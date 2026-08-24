@@ -840,6 +840,7 @@ pub fn lower_wasm_with_options(
         &checked.hir,
         &checked.semantics,
         &checked.effects,
+        &checked.capabilities,
         options.profile,
     );
     codegen::BackendProgram::new(checked, wasm_ir)
@@ -1014,6 +1015,7 @@ pub fn lower_analyzed_compilation_cancellable(
         analyzed.checked.typed_hir(),
         analyzed.checked.semantics(),
         analyzed.checked.effects(),
+        &analyzed.checked.capabilities,
         analyzed.options.profile,
     );
     Ok(LoweredCompilation {

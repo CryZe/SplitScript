@@ -26,18 +26,18 @@ pub(super) fn compile_read(
             LocalPlanOptions {
                 parameter_count: 1,
                 semantics: lowering.semantics,
+                wasm_ir: lowering.wasm_ir,
+                gc: lowering.gc,
+                reachability: lowering.reachability,
                 instance: None,
                 include_values: true,
             },
         );
-        let mut function = Function::new(
-            local_types
-                .into_iter()
-                .map(|ty| (1, lowering.gc.val_type(ty))),
-        );
+        let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
         let locals = planned_locals;
         let context = ExprContext {
             standard_library: lowering.standard_library,
+            reachability: lowering.reachability,
             abi: lowering.abi,
             state: lowering.state,
             locals: LocalStorage::Wasm {
@@ -50,6 +50,9 @@ pub(super) fn compile_read(
             runtime_globals: lowering.runtime_globals,
             runtime_helpers: lowering.runtime_helpers,
             functions: lowering.functions,
+            closures: lowering.closures,
+            closure_polls: lowering.closure_polls,
+            closure_environment: None,
             intrinsic_futures: lowering.intrinsic_futures,
             display_functions: lowering.display_functions,
             equality_functions: lowering.equality_functions,
@@ -286,19 +289,19 @@ pub(super) fn compile_state_transform(
         LocalPlanOptions {
             parameter_count: 1,
             semantics: lowering.semantics,
+            wasm_ir: lowering.wasm_ir,
+            gc: lowering.gc,
+            reachability: lowering.reachability,
             instance: None,
             include_values: true,
         },
     );
-    let mut function = Function::new(
-        local_types
-            .into_iter()
-            .map(|ty| (1, lowering.gc.val_type(ty))),
-    );
+    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
     let mut locals = planned_locals;
     locals.insert(transform.value, (0, field_type));
     let context = ExprContext {
         standard_library: lowering.standard_library,
+        reachability: lowering.reachability,
         abi: lowering.abi,
         state: lowering.state,
         locals: LocalStorage::Wasm {
@@ -311,6 +314,9 @@ pub(super) fn compile_state_transform(
         runtime_globals: lowering.runtime_globals,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
+        closures: lowering.closures,
+        closure_polls: lowering.closure_polls,
+        closure_environment: None,
         intrinsic_futures: lowering.intrinsic_futures,
         display_functions: lowering.display_functions,
         equality_functions: lowering.equality_functions,
@@ -539,6 +545,7 @@ pub(super) fn compile_user_function(
         .body(BodyOwner::Function(instance.clone()))
         .expect("checked functions have Wasm IR bodies");
     let mut locals = HashMap::new();
+    let mut boxed_parameters = Vec::new();
     let mut physical_parameter_count = 0;
     for parameter in &declaration.params {
         let ty = semantic_type(
@@ -559,8 +566,16 @@ pub(super) fn compile_user_function(
             index
         };
         locals.insert(parameter.id, (index, ty));
+        if index != u32::MAX && lowering.wasm_ir.is_mutably_captured(parameter.id) {
+            boxed_parameters.push((parameter.id, index, ty));
+        }
     }
     let mut local_types = Vec::new();
+    for (parameter, _, ty) in &boxed_parameters {
+        let cell_local = physical_parameter_count + local_types.len() as u32;
+        local_types.push(lowering.gc.capture_cell_val_type(*ty));
+        locals.insert(*parameter, (cell_local, *ty));
+    }
     let mut matches = MatchLayout::default();
     plan_wasm_locals(
         &wasm_body.locals,
@@ -570,6 +585,9 @@ pub(super) fn compile_user_function(
         LocalPlanOptions {
             parameter_count: physical_parameter_count,
             semantics: lowering.semantics,
+            wasm_ir: lowering.wasm_ir,
+            gc: lowering.gc,
+            reachability: lowering.reachability,
             instance: Some(instance),
             include_values: true,
         },
@@ -589,13 +607,16 @@ pub(super) fn compile_user_function(
             }
         }
     }
-    let mut function = Function::new(
-        local_types
-            .into_iter()
-            .map(|ty| (1, lowering.gc.val_type(ty))),
-    );
+    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
+    for (parameter, source_local, ty) in boxed_parameters {
+        function
+            .instruction(&Instruction::LocalGet(source_local))
+            .instruction(&Instruction::StructNew(lowering.gc.capture_cell_index(ty)))
+            .instruction(&Instruction::LocalSet(locals[&parameter].0));
+    }
     let context = ExprContext {
         standard_library: lowering.standard_library,
+        reachability: lowering.reachability,
         abi: lowering.abi,
         state: lowering.state,
         locals: LocalStorage::Wasm {
@@ -608,6 +629,9 @@ pub(super) fn compile_user_function(
         runtime_globals: lowering.runtime_globals,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
+        closures: lowering.closures,
+        closure_polls: lowering.closure_polls,
+        closure_environment: None,
         intrinsic_futures: lowering.intrinsic_futures,
         display_functions: lowering.display_functions,
         equality_functions: lowering.equality_functions,
@@ -649,6 +673,244 @@ pub(super) fn compile_user_function(
     function
 }
 
+pub(super) fn compile_closure(
+    closure: &wasm_ir::ClosureBody,
+    function_index: u32,
+    lowering: &EmissionContext<'_>,
+) -> Function {
+    let expression = lowering
+        .wasm_ir
+        .expression(closure.expression)
+        .expect("closure expressions belong to Wasm IR");
+    let crate::types::TypeKind::Callable {
+        parameters, result, ..
+    } = lowering.semantics.types().kind(expression.ty)
+    else {
+        unreachable!("checked closure expressions have callable types")
+    };
+    let mut locals = HashMap::new();
+    let mut boxed_parameters = Vec::new();
+    let mut physical_parameter_count = 1;
+    for (parameter, ty) in closure.parameters.iter().zip(parameters) {
+        let ty = semantic_type(*ty, lowering.semantics);
+        let index = if ty.has_runtime_value() {
+            let index = physical_parameter_count;
+            physical_parameter_count += 1;
+            index
+        } else {
+            u32::MAX
+        };
+        locals.insert(*parameter, (index, ty));
+        if index != u32::MAX && lowering.wasm_ir.is_mutably_captured(*parameter) {
+            boxed_parameters.push((*parameter, index, ty));
+        }
+    }
+    let mut local_types = Vec::new();
+    for (parameter, _, ty) in &boxed_parameters {
+        let cell_local = physical_parameter_count + local_types.len() as u32;
+        local_types.push(lowering.gc.capture_cell_val_type(*ty));
+        locals.insert(*parameter, (cell_local, *ty));
+    }
+    let mut matches = MatchLayout::default();
+    plan_wasm_locals(
+        &closure.locals,
+        &mut locals,
+        &mut matches,
+        &mut local_types,
+        LocalPlanOptions {
+            parameter_count: physical_parameter_count,
+            semantics: lowering.semantics,
+            wasm_ir: lowering.wasm_ir,
+            gc: lowering.gc,
+            reachability: lowering.reachability,
+            instance: None,
+            include_values: true,
+        },
+    );
+    let captures = closure
+        .captures
+        .iter()
+        .enumerate()
+        .map(|(field, capture)| {
+            (
+                capture.value,
+                (
+                    field as u32,
+                    value_type(capture.value, lowering.semantics),
+                    capture.mutable,
+                ),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let environment = lowering
+        .gc
+        .closure_environment_index(closure.expression)
+        .map(|struct_type| ClosureEnvironment {
+            local: 0,
+            struct_type,
+            captures: &captures,
+        });
+    if let Some(debug) = lowering.debug {
+        for parameter in &closure.parameters {
+            let (local, ty) = locals[parameter];
+            debug.register_variable(function_index, *parameter, local, ty, true);
+        }
+        for (&value, &(local, ty)) in &locals {
+            if !closure.parameters.contains(&value) {
+                debug.register_variable(function_index, value, local, ty, false);
+            }
+        }
+    }
+    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
+    for (parameter, source_local, ty) in boxed_parameters {
+        function
+            .instruction(&Instruction::LocalGet(source_local))
+            .instruction(&Instruction::StructNew(lowering.gc.capture_cell_index(ty)))
+            .instruction(&Instruction::LocalSet(locals[&parameter].0));
+    }
+    let context = ExprContext {
+        standard_library: lowering.standard_library,
+        reachability: lowering.reachability,
+        abi: lowering.abi,
+        state: lowering.state,
+        locals: LocalStorage::Wasm {
+            values: &locals,
+            temporaries: &matches.temporaries,
+        },
+        globals: lowering.globals,
+        global_types: lowering.global_types,
+        settings: lowering.settings,
+        runtime_globals: lowering.runtime_globals,
+        runtime_helpers: lowering.runtime_helpers,
+        functions: lowering.functions,
+        closures: lowering.closures,
+        closure_polls: lowering.closure_polls,
+        closure_environment: environment,
+        intrinsic_futures: lowering.intrinsic_futures,
+        display_functions: lowering.display_functions,
+        equality_functions: lowering.equality_functions,
+        array_functions: lowering.array_functions,
+        set_functions: lowering.set_functions,
+        records: lowering.records,
+        enums: lowering.enums,
+        arrays: lowering.arrays,
+        memory: lowering.memory,
+        abi_read: lowering.abi_read,
+        signatures: lowering.signatures,
+        matches: &matches,
+        semantics: lowering.semantics,
+        wasm_ir: lowering.wasm_ir,
+        gc: lowering.gc,
+        async_frames: lowering.async_frames,
+        intrinsic_capture: None,
+        debug: lowering.debug_emission(function_index),
+        function_instance: None,
+        loop_control: None,
+        bare_return: BareReturn::None,
+        materialize_none: true,
+    };
+    compile_block(&mut function, &closure.entry, &context, None);
+    let result = semantic_type(*result, lowering.semantics);
+    if result.has_runtime_value() {
+        function.instruction(&Instruction::Unreachable);
+    }
+    function.instruction(&Instruction::End);
+    function
+}
+
+pub(super) fn compile_async_closure_init(
+    closure: &wasm_ir::ClosureBody,
+    layout: &AsyncFrameLayout,
+    lowering: &EmissionContext<'_>,
+) -> Function {
+    let expression = lowering
+        .wasm_ir
+        .expression(closure.expression)
+        .expect("closure expressions belong to Wasm IR");
+    let crate::types::TypeKind::Callable { parameters, .. } =
+        lowering.semantics.types().kind(expression.ty)
+    else {
+        unreachable!("checked closure expressions have callable types")
+    };
+    let mut next_parameter = 1;
+    let parameter_locals = closure
+        .parameters
+        .iter()
+        .zip(parameters)
+        .map(|(parameter, ty)| {
+            let ty = semantic_type(*ty, lowering.semantics);
+            let local = ty.has_runtime_value().then(|| {
+                let local = next_parameter;
+                next_parameter += 1;
+                local
+            });
+            (*parameter, local)
+        })
+        .collect::<HashMap<_, _>>();
+    let environment = lowering.gc.closure_environment_index(closure.expression);
+    let mut function = Function::new([]);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(
+            lowering.gc.closure_frame_tag(closure.expression) as i32,
+        ));
+    for (position, ty) in layout.types.iter().copied().enumerate() {
+        let field = layout.base_fields + position as u32;
+        if let Some((capture_index, capture)) =
+            closure.captures.iter().enumerate().find(|(_, capture)| {
+                layout
+                    .fields
+                    .get(&capture.value)
+                    .is_some_and(|(candidate, _)| *candidate == field)
+            })
+        {
+            let environment = environment.expect("capturing closures have environment layouts");
+            function.instruction(&Instruction::LocalGet(0)).instruction(
+                &Instruction::RefCastNonNull(HeapType::Concrete(environment)),
+            );
+            if capture.mutable {
+                function.instruction(&Instruction::StructGet {
+                    struct_type_index: environment,
+                    field_index: capture_index as u32,
+                });
+            } else {
+                emit_typed_struct_get(&mut function, environment, capture_index as u32, ty);
+            }
+        } else if let Some(parameter) = closure.parameters.iter().find(|parameter| {
+            layout
+                .fields
+                .get(parameter)
+                .is_some_and(|(candidate, _)| *candidate == field)
+        }) {
+            if let Some(local) = parameter_locals[parameter] {
+                function.instruction(&Instruction::LocalGet(local));
+                if layout.capture_cell_fields.contains(&field) {
+                    function
+                        .instruction(&Instruction::StructNew(lowering.gc.capture_cell_index(ty)));
+                }
+            } else if layout.capture_cell_fields.contains(&field) {
+                function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                    lowering.gc.capture_cell_index(ty),
+                )));
+            } else {
+                emit_default(&mut function, ty, lowering.gc);
+            }
+        } else if layout.capture_cell_fields.contains(&field) {
+            function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                lowering.gc.capture_cell_index(ty),
+            )));
+        } else {
+            emit_default(&mut function, ty, lowering.gc);
+        }
+    }
+    function
+        .instruction(&Instruction::StructNew(
+            lowering.gc.closure_frame_index(closure.expression),
+        ))
+        .instruction(&Instruction::End);
+    function
+}
+
 pub(super) fn compile_action(
     action: &Action,
     function_index: u32,
@@ -673,6 +935,9 @@ pub(super) fn compile_action(
                 2
             },
             semantics: lowering.semantics,
+            wasm_ir: lowering.wasm_ir,
+            gc: lowering.gc,
+            reachability: lowering.reachability,
             instance: None,
             include_values: true,
         },
@@ -682,13 +947,10 @@ pub(super) fn compile_action(
             debug.register_variable(function_index, value, local, ty, false);
         }
     }
-    let mut function = Function::new(
-        local_types
-            .into_iter()
-            .map(|ty| (1, lowering.gc.val_type(ty))),
-    );
+    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
     let context = ExprContext {
         standard_library: lowering.standard_library,
+        reachability: lowering.reachability,
         abi: lowering.abi,
         state: lowering.state,
         locals: LocalStorage::Wasm {
@@ -701,6 +963,9 @@ pub(super) fn compile_action(
         runtime_globals: lowering.runtime_globals,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
+        closures: lowering.closures,
+        closure_polls: lowering.closure_polls,
+        closure_environment: None,
         intrinsic_futures: lowering.intrinsic_futures,
         display_functions: lowering.display_functions,
         equality_functions: lowering.equality_functions,
@@ -756,6 +1021,9 @@ pub(super) fn emit_action_default(function: &mut Function, action: ActionKind, g
 pub(super) struct LocalPlanOptions<'a> {
     pub(super) parameter_count: u32,
     pub(super) semantics: &'a SemanticModel,
+    pub(super) wasm_ir: &'a wasm_ir::Program,
+    pub(super) gc: &'a GcLayout,
+    pub(super) reachability: &'a super::reachability::Reachability,
     pub(super) instance: Option<&'a crate::semantic::FunctionInstance>,
     pub(super) include_values: bool,
 }
@@ -764,22 +1032,88 @@ pub(super) fn plan_wasm_locals(
     planned: &[wasm_ir::Local],
     locals: &mut HashMap<ValueId, (u32, Type)>,
     matches: &mut MatchLayout,
-    types: &mut Vec<Type>,
+    types: &mut Vec<ValType>,
     options: LocalPlanOptions<'_>,
 ) {
-    for local in planned {
-        if matches!(local.purpose, LocalPurpose::Value(_)) && !options.include_values {
+    let mut specialized_scratch = Vec::new();
+    if let Some(instance) = options.instance {
+        for (owner, expression) in options.reachability.expression_instances() {
+            if owner.as_ref() != Some(instance) {
+                continue;
+            }
+            let expression_ir = options
+                .wasm_ir
+                .expression(expression)
+                .expect("reachable expressions belong to Wasm IR");
+            let wasm_ir::ExpressionKind::Call { target, .. } = &expression_ir.kind else {
+                continue;
+            };
+            if !matches!(target, wasm_ir::CallTarget::CapabilityRequirement { .. }) {
+                continue;
+            }
+            let wasm_ir::CallTarget::Intrinsic {
+                intrinsic,
+                receiver_type,
+                ..
+            } = options
+                .reachability
+                .resolved_call_target(Some(instance), expression, target)
+            else {
+                continue;
+            };
+            let Some(policy) = crate::intrinsic_registry::contract(*intrinsic).synchronous_scratch
+            else {
+                continue;
+            };
+            let expression_ty = options
+                .semantics
+                .specialize_type(instance, expression_ir.ty);
+            let receiver_ty =
+                receiver_type.map(|receiver| options.semantics.specialize_type(instance, receiver));
+            let scratch_ty = match policy.ty {
+                ScratchType::Core(core) => options.semantics.types().id_for_core(core),
+                ScratchType::Standard(standard) => {
+                    options.semantics.types().id_for_standard(standard)
+                }
+                ScratchType::Expression => expression_ty,
+                ScratchType::ResultValue => {
+                    let crate::types::TypeKind::Result { value, .. } =
+                        options.semantics.types().kind(expression_ty)
+                    else {
+                        unreachable!("result-value scratch requires a Result expression")
+                    };
+                    *value
+                }
+                ScratchType::Receiver => {
+                    receiver_ty.expect("receiver scratch requires a method-shaped intrinsic")
+                }
+            };
+            specialized_scratch.extend((0..policy.slots).map(|slot| {
+                (
+                    scratch_ty,
+                    LocalPurpose::IntrinsicScratch { expression, slot },
+                )
+            }));
+        }
+    }
+
+    for (local_ty, purpose) in planned
+        .iter()
+        .map(|local| (local.ty, local.purpose))
+        .chain(specialized_scratch)
+    {
+        if matches!(purpose, LocalPurpose::Value(_)) && !options.include_values {
             continue;
         }
         let index = options.parameter_count + types.len() as u32;
         let ty = semantic_type(
-            options.instance.map_or(local.ty, |instance| {
-                options.semantics.specialize_type(instance, local.ty)
+            options.instance.map_or(local_ty, |instance| {
+                options.semantics.specialize_type(instance, local_ty)
             }),
             options.semantics,
         );
         if ty == Type::Never {
-            match local.purpose {
+            match purpose {
                 LocalPurpose::Value(value) => {
                     locals.insert(value, (u32::MAX, ty));
                 }
@@ -806,13 +1140,19 @@ pub(super) fn plan_wasm_locals(
             continue;
         }
         if ty == Type::None
-            && let LocalPurpose::Value(value) = local.purpose
+            && let LocalPurpose::Value(value) = purpose
         {
             locals.insert(value, (u32::MAX, ty));
             continue;
         }
-        types.push(ty);
-        match local.purpose {
+        let val_type = match purpose {
+            LocalPurpose::Value(value) if options.wasm_ir.is_mutably_captured(value) => {
+                options.gc.capture_cell_val_type(ty)
+            }
+            _ => options.gc.val_type(ty),
+        };
+        types.push(val_type);
+        match purpose {
             LocalPurpose::Value(value) => {
                 locals.insert(value, (index, ty));
             }
@@ -845,7 +1185,7 @@ use wasm_encoder::{BlockType, Function, HeapType, Instruction, ValType};
 use crate::{
     abi::AbiImportId,
     ast::{Action, ActionKind, FunctionDecl, ResultTypeId, StateField, StateSource, ValueId},
-    intrinsic_registry::RuntimeHelperId,
+    intrinsic_registry::{RuntimeHelperId, ScratchType},
     semantic::SemanticModel,
     stdlib::{Implementation, IntrinsicId, StdlibTypeId},
     wasm_ir::{self, BodyOwner, LocalPurpose},
@@ -857,7 +1197,10 @@ use super::{
     context::EmissionContext,
     data_plan::StringPool,
     emit_default, emit_memory_load, emit_memory_value, emit_result_error, emit_result_success,
-    expression::{BareReturn, ExprContext, LocalStorage, MatchLayout, compile_block},
+    emit_typed_struct_get,
+    expression::{
+        BareReturn, ClosureEnvironment, ExprContext, LocalStorage, MatchLayout, compile_block,
+    },
     imports::Abi,
     memarg, memory_plan, semantic_type, value_type,
 };
@@ -899,6 +1242,7 @@ pub(super) fn compile_async_function_init(
         ));
     for (position, ty) in layout.types.iter().copied().enumerate() {
         let field = position as u32 + layout.base_fields;
+        let captured_cell = layout.capture_cell_fields.contains(&field);
         if let Some(parameter) = declaration.params.iter().find_map(|parameter| {
             layout
                 .fields
@@ -908,9 +1252,21 @@ pub(super) fn compile_async_function_init(
         }) {
             if let Some(local) = parameter_locals[&parameter] {
                 function.instruction(&Instruction::LocalGet(local));
+                if captured_cell {
+                    function
+                        .instruction(&Instruction::StructNew(lowering.gc.capture_cell_index(ty)));
+                }
+            } else if captured_cell {
+                function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                    lowering.gc.capture_cell_index(ty),
+                )));
             } else {
                 emit_default(&mut function, ty, lowering.gc);
             }
+        } else if captured_cell {
+            function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                lowering.gc.capture_cell_index(ty),
+            )));
         } else {
             emit_default(&mut function, ty, lowering.gc);
         }

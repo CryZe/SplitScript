@@ -491,6 +491,15 @@ pub struct CallableTypeDecl {
     pub id: CallableTypeId,
     pub parameters: Vec<TypeRef>,
     pub result: TypeRef,
+    /// Every written occurrence retained even when structurally identical
+    /// callable types share one semantic identity.
+    pub occurrences: Vec<CallableTypeOccurrence>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CallableTypeOccurrence {
+    pub span: Span,
+    pub arrow: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

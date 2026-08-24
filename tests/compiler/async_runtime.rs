@@ -263,6 +263,197 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
 }
 
 #[test]
+fn closures_execute_through_typed_function_references_and_capture_values() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn apply(value: u32, transform: (u32) -> u32) -> u32 {
+            return transform(value)
+        }
+
+        whileAttached {
+            let offset = 3u32
+            let addOffset = value => value + offset
+            print(addOffset(4))
+            print(apply(5, value => value * 2))
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(store.data().messages, ["7", "10"]);
+}
+
+#[test]
+fn higher_order_helpers_specialize_inferred_callable_parameters() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn apply(value, transform) {
+            return transform(value)
+        }
+
+        whileAttached {
+            print(apply(4u32, value => value + 1))
+            print(apply("ready", value => `{value}!`))
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(store.data().messages, ["5", "ready!"]);
+}
+
+#[test]
+fn mutable_closure_captures_share_one_cell_with_the_declaring_scope() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let counter = 1u32
+            let increment = () => {
+                counter += 1
+                return counter
+            }
+            print(increment())
+            counter += 4
+            print(increment())
+            print(counter)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(store.data().messages, ["2", "7", "7"]);
+}
+
+#[test]
+fn returned_closures_retain_mutable_function_parameters() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn counterFrom(start: u32) -> () -> u32 {
+            return () => {
+                start += 1
+                return start
+            }
+        }
+
+        whileAttached {
+            let next = counterFrom(8)
+            print(next())
+            print(next())
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(store.data().messages, ["9", "10"]);
+}
+
+#[test]
+fn nested_closures_share_the_cell_created_by_their_enclosing_closure() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let makeCounter = () => {
+                let counter = 2u32
+                return () => {
+                    counter += 1
+                    return counter
+                }
+            }
+            let next = makeCounter()
+            print(next())
+            print(next())
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(store.data().messages, ["3", "4"]);
+}
+
+#[test]
+fn closures_share_mutable_cells_stored_across_async_suspension() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn counterAfterTick() {
+            let counter = 4u32
+            await nextTick()
+            return () => {
+                counter += 1
+                return counter
+            }
+        }
+
+        onAttach {
+            let next = await counterAfterTick()
+            print(next())
+            print(next())
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    for _ in 0..5 {
+        update.call(&mut store, ()).unwrap();
+    }
+
+    assert_eq!(store.data().messages, ["5", "6"]);
+}
+
+#[test]
+fn async_closure_bodies_use_typed_continuation_frames() {
+    let source = r#"
+        state "game.exe" {}
+
+        onAttach {
+            let offset = 3u32
+            let afterTick = (value: u32) => {
+                value += offset
+                await nextTick()
+                value += 1
+                return value
+            }
+            print(await afterTick(4))
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    for _ in 0..6 {
+        update.call(&mut store, ()).unwrap();
+    }
+
+    assert_eq!(store.data().messages, ["8"]);
+}
+
+#[test]
 fn source_defined_unity_scene_manager_discovers_and_snapshots_scenes() {
     let source = r#"
         let sceneManager

@@ -17,6 +17,7 @@ use crate::{
 pub(super) struct Reachability {
     functions: BTreeSet<FunctionInstance>,
     expressions: BTreeSet<ExprId>,
+    closures: BTreeSet<ExprId>,
     expression_instances: BTreeSet<(Option<FunctionInstance>, ExprId)>,
     equality_records: BTreeSet<RecordId>,
     equality_standard_records: BTreeSet<StdlibTypeId>,
@@ -40,6 +41,7 @@ pub(super) struct Reachability {
     display_functions: BTreeMap<TypeId, FunctionInstance>,
     debug_functions: BTreeMap<TypeId, FunctionInstance>,
     derived_debugs: BTreeSet<TypeId>,
+    capability_calls: BTreeMap<(Option<FunctionInstance>, ExprId), wasm_ir::CallTarget>,
 }
 
 impl Reachability {
@@ -135,7 +137,49 @@ impl Reachability {
             {
                 reachable.string_equality = true;
             }
+            if let wasm_ir::ExpressionKind::Closure { closure, .. } = expression.kind {
+                if reachable.closures.insert(closure) {
+                    let body = wasm_ir
+                        .closure(closure)
+                        .expect("reachable closures have lowered bodies");
+                    collect_block_expression_roots(
+                        &body.entry,
+                        wasm_ir,
+                        owner.clone(),
+                        &mut pending,
+                    );
+                    collect_assignment_function_roots(
+                        &body.entry,
+                        wasm_ir,
+                        owner.clone(),
+                        &mut pending_functions,
+                    );
+                }
+            }
             if let wasm_ir::ExpressionKind::Call { target, .. } = &expression.kind {
+                let capability_call =
+                    matches!(target, wasm_ir::CallTarget::CapabilityRequirement { .. });
+                let resolved_target = if capability_call {
+                    Some(
+                        wasm_ir::resolve_capability_requirement(
+                            target,
+                            owner.as_ref(),
+                            program,
+                            semantics,
+                            standard_library,
+                            capabilities,
+                        )
+                        .expect("validated capability calls have concrete implementations"),
+                    )
+                } else {
+                    None
+                };
+                if let Some(resolved) = resolved_target.clone() {
+                    reachable
+                        .capability_calls
+                        .insert((owner.clone(), id), resolved);
+                }
+                let target = resolved_target.as_ref().unwrap_or(target);
                 if let wasm_ir::CallTarget::Intrinsic {
                     intrinsic: IntrinsicId::EquatableEquals | IntrinsicId::EquatableNotEquals,
                     receiver_type: Some(receiver),
@@ -222,12 +266,16 @@ impl Reachability {
                         )
                     }
                     wasm_ir::CallTarget::Intrinsic { .. }
+                    | wasm_ir::CallTarget::CapabilityRequirement { .. }
                     | wasm_ir::CallTarget::ResultError { .. }
                     | wasm_ir::CallTarget::OptionSome { .. }
                     | wasm_ir::CallTarget::IteratorItem { .. }
                     | wasm_ir::CallTarget::ResultSuccess { .. } => None,
                 };
                 let function = function.map(|function| {
+                    if capability_call {
+                        return function;
+                    }
                     if matches!(target, wasm_ir::CallTarget::LibraryOverload { .. }) {
                         return function;
                     }
@@ -399,32 +447,35 @@ impl Reachability {
                 type_roots.extend([specialize(conversion.source), specialize(conversion.target)]);
             }
             match &expression.kind {
-                wasm_ir::ExpressionKind::Call { target, .. } => match target {
-                    wasm_ir::CallTarget::UserMethod { receiver_type, .. } => {
-                        type_roots.push(specialize(*receiver_type));
+                wasm_ir::ExpressionKind::Call { target, .. } => {
+                    match reachable.resolved_call_target(owner.as_ref(), *id, target) {
+                        wasm_ir::CallTarget::UserMethod { receiver_type, .. } => {
+                            type_roots.push(specialize(*receiver_type));
+                        }
+                        wasm_ir::CallTarget::Intrinsic {
+                            type_arguments,
+                            receiver_type,
+                            ..
+                        } => {
+                            type_roots.extend(type_arguments.iter().copied().map(specialize));
+                            type_roots.extend(receiver_type.map(specialize));
+                        }
+                        wasm_ir::CallTarget::LibraryOverload {
+                            dispatch_type,
+                            receiver_type,
+                            ..
+                        } => {
+                            type_roots.push(specialize(*dispatch_type));
+                            type_roots.extend(receiver_type.map(specialize));
+                        }
+                        wasm_ir::CallTarget::UserFunction { .. }
+                        | wasm_ir::CallTarget::CapabilityRequirement { .. }
+                        | wasm_ir::CallTarget::ResultError { .. }
+                        | wasm_ir::CallTarget::OptionSome { .. }
+                        | wasm_ir::CallTarget::IteratorItem { .. }
+                        | wasm_ir::CallTarget::ResultSuccess { .. } => {}
                     }
-                    wasm_ir::CallTarget::Intrinsic {
-                        type_arguments,
-                        receiver_type,
-                        ..
-                    } => {
-                        type_roots.extend(type_arguments.iter().copied().map(specialize));
-                        type_roots.extend(receiver_type.map(specialize));
-                    }
-                    wasm_ir::CallTarget::LibraryOverload {
-                        dispatch_type,
-                        receiver_type,
-                        ..
-                    } => {
-                        type_roots.push(specialize(*dispatch_type));
-                        type_roots.extend(receiver_type.map(specialize));
-                    }
-                    wasm_ir::CallTarget::UserFunction { .. }
-                    | wasm_ir::CallTarget::ResultError { .. }
-                    | wasm_ir::CallTarget::OptionSome { .. }
-                    | wasm_ir::CallTarget::IteratorItem { .. }
-                    | wasm_ir::CallTarget::ResultSuccess { .. } => {}
-                },
+                }
                 wasm_ir::ExpressionKind::Propagate { target, .. } => {
                     type_roots.push(specialize(target.result()));
                 }
@@ -514,6 +565,21 @@ impl Reachability {
 
     pub fn contains_expression(&self, expression: ExprId) -> bool {
         self.expressions.contains(&expression)
+    }
+
+    pub(super) fn resolved_call_target<'a>(
+        &'a self,
+        owner: Option<&FunctionInstance>,
+        expression: ExprId,
+        original: &'a wasm_ir::CallTarget,
+    ) -> &'a wasm_ir::CallTarget {
+        self.capability_calls
+            .get(&(owner.cloned(), expression))
+            .unwrap_or(original)
+    }
+
+    pub fn closure_expressions(&self) -> impl Iterator<Item = ExprId> + '_ {
+        self.closures.iter().copied()
     }
 
     pub fn requires_record_equality(&self, record: RecordId) -> bool {

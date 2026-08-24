@@ -431,6 +431,29 @@ fn validate_field_type(
                 errors,
             );
         }
+        TypeRef::Callable {
+            parameters: callable_parameters,
+            result,
+        } => {
+            for parameter in callable_parameters {
+                validate_field_type(
+                    *parameter,
+                    field,
+                    parameters,
+                    core_types,
+                    standard_types,
+                    errors,
+                );
+            }
+            validate_field_type(
+                *result,
+                field,
+                parameters,
+                core_types,
+                standard_types,
+                errors,
+            );
+        }
         TypeRef::Parameter(parameter)
             if !parameters
                 .iter()
@@ -478,6 +501,9 @@ fn validate_memory_type(
         TypeRef::Associated(_) => {
             Err("associated fields have no fixed process-memory layout".to_owned())
         }
+        TypeRef::Callable { .. } => {
+            Err("callable fields have no fixed process-memory layout".to_owned())
+        }
     }
 }
 
@@ -512,6 +538,7 @@ fn validate_equality_type(
         TypeRef::FixedArray { .. } => Err("its fixed array type is not Equatable".to_owned()),
         TypeRef::Parameter(_) => Err("its generic type is not Equatable".to_owned()),
         TypeRef::Associated(_) => Err("its associated type is not Equatable".to_owned()),
+        TypeRef::Callable { .. } => Err("its callable type is not Equatable".to_owned()),
     }
 }
 

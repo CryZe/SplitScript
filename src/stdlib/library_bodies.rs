@@ -64,6 +64,10 @@ fn contains_type_parameter(ty: TypeRef) -> bool {
             arguments.iter().copied().any(contains_type_parameter)
         }
         TypeRef::FixedArray { element, .. } => contains_type_parameter(*element),
+        TypeRef::Callable { parameters, result } => {
+            parameters.iter().copied().any(contains_type_parameter)
+                || contains_type_parameter(*result)
+        }
         TypeRef::Core(_) | TypeRef::Standard(_) => false,
     }
 }

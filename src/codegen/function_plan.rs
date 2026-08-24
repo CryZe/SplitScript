@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use wasm_encoder::{FunctionSection, HeapType, RefType, TypeSection, ValType};
 
 use crate::{
-    ast::{ActionKind, EnumDecl, Program},
+    ast::{ActionKind, EnumDecl, ExprId, Program},
     equality::EqualityCapabilities,
     semantic::{FunctionInstance, SemanticModel},
     stdlib::{RuntimeRepresentation, StandardLibrary},
@@ -30,6 +30,8 @@ pub(super) struct FunctionPlan<'a> {
     pub array_functions: ArrayFunctions,
     pub sets: SetFunctions,
     pub users: HashMap<FunctionInstance, UserFunctionPlan>,
+    pub closures: HashMap<ExprId, u32>,
+    pub closure_polls: HashMap<ExprId, u32>,
     pub intrinsic_futures: HashMap<IntrinsicFutureInstance, u32>,
     pub displays: DisplayFunctions,
     pub reads: Vec<u32>,
@@ -468,6 +470,42 @@ pub(super) fn encode<'a>(
 
     let start = declare("_start".to_owned(), vec![], vec![]);
     let update = declare("update".to_owned(), vec![], vec![]);
+    let mut closure_polls = HashMap::new();
+    for (expression, _) in async_frames.closures() {
+        let frame = ValType::Ref(RefType {
+            nullable: false,
+            heap_type: HeapType::Concrete(gc.closure_frame_index(expression)),
+        });
+        closure_polls.insert(
+            expression,
+            declare(
+                format!("__splitscript::closure::expr{}::poll", expression.index()),
+                vec![frame],
+                vec![ValType::I32],
+            ),
+        );
+    }
+    let mut closures = HashMap::new();
+    for closure in reachability
+        .closure_expressions()
+        .filter_map(|expression| wasm_ir.closure(expression))
+    {
+        let expression = wasm_ir
+            .expression(closure.expression)
+            .expect("closure expressions belong to Wasm IR");
+        let crate::types::TypeKind::Callable { layout, .. } = semantics.types().kind(expression.ty)
+        else {
+            unreachable!("checked closure expressions have callable types")
+        };
+        section.function(gc.callable_function_index(*layout));
+        let function_index = next_function;
+        next_function += 1;
+        debug_names.push((
+            function_index,
+            format!("__splitscript::closure::expr{}", closure.expression.index()),
+        ));
+        closures.insert(closure.expression, function_index);
+    }
 
     FunctionPlan {
         section,
@@ -476,6 +514,8 @@ pub(super) fn encode<'a>(
         array_functions,
         sets: set_functions,
         users,
+        closures,
+        closure_polls,
         intrinsic_futures,
         displays,
         reads,

@@ -6,7 +6,7 @@ use crate::{
     Diagnostic, DiagnosticFix, FixApplicability, TextEdit,
     ast::{ActionKind, ExprKind, FunctionId, Program, Span, StateDecl, StateSource, Stmt},
     inference::Type,
-    stdlib::{CoreTypeId, StdlibTypeId},
+    stdlib::{CoreTypeId, ItemKind, StdlibOwner, StdlibTypeId},
     visit::{self, Visitor},
 };
 
@@ -389,6 +389,23 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
         DebugContext::from_declaration(function.debug_only),
         |checker| {
             let signature = checker.declarations.function_signatures[&function.id].clone();
+            if let Some(item) = checker
+                .standard_library
+                .all_items()
+                .iter()
+                .find(|item| match item.implementation {
+                    crate::stdlib::Implementation::LibraryBody { function_name, .. } => {
+                        function_name == function.name
+                    }
+                    crate::stdlib::Implementation::LibraryOverloads { cases, .. } => cases
+                        .iter()
+                        .any(|case| case.function_name == function.name),
+                    _ => false,
+                })
+                .copied()
+            {
+                seed_library_body_signature(checker, item, &signature, function.span);
+            }
             let failure = match checker.shallow_type(signature.completion) {
                 result @ Type::Result(_) => FailureContext::boundary(result),
                 _ => FailureContext::None,
@@ -504,6 +521,72 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
             });
         },
     );
+}
+
+fn seed_library_body_signature(
+    checker: &mut Checker,
+    item: crate::stdlib::StdlibItem,
+    inferred: &crate::typeck::declarations::FunctionSignature,
+    span: Span,
+) {
+    let mut variables = item
+        .signature
+        .type_parameters
+        .iter()
+        .map(|parameter| {
+            let requirements = parameter.constraints.iter().fold(
+                crate::inference::Requirements::none(),
+                |requirements, constraint| {
+                    requirements | crate::inference::Requirements::capability(*constraint)
+                },
+            );
+            (parameter.name, checker.fresh_inference(requirements, None))
+        })
+        .collect::<HashMap<_, _>>();
+    if let StdlibOwner::Capability(capability) = item.owner {
+        let receiver = match item.kind {
+            ItemKind::Method {
+                receiver: crate::stdlib::TypeRef::Parameter(name),
+            } => variables[name],
+            ItemKind::Method { receiver } => checker.catalog_type(receiver, &variables),
+            ItemKind::Function => unreachable!("capability members are receiver methods"),
+        };
+        for associated in checker
+            .standard_library
+            .capability(capability)
+            .associated_types
+        {
+            let value = checker
+                .inference
+                .associated_type(receiver, capability, associated.name);
+            variables.insert(associated.name, value);
+        }
+    } else if let StdlibOwner::TypeConstructor(constructor) = item.owner {
+        for associated in checker
+            .standard_library
+            .type_constructor(constructor)
+            .associated_types
+        {
+            let value = checker.catalog_type(associated.value, &variables);
+            variables.insert(associated.name, value);
+        }
+    }
+
+    let mut declared_parameters = Vec::new();
+    if let ItemKind::Method { receiver } = item.kind {
+        declared_parameters.push(checker.catalog_type(receiver, &variables));
+    }
+    declared_parameters.extend(
+        item.signature
+            .parameters
+            .iter()
+            .map(|parameter| checker.catalog_type(parameter.ty, &variables)),
+    );
+    for (actual, declared) in inferred.params.iter().copied().zip(declared_parameters) {
+        checker.unify(actual, declared, span);
+    }
+    let result = checker.catalog_type(item.signature.result, &variables);
+    checker.unify(inferred.completion, result, span);
 }
 
 fn generalize_component(checker: &mut Checker, functions: &[FunctionId]) {

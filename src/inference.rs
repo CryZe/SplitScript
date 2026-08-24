@@ -680,6 +680,14 @@ impl InferenceContext {
                 let element = self.catalog_type(*element, variables);
                 Type::Array(self.array_type_with_length(element, Some(length)))
             }
+            CatalogTypeRef::Callable { parameters, result } => {
+                let parameters = parameters
+                    .iter()
+                    .map(|parameter| self.catalog_type(*parameter, variables))
+                    .collect();
+                let result = self.catalog_type(*result, variables);
+                Type::Callable(self.callable_type(parameters, result))
+            }
             CatalogTypeRef::Application {
                 constructor,
                 arguments,

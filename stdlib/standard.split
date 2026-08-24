@@ -2063,6 +2063,53 @@ capability Iterator<T> {
     /// ```
     @mustUse("The yielded item or exhausted state must be inspected.")
     fn next() -> IteratorStep<Item>;
+
+    /// Lazily transforms every remaining item from this cursor.
+    ///
+    /// The callback runs only when the returned iterator is advanced. The
+    /// original cursor becomes the source owned by that adapter, so iterating
+    /// the adapter continues from its current position.
+    ///
+    /// # Example
+    ///
+    /// Double values as they are consumed
+    ///
+    /// ```splitscript
+    /// let doubled = [1, 2, 3].iterator().map(value => value * 2)
+    /// for value in doubled {
+    ///     print(value)
+    /// }
+    /// ```
+    @mustUse("The lazy mapped iterator is otherwise discarded.")
+    fn map<U>(
+        /// Transformation applied to each yielded item.
+        transform: (Item) -> U,
+    ) -> MapIterator<T, Item, U> {
+        return MapIterator { source: self, transform: transform }
+    }
+
+    /// Lazily retains the remaining items accepted by a predicate.
+    ///
+    /// Advancing the returned iterator advances the source until either an
+    /// accepted item or [`End`] is reached.
+    ///
+    /// # Example
+    ///
+    /// Keep even values
+    ///
+    /// ```splitscript
+    /// let evens = [1, 2, 3, 4].iterator().filter(value => value % 2 == 0)
+    /// for value in evens {
+    ///     print(value)
+    /// }
+    /// ```
+    @mustUse("The lazy filtered iterator is otherwise discarded.")
+    fn filter(
+        /// Predicate deciding whether an item is yielded.
+        predicate: (Item) -> bool,
+    ) -> FilterIterator<T, Item> {
+        return FilterIterator { source: self, predicate: predicate }
+    }
 }
 
 /// Creates an [`Iterator`] over a value without consuming that value.
@@ -2137,6 +2184,102 @@ typeConstructor IteratorStep<T> {
     private value: T,
 }
 
+/// Lazily transforms the items of another iterator.
+///
+/// Create this adapter with [`Iterator.map`]. Calling [`Iterator.next`]
+/// advances its source cursor once and invokes the stored transformation only
+/// for an item step.
+///
+/// # Example
+///
+/// Store a mapped cursor
+///
+/// ```splitscript
+/// let iterator: MapIterator<ArrayIterator<u32>, u32, String> =
+///     [1, 2].iterator().map(value => `{value}`)
+/// ```
+@capabilities(Iterator)
+typeConstructor MapIterator<I: Iterator, S, U> {
+    /// Values produced by this adapter.
+    type Item = U;
+
+    /// Cursor being transformed.
+    private source: I,
+    /// Transformation applied to each source item.
+    private transform: (S) -> U,
+
+    /// Advances and transforms one source item.
+    ///
+    /// Exhaustion passes through without invoking the transformation.
+    ///
+    /// # Example
+    ///
+    /// Pull one transformed item
+    ///
+    /// ```splitscript
+    /// let iterator = [1, 2].iterator().map(value => value * 10)
+    /// let first = iterator.next()
+    /// ```
+    @mustUse("The yielded item or exhausted state must be inspected.")
+    fn next() -> IteratorStep<U> {
+        return match self.source.next() {
+            Item(value) => Item((self.transform)(value)),
+            End => End,
+        }
+    }
+}
+
+/// Lazily filters the items of another iterator.
+///
+/// Create this adapter with [`Iterator.filter`]. Each call to
+/// [`Iterator.next`] advances its source until the predicate accepts an item
+/// or the source reaches [`End`].
+///
+/// # Example
+///
+/// Store a filtered cursor
+///
+/// ```splitscript
+/// let iterator: FilterIterator<ArrayIterator<u32>, u32> =
+///     [1, 2, 3].iterator().filter(value => value > 1)
+/// ```
+@capabilities(Iterator)
+typeConstructor FilterIterator<I: Iterator, S> {
+    /// Values produced by this adapter.
+    type Item = S;
+
+    /// Cursor being filtered.
+    private source: I,
+    /// Predicate applied to source items.
+    private predicate: (S) -> bool,
+
+    /// Advances until an accepted item or exhaustion is reached.
+    ///
+    /// Rejected items are consumed from the source cursor and are not revisited.
+    ///
+    /// # Example
+    ///
+    /// Pull one accepted item
+    ///
+    /// ```splitscript
+    /// let iterator = [1, 2, 3].iterator().filter(value => value > 1)
+    /// let first = iterator.next()
+    /// ```
+    @mustUse("The yielded item or exhausted state must be inspected.")
+    fn next() -> IteratorStep<S> {
+        loop {
+            match self.source.next() {
+                Item(value) => if (self.predicate)(value) {
+                    return Item(value)
+                } else {
+                    None
+                },
+                End => return End,
+            }
+        }
+    }
+}
+
 /// Iterates over an array while detecting structural mutation.
 ///
 /// # Example
@@ -2175,6 +2318,7 @@ typeConstructor ArrayIterator<T> {
     @intrinsic(ArrayIteratorNext)
     @mustUse("The yielded item or exhausted state must be inspected.")
     fn next() -> IteratorStep<T>;
+
 }
 
 /// Iterates over a set while detecting structural mutation.
@@ -2216,6 +2360,7 @@ typeConstructor SetIterator<T: Equatable> {
     @intrinsic(SetIteratorNext)
     @mustUse("The yielded item or exhausted state must be inspected.")
     fn next() -> IteratorStep<T>;
+
 }
 
 /// Iterates from an included integer start to an excluded end.
@@ -2254,6 +2399,7 @@ typeConstructor ExclusiveRangeIterator<T: Integer> {
     @intrinsic(ExclusiveRangeIteratorNext)
     @mustUse("The yielded item or exhausted state must be inspected.")
     fn next() -> IteratorStep<T>;
+
 }
 
 /// Iterates from an included integer start through an included end.
@@ -2294,6 +2440,7 @@ typeConstructor InclusiveRangeIterator<T: Integer> {
     @intrinsic(InclusiveRangeIteratorNext)
     @mustUse("The yielded item or exhausted state must be inspected.")
     fn next() -> IteratorStep<T>;
+
 }
 
 /// Supports deserialization from process memory.

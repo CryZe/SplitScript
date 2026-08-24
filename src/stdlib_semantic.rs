@@ -64,18 +64,12 @@ impl StandardLibrarySemanticExt for StandardLibrary {
 
     fn method_candidates(&self, name: &str) -> Vec<CallCandidate> {
         self.method_items_named(name)
-            .filter(|item| {
-                item.implementation != crate::stdlib::Implementation::CapabilityRequirement
-            })
             .map(|item| CallCandidate { item })
             .collect()
     }
 
     fn method_candidates_including_private(&self, name: &str) -> Vec<CallCandidate> {
         self.method_items_named_including_private(name)
-            .filter(|item| {
-                item.implementation != crate::stdlib::Implementation::CapabilityRequirement
-            })
             .map(|item| CallCandidate { item })
             .collect()
     }
@@ -168,6 +162,7 @@ fn catalog_method_accepts(
                 })
             }),
         TypeRef::Associated(_) => false,
+        TypeRef::Callable { .. } => matches!(receiver, TypeKind::Callable { .. }),
     }
 }
 

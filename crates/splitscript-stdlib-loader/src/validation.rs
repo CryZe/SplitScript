@@ -270,6 +270,12 @@ impl<'a> Validator<'a> {
                     self.validate_public_type_ref(owner, argument);
                 }
             }
+            Type::Callable { parameters, result } => {
+                for parameter in parameters {
+                    self.validate_public_type_ref(owner, parameter);
+                }
+                self.validate_public_type_ref(owner, result);
+            }
         }
     }
 
@@ -613,11 +619,6 @@ impl<'a> Validator<'a> {
                     "`{qualified}` capability requirement must be a receiver method"
                 ));
             }
-            if capability_requirement && !function.type_parameters.is_empty() {
-                self.error(format!(
-                    "`{qualified}` capability requirement cannot declare callable-specific type parameters"
-                ));
-            }
             self.validate_type_parameters(&qualified, &function.type_parameters);
             let parameters =
                 self.effective_function_type_parameters(&qualified, function, inherited);
@@ -838,11 +839,20 @@ impl<'a> Validator<'a> {
         function: &FunctionDeclaration,
         inherited: &[TypeParameter],
     ) -> Vec<TypeParameter> {
-        let mut parameters = if function.type_parameters.is_empty() {
-            inherited.to_vec()
-        } else {
-            function.type_parameters.clone()
-        };
+        let mut parameters = inherited.to_vec();
+        for parameter in &function.type_parameters {
+            if parameters
+                .iter()
+                .any(|inherited| inherited.name == parameter.name)
+            {
+                self.error(format!(
+                    "`{owner}` repeats inherited type parameter `{}`",
+                    parameter.name
+                ));
+            } else {
+                parameters.push(parameter.clone());
+            }
+        }
         let mut constrained_names = HashSet::new();
         for constrained in &function.where_constraints {
             if !constrained_names.insert(constrained.name.as_str()) {
@@ -1042,6 +1052,15 @@ impl<'a> Validator<'a> {
                 for argument in arguments {
                     self.validate_type(owner, argument, parameters);
                 }
+            }
+            Type::Callable {
+                parameters: callable_parameters,
+                result,
+            } => {
+                for parameter in callable_parameters {
+                    self.validate_type(owner, parameter, parameters);
+                }
+                self.validate_type(owner, result, parameters);
             }
         }
     }

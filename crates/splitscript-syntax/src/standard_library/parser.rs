@@ -613,7 +613,28 @@ impl Parser<'_> {
     }
 
     fn ty(&mut self) -> Result<Type, Error> {
-        let mut ty = if self.eat(&TokenKind::LBracket) {
+        let mut ty = if self.eat(&TokenKind::LParen) {
+            let mut parameters = Vec::new();
+            while !self.at(&TokenKind::RParen) {
+                parameters.push(self.ty()?);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+                if self.at(&TokenKind::RParen) {
+                    break;
+                }
+            }
+            self.expect(
+                TokenKind::RParen,
+                "expected `)` after callable parameter types",
+            )?;
+            self.expect(TokenKind::Minus, "expected `->` after callable parameters")?;
+            self.expect(TokenKind::Gt, "expected `>` in the callable arrow `->`")?;
+            Type::Callable {
+                parameters,
+                result: Box::new(self.ty()?),
+            }
+        } else if self.eat(&TokenKind::LBracket) {
             let element = self.ty()?;
             let length = if self.eat(&TokenKind::Semicolon) {
                 let token = self.current().clone();

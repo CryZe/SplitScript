@@ -35,6 +35,7 @@ pub(super) struct EncodedTypes {
 pub(super) struct Inputs<'a> {
     pub standard_library: &'a StandardLibrary,
     pub program: &'a Program,
+    pub wasm_ir: &'a crate::wasm_ir::Program,
     pub semantics: &'a SemanticModel,
     pub async_layout: Option<&'a AsyncFrameLayout>,
     pub async_frames: &'a AsyncFrameLayouts,
@@ -54,6 +55,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
     let Inputs {
         standard_library,
         program,
+        wasm_ir,
         semantics,
         async_layout,
         async_frames,
@@ -71,6 +73,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
     let layout = GcLayout::plan(super::gc_layout::Inputs {
         standard_library: standard_library.clone(),
         program,
+        wasm_ir,
         enums,
         semantics,
         arrays: array_types,
@@ -163,9 +166,16 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
             frame_layout.types.iter().all(|ty| *ty != Type::Never),
             "async frame contains a `Never` field: {frame_layout:?}"
         );
-        fields.extend(frame_layout.types.iter().map(|ty| FieldType {
-            element_type: layout.storage_type(*ty),
-            mutable: true,
+        fields.extend(frame_layout.types.iter().enumerate().map(|(position, ty)| {
+            let field = frame_layout.base_fields + position as u32;
+            FieldType {
+                element_type: if frame_layout.capture_cell_fields.contains(&field) {
+                    layout.capture_cell_storage_type(*ty)
+                } else {
+                    layout.storage_type(*ty)
+                },
+                mutable: true,
+            }
         }));
     }
     recursive_types.push(SubType {
@@ -518,6 +528,70 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
             },
         });
     }
+    let mut captured_values = wasm_ir.mutably_captured_values().collect::<Vec<_>>();
+    captured_values.sort_by_key(|value| value.index());
+    let mut emitted_capture_cells = std::collections::HashSet::new();
+    for value in captured_values {
+        let ty = value_type(value, semantics);
+        if !ty.has_runtime_value() || !emitted_capture_cells.insert(ty) {
+            continue;
+        }
+        debug_assert_eq!(layout.capture_cell_index(ty), recursive_types.len() as u32);
+        recursive_types.push(SubType {
+            is_final: true,
+            supertype_idx: None,
+            composite_type: CompositeType {
+                inner: CompositeInnerType::Struct(StructType {
+                    fields: [FieldType {
+                        element_type: layout.storage_type(ty),
+                        mutable: true,
+                    }]
+                    .into(),
+                }),
+                shared: false,
+                descriptor: None,
+                describes: None,
+            },
+        });
+    }
+    for closure in reachability
+        .closure_expressions()
+        .filter_map(|expression| wasm_ir.closure(expression))
+        .filter(|closure| !closure.captures.is_empty())
+    {
+        debug_assert_eq!(
+            layout
+                .closure_environment_index(closure.expression)
+                .expect("capturing closures have environment layouts"),
+            recursive_types.len() as u32
+        );
+        recursive_types.push(SubType {
+            is_final: true,
+            supertype_idx: None,
+            composite_type: CompositeType {
+                inner: CompositeInnerType::Struct(StructType {
+                    fields: closure
+                        .captures
+                        .iter()
+                        .map(|capture| {
+                            let ty = value_type(capture.value, semantics);
+                            FieldType {
+                                element_type: if capture.mutable && ty.has_runtime_value() {
+                                    layout.capture_cell_storage_type(ty)
+                                } else {
+                                    layout.storage_type(ty)
+                                },
+                                mutable: false,
+                            }
+                        })
+                        .collect(),
+                }),
+                shared: false,
+                descriptor: None,
+                describes: None,
+            },
+        });
+    }
     for future in async_types
         .iter()
         .filter(|future| reachability.contains_async_type(future.id))
@@ -577,9 +651,64 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                         },
                     ]
                     .into_iter()
-                    .chain(frame.types.iter().map(|ty| FieldType {
-                        element_type: layout.storage_type(*ty),
-                        mutable: true,
+                    .chain(frame.types.iter().enumerate().map(|(position, ty)| {
+                        let field = frame.base_fields + position as u32;
+                        FieldType {
+                            element_type: if frame.capture_cell_fields.contains(&field) {
+                                layout.capture_cell_storage_type(*ty)
+                            } else {
+                                layout.storage_type(*ty)
+                            },
+                            mutable: true,
+                        }
+                    }))
+                    .collect(),
+                }),
+                shared: false,
+                descriptor: None,
+                describes: None,
+            },
+        });
+    }
+    for (expression, frame) in async_frames.closures() {
+        let closure_type = wasm_ir
+            .expression(expression)
+            .expect("reachable closure expressions belong to Wasm IR")
+            .ty;
+        let TypeKind::Callable { result, .. } = semantics.types().kind(closure_type) else {
+            unreachable!("checked closure expressions have callable types")
+        };
+        let Type::Async(future) = super::semantic_type(*result, semantics) else {
+            unreachable!("suspending closures return async values")
+        };
+        let frame_index = layout.closure_frame_index(expression);
+        debug_assert_eq!(frame_index, recursive_types.len() as u32);
+        recursive_types.push(SubType {
+            is_final: true,
+            supertype_idx: Some(layout.index(Type::Async(future))),
+            composite_type: CompositeType {
+                inner: CompositeInnerType::Struct(StructType {
+                    fields: [
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I32),
+                            mutable: true,
+                        },
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I32),
+                            mutable: false,
+                        },
+                    ]
+                    .into_iter()
+                    .chain(frame.types.iter().enumerate().map(|(position, ty)| {
+                        let field = frame.base_fields + position as u32;
+                        FieldType {
+                            element_type: if frame.capture_cell_fields.contains(&field) {
+                                layout.capture_cell_storage_type(*ty)
+                            } else {
+                                layout.storage_type(*ty)
+                            },
+                            mutable: true,
+                        }
                     }))
                     .collect(),
                 }),
@@ -660,6 +789,27 @@ pub(super) fn instantiated_catalog_type(
                     _ => None,
                 })
                 .expect("instantiated fixed-array fields have semantic layouts")
+        }
+        TypeRef::Callable { parameters, result } => {
+            let parameters = parameters
+                .iter()
+                .map(|parameter| instantiated_catalog_type(*parameter, variables, semantics))
+                .collect::<Vec<_>>();
+            let result = instantiated_catalog_type(*result, variables, semantics);
+            semantics
+                .types()
+                .iter()
+                .find_map(|(id, kind)| match kind {
+                    TypeKind::Callable {
+                        parameters: candidate_parameters,
+                        result: candidate_result,
+                        ..
+                    } if *candidate_parameters == parameters && *candidate_result == result => {
+                        Some(id)
+                    }
+                    _ => None,
+                })
+                .expect("instantiated callable fields have semantic layouts")
         }
         TypeRef::Application {
             constructor,

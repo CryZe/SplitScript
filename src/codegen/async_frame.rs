@@ -48,6 +48,9 @@ pub(super) struct AsyncFrameLayout {
     pub fields: HashMap<ValueId, (u32, Type)>,
     pub temporaries: HashMap<TemporaryId, (u32, Type)>,
     pub types: Vec<Type>,
+    /// Frame fields whose physical value is a shared mutable-capture cell,
+    /// while `fields` and `types` retain the source-level value type.
+    pub capture_cell_fields: HashSet<u32>,
     pub completion: Option<(u32, Type)>,
     pub children: HashMap<ExprId, (u32, Type)>,
     pub base_fields: u32,
@@ -76,7 +79,10 @@ impl AsyncFrameLayout {
             .body(BodyOwner::Action(action))
             .expect("checked actions have Wasm IR bodies");
         Some(Self::for_body(
-            body,
+            &body.entry,
+            &body.locals,
+            &body.frame_values,
+            &body.frame_temporaries,
             wasm_ir,
             semantics,
             None,
@@ -110,43 +116,82 @@ impl AsyncFrameLayout {
             }
         };
         Self::for_body(
-            body,
+            &body.entry,
+            &body.locals,
+            &body.frame_values,
+            &body.frame_temporaries,
             wasm_ir,
             semantics,
             Some(instance),
             2,
-            declaration.params.iter().map(|parameter| parameter.id),
+            declaration
+                .params
+                .iter()
+                .map(|parameter| (parameter.id, wasm_ir.is_mutably_captured(parameter.id))),
+        )
+        .with_completion(completion)
+    }
+
+    pub(super) fn for_closure(
+        closure: &wasm_ir::ClosureBody,
+        program: &wasm_ir::Program,
+        semantics: &SemanticModel,
+    ) -> Self {
+        let completion = closure
+            .completion
+            .map(|completion| semantic_type(completion, semantics))
+            .filter(|completion| completion.has_runtime_value());
+        let captures = closure
+            .captures
+            .iter()
+            .map(|capture| (capture.value, capture.mutable));
+        let parameters = closure
+            .parameters
+            .iter()
+            .copied()
+            .map(|value| (value, program.is_mutably_captured(value)));
+        Self::for_body(
+            &closure.entry,
+            &closure.locals,
+            &closure.frame_values,
+            &closure.frame_temporaries,
+            program,
+            semantics,
+            None,
+            2,
+            captures.chain(parameters),
         )
         .with_completion(completion)
     }
 
     fn for_body(
-        body: &wasm_ir::Body,
+        entry: &wasm_ir::Block,
+        locals: &[wasm_ir::Local],
+        frame_values: &[ValueId],
+        frame_temporaries: &[TemporaryId],
         program: &wasm_ir::Program,
         semantics: &SemanticModel,
         instance: Option<&FunctionInstance>,
         base_fields: u32,
-        parameters: impl IntoIterator<Item = ValueId>,
+        initial_values: impl IntoIterator<Item = (ValueId, bool)>,
     ) -> Self {
         let mut layout = Self {
             base_fields,
             ..Self::default()
         };
-        for value in parameters {
+        for (value, capture_cell) in initial_values {
             let source = semantics
                 .value_type(value)
                 .expect("checked parameters have semantic types");
             let source = instance.map_or(source, |instance| {
                 semantics.specialize_type(instance, source)
             });
-            layout.push_value(value, semantic_type(source, semantics));
+            layout.push_value(value, semantic_type(source, semantics), capture_cell);
         }
-        for local in &body.locals {
+        for local in locals {
             let destination = match local.purpose {
-                LocalPurpose::Value(value) if body.frame_values.contains(&value) => Some(Ok(value)),
-                LocalPurpose::Temporary(temporary)
-                    if body.frame_temporaries.contains(&temporary) =>
-                {
+                LocalPurpose::Value(value) if frame_values.contains(&value) => Some(Ok(value)),
+                LocalPurpose::Temporary(temporary) if frame_temporaries.contains(&temporary) => {
                     Some(Err(temporary))
                 }
                 _ => None,
@@ -158,7 +203,7 @@ impl AsyncFrameLayout {
                 let ty = semantic_type(source, semantics);
                 match destination {
                     Ok(value) => {
-                        layout.push_value(value, ty);
+                        layout.push_value(value, ty, program.is_mutably_captured(value));
                     }
                     Err(temporary) => {
                         if ty == Type::Never {
@@ -210,7 +255,7 @@ impl AsyncFrameLayout {
             semantics,
             values: Vec::new(),
         };
-        wasm_ir::Visitor::visit_block(&mut children, &body.entry, program);
+        wasm_ir::Visitor::visit_block(&mut children, entry, program);
         for (expression, ty) in children.values {
             if layout.children.contains_key(&expression) {
                 continue;
@@ -222,7 +267,7 @@ impl AsyncFrameLayout {
         layout
     }
 
-    fn push_value(&mut self, value: ValueId, ty: Type) {
+    fn push_value(&mut self, value: ValueId, ty: Type, capture_cell: bool) {
         if self.fields.contains_key(&value) {
             return;
         }
@@ -233,6 +278,9 @@ impl AsyncFrameLayout {
         let field = self.base_fields + self.types.len() as u32;
         self.fields.insert(value, (field, ty));
         self.types.push(ty);
+        if capture_cell {
+            self.capture_cell_fields.insert(field);
+        }
     }
 
     fn with_completion(mut self, completion: Option<Type>) -> Self {
@@ -262,6 +310,8 @@ pub(super) struct AsyncFrameLayouts {
     pub attach: Option<AsyncFrameLayout>,
     functions: HashMap<FunctionInstance, AsyncFrameLayout>,
     ordered_functions: Vec<FunctionInstance>,
+    closures: HashMap<ExprId, AsyncFrameLayout>,
+    ordered_closures: Vec<ExprId>,
     intrinsics: HashMap<IntrinsicFutureInstance, IntrinsicFutureLayout>,
     ordered_intrinsics: Vec<IntrinsicFutureInstance>,
 }
@@ -303,6 +353,21 @@ impl AsyncFrameLayouts {
             functions.insert(
                 instance.clone(),
                 AsyncFrameLayout::for_function(instance, program, wasm_ir, semantics),
+            );
+        }
+        let mut closures = HashMap::new();
+        let mut ordered_closures = Vec::new();
+        for expression in reachability.closure_expressions() {
+            let closure = wasm_ir
+                .closure(expression)
+                .expect("reachable closures have Wasm IR bodies");
+            if closure.completion.is_none() {
+                continue;
+            }
+            ordered_closures.push(expression);
+            closures.insert(
+                expression,
+                AsyncFrameLayout::for_closure(closure, wasm_ir, semantics),
             );
         }
         let mut intrinsics = HashMap::new();
@@ -361,6 +426,19 @@ impl AsyncFrameLayouts {
                     values: &mut directly_polled,
                 },
                 &body.entry,
+                wasm_ir,
+            );
+        }
+        for expression in reachability.closure_expressions() {
+            let closure = wasm_ir
+                .closure(expression)
+                .expect("reachable closures have Wasm IR bodies");
+            wasm_ir::Visitor::visit_block(
+                &mut DirectIntrinsicPolls {
+                    owner: None,
+                    values: &mut directly_polled,
+                },
+                &closure.entry,
                 wasm_ir,
             );
         }
@@ -473,6 +551,8 @@ impl AsyncFrameLayouts {
             attach,
             functions,
             ordered_functions,
+            closures,
+            ordered_closures,
             intrinsics,
             ordered_intrinsics,
         }
@@ -488,6 +568,17 @@ impl AsyncFrameLayouts {
         self.ordered_functions
             .iter()
             .map(|instance| (instance, &self.functions[instance]))
+    }
+
+    pub(super) fn closure(&self, expression: ExprId) -> Option<&AsyncFrameLayout> {
+        self.closures.get(&expression)
+    }
+
+    pub(super) fn closures(&self) -> impl ExactSizeIterator<Item = (ExprId, &AsyncFrameLayout)> {
+        self.ordered_closures
+            .iter()
+            .copied()
+            .map(|expression| (expression, &self.closures[&expression]))
     }
 
     pub(super) fn intrinsic(

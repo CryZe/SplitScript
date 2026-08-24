@@ -5,6 +5,7 @@ use super::{
     RangeTypeDecl, ResultTypeDecl, Span, TokenKind, TypeApplicationDecl, TypeApplicationOccurrence,
     TypeNameId, TypeRef, ambiguous_range_diagnostic,
 };
+use crate::ast::CallableTypeOccurrence;
 use crate::migration::ForeignSpellingContext;
 
 impl Parser<'_> {
@@ -163,11 +164,21 @@ impl Parser<'_> {
                 TokenKind::RParen,
                 "expected `)` after callable parameter types",
             )?;
-            self.expect(TokenKind::Minus, "expected `->` after callable parameters")?;
-            self.expect(TokenKind::Gt, "expected `>` in the callable arrow `->`")?;
+            let minus = self.expect(TokenKind::Minus, "expected `->` after callable parameters")?;
+            let greater = self.expect(TokenKind::Gt, "expected `>` in the callable arrow `->`")?;
             let (result, end) = self.parse_type("expected a callable result type")?;
             let key = (parameters.clone(), result);
+            let occurrence = CallableTypeOccurrence {
+                span: start.join(end),
+                arrow: minus.join(greater),
+            };
             let id = if let Some(&id) = self.callable_type_ids.get(&key) {
+                self.callable_types
+                    .iter_mut()
+                    .find(|callable| callable.id == id)
+                    .expect("interned callable types have declarations")
+                    .occurrences
+                    .push(occurrence);
                 id
             } else {
                 let id = self.constructed_type_ids.callable();
@@ -175,6 +186,7 @@ impl Parser<'_> {
                     id,
                     parameters,
                     result,
+                    occurrences: vec![occurrence],
                 });
                 self.callable_type_ids.insert(key, id);
                 id

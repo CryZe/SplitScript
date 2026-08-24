@@ -634,6 +634,11 @@ impl Checker {
                 .into_iter()
                 .filter(|candidate| self.catalog_candidate_may_apply(candidate, receiver_type))
                 .collect::<Vec<_>>();
+            Self::prefer_matching_catalog_call_shape(
+                &mut candidates,
+                type_arguments.len(),
+                args.len(),
+            );
             self.prefer_specific_catalog_candidates(&mut candidates, receiver_type);
             if candidates.len() > 1 {
                 self.ambiguous_catalog_call(callee, &candidates, span);
@@ -778,6 +783,7 @@ impl Checker {
             .into_iter()
             .filter(|candidate| self.catalog_candidate_may_apply(candidate, receiver_type))
             .collect::<Vec<_>>();
+        Self::prefer_matching_catalog_call_shape(&mut candidates, type_arguments.len(), args.len());
         self.prefer_specific_catalog_candidates(&mut candidates, receiver_type);
         if candidates.len() > 1 {
             self.ambiguous_catalog_call(std::slice::from_ref(method), &candidates, span);
@@ -1155,14 +1161,17 @@ impl Checker {
             );
             self.unify(receiver.ty, declared_receiver, span)?;
             let receiver_type = self.shallow_type(receiver.ty);
-            if let Some((constructor, _)) = self.constructed_field_receiver(receiver_type) {
-                let definitions = self
-                    .standard_library
-                    .type_constructor(constructor)
-                    .associated_types
-                    .to_vec();
+            if let Some((constructor, arguments)) = self.constructed_field_receiver(receiver_type) {
+                let declaration = self.standard_library.type_constructor(constructor);
+                let constructor_variables = declaration
+                    .parameters
+                    .iter()
+                    .zip(arguments)
+                    .map(|(parameter, argument)| (parameter.name, argument))
+                    .collect::<HashMap<_, _>>();
+                let definitions = declaration.associated_types.to_vec();
                 for definition in definitions {
-                    let value = self.catalog_type(definition.value, &variables);
+                    let value = self.catalog_type(definition.value, &constructor_variables);
                     variables.insert(definition.name, value);
                 }
             }
@@ -1195,6 +1204,22 @@ impl Checker {
                 return None;
             }
             concrete_signature.push(declared_receiver);
+        }
+        if let StdlibOwner::Capability(capability) = item.owner {
+            let receiver = receiver
+                .as_ref()
+                .expect("capability members are receiver methods")
+                .ty;
+            for associated in self
+                .standard_library
+                .capability(capability)
+                .associated_types
+            {
+                let value = self
+                    .inference
+                    .associated_type(receiver, capability, associated.name);
+                variables.insert(associated.name, value);
+            }
         }
         let operation = self.standard_library.operation_semantics(item.id);
         let expected_result = expected.map(|ty| self.shallow_type(ty));
@@ -1326,6 +1351,7 @@ impl Checker {
                     })
                 }),
             CatalogTypeRef::Associated(_) => false,
+            CatalogTypeRef::Callable { .. } => matches!(receiver, Type::Callable(_)),
         }
     }
 
@@ -1337,7 +1363,26 @@ impl Checker {
         if candidates.len() < 2 {
             return;
         }
-        let receiver_is_inferred = matches!(self.shallow_type(receiver), Type::Variable(_));
+        let receiver = self.shallow_type(receiver);
+        let receiver_is_inferred = matches!(receiver, Type::Variable(_));
+        if let Type::Variable(variable) = receiver {
+            let requirements = self.inference.variable_requirements(variable);
+            let capability_candidates = candidates
+                .iter()
+                .filter(|candidate| {
+                    matches!(
+                        candidate.item.owner,
+                        StdlibOwner::Capability(capability)
+                            if requirements.as_slice().contains(&capability)
+                    )
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            if !capability_candidates.is_empty() {
+                *candidates = capability_candidates;
+                return;
+            }
+        }
         if receiver_is_inferred && let CallableContext::LibraryFunction(item) = self.callable {
             let owner = self.standard_library.item(item).owner;
             if candidates
@@ -1355,6 +1400,26 @@ impl Checker {
         };
         let strongest = candidates.iter().map(specificity).max().unwrap_or_default();
         candidates.retain(|candidate| specificity(candidate) == strongest);
+    }
+
+    /// Resolve overloads by the syntax written at the call site before using
+    /// receiver specificity. Keeping this independent of type unification
+    /// means methods inherited through capabilities can safely share a name
+    /// with a concrete overload of another arity, such as `Display.toString()`
+    /// and `Integer.toString(radix)`.
+    fn prefer_matching_catalog_call_shape(
+        candidates: &mut Vec<CallCandidate>,
+        explicit_type_arguments: usize,
+        arguments: usize,
+    ) {
+        let matches = |candidate: &&CallCandidate| {
+            candidate.item.signature.parameters.len() == arguments
+                && (explicit_type_arguments == 0
+                    || candidate.item.signature.type_parameters.len() == explicit_type_arguments)
+        };
+        if candidates.iter().filter(matches).count() > 0 {
+            candidates.retain(|candidate| matches(&candidate));
+        }
     }
 
     pub(super) fn ambiguous_catalog_call(
@@ -1390,15 +1455,23 @@ impl Checker {
                 let element = self.catalog_type(*element, variables);
                 Type::Array(self.inference.array_type_with_length(element, Some(length)))
             }
+            CatalogTypeRef::Callable { parameters, result } => {
+                let parameters = parameters
+                    .iter()
+                    .map(|parameter| self.catalog_type(*parameter, variables))
+                    .collect();
+                let result = self.catalog_type(*result, variables);
+                Type::Callable(self.inference.callable_type(parameters, result))
+            }
             CatalogTypeRef::Application {
                 constructor,
                 arguments,
             } => {
-                let [value] = arguments else {
-                    unreachable!("validated built-in type constructors have one argument")
-                };
-                let value = self.catalog_type(*value, variables);
-                self.catalog_application_type(constructor, value)
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.catalog_type(*argument, variables))
+                    .collect();
+                self.catalog_application_type(constructor, arguments)
             }
         }
     }
@@ -1406,8 +1479,12 @@ impl Checker {
     pub(super) fn catalog_application_type(
         &mut self,
         constructor: StdlibTypeConstructorId,
-        value: Type,
+        arguments: Vec<Type>,
     ) -> Type {
+        let [value] = arguments.as_slice() else {
+            return Type::Application(self.inference.application_type(constructor, arguments));
+        };
+        let value = *value;
         if constructor == StdlibTypeConstructorId::Array {
             Type::Array(self.array_type_id(value))
         } else if constructor == StdlibTypeConstructorId::Option {
@@ -1427,7 +1504,7 @@ impl Checker {
                     .range_type(value, crate::ast::RangeKind::Inclusive),
             )
         } else {
-            Type::Application(self.inference.application_type(constructor, vec![value]))
+            Type::Application(self.inference.application_type(constructor, arguments))
         }
     }
 
@@ -1911,7 +1988,11 @@ impl Checker {
         self.errors.push(diagnostic);
     }
 
-    pub(super) fn lookup_member(&self, ty: Type, field: &str) -> Option<(Type, ResolvedMember)> {
+    pub(super) fn lookup_member(
+        &mut self,
+        ty: Type,
+        field: &str,
+    ) -> Option<(Type, ResolvedMember)> {
         if matches!(
             ty,
             Type::Known(id)
@@ -1940,24 +2021,18 @@ impl Checker {
                 ResolvedMember::StandardField(field.id),
             ));
         }
-        if let Some((constructor, argument)) = self.constructed_field_receiver(ty)
+        if let Some((constructor, arguments)) = self.constructed_field_receiver(ty)
             && let Some(field) = self.visible_constructor_field(constructor, field)
         {
-            let parameter = self
+            let variables = self
                 .standard_library
                 .type_constructor(constructor)
                 .parameters
-                .first()
-                .expect("supported constructed runtime values have one type parameter")
-                .name;
-            let field_type = match field.ty {
-                CatalogTypeRef::Parameter(name) if name == parameter => argument,
-                CatalogTypeRef::Core(core) => self.declared_type(DeclaredTypeRef::Core(core)),
-                CatalogTypeRef::Standard(standard) => self.standard_type(standard),
-                _ => unreachable!(
-                    "constructed standard-library fields currently use direct declared types"
-                ),
-            };
+                .iter()
+                .zip(arguments)
+                .map(|(parameter, argument)| (parameter.name, argument))
+                .collect();
+            let field_type = self.catalog_type(field.ty, &variables);
             return Some((field_type, ResolvedMember::StandardField(field.id)));
         }
         match self.source_record_id(ty) {
@@ -2052,41 +2127,34 @@ impl Checker {
     pub(super) fn constructed_field_receiver(
         &self,
         ty: Type,
-    ) -> Option<(StdlibTypeConstructorId, Type)> {
+    ) -> Option<(StdlibTypeConstructorId, Vec<Type>)> {
         match ty {
             Type::Array(array) => Some((
                 StdlibTypeConstructorId::Array,
-                self.inference.array_element(array),
+                vec![self.inference.array_element(array)],
             )),
             Type::Option(option) => Some((
                 StdlibTypeConstructorId::Option,
-                self.inference.option_value(option),
+                vec![self.inference.option_value(option)],
             )),
             Type::Result(result) => Some((
                 StdlibTypeConstructorId::Result,
-                self.inference.result_value(result),
+                vec![self.inference.result_value(result)],
             )),
             Type::Set(set) => Some((
                 StdlibTypeConstructorId::Set,
-                self.inference.set_element(set),
+                vec![self.inference.set_element(set)],
             )),
-            Type::Application(application) => self
-                .inference
-                .application_arguments(application)
-                .first()
-                .copied()
-                .map(|argument| {
-                    (
-                        self.inference.application_constructor(application),
-                        argument,
-                    )
-                }),
+            Type::Application(application) => Some((
+                self.inference.application_constructor(application),
+                self.inference.application_arguments(application).to_vec(),
+            )),
             Type::Range(range) => Some((
                 match self.inference.range_kind(range) {
                     crate::ast::RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
                     crate::ast::RangeKind::Inclusive => StdlibTypeConstructorId::InclusiveRange,
                 },
-                self.inference.range_bound(range),
+                vec![self.inference.range_bound(range)],
             )),
             _ => None,
         }
@@ -2216,7 +2284,7 @@ impl Checker {
     }
 
     pub(super) fn lookup_members(
-        &self,
+        &mut self,
         mut ty: Type,
         fields: &[String],
     ) -> Option<(Type, Vec<ResolvedMember>)> {
@@ -2264,7 +2332,7 @@ impl Checker {
                 && let StdlibOwner::TypeConstructor(owner) = item.owner
                 && self
                     .standard_library
-                    .public_constructor_fields(owner)
+                    .fields_of_constructor(owner)
                     .next()
                     .is_some()
             {

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use wasm_encoder::{AbstractHeapType, HeapType, RefType, StorageType, ValType};
 
 use crate::{
-    ast::{AsyncTypeId, EnumDecl, Program},
+    ast::{AsyncTypeId, EnumDecl, ExprId, Program},
     semantic::{FunctionInstance, ResolvedEnumVariantId},
     stdlib::{
         DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibTypeId,
@@ -30,8 +30,12 @@ pub(super) struct GcLayout {
     async_frame: u32,
     async_values: HashMap<AsyncTypeId, u32>,
     callable_functions: HashMap<crate::ast::CallableTypeId, u32>,
+    capture_cells: HashMap<Type, u32>,
+    closure_environments: HashMap<ExprId, u32>,
     function_frames: HashMap<FunctionInstance, u32>,
     function_frame_tags: HashMap<FunctionInstance, u32>,
+    closure_frames: HashMap<ExprId, u32>,
+    closure_frame_tags: HashMap<ExprId, u32>,
     intrinsic_frames: HashMap<IntrinsicFutureInstance, u32>,
     intrinsic_frame_tags: HashMap<IntrinsicFutureInstance, u32>,
     dynamic: HashMap<Type, u32>,
@@ -42,6 +46,7 @@ pub(super) struct GcLayout {
 pub(super) struct Inputs<'a> {
     pub standard_library: StandardLibrary,
     pub program: &'a Program,
+    pub wasm_ir: &'a crate::wasm_ir::Program,
     pub enums: &'a [EnumDecl],
     pub semantics: &'a crate::semantic::SemanticModel,
     pub arrays: &'a [ResolvedArrayType],
@@ -61,6 +66,7 @@ impl GcLayout {
         let Inputs {
             standard_library,
             program,
+            wasm_ir,
             enums,
             semantics,
             arrays,
@@ -294,6 +300,27 @@ impl GcLayout {
             next += 1;
         }
 
+        let mut capture_cells = HashMap::new();
+        let mut captured_values = wasm_ir.mutably_captured_values().collect::<Vec<_>>();
+        captured_values.sort_by_key(|value| value.index());
+        for value in captured_values {
+            let ty = super::value_type(value, semantics);
+            if ty.has_runtime_value() && !capture_cells.contains_key(&ty) {
+                capture_cells.insert(ty, next);
+                next += 1;
+            }
+        }
+
+        let mut closure_environments = HashMap::new();
+        for closure in reachability
+            .closure_expressions()
+            .filter_map(|expression| wasm_ir.closure(expression))
+            .filter(|closure| !closure.captures.is_empty())
+        {
+            closure_environments.insert(closure.expression, next);
+            next += 1;
+        }
+
         let mut async_values = HashMap::new();
         for future in asyncs
             .iter()
@@ -309,7 +336,15 @@ impl GcLayout {
             function_frame_tags.insert(instance.clone(), tag as u32 + 1);
             next += 1;
         }
-        let first_intrinsic_tag = function_frames.len() as u32 + 1;
+        let mut closure_frames = HashMap::new();
+        let mut closure_frame_tags = HashMap::new();
+        let first_closure_tag = function_frames.len() as u32 + 1;
+        for (position, (expression, _)) in async_frames.closures().enumerate() {
+            closure_frames.insert(expression, next);
+            closure_frame_tags.insert(expression, first_closure_tag + position as u32);
+            next += 1;
+        }
+        let first_intrinsic_tag = first_closure_tag + closure_frames.len() as u32;
         let mut intrinsic_frames = HashMap::new();
         let mut intrinsic_frame_tags = HashMap::new();
         for (position, (instance, _)) in async_frames.intrinsics().enumerate() {
@@ -325,8 +360,12 @@ impl GcLayout {
             async_frame,
             async_values,
             callable_functions,
+            capture_cells,
+            closure_environments,
             function_frames,
             function_frame_tags,
+            closure_frames,
+            closure_frame_tags,
             intrinsic_frames,
             intrinsic_frame_tags,
             dynamic,
@@ -387,6 +426,25 @@ impl GcLayout {
         self.callable_functions[&callable]
     }
 
+    pub(super) fn closure_environment_index(&self, expression: ExprId) -> Option<u32> {
+        self.closure_environments.get(&expression).copied()
+    }
+
+    pub(super) fn capture_cell_index(&self, ty: Type) -> u32 {
+        self.capture_cells[&ty]
+    }
+
+    pub(super) fn capture_cell_val_type(&self, ty: Type) -> ValType {
+        ValType::Ref(RefType {
+            nullable: true,
+            heap_type: HeapType::Concrete(self.capture_cell_index(ty)),
+        })
+    }
+
+    pub(super) fn capture_cell_storage_type(&self, ty: Type) -> StorageType {
+        StorageType::Val(self.capture_cell_val_type(ty))
+    }
+
     pub(super) fn function_frame_index(&self, instance: &FunctionInstance) -> u32 {
         self.function_frames
             .get(instance)
@@ -399,6 +457,20 @@ impl GcLayout {
             .get(instance)
             .copied()
             .expect("suspending function instances have runtime tags")
+    }
+
+    pub(super) fn closure_frame_index(&self, expression: ExprId) -> u32 {
+        self.closure_frames
+            .get(&expression)
+            .copied()
+            .expect("suspending closures have planned GC frames")
+    }
+
+    pub(super) fn closure_frame_tag(&self, expression: ExprId) -> u32 {
+        self.closure_frame_tags
+            .get(&expression)
+            .copied()
+            .expect("suspending closures have runtime tags")
     }
 
     pub(super) fn intrinsic_frame_index(&self, instance: &IntrinsicFutureInstance) -> u32 {

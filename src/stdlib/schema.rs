@@ -162,6 +162,10 @@ pub enum TypeRef {
         element: &'static TypeRef,
         length: u32,
     },
+    Callable {
+        parameters: &'static [TypeRef],
+        result: &'static TypeRef,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

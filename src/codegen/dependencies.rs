@@ -92,18 +92,28 @@ impl BackendDependencies {
             }
         }
 
-        for expression in wasm_ir.expressions() {
-            if !reachability.contains_expression(expression.id) {
-                continue;
-            }
+        for (owner, expression_id) in reachability.expression_instances() {
+            let expression = wasm_ir
+                .expression(expression_id)
+                .expect("reachable expressions belong to Wasm IR");
+            let specialize = |ty| {
+                owner
+                    .as_ref()
+                    .map_or(ty, |instance| semantics.specialize_type(instance, ty))
+            };
             match &expression.kind {
-                wasm_ir::ExpressionKind::Call {
-                    target:
-                        wasm_ir::CallTarget::Intrinsic {
-                            item, intrinsic, ..
-                        },
-                    ..
-                } => {
+                wasm_ir::ExpressionKind::Call { target, .. }
+                    if matches!(
+                        reachability.resolved_call_target(owner.as_ref(), expression.id, target),
+                        wasm_ir::CallTarget::Intrinsic { .. }
+                    ) =>
+                {
+                    let wasm_ir::CallTarget::Intrinsic {
+                        item, intrinsic, ..
+                    } = reachability.resolved_call_target(owner.as_ref(), expression.id, target)
+                    else {
+                        unreachable!()
+                    };
                     dependencies.stdlib_items.insert(*item);
                     dependencies.require_intrinsic(*intrinsic);
                 }
@@ -118,7 +128,7 @@ impl BackendDependencies {
                     }) {
                         dependencies.require(
                             if matches!(
-                                semantics.types().kind(source),
+                                semantics.types().kind(specialize(source)),
                                 TypeKind::Builtin(CoreTypeId::Char)
                             ) {
                                 RuntimeHelperId::FormatChar
@@ -130,7 +140,7 @@ impl BackendDependencies {
                 }
                 wasm_ir::ExpressionKind::Cast { value }
                     if matches!(
-                        semantics.types().kind(expression.ty),
+                        semantics.types().kind(specialize(expression.ty)),
                         TypeKind::Standard(StdlibTypeId::String)
                     ) =>
                 {
@@ -138,6 +148,7 @@ impl BackendDependencies {
                         .expression(*value)
                         .expect("cast operand belongs to Wasm IR")
                         .ty;
+                    let source = specialize(source);
                     dependencies.require(
                         if matches!(
                             semantics.types().kind(source),

@@ -220,22 +220,42 @@ impl SchemeMatcher<'_> {
             TypeRef::Associated(_) => {
                 Err("; source bodies cannot independently narrow an associated type".to_owned())
             }
+            TypeRef::Callable { parameters, result } => {
+                let TypeKind::Callable {
+                    parameters: actual_parameters,
+                    result: actual_result,
+                    ..
+                } = self.semantics.types().kind(actual)
+                else {
+                    return Err(String::new());
+                };
+                if parameters.len() != actual_parameters.len() {
+                    return Err(String::new());
+                }
+                for (expected, actual) in parameters.iter().zip(actual_parameters) {
+                    self.ty(*expected, *actual)?;
+                }
+                self.ty(*result, *actual_result)
+            }
             TypeRef::Application {
                 constructor,
                 arguments,
             } => {
-                let (actual_argument, actual_length) =
-                    constructed_argument(self.semantics, constructor, actual)
+                let (actual_arguments, actual_length) =
+                    constructed_arguments(self.semantics, constructor, actual)
                         .ok_or_else(String::new)?;
                 if constructor == StdlibTypeConstructorId::Array && actual_length.is_some() {
                     return Err(
                         "; an unbounded array declaration inferred a fixed length".to_owned()
                     );
                 }
-                let [expected_argument] = arguments else {
-                    return Err("; only unary catalog constructors are supported".to_owned());
-                };
-                self.ty(*expected_argument, actual_argument)
+                if arguments.len() != actual_arguments.len() {
+                    return Err(String::new());
+                }
+                for (expected, actual) in arguments.iter().zip(actual_arguments) {
+                    self.ty(*expected, actual)?;
+                }
+                Ok(())
             }
             TypeRef::FixedArray { element, length } => {
                 let TypeKind::Array {
@@ -266,25 +286,35 @@ fn type_ref_contains(ty: TypeRef, parameter: &str) -> bool {
             .iter()
             .any(|argument| type_ref_contains(*argument, parameter)),
         TypeRef::FixedArray { element, .. } => type_ref_contains(*element, parameter),
+        TypeRef::Callable { parameters, result } => {
+            parameters
+                .iter()
+                .any(|ty| type_ref_contains(*ty, parameter))
+                || type_ref_contains(*result, parameter)
+        }
         TypeRef::Core(_) | TypeRef::Standard(_) => false,
     }
 }
 
-fn constructed_argument(
+fn constructed_arguments(
     semantics: &SemanticModel,
     constructor: StdlibTypeConstructorId,
     actual: TypeId,
-) -> Option<(TypeId, Option<u32>)> {
+) -> Option<(Vec<TypeId>, Option<u32>)> {
     match (constructor, semantics.types().kind(actual)) {
         (
             StdlibTypeConstructorId::Array,
             TypeKind::Array {
                 element, length, ..
             },
-        ) => Some((*element, *length)),
+        ) => Some((vec![*element], *length)),
         (StdlibTypeConstructorId::Option, TypeKind::Option { value, .. })
-        | (StdlibTypeConstructorId::Result, TypeKind::Result { value, .. }) => Some((*value, None)),
-        (StdlibTypeConstructorId::Set, TypeKind::Set { element, .. }) => Some((*element, None)),
+        | (StdlibTypeConstructorId::Result, TypeKind::Result { value, .. }) => {
+            Some((vec![*value], None))
+        }
+        (StdlibTypeConstructorId::Set, TypeKind::Set { element, .. }) => {
+            Some((vec![*element], None))
+        }
         (
             expected,
             TypeKind::Application {
@@ -292,7 +322,7 @@ fn constructed_argument(
                 arguments,
                 ..
             },
-        ) if expected == *constructor && arguments.len() == 1 => Some((arguments[0], None)),
+        ) if expected == *constructor => Some((arguments.clone(), None)),
         (
             StdlibTypeConstructorId::ExclusiveRange,
             TypeKind::Range {
@@ -308,7 +338,7 @@ fn constructed_argument(
                 kind: crate::ast::RangeKind::Inclusive,
                 ..
             },
-        ) => Some((*bound, None)),
+        ) => Some((vec![*bound], None)),
         _ => None,
     }
 }
@@ -353,6 +383,7 @@ fn declared_type_has_capability(
             library.capability(capability).behavior == CapabilityBehavior::StructuralMemoryLayout
                 && declared_type_has_capability(library, signature, *element, capability)
         }
+        TypeRef::Callable { .. } => false,
         TypeRef::Application { .. } => false,
     }
 }

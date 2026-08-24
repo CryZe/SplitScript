@@ -159,6 +159,7 @@ fn emit_aggregate_global_initializers(
     let matches = MatchLayout::default();
     let context = ExprContext {
         standard_library: lowering.standard_library,
+        reachability: lowering.reachability,
         abi: lowering.abi,
         state: lowering.state,
         locals: LocalStorage::Wasm {
@@ -171,6 +172,9 @@ fn emit_aggregate_global_initializers(
         runtime_globals: lowering.runtime_globals,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
+        closures: lowering.closures,
+        closure_polls: lowering.closure_polls,
+        closure_environment: None,
         intrinsic_futures: lowering.intrinsic_futures,
         display_functions: lowering.display_functions,
         equality_functions: lowering.equality_functions,

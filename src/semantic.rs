@@ -10,8 +10,9 @@ use crate::{
     inference::Type,
     stdlib::{StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibTypeId, StdlibVariantId},
     types::{
-        ResolvedArrayType, ResolvedConstructedTypes, ResolvedOptionType, ResolvedRangeType,
-        ResolvedResultType, ResolvedSetType, TypeId, TypeKind, TypeStore,
+        ResolvedArrayType, ResolvedCallableType, ResolvedConstructedTypes,
+        ResolvedConstructedTypesMut, ResolvedOptionType, ResolvedRangeType, ResolvedResultType,
+        ResolvedSetType, TypeId, TypeKind, TypeStore,
     },
 };
 
@@ -242,6 +243,7 @@ pub enum ResolvedEnumVariantId {
 pub enum ResolvedRecordId {
     Source(RecordId),
     Standard(StdlibTypeId),
+    StandardConstructor(TypeApplicationId),
 }
 
 impl std::fmt::Display for ResolvedRecordId {
@@ -249,6 +251,7 @@ impl std::fmt::Display for ResolvedRecordId {
         match self {
             Self::Source(record) => record.fmt(formatter),
             Self::Standard(record) => write!(formatter, "{record:?}"),
+            Self::StandardConstructor(record) => write!(formatter, "{record:?}"),
         }
     }
 }
@@ -578,19 +581,12 @@ impl SemanticModel {
         None
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn materialize_specialized_type(
         &mut self,
         instance: &FunctionInstance,
         ty: TypeId,
         ids: &mut crate::ast::ConstructedTypeIdAllocator,
-        arrays: &mut Vec<ResolvedArrayType>,
-        options: &mut Vec<ResolvedOptionType>,
-        results: &mut Vec<ResolvedResultType>,
-        asyncs: &mut Vec<crate::types::ResolvedAsyncType>,
-        ranges: &mut Vec<ResolvedRangeType>,
-        sets: &mut Vec<ResolvedSetType>,
-        applications: &mut Vec<crate::types::ResolvedApplicationType>,
+        constructed: &mut ResolvedConstructedTypesMut<'_>,
     ) -> TypeId {
         if let Some(specialized) = self.specialized_types.get(&(instance.clone(), ty)) {
             return *specialized;
@@ -606,18 +602,8 @@ impl SemanticModel {
             TypeKind::Array {
                 element, length, ..
             } => {
-                let element = self.materialize_specialized_type(
-                    instance,
-                    element,
-                    ids,
-                    arrays,
-                    options,
-                    results,
-                    asyncs,
-                    ranges,
-                    sets,
-                    applications,
-                );
+                let element =
+                    self.materialize_specialized_type(instance, element, ids, constructed);
                 if element
                     == match self.types.kind(ty) {
                         TypeKind::Array { element, .. } => *element,
@@ -627,7 +613,7 @@ impl SemanticModel {
                     ty
                 } else {
                     let layout = ids.array();
-                    arrays.push(ResolvedArrayType {
+                    constructed.arrays.push(ResolvedArrayType {
                         id: layout,
                         element: self.resolved_type_ref(element),
                         length,
@@ -641,18 +627,7 @@ impl SemanticModel {
                 }
             }
             TypeKind::Option { value, .. } => {
-                let value = self.materialize_specialized_type(
-                    instance,
-                    value,
-                    ids,
-                    arrays,
-                    options,
-                    results,
-                    asyncs,
-                    ranges,
-                    sets,
-                    applications,
-                );
+                let value = self.materialize_specialized_type(instance, value, ids, constructed);
                 if value
                     == match self.types.kind(ty) {
                         TypeKind::Option { value, .. } => *value,
@@ -662,7 +637,7 @@ impl SemanticModel {
                     ty
                 } else {
                     let layout = ids.option();
-                    options.push(ResolvedOptionType {
+                    constructed.options.push(ResolvedOptionType {
                         id: layout,
                         value: self.resolved_type_ref(value),
                     });
@@ -670,18 +645,7 @@ impl SemanticModel {
                 }
             }
             TypeKind::Result { value, .. } => {
-                let value = self.materialize_specialized_type(
-                    instance,
-                    value,
-                    ids,
-                    arrays,
-                    options,
-                    results,
-                    asyncs,
-                    ranges,
-                    sets,
-                    applications,
-                );
+                let value = self.materialize_specialized_type(instance, value, ids, constructed);
                 if value
                     == match self.types.kind(ty) {
                         TypeKind::Result { value, .. } => *value,
@@ -691,7 +655,7 @@ impl SemanticModel {
                     ty
                 } else {
                     let layout = ids.result();
-                    results.push(ResolvedResultType {
+                    constructed.results.push(ResolvedResultType {
                         id: layout,
                         value: self.resolved_type_ref(value),
                     });
@@ -699,18 +663,7 @@ impl SemanticModel {
                 }
             }
             TypeKind::Async { value, .. } => {
-                let value = self.materialize_specialized_type(
-                    instance,
-                    value,
-                    ids,
-                    arrays,
-                    options,
-                    results,
-                    asyncs,
-                    ranges,
-                    sets,
-                    applications,
-                );
+                let value = self.materialize_specialized_type(instance, value, ids, constructed);
                 if value
                     == match self.types.kind(ty) {
                         TypeKind::Async { value, .. } => *value,
@@ -720,7 +673,7 @@ impl SemanticModel {
                     ty
                 } else {
                     let layout = ids.async_value();
-                    asyncs.push(crate::types::ResolvedAsyncType {
+                    constructed.asyncs.push(crate::types::ResolvedAsyncType {
                         id: layout,
                         value: self.resolved_type_ref(value),
                     });
@@ -728,18 +681,8 @@ impl SemanticModel {
                 }
             }
             TypeKind::Set { element, .. } => {
-                let element = self.materialize_specialized_type(
-                    instance,
-                    element,
-                    ids,
-                    arrays,
-                    options,
-                    results,
-                    asyncs,
-                    ranges,
-                    sets,
-                    applications,
-                );
+                let element =
+                    self.materialize_specialized_type(instance, element, ids, constructed);
                 if element
                     == match self.types.kind(ty) {
                         TypeKind::Set { element, .. } => *element,
@@ -748,7 +691,8 @@ impl SemanticModel {
                 {
                     ty
                 } else {
-                    let backing = arrays
+                    let backing = constructed
+                        .arrays
                         .iter()
                         .find(|array| {
                             array.length.is_none()
@@ -757,7 +701,7 @@ impl SemanticModel {
                         .map(|array| array.id)
                         .unwrap_or_else(|| {
                             let backing = ids.array();
-                            arrays.push(ResolvedArrayType {
+                            constructed.arrays.push(ResolvedArrayType {
                                 id: backing,
                                 element: self.resolved_type_ref(element),
                                 length: None,
@@ -771,7 +715,7 @@ impl SemanticModel {
                             backing
                         });
                     let layout = ids.application();
-                    sets.push(ResolvedSetType {
+                    constructed.sets.push(ResolvedSetType {
                         id: layout,
                         element: self.resolved_type_ref(element),
                         backing,
@@ -784,18 +728,7 @@ impl SemanticModel {
                 }
             }
             TypeKind::Range { bound, kind, .. } => {
-                let bound = self.materialize_specialized_type(
-                    instance,
-                    bound,
-                    ids,
-                    arrays,
-                    options,
-                    results,
-                    asyncs,
-                    ranges,
-                    sets,
-                    applications,
-                );
+                let bound = self.materialize_specialized_type(instance, bound, ids, constructed);
                 if bound
                     == match self.types.kind(ty) {
                         TypeKind::Range { bound, .. } => *bound,
@@ -805,7 +738,7 @@ impl SemanticModel {
                     ty
                 } else {
                     let layout = ids.range();
-                    ranges.push(ResolvedRangeType {
+                    constructed.ranges.push(ResolvedRangeType {
                         id: layout,
                         bound: self.resolved_type_ref(bound),
                         kind,
@@ -825,32 +758,23 @@ impl SemanticModel {
                 let specialized_arguments = arguments
                     .iter()
                     .map(|argument| {
-                        self.materialize_specialized_type(
-                            instance,
-                            *argument,
-                            ids,
-                            arrays,
-                            options,
-                            results,
-                            asyncs,
-                            ranges,
-                            sets,
-                            applications,
-                        )
+                        self.materialize_specialized_type(instance, *argument, ids, constructed)
                     })
                     .collect::<Vec<_>>();
                 if specialized_arguments == arguments {
                     ty
                 } else {
                     let layout = ids.application();
-                    applications.push(crate::types::ResolvedApplicationType {
-                        id: layout,
-                        constructor,
-                        arguments: specialized_arguments
-                            .iter()
-                            .map(|argument| self.resolved_type_ref(*argument))
-                            .collect(),
-                    });
+                    constructed
+                        .applications
+                        .push(crate::types::ResolvedApplicationType {
+                            id: layout,
+                            constructor,
+                            arguments: specialized_arguments
+                                .iter()
+                                .map(|argument| self.resolved_type_ref(*argument))
+                                .collect(),
+                        });
                     self.types.intern(TypeKind::Application {
                         layout,
                         constructor,
@@ -858,7 +782,49 @@ impl SemanticModel {
                     })
                 }
             }
-            TypeKind::Callable { .. } => ty,
+            TypeKind::Callable {
+                parameters, result, ..
+            } => {
+                let specialized_parameters = parameters
+                    .iter()
+                    .map(|parameter| {
+                        self.materialize_specialized_type(instance, *parameter, ids, constructed)
+                    })
+                    .collect::<Vec<_>>();
+                let specialized_result =
+                    self.materialize_specialized_type(instance, result, ids, constructed);
+                if specialized_parameters == parameters && specialized_result == result {
+                    ty
+                } else {
+                    let resolved_parameters = specialized_parameters
+                        .iter()
+                        .map(|parameter| self.resolved_type_ref(*parameter))
+                        .collect::<Vec<_>>();
+                    let resolved_result = self.resolved_type_ref(specialized_result);
+                    let layout = constructed
+                        .callables
+                        .iter()
+                        .find(|callable| {
+                            callable.parameters == resolved_parameters
+                                && callable.result == resolved_result
+                        })
+                        .map(|callable| callable.id)
+                        .unwrap_or_else(|| {
+                            let layout = ids.callable();
+                            constructed.callables.push(ResolvedCallableType {
+                                id: layout,
+                                parameters: resolved_parameters,
+                                result: resolved_result,
+                            });
+                            layout
+                        });
+                    self.types.intern(TypeKind::Callable {
+                        layout,
+                        parameters: specialized_parameters,
+                        result: specialized_result,
+                    })
+                }
+            }
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
             | TypeKind::StateSnapshot

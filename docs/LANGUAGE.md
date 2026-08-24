@@ -901,6 +901,54 @@ Functions are independent of a particular action snapshot. Values from
 their dependencies visible. Suspending functions return [`async`] values and
 may use [`await`] where their process-lifetime effect permits it.
 
+### Callable values and closures
+
+A callable type spells out its parameters and result:
+
+```text
+fn apply(value: u32, transform: (u32) -> u32) -> u32 {
+    return transform(value)
+}
+```
+
+A closure creates such a value with `=>`. One parameter may omit parentheses;
+zero or multiple parameters use parentheses. The body is any expression, so a
+value block provides local statements when needed:
+
+```text
+let offset = 2u32
+let addOffset = value => value + offset
+
+let counter = 0u32
+let increment = () => {
+    counter += 1
+    return counter
+}
+
+print(apply(4, value => value * 2))
+print(addOffset(increment()))
+```
+
+A closure body may suspend. Its callable result is inferred as `async T`, and
+calling it creates a typed future just like calling a named async function:
+
+```text
+let afterTick = (value: u32) => {
+    await nextTick()
+    return value + 1
+}
+print(await afterTick(4))
+```
+
+Parameter and result types are inferred from the body, invocation sites, and
+an expected callable type in either direction. Creating a closure retains its
+lexical captures but does not execute the body. Immutable captures are stored
+as values. Mutable locals use one shared GC cell, so the declaring scope,
+returned closures, nested closures, and continuations across [`await`] all see
+the same assignments. [`return`] exits the closure itself; [`break`] and
+[`continue`] cannot target a loop outside it. Callable values do not implement
+[`Equatable`].
+
 ## Records
 
 Records are immutable, named value shapes represented as WebAssembly GC

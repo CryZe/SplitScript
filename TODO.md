@@ -389,11 +389,18 @@ semantic-review evidence, not as a conformance corpus.
   specialized lowering. Untyped helper parameters infer the minimal
   `T: Iterable` constraint, and the projected `T.Item` participates in ordinary
   bidirectional parameter, result, and capability inference.
-- [ ] Design user-defined mutable iterator state and lower `for` through a
-  general `Iterable.iterator` / `Iterator.next` call path once that ownership
-  model is settled. Specify failure and asynchronous iteration separately;
-  defer `map`, `filter`, and similar adapters until closures have a settled
-  design.
+- [x] Lower `for` over an existing `Iterator` through its ordinary `next`
+  protocol, consuming that cursor, while `for` over `Iterable` retains an
+  independent traversal. Lazy source-defined `map` and `filter` adapters store
+  ordinary closures, compose without intermediate collections, participate in
+  generic capability dispatch, and remain live across suspending loop bodies.
+  Constructed callable layouts, generic standard-library record fields,
+  reachability, scratch planning, and intrinsic dependencies all use the same
+  demand-driven specialization path rather than adapter-specific intrinsics.
+- [ ] Design user-defined mutable iterator state once user-authored associated
+  types are available. Specify fallible and asynchronous iteration separately;
+  do not conflate either one with the completed synchronous `IteratorStep`
+  protocol.
 
 ### Engine and emulator providers
 
@@ -641,19 +648,38 @@ remaining work is product hardening and distribution.
   tasks.
 - [ ] Broaden suspending control flow incrementally from real ports and add a
   host-executed conformance fixture for each new shape.
-- [ ] Design first-class function values and lexical closures for iterator
+- [ ] Finish first-class function values and lexical closures for iterator
   adapters, separately from legacy delegate migration. The maintained Axiom
   Verge port already established that its three callback-shaped C# delegates
   are clearer as ordinary typed functions, so callbacks alone are not evidence
   for a delegate/event model. Lazy `map` and `filter` do provide a distinct
-  reason to store callable behavior. Settle the callable type spelling,
-  arrow-expression syntax, inferred parameter/result types, by-reference
-  capture of mutable locals, invocation effects, async results, recursive
-  closures, and Wasm GC environment representation before implementation.
-  Preserve ordinary lexical control flow: `return` belongs to the closure,
-  while `break` and `continue` cannot target loops outside it. Add function
-  references and closures through one callable abstraction rather than a
-  closure-only invocation path.
+  reason to store callable behavior. Callable type syntax, arrow closures,
+  bidirectional parameter/result inference, invocation, independent closure
+  bodies, typed Wasm GC function references, immutable environments, and
+  shared GC cells for mutable captures are implemented. Shared cells work for
+  returned and nested closures and survive async continuation frames. Untyped
+  higher-order helpers infer callable parameters from invocation and specialize
+  those signatures independently at each concrete call site. Async closure
+  bodies now use the same typed continuation-frame and runtime-tag dispatch as
+  source async functions, including captured values and mutable parameters
+  that survive suspension. Finish latent effect inference at invocation sites,
+  generic closure bodies and captures, and named function-to-callable
+  conversion. Lazy `Iterator.map` and `Iterator.filter`, including stored
+  callbacks and direct `for` consumption, are complete. Preserve
+  ordinary lexical control flow: `return` belongs to the closure, while
+  `break` and `continue` cannot target loops outside it. Keep named functions
+  and closures on one callable abstraction rather than a closure-only path.
+- [ ] Make reachability-based unused analysis account for implicit protocol
+  use. A user-defined `toString`/`debugString` implementation, its receiver
+  record, and fields read only through that implementation are used whenever
+  the corresponding derived `Display`/`Debug` path is reachable; do not warn
+  about them merely because no ordinary source call names the method. Cover
+  the same rule for future capability-satisfying user methods rather than
+  special-casing display.
+- [ ] Treat the implicit method receiver `self` as a first-class language
+  symbol throughout the editor: keyword highlighting, hover documentation,
+  semantic tokens, selection, and definition behavior should agree with its
+  precisely inferred receiver type.
 - [ ] Complete remaining ordinary library gaps when a port needs them:
   immutable String operations beyond the corpus-proven P0 slice, additional
   numeric operations, and typed time operations proven useful by maintained

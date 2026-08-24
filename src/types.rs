@@ -141,6 +141,22 @@ pub struct ResolvedConstructedTypes<'a> {
     pub applications: &'a [ResolvedApplicationType],
 }
 
+/// Mutable constructed-type tables extended by demand-driven specialization.
+///
+/// Keeping these tables together makes materialization a single compiler
+/// boundary: adding another constructed type does not require threading one
+/// more unrelated argument through every recursive specialization call.
+pub(crate) struct ResolvedConstructedTypesMut<'a> {
+    pub arrays: &'a mut Vec<ResolvedArrayType>,
+    pub options: &'a mut Vec<ResolvedOptionType>,
+    pub results: &'a mut Vec<ResolvedResultType>,
+    pub asyncs: &'a mut Vec<ResolvedAsyncType>,
+    pub callables: &'a mut Vec<ResolvedCallableType>,
+    pub ranges: &'a mut Vec<ResolvedRangeType>,
+    pub sets: &'a mut Vec<ResolvedSetType>,
+    pub applications: &'a mut Vec<ResolvedApplicationType>,
+}
+
 /// Semantic name for a core, non-constructed SplitScript type.
 ///
 /// This is an alias, not a second primitive-type universe. The standard

@@ -725,7 +725,9 @@ impl CompilerDatabase {
             TypeKind::Option { .. } => Some(DefinitionTarget::Language(LanguageItemId::OptionType)),
             TypeKind::Result { .. } => Some(DefinitionTarget::Language(LanguageItemId::ResultType)),
             TypeKind::Async { .. } => Some(DefinitionTarget::Language(LanguageItemId::Async)),
-            TypeKind::Callable { .. } => None,
+            TypeKind::Callable { .. } => {
+                Some(DefinitionTarget::Language(LanguageItemId::CallableType))
+            }
             TypeKind::Range { kind, .. } => Some(DefinitionTarget::StandardLibrarySymbol(
                 StdlibSymbolId::TypeConstructor(match kind {
                     crate::ast::RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
@@ -753,6 +755,13 @@ impl CompilerDatabase {
         let Some(token) = self.token_at(offset)? else {
             return Ok(None);
         };
+        let contextual = {
+            let recovered = self.recovering_parse()?;
+            contextual_language_item_at(recovered.syntax(), token.span)
+        };
+        if let Some(item) = contextual {
+            return Ok(Some(DefinitionTarget::Language(item)));
+        }
         if let TokenKind::Ident(name) = &token.kind {
             let recovered = self.recovering_parse()?;
             if let Some(policy) = recovered.syntax().tick_rate
@@ -765,9 +774,6 @@ impl CompilerDatabase {
                         .is_some_and(|rate| rate.keyword_span == token.span))
             {
                 return Ok(Some(DefinitionTarget::Language(LanguageItemId::TickRate)));
-            }
-            if let Some(item) = contextual_language_item_at(recovered.syntax(), token.span) {
-                return Ok(Some(DefinitionTarget::Language(item)));
             }
             if let Some(provider) = recovered
                 .syntax()
@@ -990,6 +996,16 @@ struct ContextualLanguageItemAt {
 }
 
 impl<'ast> Visitor<'ast> for ContextualLanguageItemAt {
+    fn visit_expr(&mut self, expression: &'ast crate::ast::Expr) {
+        if let crate::ast::ExprKind::Closure { arrow_span, .. } = &expression.kind
+            && *arrow_span == self.target
+        {
+            self.item = Some(LanguageItemId::Closure);
+            return;
+        }
+        visit::walk_expr(self, expression);
+    }
+
     fn visit_state_field(&mut self, field: &'ast crate::ast::StateField) {
         if let crate::ast::StateSource::Pointer(path) = &field.source
             && path.at_span == Some(self.target)
@@ -1064,6 +1080,16 @@ fn contextual_language_item_at(
     program: &crate::ast::Program,
     target: Span,
 ) -> Option<LanguageItemId> {
+    if program
+        .callable_types
+        .iter()
+        .flat_map(|callable| &callable.occurrences)
+        .any(|occurrence| {
+            occurrence.arrow.start <= target.start && target.end <= occurrence.arrow.end
+        })
+    {
+        return Some(LanguageItemId::CallableType);
+    }
     let mut finder = ContextualLanguageItemAt { target, item: None };
     finder.visit_program(program);
     finder.item

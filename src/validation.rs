@@ -17,8 +17,8 @@ use crate::{
         TypedMatchArm, TypedProgram, TypedStatementKind, TypedVisitor,
     },
     semantic::{
-        FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue,
-        SemanticModel,
+        DynamicCallCallee, FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember,
+        ResolvedValue, SemanticModel,
     },
     stdlib::{
         Implementation, StandardLibrary, StdlibCapabilityId, StdlibItemId, StdlibTypeConstructorId,
@@ -991,6 +991,11 @@ fn validate_unused_bindings(syntax: &Program, hir: &TypedProgram) -> Vec<Diagnos
 
     let mut reads = HashSet::new();
     for expression in hir.expressions() {
+        if let Some(ExpressionResolution::DynamicCall(DynamicCallCallee::Value(value))) =
+            expression.resolution
+        {
+            reads.insert(value);
+        }
         let root = hir
             .value_path(expression.id)
             .and_then(|(root, _)| root)

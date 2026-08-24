@@ -289,12 +289,14 @@ impl Checker {
                         .collect::<std::collections::HashMap<_, _>>();
                     let receiver = self.catalog_application_type(
                         constructor,
-                        variables[declaration.parameters[0].name],
+                        vec![variables[declaration.parameters[0].name]],
                     );
                     self.unify(iterable_ty, receiver, iterable.span);
                     iterable_ty = self.shallow_type(receiver);
                 }
                 let iterable_capability = crate::stdlib::StdlibCapabilityId::Iterable;
+                let iterator_capability = crate::stdlib::StdlibCapabilityId::Iterator;
+                let mut consumes_iterator = false;
                 let element_ty = if matches!(iterable_ty, Type::Variable(_)) {
                     self.inference
                         .require(
@@ -310,31 +312,38 @@ impl Checker {
                             )
                         })
                 } else {
-                    self.constructed_field_receiver(iterable_ty)
-                        .and_then(|(constructor, argument)| {
+                    self.constructed_field_receiver(iterable_ty).and_then(
+                        |(constructor, arguments)| {
                         let declaration = self.standard_library.type_constructor(constructor);
-                        if !self.standard_library.type_constructor_has_capability(
-                            constructor,
-                            iterable_capability,
+                        if self.standard_library.type_constructor_has_capability(
+                            constructor, iterable_capability,
                         ) {
+                        } else if self.standard_library.type_constructor_has_capability(
+                            constructor, iterator_capability,
+                        ) {
+                            consumes_iterator = true;
+                        } else {
                             return None;
                         }
-                        let mut variables = std::collections::HashMap::new();
-                        if let Some(parameter) = declaration.parameters.first() {
-                            variables.insert(parameter.name, argument);
-                        }
+                        let variables = declaration
+                            .parameters
+                            .iter()
+                            .zip(arguments)
+                            .map(|(parameter, argument)| (parameter.name, argument))
+                            .collect();
                         declaration
                             .associated_types
                             .iter()
                             .find(|associated| associated.name == "Item")
                             .map(|associated| self.catalog_type(associated.value, &variables))
-                    })
+                    },
+                    )
                 }
                 .unwrap_or_else(|| {
                         let actual = self.type_name(iterable_ty);
                         self.error(
                             format!(
-                                "`for ... in` requires an `Iterable` value, but this expression has type `{actual}`"
+                                "`for ... in` requires an `Iterable` or `Iterator` value, but this expression has type `{actual}`"
                             ),
                             iterable.span,
                         );
@@ -344,12 +353,13 @@ impl Checker {
                 // compiler-owned iterable slot. This lets the backend lower a
                 // direct range loop without allocating the first-class range
                 // object that is needed when a range escapes into a value.
-                let iterable_storage_ty =
-                    if matches!(iterable.kind, crate::ast::ExprKind::Range { .. }) {
-                        element_ty
-                    } else {
-                        iterable_ty
-                    };
+                let iterable_storage_ty = if !consumes_iterator
+                    && matches!(iterable.kind, crate::ast::ExprKind::Range { .. })
+                {
+                    element_ty
+                } else {
+                    iterable_ty
+                };
                 self.semantics
                     .resolve_value_type(*iterable_value, iterable_storage_ty);
                 let is_range = match self.shallow_type(iterable_ty) {
@@ -360,14 +370,17 @@ impl Checker {
                     ),
                     _ => false,
                 };
-                self.semantics.resolve_value_type(
-                    *index_value,
-                    if is_range {
-                        element_ty
-                    } else {
-                        self.core_type(crate::stdlib::CoreTypeId::U32)
-                    },
-                );
+                let index_ty = if consumes_iterator {
+                    self.catalog_application_type(
+                        crate::stdlib::StdlibTypeConstructorId::IteratorStep,
+                        vec![element_ty],
+                    )
+                } else if is_range {
+                    element_ty
+                } else {
+                    self.core_type(crate::stdlib::CoreTypeId::U32)
+                };
+                self.semantics.resolve_value_type(*index_value, index_ty);
                 self.semantics.resolve_value_type(
                     *version_value,
                     self.core_type(crate::stdlib::CoreTypeId::U32),

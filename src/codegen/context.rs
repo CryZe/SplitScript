@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{EnumDecl, RecordDecl, ValueId},
+    ast::{EnumDecl, ExprId, RecordDecl, ValueId},
     memory::MemoryLayouts,
     semantic::{FunctionInstance, SemanticModel},
     stdlib::StandardLibrary,
@@ -28,6 +28,8 @@ use super::{
 /// a narrower input when they do not need this complete view.
 pub(super) struct EmissionContext<'a> {
     pub standard_library: &'a StandardLibrary,
+    pub reachability: &'a super::reachability::Reachability,
+    pub capabilities: &'a crate::capabilities::CapabilityAnalysis,
     pub abi: &'a Abi,
     pub state: &'a crate::ast::StateDecl,
     pub globals: &'a HashMap<ValueId, u32>,
@@ -36,6 +38,8 @@ pub(super) struct EmissionContext<'a> {
     pub runtime_globals: RuntimeGlobals,
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
+    pub closures: &'a HashMap<ExprId, u32>,
+    pub closure_polls: &'a HashMap<ExprId, u32>,
     pub intrinsic_futures: &'a HashMap<super::async_frame::IntrinsicFutureInstance, u32>,
     pub display_functions: &'a DisplayFunctions,
     pub equality_functions: &'a EqualityFunctions,

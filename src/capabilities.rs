@@ -30,6 +30,17 @@ pub struct CapabilityAnalysis {
     structural_requirements: HashMap<StdlibCapabilityId, Vec<StdlibItemId>>,
 }
 
+/// Concrete implementation selected for a structural capability requirement.
+///
+/// Generic bodies retain the requirement until monomorphization. Once their
+/// receiver is concrete, dispatch resolves either to a user-authored method or
+/// to the standard-library member owned by that concrete type shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CapabilityMethodImplementation {
+    Source(FunctionId),
+    Standard(StdlibItemId),
+}
+
 impl CapabilityAnalysis {
     pub fn build(
         records: &[RecordDecl],
@@ -339,6 +350,66 @@ impl CapabilityAnalysis {
             })
             .flatten()
             .filter(|function| self.method_matches(ty, *function, requirement, semantics))
+    }
+
+    pub(crate) fn resolve_method_requirement(
+        &self,
+        ty: TypeId,
+        requirement: StdlibItemId,
+        semantics: &SemanticModel,
+    ) -> Option<CapabilityMethodImplementation> {
+        let requirement = self.standard_library.item(requirement);
+        let StdlibOwner::Capability(capability) = requirement.owner else {
+            return None;
+        };
+        if requirement.implementation != Implementation::CapabilityRequirement
+            || self.require(ty, capability, semantics).is_err()
+        {
+            return None;
+        }
+        if let Some(function) =
+            self.method_implementation(ty, capability, requirement.id, semantics)
+        {
+            return Some(CapabilityMethodImplementation::Source(function));
+        }
+
+        let owner = match semantics.types().kind(ty) {
+            TypeKind::Builtin(core) => StdlibOwner::Core(*core),
+            TypeKind::Standard(standard) => StdlibOwner::Type(*standard),
+            TypeKind::SettingsView => StdlibOwner::Type(crate::stdlib::StdlibTypeId::SettingsView),
+            TypeKind::Array { .. } => StdlibOwner::TypeConstructor(StdlibTypeConstructorId::Array),
+            TypeKind::Option { .. } => {
+                StdlibOwner::TypeConstructor(StdlibTypeConstructorId::Option)
+            }
+            TypeKind::Result { .. } => {
+                StdlibOwner::TypeConstructor(StdlibTypeConstructorId::Result)
+            }
+            TypeKind::Set { .. } => StdlibOwner::TypeConstructor(StdlibTypeConstructorId::Set),
+            TypeKind::Range { kind, .. } => StdlibOwner::TypeConstructor(match kind {
+                crate::ast::RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
+                crate::ast::RangeKind::Inclusive => StdlibTypeConstructorId::InclusiveRange,
+            }),
+            TypeKind::Application { constructor, .. } => StdlibOwner::TypeConstructor(*constructor),
+            TypeKind::Error
+            | TypeKind::StateSnapshot
+            | TypeKind::Record(_)
+            | TypeKind::Enum(_)
+            | TypeKind::GenericParameter { .. }
+            | TypeKind::Async { .. }
+            | TypeKind::Callable { .. } => return None,
+        };
+        self.standard_library
+            .children_of(owner)
+            .filter_map(|symbol| match symbol {
+                crate::stdlib::StdlibSymbolId::Item(item) => Some(item),
+                _ => None,
+            })
+            .find(|item| {
+                let item = self.standard_library.item(*item);
+                item.name == requirement.name
+                    && item.implementation != Implementation::CapabilityRequirement
+            })
+            .map(CapabilityMethodImplementation::Standard)
     }
 
     pub fn structural_method_requirements(
@@ -654,6 +725,24 @@ impl CapabilityAnalysis {
                 };
                 *actual_length == length
                     && self.type_ref_matches(*element, *actual, receiver, semantics)
+            }
+            TypeRef::Callable { parameters, result } => {
+                let TypeKind::Callable {
+                    parameters: actual_parameters,
+                    result: actual_result,
+                    ..
+                } = semantics.types().kind(actual)
+                else {
+                    return false;
+                };
+                parameters.len() == actual_parameters.len()
+                    && parameters
+                        .iter()
+                        .zip(actual_parameters)
+                        .all(|(required, actual)| {
+                            self.type_ref_matches(*required, *actual, receiver, semantics)
+                        })
+                    && self.type_ref_matches(*result, *actual_result, receiver, semantics)
             }
             TypeRef::Application { .. } => false,
         }

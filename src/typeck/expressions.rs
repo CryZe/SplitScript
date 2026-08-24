@@ -420,6 +420,78 @@ impl Checker {
                         expected,
                         expr.span,
                     )?
+                } else if self.is_library_function()
+                    && let Some(declaration) = self
+                        .standard_library
+                        .named_type_constructor_by_name(name)
+                        .copied()
+                {
+                    let variables = declaration
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            let requirements = parameter.constraints.iter().fold(
+                                Requirements::none(),
+                                |requirements, constraint| {
+                                    requirements | Requirements::capability(*constraint)
+                                },
+                            );
+                            (parameter.name, self.fresh_inference(requirements, None))
+                        })
+                        .collect::<HashMap<_, _>>();
+                    let arguments = declaration
+                        .parameters
+                        .iter()
+                        .map(|parameter| variables[parameter.name])
+                        .collect::<Vec<_>>();
+                    let record_type = self.catalog_application_type(declaration.id, arguments);
+                    let Type::Application(application) = record_type else {
+                        unreachable!("named runtime record constructors use application layouts")
+                    };
+                    self.semantics.resolve_record_literal(
+                        expr.id,
+                        ResolvedRecordId::StandardConstructor(application),
+                    );
+                    let declared_fields = self
+                        .standard_library
+                        .fields_of_constructor(declaration.id)
+                        .copied()
+                        .collect::<Vec<_>>();
+                    let mut seen = HashSet::new();
+                    let mut resolved_fields = Vec::with_capacity(fields.len());
+                    for (name, value) in fields {
+                        if !seen.insert(name.clone()) {
+                            self.error(format!("duplicate record field `{name}`"), value.span);
+                            continue;
+                        }
+                        if let Some(field) =
+                            declared_fields.iter().find(|field| field.name == *name)
+                        {
+                            let field_type = self.catalog_type(field.ty, &variables);
+                            self.expr(value, Some(field_type));
+                            resolved_fields.push(ResolvedRecordFieldId::Standard(field.id));
+                        } else {
+                            self.expr(value, None);
+                            self.error(
+                                format!("record `{}` has no field `{name}`", declaration.name),
+                                value.span,
+                            );
+                        }
+                    }
+                    self.semantics
+                        .resolve_record_literal_fields(expr.id, resolved_fields);
+                    for field in &declared_fields {
+                        if !seen.contains(field.name) {
+                            self.error(
+                                format!(
+                                    "record `{}` initializer is missing field `{}`",
+                                    declaration.name, field.name
+                                ),
+                                expr.span,
+                            );
+                        }
+                    }
+                    self.expect_expression(expr.id, record_type, expected, expr.span)?
                 } else {
                     self.error(format!("unknown record type `{name}`"), expr.span);
                     return None;
@@ -1207,13 +1279,31 @@ impl Checker {
                     && self.binding(name).is_some()
                 {
                     let binding = self.binding_for_use(name, *name_span)?;
-                    let Type::Callable(callable) = self.shallow_type(binding.ty) else {
-                        let actual = self.type_name(binding.ty);
-                        self.error(
-                            format!("`{name}` is not callable; found `{actual}`"),
-                            *name_span,
-                        );
-                        return None;
+                    let callable = match self.shallow_type(binding.ty) {
+                        Type::Callable(callable) => callable,
+                        Type::Variable(_) => {
+                            // Calling an otherwise unconstrained parameter is itself
+                            // enough information to infer a callable type. The
+                            // parameter and result variables become part of the
+                            // surrounding function's generalized signature.
+                            let parameters = (0..args.len())
+                                .map(|_| self.fresh_inference(Requirements::none(), None))
+                                .collect::<Vec<_>>();
+                            let result = expected.unwrap_or_else(|| {
+                                self.fresh_inference(Requirements::none(), None)
+                            });
+                            let callable = self.inference.callable_type(parameters, result);
+                            self.unify(binding.ty, Type::Callable(callable), *name_span)?;
+                            callable
+                        }
+                        _ => {
+                            let actual = self.type_name(binding.ty);
+                            self.error(
+                                format!("`{name}` is not callable; found `{actual}`"),
+                                *name_span,
+                            );
+                            return None;
+                        }
                     };
                     self.semantics.resolve_dynamic_call(
                         expr.id,

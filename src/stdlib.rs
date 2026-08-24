@@ -89,6 +89,15 @@ impl TypeRef {
                 "[{}; {length}]",
                 element.render_with(library, substitutions)
             ),
+            Self::Callable { parameters, result } => format!(
+                "({}) -> {}",
+                parameters
+                    .iter()
+                    .map(|parameter| parameter.render_with(library, substitutions))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                result.render_with(library, substitutions),
+            ),
         }
     }
 }
@@ -1503,6 +1512,15 @@ fn validate_catalog_type_ref(
         }
         TypeRef::FixedArray { element, .. } => {
             validate_catalog_type_ref(*element, parameters, item, errors);
+        }
+        TypeRef::Callable {
+            parameters: callable_parameters,
+            result,
+        } => {
+            for parameter in callable_parameters {
+                validate_catalog_type_ref(*parameter, parameters, item, errors);
+            }
+            validate_catalog_type_ref(*result, parameters, item, errors);
         }
     }
 }

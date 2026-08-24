@@ -106,11 +106,28 @@ pub fn walk_statement(
             visitor.visit_expression_id(*condition, program);
             visitor.visit_block(body, program);
         }
-        Statement::For { iterable, body, .. } => {
+        Statement::For {
+            iterable,
+            iterator_step,
+            body,
+            ..
+        } => {
             visitor.visit_expression_id(*iterable, program);
+            if let Some(iterator_step) = iterator_step {
+                visitor.visit_expression_id(*iterator_step, program);
+            }
             visitor.visit_block(body, program);
         }
-        Statement::ForInit { iterable, .. } => visitor.visit_expression_id(*iterable, program),
+        Statement::ForInit {
+            iterable,
+            iterator_step,
+            ..
+        } => {
+            visitor.visit_expression_id(*iterable, program);
+            if let Some(iterator_step) = iterator_step {
+                visitor.visit_expression_id(*iterator_step, program);
+            }
+        }
     }
 }
 
@@ -141,8 +158,14 @@ pub fn walk_terminator(
             visitor.visit_block(body, program);
         }
         Terminator::AsyncFor {
-            body, continuation, ..
+            iterator_step,
+            body,
+            continuation,
+            ..
         } => {
+            if let Some(iterator_step) = iterator_step {
+                visitor.visit_expression_id(*iterator_step, program);
+            }
             visitor.visit_block(body, program);
             visitor.visit_block(continuation, program);
         }

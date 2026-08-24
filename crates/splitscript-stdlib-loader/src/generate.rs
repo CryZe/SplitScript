@@ -428,11 +428,16 @@ impl<'a> CatalogGenerator<'a> {
             };
             let id = format!("{id_prefix}{}", ident(&function.name));
             let intrinsic = optional_attribute_name(&function.attributes, "intrinsic");
-            let mut type_parameters = if function.type_parameters.is_empty() {
-                inherited.unwrap_or_default().to_vec()
+            // Instance members can refer to their owner's parameters in both
+            // their signature and body. Static members are constructors or
+            // factories with no receiver carrying those arguments, so their
+            // generic scope is deliberately independent from the owner.
+            let mut type_parameters = if function.is_static {
+                Vec::new()
             } else {
-                function.type_parameters.clone()
+                inherited.unwrap_or_default().to_vec()
             };
+            type_parameters.extend(function.type_parameters.clone());
             for constrained in &function.where_constraints {
                 let parameter = type_parameters
                     .iter_mut()
@@ -654,7 +659,9 @@ impl<'a> CatalogGenerator<'a> {
         owner: &CallableOwnerDeclaration,
     ) -> String {
         let values = parameters.iter().map(|parameter| {
-            let constraints = if self.library.declarations.iter().any(|declaration| matches!(declaration, Declaration::Capability(candidate) if candidate.name == owner.name)) {
+            let constraints = if self.library.declarations.iter().any(|declaration| matches!(declaration, Declaration::Capability(candidate) if candidate.name == owner.name))
+                && owner.type_parameters.iter().any(|owner_parameter| owner_parameter.name == parameter.name)
+            {
                 vec![owner.name.clone()]
             } else if !parameter.constraints.is_empty() {
                 parameter.constraints.clone()
@@ -782,6 +789,18 @@ impl<'a> CatalogGenerator<'a> {
             Type::FixedArray { element, length } => format!(
                 "TypeRef::FixedArray {{ element: &{}, length: {length} }}",
                 self.type_ref(element, parameters, associated_types)
+            ),
+            Type::Callable {
+                parameters: callable_parameters,
+                result,
+            } => format!(
+                "TypeRef::Callable {{ parameters: &[{}], result: &{} }}",
+                callable_parameters
+                    .iter()
+                    .map(|parameter| self.type_ref(parameter, parameters, associated_types))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                self.type_ref(result, parameters, associated_types),
             ),
             Type::Application {
                 constructor,

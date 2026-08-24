@@ -53,7 +53,8 @@ mod update;
 use self::array_functions::ArrayFunctions;
 use self::async_frame::AsyncFrameLayouts;
 use self::async_state::{
-    compile_async_attach, compile_async_function_poll, compile_intrinsic_future_poll,
+    compile_async_attach, compile_async_closure_poll, compile_async_function_poll,
+    compile_intrinsic_future_poll,
 };
 use self::backend_type::Type;
 use self::context::{AttachContext, EmissionContext};
@@ -66,8 +67,9 @@ use self::global_plan::SettingStorage;
 use self::module_start::compile_start;
 use self::runtime_helper_registry::RuntimeHelperPlan;
 use self::script_functions::{
-    LocalPlanOptions, compile_action, compile_async_function_init, compile_read,
-    compile_state_transform, compile_user_function, plan_wasm_locals,
+    LocalPlanOptions, compile_action, compile_async_closure_init, compile_async_function_init,
+    compile_closure, compile_read, compile_state_transform, compile_user_function,
+    plan_wasm_locals,
 };
 use self::set_functions::SetFunctions;
 use self::update::{ProviderAttach, StatePollFunctions, compile_update};
@@ -236,11 +238,14 @@ impl<'a> BackendProgram<'a> {
         };
         specialization::materialize(
             &wasm_ir,
+            &checked.compilation_syntax,
+            &checked.capabilities,
             &mut semantics,
             &mut constructed_types.arrays,
             &mut constructed_types.options,
             &mut constructed_types.results,
             &mut constructed_types.asyncs,
+            &mut constructed_types.callables,
             &mut constructed_types.ranges,
             &mut constructed_types.sets,
             &mut constructed_types.applications,
@@ -368,6 +373,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     } = gc_types::encode(gc_types::Inputs {
         standard_library: &standard_library,
         program,
+        wasm_ir,
         semantics,
         async_layout,
         async_frames: &async_frames,
@@ -410,6 +416,8 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         array_functions,
         sets: set_functions,
         users: user_functions,
+        closures: closure_functions,
+        closure_polls,
         intrinsic_futures,
         displays: display_functions,
         reads: read_functions,
@@ -450,6 +458,8 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     );
     let lowering = EmissionContext {
         standard_library: &standard_library,
+        reachability: &reachability,
+        capabilities,
         abi: &abi,
         state,
         globals: &global_indices,
@@ -458,6 +468,8 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         runtime_globals,
         runtime_helpers: &runtime_helpers,
         functions: &user_functions,
+        closures: &closure_functions,
+        closure_polls: &closure_polls,
         intrinsic_futures: &intrinsic_futures,
         display_functions: &display_functions,
         equality_functions: &equality_functions,
@@ -663,6 +675,33 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         &update_context,
     );
     codes.push(&body);
+    for closure in wasm_ir
+        .closures()
+        .filter(|closure| closure_polls.contains_key(&closure.expression))
+    {
+        let layout = async_frames
+            .closure(closure.expression)
+            .expect("async closure poll functions have frame layouts");
+        let body = compile_async_closure_poll(
+            closure,
+            closure_polls[&closure.expression],
+            layout,
+            &runtime,
+        );
+        codes.push(&body);
+    }
+    for closure in wasm_ir
+        .closures()
+        .filter(|closure| closure_functions.contains_key(&closure.expression))
+    {
+        if let Some(layout) = async_frames.closure(closure.expression) {
+            let body = compile_async_closure_init(closure, layout, &lowering);
+            codes.push(&body);
+        } else {
+            let body = compile_closure(closure, closure_functions[&closure.expression], &lowering);
+            codes.push(&body);
+        }
+    }
 
     let debug_artifacts = debug_recorder.as_ref().map(|recorder| {
         debug_artifacts::DebugArtifactPlan::new(debug_artifacts::DebugArtifactInputs {
@@ -683,6 +722,11 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             imports,
             functions,
             globals,
+            referenced_functions: {
+                let mut functions = closure_functions.values().copied().collect::<Vec<_>>();
+                functions.sort_unstable();
+                functions
+            },
             codes: codes.finish(),
         },
         &static_data,
@@ -698,6 +742,7 @@ fn resolved_intrinsic(target: &wasm_ir::CallTarget) -> Option<IntrinsicId> {
         wasm_ir::CallTarget::UserFunction { .. }
         | wasm_ir::CallTarget::UserMethod { .. }
         | wasm_ir::CallTarget::LibraryOverload { .. }
+        | wasm_ir::CallTarget::CapabilityRequirement { .. }
         | wasm_ir::CallTarget::ResultError { .. }
         | wasm_ir::CallTarget::OptionSome { .. }
         | wasm_ir::CallTarget::IteratorItem { .. }

@@ -64,7 +64,12 @@ pub(super) fn compile_async_attach(
         .then_some(runtime.lowering.runtime_globals.selected_layout)
         .flatten();
     compile_async_body(
-        wasm_body,
+        &wasm_body.entry,
+        &wasm_body.locals,
+        wasm_body.async_state_count,
+        wasm_body
+            .cancellation_region
+            .expect("onAttach has a process-lifetime cancellation region"),
         layout,
         runtime,
         frame,
@@ -91,11 +96,44 @@ pub(super) fn compile_async_function_poll(
         source: AsyncFrameSource::Local(0),
     };
     compile_async_body(
-        wasm_body,
+        &wasm_body.entry,
+        &wasm_body.locals,
+        wasm_body.async_state_count,
+        wasm_body
+            .cancellation_region
+            .expect("suspending functions have a cancellation region"),
         layout,
         runtime,
         frame,
         Some(instance),
+        BareReturn::AsyncFuture {
+            frame,
+            completion: layout.completion,
+        },
+        None,
+        function_index,
+    )
+}
+
+pub(super) fn compile_async_closure_poll(
+    closure: &wasm_ir::ClosureBody,
+    function_index: u32,
+    layout: &AsyncFrameLayout,
+    runtime: &AttachContext<'_>,
+) -> Function {
+    let frame = AsyncFrameRef {
+        struct_type: runtime.lowering.gc.closure_frame_index(closure.expression),
+        source: AsyncFrameSource::Local(0),
+    };
+    compile_async_body(
+        &closure.entry,
+        &closure.locals,
+        closure.async_state_count,
+        wasm_ir::CancellationRegion::ProcessLifetime,
+        layout,
+        runtime,
+        frame,
+        None,
         BareReturn::AsyncFuture {
             frame,
             completion: layout.completion,
@@ -119,6 +157,7 @@ pub(super) fn compile_intrinsic_future_poll(
         instance.expression,
         runtime.lowering.wasm_ir,
         runtime.lowering.semantics,
+        runtime.lowering.capabilities,
     );
     let mut matches = MatchLayout::default();
     let mut local_types = Vec::new();
@@ -131,19 +170,19 @@ pub(super) fn compile_intrinsic_future_poll(
         LocalPlanOptions {
             parameter_count: 1,
             semantics: runtime.lowering.semantics,
+            wasm_ir: runtime.lowering.wasm_ir,
+            gc: runtime.lowering.gc,
+            reachability: runtime.lowering.reachability,
             instance: instance.owner.as_ref(),
             include_values: false,
         },
     );
-    let mut function = Function::new(
-        local_types
-            .into_iter()
-            .map(|ty| (1, runtime.lowering.gc.val_type(ty))),
-    );
+    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
     let empty_values = HashMap::new();
     let empty_temporaries = HashMap::new();
     let context = ExprContext {
         standard_library: runtime.lowering.standard_library,
+        reachability: runtime.lowering.reachability,
         abi: runtime.abi,
         state: runtime.lowering.state,
         locals: LocalStorage::Hybrid {
@@ -159,6 +198,9 @@ pub(super) fn compile_intrinsic_future_poll(
         runtime_globals: runtime.lowering.runtime_globals,
         runtime_helpers: runtime.lowering.runtime_helpers,
         functions: runtime.lowering.functions,
+        closures: runtime.lowering.closures,
+        closure_polls: runtime.lowering.closure_polls,
+        closure_environment: None,
         intrinsic_futures: runtime.lowering.intrinsic_futures,
         display_functions: runtime.lowering.display_functions,
         equality_functions: runtime.lowering.equality_functions,
@@ -242,7 +284,10 @@ pub(super) fn compile_intrinsic_future_poll(
 
 #[allow(clippy::too_many_arguments)]
 fn compile_async_body(
-    wasm_body: &wasm_ir::Body,
+    entry: &wasm_ir::Block,
+    locals: &[wasm_ir::Local],
+    async_state_count: u32,
+    cancellation_region: wasm_ir::CancellationRegion,
     layout: &AsyncFrameLayout,
     runtime: &AttachContext<'_>,
     frame: AsyncFrameRef,
@@ -251,31 +296,28 @@ fn compile_async_body(
     result_global: Option<u32>,
     function_index: u32,
 ) -> Function {
-    let cancellation_region = wasm_body
-        .cancellation_region
-        .expect("onAttach is owned by the process-lifetime cancellation region");
     let mut matches = MatchLayout::default();
     let mut local_types = Vec::new();
     let mut planned_locals = HashMap::new();
     plan_wasm_locals(
-        &wasm_body.locals,
+        locals,
         &mut planned_locals,
         &mut matches,
         &mut local_types,
         LocalPlanOptions {
             parameter_count: 1,
             semantics: runtime.lowering.semantics,
+            wasm_ir: runtime.lowering.wasm_ir,
+            gc: runtime.lowering.gc,
+            reachability: runtime.lowering.reachability,
             instance: function_instance,
             include_values: true,
         },
     );
-    let mut function = Function::new(
-        local_types
-            .into_iter()
-            .map(|ty| (1, runtime.lowering.gc.val_type(ty))),
-    );
+    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
     let context = ExprContext {
         standard_library: runtime.lowering.standard_library,
+        reachability: runtime.lowering.reachability,
         abi: runtime.abi,
         state: runtime.lowering.state,
         locals: LocalStorage::Hybrid {
@@ -291,6 +333,9 @@ fn compile_async_body(
         runtime_globals: runtime.lowering.runtime_globals,
         runtime_helpers: runtime.lowering.runtime_helpers,
         functions: runtime.lowering.functions,
+        closures: runtime.lowering.closures,
+        closure_polls: runtime.lowering.closure_polls,
+        closure_environment: None,
         intrinsic_futures: runtime.lowering.intrinsic_futures,
         display_functions: runtime.lowering.display_functions,
         equality_functions: runtime.lowering.equality_functions,
@@ -315,15 +360,13 @@ fn compile_async_body(
         materialize_none: true,
     };
 
-    let mut states = (0..wasm_body.async_state_count)
-        .map(|_| None)
-        .collect::<Vec<_>>();
+    let mut states = (0..async_state_count).map(|_| None).collect::<Vec<_>>();
     states[wasm_ir::AsyncStateId::ENTRY.index() as usize] = Some(AsyncState::Block {
-        block: &wasm_body.entry,
+        block: entry,
         loop_targets: None,
         resume_source: None,
     });
-    collect_async_states(&wasm_body.entry, &mut states, None);
+    collect_async_states(entry, &mut states, None);
     debug_assert!(states.iter().all(Option::is_some));
 
     function.instruction(&Instruction::Loop(BlockType::Empty));
@@ -372,6 +415,7 @@ fn compile_async_body(
                 iterable_value,
                 index_value,
                 version_value,
+                iterator_step,
                 body,
                 header_state,
                 exit_state,
@@ -381,6 +425,7 @@ fn compile_async_body(
                     iterable_value,
                     index_value,
                     version_value,
+                    iterator_step,
                     &context,
                 );
                 function.instruction(&Instruction::If(BlockType::Empty));
@@ -2077,13 +2122,30 @@ fn compile_source_future_poll(
             semantic_type(result, context.semantics) == child_type
         })
         .collect::<Vec<_>>();
+    let closure_candidates = context
+        .async_frames
+        .closures()
+        .filter(|(expression, _)| {
+            let ty = context
+                .wasm_ir
+                .expression(*expression)
+                .expect("reachable closure expressions belong to Wasm IR")
+                .ty;
+            let TypeKind::Callable { result, .. } = context.semantics.types().kind(ty) else {
+                unreachable!("checked closure expressions have callable types")
+            };
+            semantic_type(*result, context.semantics) == child_type
+        })
+        .collect::<Vec<_>>();
     let intrinsic_candidates = context
         .async_frames
         .intrinsics()
         .filter(|(_, layout)| layout.future == child_type)
         .collect::<Vec<_>>();
     assert!(
-        !source_candidates.is_empty() || !intrinsic_candidates.is_empty(),
+        !source_candidates.is_empty()
+            || !closure_candidates.is_empty()
+            || !intrinsic_candidates.is_empty(),
         "reachable future values have at least one concrete producer"
     );
     function.instruction(&Instruction::Block(BlockType::Empty));
@@ -2112,6 +2174,54 @@ fn compile_source_future_poll(
                     .poll
                     .expect("async source functions have poll entries"),
             ))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End);
+
+        if let Some((destination_field, destination_type)) = parent_layout.field(destination) {
+            parent.emit(function);
+            if let Some((completion_field, completion_type)) = child_layout.completion {
+                debug_assert_eq!(destination_type, completion_type);
+                emit_child_frame(function, parent, child_field, child_frame);
+                emit_typed_struct_get(function, child_frame, completion_field, completion_type);
+            } else {
+                debug_assert_eq!(destination_type, Type::None);
+                emit_default(function, Type::None, context.gc);
+            }
+            function.instruction(&Instruction::StructSet {
+                struct_type_index: parent.struct_type,
+                field_index: destination_field,
+            });
+        }
+
+        clear_child_future(function, parent, child_field, child_future, context);
+        function
+            .instruction(&Instruction::Br(1))
+            .instruction(&Instruction::End);
+    }
+    for (child, child_layout) in closure_candidates {
+        let child_frame = context.gc.closure_frame_index(child);
+        parent.emit(function);
+        function
+            .instruction(&Instruction::StructGet {
+                struct_type_index: parent.struct_type,
+                field_index: child_field,
+            })
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::StructGet {
+                struct_type_index: context.gc.index(Type::Async(child_future)),
+                field_index: 1,
+            })
+            .instruction(&Instruction::I32Const(
+                context.gc.closure_frame_tag(child) as i32
+            ))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::If(BlockType::Empty));
+        emit_child_frame(function, parent, child_field, child_frame);
+        function
+            .instruction(&Instruction::Call(context.closure_polls[&child]))
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::I32Const(0))
@@ -2377,6 +2487,7 @@ enum AsyncState<'a> {
         iterable_value: ValueId,
         index_value: ValueId,
         version_value: ValueId,
+        iterator_step: Option<ExprId>,
         body: &'a wasm_ir::Block,
         header_state: wasm_ir::AsyncStateId,
         exit_state: wasm_ir::AsyncStateId,
@@ -2533,6 +2644,7 @@ fn collect_async_states<'a>(
             iterable_value,
             index_value,
             version_value,
+            iterator_step,
             body,
             continuation,
             header_state,
@@ -2548,6 +2660,7 @@ fn collect_async_states<'a>(
                 iterable_value: *iterable_value,
                 index_value: *index_value,
                 version_value: *version_value,
+                iterator_step: *iterator_step,
                 body,
                 header_state: *header_state,
                 exit_state: *exit_state,
@@ -2605,11 +2718,18 @@ fn compile_async_flow(
             }
             wasm_ir::Statement::Store {
                 target,
+                declaration,
                 operation,
                 value,
-                ..
             } => {
-                compile_assignment(function, *target, operation.as_ref(), *value, context);
+                compile_assignment(
+                    function,
+                    *target,
+                    *declaration,
+                    operation.as_ref(),
+                    *value,
+                    context,
+                );
             }
             wasm_ir::Statement::StateStore {
                 target,
@@ -2791,6 +2911,7 @@ fn compile_async_flow(
                 index_value,
                 version_value,
                 iterable,
+                iterator_step,
                 body,
             } => {
                 compile_for_init(
@@ -2809,6 +2930,7 @@ fn compile_async_flow(
                     *iterable_value,
                     *index_value,
                     *version_value,
+                    *iterator_step,
                     context,
                 );
                 function

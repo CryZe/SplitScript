@@ -79,6 +79,82 @@ fn iterator_exhaustion_is_distinct_from_an_optional_item() {
 }
 
 #[test]
+fn lazy_iterator_adapters_transform_and_filter_remaining_items() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            whileAttached {
+                let factor = 3u32
+                let iterator = [1u32, 2, 3, 4]
+                    .iterator()
+                    .map(value => value * factor)
+                    .filter(value => value > 6)
+                let first = iterator.next()
+                let second = iterator.next()
+                let exhausted = iterator.next()
+                print(match first { Item(value) => value, End => 0 })
+                print(match second { Item(value) => value, End => 0 })
+                print(match exhausted { Item(_) => 0, End => 1 })
+            }
+        "#,
+    )
+    .expect("map and filter should compose as lazy iterator cursors");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("lazy iterator adapters should produce valid Wasm GC");
+}
+
+#[test]
+fn for_consumes_existing_iterator_cursors_and_lazy_adapters() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            whileAttached {
+                let cursor = [1u32, 2, 3, 4].iterator()
+                let first = cursor.next()
+                for value in cursor.map(value => value * 2).filter(value => value > 4) {
+                    print(value)
+                }
+                let raw = [5u32, 6].iterator()
+                for value in raw {
+                    print(value)
+                }
+                print(match first { Item(value) => value, End => 0 })
+            }
+        "#,
+    )
+    .expect("for should consume an existing iterator through its next protocol");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("iterator-consuming for loops should produce valid Wasm GC");
+}
+
+#[test]
+fn iterator_consuming_for_survives_async_loop_bodies() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            onAttach {
+                let cursor = [1u32, 2, 3]
+                    .iterator()
+                    .filter(value => value > 1)
+                for value in cursor {
+                    await nextTick()
+                    print(value)
+                }
+            }
+        "#,
+    )
+    .expect("iterator cursors should remain live across suspension in a for body");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("async iterator-consuming for loops should produce valid Wasm GC");
+}
+
+#[test]
 fn discarded_iterator_values_are_must_use() {
     let source = r#"
         state "game.exe" {}

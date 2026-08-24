@@ -428,6 +428,33 @@ onAttach {
     print(module.address)
 }"#;
 
+const CLOSURE_SOURCE: &str = r#"state "game.exe" {}
+
+fn apply(value: u32, transform: (u32) -> u32) -> u32 {
+    return transform(value)
+}
+
+whileAttached {
+    let offset = 2u32
+    let addOffset = value => value + offset
+    let counter = 0u32
+    let increment = () => {
+        counter += 1
+        return counter
+    }
+    print(addOffset(3))
+    print(apply(4, value => value * 2))
+    print(increment())
+}
+
+onAttach {
+    let afterTick = (value: u32) => {
+        await nextTick()
+        return value + 1
+    }
+    print(await afterTick(4))
+}"#;
+
 const TYPES_AND_LITERALS_SOURCE: &str = r#"state "game.exe" {}
 
 fn maybe(value) -> i32? {
@@ -512,6 +539,29 @@ focused_example!(
     "Declare a helper",
     "fn isBoss(level) {\n    return level == 7\n}",
     DECLARATIONS_SOURCE
+);
+const CLOSURE_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Pass behavior to a function",
+        "let doubled = apply(4, value => value * 2)",
+        CLOSURE_SOURCE,
+    ),
+    Example::checked(
+        "Capture and update a local",
+        "let counter = 0u32\nlet increment = () => {\n    counter += 1\n    return counter\n}",
+        CLOSURE_SOURCE,
+    ),
+    Example::checked(
+        "Suspend inside a closure",
+        "let afterTick = (value: u32) => {\n    await nextTick()\n    return value + 1\n}\nprint(await afterTick(4))",
+        CLOSURE_SOURCE,
+    ),
+];
+focused_example!(
+    CALLABLE_TYPE_EXAMPLE,
+    "Accept a callable value",
+    "fn apply(value: u32, transform: (u32) -> u32) -> u32 {\n    return transform(value)\n}",
+    CLOSURE_SOURCE
 );
 focused_example!(
     RECORD_EXAMPLE,
@@ -1036,6 +1086,24 @@ define_language_catalog! {
         "Declares a function or method.",
         "Parameter and result annotations are optional when constraints from the body and call sites determine them.",
         FUNCTION_EXAMPLE
+    ),
+    language_item!(
+        Closure,
+        "closure",
+        LanguageItemKind::Syntax,
+        "value => expression | (left, right) => { ... }",
+        "Creates a callable value with lexical captures.",
+        "Parameter and result types are inferred bidirectionally from the body, invocation sites, and any expected [`callable type`]. A single parameter may omit parentheses; zero or multiple parameters use parentheses. The body is any expression, including a [`value block`], and may use [`await`] or [`retry`] to infer an [`async`] result. Calling such a closure creates a typed future; creating the closure itself does not execute or poll its body. Captured immutable values are retained in the closure environment. A mutable local is captured by reference through one shared cell, so assignments in the closure and its declaring scope observe each other even after the closure is returned or stored across [`await`]. [`return`] exits the closure itself; [`break`] and [`continue`] cannot escape into an outer loop.",
+        CLOSURE_EXAMPLES
+    ),
+    language_item!(
+        CallableType,
+        "callable type",
+        LanguageItemKind::Syntax,
+        "(Parameter, ...) -> Result",
+        "Describes a first-class callable value.",
+        "The parameter list may be empty and the result may be any ordinary type, including [`async`] `T`. A value of this type is invoked with ordinary call syntax. [`closure`] expressions infer this type from either direction; named function values will use the same abstraction once supported. Callable values are intentionally not [`Equatable`].",
+        CALLABLE_TYPE_EXAMPLE
     ),
     language_item!(
         Record,

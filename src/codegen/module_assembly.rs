@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use wasm_encoder::{
-    CodeSection, CustomSection, ExportKind, ExportSection, FunctionSection, GlobalSection,
-    ImportSection, MemorySection, MemoryType, Module, TypeSection,
+    CodeSection, CustomSection, ElementSection, Elements, ExportKind, ExportSection,
+    FunctionSection, GlobalSection, ImportSection, MemorySection, MemoryType, Module, TypeSection,
 };
 
 use super::{data_plan::StaticData, debug_artifacts::DebugArtifactPlan};
@@ -12,6 +12,7 @@ pub(super) struct Sections {
     pub imports: ImportSection,
     pub functions: FunctionSection,
     pub globals: GlobalSection,
+    pub referenced_functions: Vec<u32>,
     pub codes: CodeSection,
 }
 
@@ -27,6 +28,7 @@ pub(super) fn finish(
         imports,
         functions,
         globals,
+        referenced_functions,
         codes,
     } = sections;
     let mut memories = MemorySection::new();
@@ -42,6 +44,10 @@ pub(super) fn finish(
     exports.export("_start", ExportKind::Func, start_function);
     exports.export("update", ExportKind::Func, update_function);
     let data = data.encode();
+    let mut elements = ElementSection::new();
+    if !referenced_functions.is_empty() {
+        elements.declared(Elements::Functions(Cow::Owned(referenced_functions)));
+    }
 
     let mut module = Module::new();
     module.section(&types);
@@ -50,6 +56,9 @@ pub(super) fn finish(
     module.section(&memories);
     module.section(&globals);
     module.section(&exports);
+    if !elements.is_empty() {
+        module.section(&elements);
+    }
     module.section(&codes);
     module.section(&data);
     if let Some(debug) = debug {

@@ -92,6 +92,7 @@ pub(super) enum BareReturn {
 #[derive(Clone, Copy)]
 pub(super) struct ExprContext<'a> {
     pub standard_library: &'a StandardLibrary,
+    pub reachability: &'a super::reachability::Reachability,
     pub abi: &'a Abi,
     pub state: &'a crate::ast::StateDecl,
     pub locals: LocalStorage<'a>,
@@ -101,6 +102,9 @@ pub(super) struct ExprContext<'a> {
     pub runtime_globals: RuntimeGlobals,
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
+    pub closures: &'a HashMap<ExprId, u32>,
+    pub closure_polls: &'a HashMap<ExprId, u32>,
+    pub closure_environment: Option<ClosureEnvironment<'a>>,
     pub intrinsic_futures: &'a HashMap<IntrinsicFutureInstance, u32>,
     pub display_functions: &'a DisplayFunctions,
     pub equality_functions: &'a EqualityFunctions,
@@ -126,6 +130,28 @@ pub(super) struct ExprContext<'a> {
     /// Whether semantic unit values need a physical operand-stack value.
     /// Discarded expressions and unit-returning ABIs erase `None` entirely.
     pub materialize_none: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ClosureEnvironment<'a> {
+    pub local: u32,
+    pub struct_type: u32,
+    pub captures: &'a HashMap<ValueId, (u32, Type, bool)>,
+}
+
+impl ClosureEnvironment<'_> {
+    fn emit(self, function: &mut Function) {
+        function
+            .instruction(&Instruction::LocalGet(self.local))
+            .instruction(&Instruction::RefCastNonNull(HeapType::Concrete(
+                self.struct_type,
+            )));
+    }
+}
+
+fn emit_capture_cell_get(function: &mut Function, ty: Type, gc: &GcLayout) {
+    function.instruction(&Instruction::RefAsNonNull);
+    emit_typed_struct_get(function, gc.capture_cell_index(ty), 0, ty);
 }
 
 #[derive(Clone, Copy)]
@@ -309,11 +335,18 @@ fn compile_block_with_loop(
             }
             wasm_ir::Statement::Store {
                 target,
+                declaration,
                 operation,
                 value,
-                ..
             } => {
-                compile_assignment(function, *target, operation.as_ref(), *value, context);
+                compile_assignment(
+                    function,
+                    *target,
+                    *declaration,
+                    operation.as_ref(),
+                    *value,
+                    context,
+                );
             }
             wasm_ir::Statement::StateStore {
                 target,
@@ -426,6 +459,7 @@ fn compile_block_with_loop(
                 index_value,
                 version_value,
                 iterable,
+                iterator_step,
                 body,
             } => {
                 compile_for_init(
@@ -444,6 +478,7 @@ fn compile_block_with_loop(
                     *iterable_value,
                     *index_value,
                     *version_value,
+                    *iterator_step,
                     context,
                 );
                 function
@@ -478,6 +513,7 @@ fn compile_block_with_loop(
                 index_value,
                 version_value,
                 iterable,
+                iterator_step: _,
                 ..
             } => compile_for_init(
                 function,
@@ -918,10 +954,64 @@ fn compile_match_statement(
 pub(super) fn compile_assignment(
     function: &mut Function,
     target: ValueId,
+    declaration: bool,
     operation: Option<&wasm_ir::AssignmentOperation>,
     value: ExprId,
     context: &ExprContext<'_>,
 ) {
+    if let Some(environment) = context.closure_environment
+        && let Some((field, ty, mutable)) = environment.captures.get(&target).copied()
+    {
+        if !ty.has_runtime_value() {
+            compile_expr(function, value, &context.erasing_none());
+            return;
+        }
+        debug_assert!(mutable, "immutable captures cannot be assignment targets");
+        environment.emit(function);
+        function.instruction(&Instruction::StructGet {
+            struct_type_index: environment.struct_type,
+            field_index: field,
+        });
+        function.instruction(&Instruction::RefAsNonNull);
+        compile_assignment_value(function, operation, value, ty, context, |function| {
+            environment.emit(function);
+            function.instruction(&Instruction::StructGet {
+                struct_type_index: environment.struct_type,
+                field_index: field,
+            });
+            emit_capture_cell_get(function, ty, context.gc);
+        });
+        function.instruction(&Instruction::StructSet {
+            struct_type_index: context.gc.capture_cell_index(ty),
+            field_index: 0,
+        });
+        return;
+    }
+    if context.wasm_ir.is_mutably_captured(target) {
+        let ty = stored_value_type(target, context);
+        if !ty.has_runtime_value() {
+            compile_expr(function, value, &context.erasing_none());
+            return;
+        }
+        if declaration {
+            compile_raw_value_set(function, target, context, |function| {
+                compile_expr(function, value, context);
+                function.instruction(&Instruction::StructNew(context.gc.capture_cell_index(ty)));
+            });
+            return;
+        }
+        emit_raw_value_get(function, target, context);
+        function.instruction(&Instruction::RefAsNonNull);
+        compile_assignment_value(function, operation, value, ty, context, |function| {
+            emit_raw_value_get(function, target, context);
+            emit_capture_cell_get(function, ty, context.gc);
+        });
+        function.instruction(&Instruction::StructSet {
+            struct_type_index: context.gc.capture_cell_index(ty),
+            field_index: 0,
+        });
+        return;
+    }
     match context.locals {
         LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&target) => {
             let (field, ty) = frame_values[&target];
@@ -1309,61 +1399,101 @@ fn compile_resolved_path(
             }));
             storage.ty
         }
-        ResolvedValue::Variable(value) => match context.locals {
-            LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&value) => {
-                let (field, ty) = frame_values[&value];
-                if !ty.has_runtime_value() {
-                    if context.materialize_none && ty == Type::None {
-                        emit_default(function, Type::None, context.gc);
-                    }
-                } else {
-                    let frame = context.locals.frame();
-                    frame.emit(function);
-                    emit_typed_struct_get(function, frame.struct_type, field, ty);
-                }
-                ty
-            }
-            LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&value) => {
-                let (local, ty) = wasm_values[&value];
-                if !ty.has_runtime_value() {
-                    if context.materialize_none && ty == Type::None {
-                        emit_default(function, Type::None, context.gc);
-                    }
-                } else {
-                    function.instruction(&Instruction::LocalGet(local));
-                }
-                ty
-            }
-            LocalStorage::Wasm { values, .. } if values.contains_key(&value) => {
-                let (local, ty) = values[&value];
-                if !ty.has_runtime_value() {
-                    if context.materialize_none && ty == Type::None {
-                        emit_default(function, Type::None, context.gc);
-                    }
-                } else {
-                    function.instruction(&Instruction::LocalGet(local));
-                }
-                ty
-            }
-            _ => {
-                let ty = context.global_types[&value];
+        ResolvedValue::Variable(value) => {
+            if let Some(environment) = context.closure_environment
+                && let Some((field, ty, mutable)) = environment.captures.get(&value).copied()
+            {
                 if ty.has_runtime_value() {
-                    function.instruction(&Instruction::GlobalGet(context.globals[&value]));
-                    if context.wasm_ir.is_attachment_global(value)
-                        && matches!(context.gc.val_type(ty), ValType::Ref(reference) if !reference.nullable)
-                    {
-                        // Definite-initialization and layout analysis prove
-                        // this storage is populated in every source context
-                        // that can read it. Re-establish the non-null source
-                        // type after loading the nullable lifetime sentinel.
-                        function.instruction(&Instruction::RefAsNonNull);
+                    environment.emit(function);
+                    if mutable {
+                        function.instruction(&Instruction::StructGet {
+                            struct_type_index: environment.struct_type,
+                            field_index: field,
+                        });
+                        emit_capture_cell_get(function, ty, context.gc);
+                    } else {
+                        emit_typed_struct_get(function, environment.struct_type, field, ty);
                     }
                 } else if ty == Type::None && context.materialize_none {
                     emit_default(function, Type::None, context.gc);
                 }
                 ty
+            } else {
+                match context.locals {
+                    LocalStorage::Hybrid { frame_values, .. }
+                        if frame_values.contains_key(&value) =>
+                    {
+                        let (field, ty) = frame_values[&value];
+                        if !ty.has_runtime_value() {
+                            if context.materialize_none && ty == Type::None {
+                                emit_default(function, Type::None, context.gc);
+                            }
+                        } else {
+                            let frame = context.locals.frame();
+                            frame.emit(function);
+                            if context.wasm_ir.is_mutably_captured(value) {
+                                function.instruction(&Instruction::StructGet {
+                                    struct_type_index: frame.struct_type,
+                                    field_index: field,
+                                });
+                                emit_capture_cell_get(function, ty, context.gc);
+                            } else {
+                                emit_typed_struct_get(function, frame.struct_type, field, ty);
+                            }
+                        }
+                        ty
+                    }
+                    LocalStorage::Hybrid { wasm_values, .. }
+                        if wasm_values.contains_key(&value) =>
+                    {
+                        let (local, ty) = wasm_values[&value];
+                        if !ty.has_runtime_value() {
+                            if context.materialize_none && ty == Type::None {
+                                emit_default(function, Type::None, context.gc);
+                            }
+                        } else {
+                            function.instruction(&Instruction::LocalGet(local));
+                            if context.wasm_ir.is_mutably_captured(value) {
+                                emit_capture_cell_get(function, ty, context.gc);
+                            }
+                        }
+                        ty
+                    }
+                    LocalStorage::Wasm { values, .. } if values.contains_key(&value) => {
+                        let (local, ty) = values[&value];
+                        if !ty.has_runtime_value() {
+                            if context.materialize_none && ty == Type::None {
+                                emit_default(function, Type::None, context.gc);
+                            }
+                        } else {
+                            function.instruction(&Instruction::LocalGet(local));
+                            if context.wasm_ir.is_mutably_captured(value) {
+                                emit_capture_cell_get(function, ty, context.gc);
+                            }
+                        }
+                        ty
+                    }
+                    _ => {
+                        let ty = context.global_types[&value];
+                        if ty.has_runtime_value() {
+                            function.instruction(&Instruction::GlobalGet(context.globals[&value]));
+                            if context.wasm_ir.is_attachment_global(value)
+                                && matches!(context.gc.val_type(ty), ValType::Ref(reference) if !reference.nullable)
+                            {
+                                // Definite-initialization and layout analysis prove
+                                // this storage is populated in every source context
+                                // that can read it. Re-establish the non-null source
+                                // type after loading the nullable lifetime sentinel.
+                                function.instruction(&Instruction::RefAsNonNull);
+                            }
+                        } else if ty == Type::None && context.materialize_none {
+                            emit_default(function, Type::None, context.gc);
+                        }
+                        ty
+                    }
+                }
             }
-        },
+        }
     };
     emit_path_fields(function, members, value_type, context)
 }
@@ -1376,7 +1506,98 @@ pub(super) fn compile_value_get(
     compile_resolved_path(function, ResolvedValue::Variable(value), &[], context)
 }
 
+fn stored_value_type(value: ValueId, context: &ExprContext<'_>) -> Type {
+    if let Some(environment) = context.closure_environment
+        && let Some((_, ty, _)) = environment.captures.get(&value).copied()
+    {
+        return ty;
+    }
+    match context.locals {
+        LocalStorage::Hybrid {
+            frame_values,
+            wasm_values,
+            ..
+        } => frame_values
+            .get(&value)
+            .or_else(|| wasm_values.get(&value))
+            .map(|(_, ty)| *ty),
+        LocalStorage::Wasm { values, .. } => values.get(&value).map(|(_, ty)| *ty),
+    }
+    .or_else(|| context.global_types.get(&value).copied())
+    .unwrap_or_else(|| {
+        let source = context
+            .semantics
+            .value_type(value)
+            .expect("checked values have semantic types");
+        semantic_type(
+            context.function_instance.map_or(source, |instance| {
+                context.semantics.specialize_type(instance, source)
+            }),
+            context.semantics,
+        )
+    })
+}
+
+/// Loads the physical slot of a mutably captured value without dereferencing
+/// its cell. Closure construction uses this to share the existing cell.
+fn emit_raw_value_get(function: &mut Function, value: ValueId, context: &ExprContext<'_>) -> Type {
+    if let Some(environment) = context.closure_environment
+        && let Some((field, ty, mutable)) = environment.captures.get(&value).copied()
+    {
+        debug_assert!(mutable);
+        environment.emit(function);
+        function.instruction(&Instruction::StructGet {
+            struct_type_index: environment.struct_type,
+            field_index: field,
+        });
+        return ty;
+    }
+    match context.locals {
+        LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&value) => {
+            let (field, ty) = frame_values[&value];
+            context.locals.frame().emit(function);
+            function.instruction(&Instruction::StructGet {
+                struct_type_index: context.locals.frame().struct_type,
+                field_index: field,
+            });
+            ty
+        }
+        LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&value) => {
+            let (local, ty) = wasm_values[&value];
+            function.instruction(&Instruction::LocalGet(local));
+            ty
+        }
+        LocalStorage::Wasm { values, .. } if values.contains_key(&value) => {
+            let (local, ty) = values[&value];
+            function.instruction(&Instruction::LocalGet(local));
+            ty
+        }
+        _ => {
+            let ty = context.global_types[&value];
+            function.instruction(&Instruction::GlobalGet(context.globals[&value]));
+            ty
+        }
+    }
+}
+
 fn compile_value_set(
+    function: &mut Function,
+    value: ValueId,
+    context: &ExprContext<'_>,
+    emit_value: impl FnOnce(&mut Function),
+) {
+    if context.wasm_ir.is_mutably_captured(value) {
+        let ty = stored_value_type(value, context);
+        compile_raw_value_set(function, value, context, |function| {
+            emit_value(function);
+            function.instruction(&Instruction::StructNew(context.gc.capture_cell_index(ty)));
+        });
+    } else {
+        compile_raw_value_set(function, value, context, emit_value);
+    }
+}
+
+fn compile_raw_value_set(
     function: &mut Function,
     value: ValueId,
     context: &ExprContext<'_>,
@@ -1446,12 +1667,37 @@ enum ForCollection {
     DirectRange {
         bound: Type,
     },
+    /// A first-class cursor consumed by repeatedly calling `Iterator.next`.
+    Iterator {
+        step: crate::ast::TypeApplicationId,
+    },
 }
 
 fn for_collection_type(
     iterable_value: ValueId,
+    index_value: ValueId,
     context: &ExprContext<'_>,
 ) -> (ForCollection, Type) {
+    let index_ty = context
+        .semantics
+        .value_type(index_value)
+        .expect("checked for-loop cursor state has a type");
+    if let Type::Application(step) = context.ty(index_ty)
+        && let Some(item) = context
+            .semantics
+            .types()
+            .iter()
+            .find_map(|(_, kind)| match kind {
+                crate::types::TypeKind::Application {
+                    layout,
+                    constructor: StdlibTypeConstructorId::IteratorStep,
+                    arguments,
+                } if *layout == step => arguments.first().copied(),
+                _ => None,
+            })
+    {
+        return (ForCollection::Iterator { step }, context.ty(item));
+    }
     let ty = context
         .semantics
         .value_type(iterable_value)
@@ -1506,7 +1752,7 @@ pub(super) fn compile_for_init(
     iterable: ExprId,
     context: &ExprContext<'_>,
 ) {
-    let collection = for_collection_type(iterable_value, context).0;
+    let collection = for_collection_type(iterable_value, index_value, context).0;
     match collection {
         ForCollection::DirectRange { .. } => {
             let wasm_ir::ExpressionKind::Range { start, end, .. } = &context
@@ -1540,6 +1786,11 @@ pub(super) fn compile_for_init(
             });
             compile_value_set(function, index_value, context, |function| {
                 function.instruction(&Instruction::I32Const(0));
+            });
+        }
+        ForCollection::Iterator { .. } => {
+            compile_value_set(function, iterable_value, context, |function| {
+                compile_expr(function, iterable, context);
             });
         }
     }
@@ -1590,6 +1841,9 @@ pub(super) fn compile_for_init(
                     matches!(kind, RangeKind::Inclusive) as i32
                 ));
             }
+            ForCollection::Iterator { .. } => {
+                function.instruction(&Instruction::I32Const(0));
+            }
         },
     );
 }
@@ -1600,9 +1854,21 @@ pub(super) fn compile_for_has_next(
     iterable_value: ValueId,
     index_value: ValueId,
     version_value: ValueId,
+    iterator_step: Option<ExprId>,
     context: &ExprContext<'_>,
 ) {
-    let (collection, _) = for_collection_type(iterable_value, context);
+    let (collection, _) = for_collection_type(iterable_value, index_value, context);
+    if let ForCollection::Iterator { .. } = collection {
+        let iterator_step = iterator_step.expect("iterator loops have a generated next call");
+        compile_value_set(function, index_value, context, |function| {
+            compile_expr(function, iterator_step, context);
+        });
+        compile_value_get(function, index_value, context);
+        function
+            .instruction(&Instruction::RefIsNull)
+            .instruction(&Instruction::I32Eqz);
+        return;
+    }
     if matches!(
         collection,
         ForCollection::Range { .. } | ForCollection::DirectRange { .. }
@@ -1657,6 +1923,7 @@ pub(super) fn compile_for_has_next(
                 });
         }
         ForCollection::Range { .. } | ForCollection::DirectRange { .. } => unreachable!(),
+        ForCollection::Iterator { .. } => unreachable!(),
     }
     compile_value_get(function, version_value, context);
     function
@@ -1677,7 +1944,9 @@ pub(super) fn compile_for_has_next(
                 field_index: super::set_functions::LENGTH_FIELD,
             });
         }
-        ForCollection::Range { .. } | ForCollection::DirectRange { .. } => unreachable!(),
+        ForCollection::Range { .. }
+        | ForCollection::DirectRange { .. }
+        | ForCollection::Iterator { .. } => unreachable!(),
     }
     function.instruction(&Instruction::I32LtU);
 }
@@ -1692,7 +1961,20 @@ pub(super) fn compile_for_bind_and_advance(
     version_value: ValueId,
     context: &ExprContext<'_>,
 ) {
-    let (collection, element) = for_collection_type(iterable_value, context);
+    let (collection, element) = for_collection_type(iterable_value, index_value, context);
+    if let ForCollection::Iterator { step } = collection {
+        compile_value_set(function, binding, context, |function| {
+            compile_value_get(function, index_value, context);
+            function.instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(
+                function,
+                context.gc.index(Type::Application(step)),
+                0,
+                element,
+            );
+        });
+        return;
+    }
     if matches!(
         collection,
         ForCollection::Range { .. } | ForCollection::DirectRange { .. }
@@ -1761,7 +2043,9 @@ pub(super) fn compile_for_bind_and_advance(
                 function.instruction(&Instruction::RefAsNonNull);
                 backing
             }
-            ForCollection::Range { .. } | ForCollection::DirectRange { .. } => unreachable!(),
+            ForCollection::Range { .. }
+            | ForCollection::DirectRange { .. }
+            | ForCollection::Iterator { .. } => unreachable!(),
         };
         compile_value_get(function, index_value, context);
         let backing_type = match collection {
@@ -1771,7 +2055,9 @@ pub(super) fn compile_for_bind_and_advance(
                 context.semantics,
             )),
             ForCollection::Set { .. } => Type::ArrayStorage(array),
-            ForCollection::Range { .. } | ForCollection::DirectRange { .. } => unreachable!(),
+            ForCollection::Range { .. }
+            | ForCollection::DirectRange { .. }
+            | ForCollection::Iterator { .. } => unreachable!(),
         };
         emit_array_get(
             function,
@@ -1839,37 +2125,61 @@ fn emit_path_fields(
                         )
                     }
                     StdlibOwner::TypeConstructor(owner) => {
-                        let Type::Range(range) = current_type else {
-                            unreachable!("constructed fields require their declared receiver")
-                        };
                         let field_index = library
                             .fields_of_constructor(owner)
                             .position(|candidate| candidate.id == *field)
                             .expect("declared constructed field has a runtime slot")
                             as u32;
-                        let (field_type, kind) = context
-                            .semantics
-                            .types()
+                        let arguments = match current_type {
+                            Type::Range(range) => context
+                                .semantics
+                                .types()
+                                .iter()
+                                .find_map(|(_, kind)| match kind {
+                                    crate::types::TypeKind::Range {
+                                        layout,
+                                        bound,
+                                        kind,
+                                    } if *layout == range => {
+                                        let constructor = match kind {
+                                            crate::ast::RangeKind::Exclusive => crate::stdlib::StdlibTypeConstructorId::ExclusiveRange,
+                                            crate::ast::RangeKind::Inclusive => crate::stdlib::StdlibTypeConstructorId::InclusiveRange,
+                                        };
+                                        (constructor == owner).then_some(vec![*bound])
+                                    }
+                                    _ => None,
+                                }),
+                            Type::Application(application) => context
+                                .semantics
+                                .types()
+                                .iter()
+                                .find_map(|(_, kind)| match kind {
+                                    crate::types::TypeKind::Application {
+                                        layout,
+                                        constructor,
+                                        arguments,
+                                    } if *layout == application && *constructor == owner => {
+                                        Some(arguments.clone())
+                                    }
+                                    _ => None,
+                                }),
+                            _ => None,
+                        }
+                        .expect("constructed fields retain their concrete receiver arguments");
+                        let variables = library
+                            .type_constructor(owner)
+                            .parameters
                             .iter()
-                            .find_map(|(_, kind)| match kind {
-                                crate::types::TypeKind::Range {
-                                    layout,
-                                    bound,
-                                    kind,
-                                } if *layout == range => Some((context.ty(*bound), *kind)),
-                                _ => None,
-                            })
-                            .expect("checked range fields retain their bound type");
-                        debug_assert_eq!(
-                            owner,
-                            match kind {
-                                crate::ast::RangeKind::Exclusive => {
-                                    crate::stdlib::StdlibTypeConstructorId::ExclusiveRange
-                                }
-                                crate::ast::RangeKind::Inclusive => {
-                                    crate::stdlib::StdlibTypeConstructorId::InclusiveRange
-                                }
-                            }
+                            .zip(arguments)
+                            .map(|(parameter, argument)| (parameter.name, argument))
+                            .collect::<std::collections::HashMap<_, _>>();
+                        let field_type = semantic_type(
+                            super::gc_types::instantiated_catalog_type(
+                                declaration.ty,
+                                &variables,
+                                context.semantics,
+                            ),
+                            context.semantics,
                         );
                         (context.gc.index(current_type), field_index, field_type)
                     }
@@ -2165,6 +2475,36 @@ fn compile_expr_unconverted(
                     compile_expr(function, *value, context);
                 }
                 function.instruction(&Instruction::StructNew(context.gc.standard_index(*record)));
+            }
+            ResolvedRecordId::StandardConstructor(_application) => {
+                let Type::Application(concrete_application) = ty else {
+                    unreachable!("constructed standard records have application types")
+                };
+                let constructor = context
+                    .semantics
+                    .types()
+                    .iter()
+                    .find_map(|(_, kind)| match kind {
+                        crate::types::TypeKind::Application {
+                            layout,
+                            constructor,
+                            ..
+                        } if *layout == concrete_application => Some(*constructor),
+                        _ => None,
+                    })
+                    .expect("checked standard-library record constructors have layouts");
+                for declared_field in context.standard_library.fields_of_constructor(constructor) {
+                    let (_, value) = fields
+                        .iter()
+                        .find(|(field, _)| {
+                            *field == ResolvedRecordFieldId::Standard(declared_field.id)
+                        })
+                        .expect("checked constructed record literals initialize every field");
+                    compile_expr(function, *value, context);
+                }
+                function.instruction(&Instruction::StructNew(
+                    context.gc.index(Type::Application(concrete_application)),
+                ));
             }
         },
         wasm_ir::ExpressionKind::Enum {
@@ -2646,10 +2986,78 @@ fn compile_expr_unconverted(
                 function.instruction(&Instruction::End);
             }
         }
-        wasm_ir::ExpressionKind::Call { .. } => {}
-        wasm_ir::ExpressionKind::Invoke { .. } | wasm_ir::ExpressionKind::Closure { .. } => {
-            unreachable!("closure expressions are lowered by the closure code-generation pass")
+        wasm_ir::ExpressionKind::Invoke { callee, arguments } => {
+            let Type::Callable(callable) = (match callee {
+                crate::semantic::DynamicCallCallee::Expression(callee) => {
+                    context.expression_type(*callee)
+                }
+                crate::semantic::DynamicCallCallee::Value(value) => context.ty(context
+                    .semantics
+                    .value_type(*value)
+                    .expect("checked callable values have semantic types")),
+            }) else {
+                unreachable!("checked dynamic callees have callable types")
+            };
+            let closure_local = context.matches.intrinsic_temps[&expression][0];
+            match callee {
+                crate::semantic::DynamicCallCallee::Expression(callee) => {
+                    compile_expr(function, *callee, context)
+                }
+                crate::semantic::DynamicCallCallee::Value(value) => {
+                    compile_value_get(function, *value, context);
+                }
+            }
+            function.instruction(&Instruction::LocalSet(closure_local));
+            function
+                .instruction(&Instruction::LocalGet(closure_local))
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: context.gc.index(Type::Callable(callable)),
+                    field_index: 1,
+                });
+            for argument in arguments {
+                compile_expr(function, *argument, context);
+            }
+            function
+                .instruction(&Instruction::LocalGet(closure_local))
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: context.gc.index(Type::Callable(callable)),
+                    field_index: 0,
+                })
+                .instruction(&Instruction::CallRef(
+                    context.gc.callable_function_index(callable),
+                ));
         }
+        wasm_ir::ExpressionKind::Closure { closure, .. } => {
+            let Type::Callable(callable) = ty else {
+                unreachable!("checked closure expressions have callable types")
+            };
+            let closure_body = context
+                .wasm_ir
+                .closure(*closure)
+                .expect("closure expressions have lowered bodies");
+            function.instruction(&Instruction::RefFunc(context.closures[closure]));
+            if let Some(environment) = context.gc.closure_environment_index(*closure) {
+                for capture in &closure_body.captures {
+                    if capture.mutable {
+                        emit_raw_value_get(function, capture.value, context);
+                    } else {
+                        compile_value_get(function, capture.value, context);
+                    }
+                }
+                function.instruction(&Instruction::StructNew(environment));
+            } else {
+                function.instruction(&Instruction::RefNull(HeapType::Abstract {
+                    shared: false,
+                    ty: AbstractHeapType::Any,
+                }));
+            }
+            function.instruction(&Instruction::StructNew(
+                context.gc.index(Type::Callable(callable)),
+            ));
+        }
+        wasm_ir::ExpressionKind::Call { .. } => {}
     }
     let wasm_ir::ExpressionKind::Call {
         target,
@@ -2658,6 +3066,10 @@ fn compile_expr_unconverted(
     else {
         return;
     };
+    let target =
+        context
+            .reachability
+            .resolved_call_target(context.function_instance, expression, target);
     if matches!(ty, Type::Async(_)) && resolved_intrinsic(target).is_some() {
         let instance = IntrinsicFutureInstance {
             owner: context.function_instance.cloned(),
@@ -2747,6 +3159,9 @@ fn compile_expr_unconverted(
             }
             wasm_ir::CallTarget::Intrinsic { .. } => {
                 unreachable!("standard-library implementations have intrinsic IDs")
+            }
+            wasm_ir::CallTarget::CapabilityRequirement { .. } => {
+                unreachable!("reachable capability calls are statically dispatched")
             }
             wasm_ir::CallTarget::ResultError { .. } => {
                 let Type::Result(result) = ty else {

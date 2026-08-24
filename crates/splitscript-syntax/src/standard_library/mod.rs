@@ -169,6 +169,10 @@ pub enum Type {
     Result(Box<Type>),
     ExclusiveRange(Box<Type>),
     InclusiveRange(Box<Type>),
+    Callable {
+        parameters: Vec<Type>,
+        result: Box<Type>,
+    },
 }
 
 impl fmt::Display for Type {
@@ -196,6 +200,16 @@ impl fmt::Display for Type {
             Self::Result(value) => write!(formatter, "{value}!"),
             Self::ExclusiveRange(value) => write!(formatter, "{value}..<{value}"),
             Self::InclusiveRange(value) => write!(formatter, "{value}..={value}"),
+            Self::Callable { parameters, result } => {
+                formatter.write_str("(")?;
+                for (index, parameter) in parameters.iter().enumerate() {
+                    if index != 0 {
+                        formatter.write_str(", ")?;
+                    }
+                    parameter.fmt(formatter)?;
+                }
+                write!(formatter, ") -> {result}")
+            }
         }
     }
 }

@@ -102,8 +102,8 @@ pub(super) struct ExprContext<'a> {
     pub runtime_globals: RuntimeGlobals,
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
-    pub closures: &'a HashMap<ExprId, u32>,
-    pub closure_polls: &'a HashMap<ExprId, u32>,
+    pub closures: &'a HashMap<crate::semantic::ClosureInstance, u32>,
+    pub closure_polls: &'a HashMap<crate::semantic::ClosureInstance, u32>,
     pub closure_environment: Option<ClosureEnvironment<'a>>,
     pub intrinsic_futures: &'a HashMap<IntrinsicFutureInstance, u32>,
     pub display_functions: &'a DisplayFunctions,
@@ -3037,8 +3037,10 @@ fn compile_expr_unconverted(
                 .wasm_ir
                 .closure(*closure)
                 .expect("closure expressions have lowered bodies");
-            function.instruction(&Instruction::RefFunc(context.closures[closure]));
-            if let Some(environment) = context.gc.closure_environment_index(*closure) {
+            let instance =
+                crate::semantic::ClosureInstance::new(context.function_instance.cloned(), *closure);
+            function.instruction(&Instruction::RefFunc(context.closures[&instance]));
+            if let Some(environment) = context.gc.closure_environment_index(&instance) {
                 for capture in &closure_body.captures {
                     if capture.mutable {
                         emit_raw_value_get(function, capture.value, context);

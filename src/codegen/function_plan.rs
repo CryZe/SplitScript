@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use wasm_encoder::{FunctionSection, HeapType, RefType, TypeSection, ValType};
 
 use crate::{
-    ast::{ActionKind, EnumDecl, ExprId, Program},
+    ast::{ActionKind, EnumDecl, Program},
     equality::EqualityCapabilities,
-    semantic::{FunctionInstance, SemanticModel},
+    semantic::{ClosureInstance, FunctionInstance, SemanticModel},
     stdlib::{RuntimeRepresentation, StandardLibrary},
     structural::{StructuralTypeId, StructuralTypes},
     types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, ResolvedSetType},
@@ -30,8 +30,8 @@ pub(super) struct FunctionPlan<'a> {
     pub array_functions: ArrayFunctions,
     pub sets: SetFunctions,
     pub users: HashMap<FunctionInstance, UserFunctionPlan>,
-    pub closures: HashMap<ExprId, u32>,
-    pub closure_polls: HashMap<ExprId, u32>,
+    pub closures: HashMap<ClosureInstance, u32>,
+    pub closure_polls: HashMap<ClosureInstance, u32>,
     pub intrinsic_futures: HashMap<IntrinsicFutureInstance, u32>,
     pub displays: DisplayFunctions,
     pub reads: Vec<u32>,
@@ -471,30 +471,35 @@ pub(super) fn encode<'a>(
     let start = declare("_start".to_owned(), vec![], vec![]);
     let update = declare("update".to_owned(), vec![], vec![]);
     let mut closure_polls = HashMap::new();
-    for (expression, _) in async_frames.closures() {
+    for (instance, _) in async_frames.closures() {
         let frame = ValType::Ref(RefType {
             nullable: false,
-            heap_type: HeapType::Concrete(gc.closure_frame_index(expression)),
+            heap_type: HeapType::Concrete(gc.closure_frame_index(instance)),
         });
         closure_polls.insert(
-            expression,
+            instance.clone(),
             declare(
-                format!("__splitscript::closure::expr{}::poll", expression.index()),
+                format!(
+                    "__splitscript::closure::expr{}::poll",
+                    instance.expression.index()
+                ),
                 vec![frame],
                 vec![ValType::I32],
             ),
         );
     }
     let mut closures = HashMap::new();
-    for closure in reachability
-        .closure_expressions()
-        .filter_map(|expression| wasm_ir.closure(expression))
-    {
+    for instance in reachability.closure_instances() {
+        let closure = wasm_ir
+            .closure(instance.expression)
+            .expect("reachable closure instances have bodies");
         let expression = wasm_ir
             .expression(closure.expression)
             .expect("closure expressions belong to Wasm IR");
-        let crate::types::TypeKind::Callable { layout, .. } = semantics.types().kind(expression.ty)
-        else {
+        let ty = instance.owner.as_ref().map_or(expression.ty, |owner| {
+            semantics.specialize_type(owner, expression.ty)
+        });
+        let crate::types::TypeKind::Callable { layout, .. } = semantics.types().kind(ty) else {
             unreachable!("checked closure expressions have callable types")
         };
         section.function(gc.callable_function_index(*layout));
@@ -504,7 +509,7 @@ pub(super) fn encode<'a>(
             function_index,
             format!("__splitscript::closure::expr{}", closure.expression.index()),
         ));
-        closures.insert(closure.expression, function_index);
+        closures.insert(instance.clone(), function_index);
     }
 
     FunctionPlan {

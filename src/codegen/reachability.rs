@@ -5,7 +5,7 @@ use crate::{
         ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, ExprId, OptionTypeId, Program, RecordId,
         ResultTypeId, TypeApplicationId,
     },
-    semantic::{FunctionInstance, SemanticModel},
+    semantic::{ClosureInstance, FunctionInstance, SemanticModel},
     stdlib::{
         IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibTypeId,
     },
@@ -17,7 +17,7 @@ use crate::{
 pub(super) struct Reachability {
     functions: BTreeSet<FunctionInstance>,
     expressions: BTreeSet<ExprId>,
-    closures: BTreeSet<ExprId>,
+    closures: BTreeSet<ClosureInstance>,
     expression_instances: BTreeSet<(Option<FunctionInstance>, ExprId)>,
     equality_records: BTreeSet<RecordId>,
     equality_standard_records: BTreeSet<StdlibTypeId>,
@@ -138,7 +138,8 @@ impl Reachability {
                 reachable.string_equality = true;
             }
             if let wasm_ir::ExpressionKind::Closure { closure, .. } = expression.kind {
-                if reachable.closures.insert(closure) {
+                let instance = ClosureInstance::new(owner.clone(), closure);
+                if reachable.closures.insert(instance) {
                     let body = wasm_ir
                         .closure(closure)
                         .expect("reachable closures have lowered bodies");
@@ -578,8 +579,8 @@ impl Reachability {
             .unwrap_or(original)
     }
 
-    pub fn closure_expressions(&self) -> impl Iterator<Item = ExprId> + '_ {
-        self.closures.iter().copied()
+    pub fn closure_instances(&self) -> impl Iterator<Item = &ClosureInstance> {
+        self.closures.iter()
     }
 
     pub fn requires_record_equality(&self, record: RecordId) -> bool {

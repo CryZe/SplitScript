@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{EnumDecl, ExprId, RecordDecl, ValueId},
+    ast::{EnumDecl, RecordDecl, ValueId},
     memory::MemoryLayouts,
     semantic::{FunctionInstance, SemanticModel},
     stdlib::StandardLibrary,
@@ -38,8 +38,8 @@ pub(super) struct EmissionContext<'a> {
     pub runtime_globals: RuntimeGlobals,
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
-    pub closures: &'a HashMap<ExprId, u32>,
-    pub closure_polls: &'a HashMap<ExprId, u32>,
+    pub closures: &'a HashMap<crate::semantic::ClosureInstance, u32>,
+    pub closure_polls: &'a HashMap<crate::semantic::ClosureInstance, u32>,
     pub intrinsic_futures: &'a HashMap<super::async_frame::IntrinsicFutureInstance, u32>,
     pub display_functions: &'a DisplayFunctions,
     pub equality_functions: &'a EqualityFunctions,

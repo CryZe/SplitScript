@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use wasm_encoder::{AbstractHeapType, HeapType, RefType, StorageType, ValType};
 
 use crate::{
-    ast::{AsyncTypeId, EnumDecl, ExprId, Program},
-    semantic::{FunctionInstance, ResolvedEnumVariantId},
+    ast::{AsyncTypeId, EnumDecl, Program},
+    semantic::{ClosureInstance, FunctionInstance, ResolvedEnumVariantId},
     stdlib::{
         DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibTypeId,
     },
@@ -31,11 +31,12 @@ pub(super) struct GcLayout {
     async_values: HashMap<AsyncTypeId, u32>,
     callable_functions: HashMap<crate::ast::CallableTypeId, u32>,
     capture_cells: HashMap<Type, u32>,
-    closure_environments: HashMap<ExprId, u32>,
+    ordered_capture_cells: Vec<Type>,
+    closure_environments: HashMap<ClosureInstance, u32>,
     function_frames: HashMap<FunctionInstance, u32>,
     function_frame_tags: HashMap<FunctionInstance, u32>,
-    closure_frames: HashMap<ExprId, u32>,
-    closure_frame_tags: HashMap<ExprId, u32>,
+    closure_frames: HashMap<ClosureInstance, u32>,
+    closure_frame_tags: HashMap<ClosureInstance, u32>,
     intrinsic_frames: HashMap<IntrinsicFutureInstance, u32>,
     intrinsic_frame_tags: HashMap<IntrinsicFutureInstance, u32>,
     dynamic: HashMap<Type, u32>,
@@ -301,23 +302,42 @@ impl GcLayout {
         }
 
         let mut capture_cells = HashMap::new();
-        let mut captured_values = wasm_ir.mutably_captured_values().collect::<Vec<_>>();
-        captured_values.sort_by_key(|value| value.index());
-        for value in captured_values {
-            let ty = super::value_type(value, semantics);
-            if ty.has_runtime_value() && !capture_cells.contains_key(&ty) {
+        let mut ordered_capture_cells = Vec::new();
+        for instance in reachability.closure_instances() {
+            let closure = wasm_ir
+                .closure(instance.expression)
+                .expect("reachable closure instances have bodies");
+            for capture in closure.captures.iter().filter(|capture| capture.mutable) {
+                let ty = instance.owner.as_ref().map_or_else(
+                    || super::value_type(capture.value, semantics),
+                    |owner| {
+                        super::semantic_type(
+                            semantics.specialize_type(
+                                owner,
+                                semantics
+                                    .value_type(capture.value)
+                                    .expect("checked captures have types"),
+                            ),
+                            semantics,
+                        )
+                    },
+                );
+                if !ty.has_runtime_value() || capture_cells.contains_key(&ty) {
+                    continue;
+                }
                 capture_cells.insert(ty, next);
+                ordered_capture_cells.push(ty);
                 next += 1;
             }
         }
 
         let mut closure_environments = HashMap::new();
-        for closure in reachability
-            .closure_expressions()
-            .filter_map(|expression| wasm_ir.closure(expression))
-            .filter(|closure| !closure.captures.is_empty())
-        {
-            closure_environments.insert(closure.expression, next);
+        for instance in reachability.closure_instances().filter(|instance| {
+            wasm_ir
+                .closure(instance.expression)
+                .is_some_and(|closure| !closure.captures.is_empty())
+        }) {
+            closure_environments.insert(instance.clone(), next);
             next += 1;
         }
 
@@ -339,9 +359,9 @@ impl GcLayout {
         let mut closure_frames = HashMap::new();
         let mut closure_frame_tags = HashMap::new();
         let first_closure_tag = function_frames.len() as u32 + 1;
-        for (position, (expression, _)) in async_frames.closures().enumerate() {
-            closure_frames.insert(expression, next);
-            closure_frame_tags.insert(expression, first_closure_tag + position as u32);
+        for (position, (instance, _)) in async_frames.closures().enumerate() {
+            closure_frames.insert(instance.clone(), next);
+            closure_frame_tags.insert(instance.clone(), first_closure_tag + position as u32);
             next += 1;
         }
         let first_intrinsic_tag = first_closure_tag + closure_frames.len() as u32;
@@ -361,6 +381,7 @@ impl GcLayout {
             async_values,
             callable_functions,
             capture_cells,
+            ordered_capture_cells,
             closure_environments,
             function_frames,
             function_frame_tags,
@@ -426,12 +447,16 @@ impl GcLayout {
         self.callable_functions[&callable]
     }
 
-    pub(super) fn closure_environment_index(&self, expression: ExprId) -> Option<u32> {
-        self.closure_environments.get(&expression).copied()
+    pub(super) fn closure_environment_index(&self, instance: &ClosureInstance) -> Option<u32> {
+        self.closure_environments.get(instance).copied()
     }
 
     pub(super) fn capture_cell_index(&self, ty: Type) -> u32 {
         self.capture_cells[&ty]
+    }
+
+    pub(super) fn capture_cell_types(&self) -> impl Iterator<Item = Type> + '_ {
+        self.ordered_capture_cells.iter().copied()
     }
 
     pub(super) fn capture_cell_val_type(&self, ty: Type) -> ValType {
@@ -459,16 +484,16 @@ impl GcLayout {
             .expect("suspending function instances have runtime tags")
     }
 
-    pub(super) fn closure_frame_index(&self, expression: ExprId) -> u32 {
+    pub(super) fn closure_frame_index(&self, instance: &ClosureInstance) -> u32 {
         self.closure_frames
-            .get(&expression)
+            .get(instance)
             .copied()
             .expect("suspending closures have planned GC frames")
     }
 
-    pub(super) fn closure_frame_tag(&self, expression: ExprId) -> u32 {
+    pub(super) fn closure_frame_tag(&self, instance: &ClosureInstance) -> u32 {
         self.closure_frame_tags
-            .get(&expression)
+            .get(instance)
             .copied()
             .expect("suspending closures have runtime tags")
     }

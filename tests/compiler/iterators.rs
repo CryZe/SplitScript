@@ -257,7 +257,7 @@ fn for_loop_parameters_infer_the_iterable_contract_and_associated_item() {
         .expect("one inferred Iterable function should accept each built-in iterable shape");
     let function = checked.syntax().functions[0].id;
     let type_parameters = checked.semantics().function_type_parameters(function);
-    assert_eq!(type_parameters.len(), 2);
+    assert_eq!(type_parameters.len(), 3);
     assert_eq!(
         checked
             .semantics()
@@ -269,6 +269,12 @@ fn for_loop_parameters_infer_the_iterable_contract_and_associated_item() {
             .semantics()
             .generic_parameter_constraints(type_parameters[1])
             .contains(&splitscript::compiler::stdlib::StdlibCapabilityId::Display)
+    );
+    assert_eq!(
+        checked
+            .semantics()
+            .generic_parameter_constraints(type_parameters[2]),
+        [splitscript::compiler::stdlib::StdlibCapabilityId::Iterator]
     );
     let mut database = CompilerDatabase::new(source);
     let function_hover = database
@@ -329,10 +335,75 @@ fn inferred_iterable_items_participate_in_parameter_and_result_inference() {
     );
     assert_eq!(
         checked.semantics().function_type_parameters(function).len(),
-        2,
-        "the iterable and its projected item are the only generalized semantic types"
+        3,
+        "the iterable, projected item, and projected cursor are the generalized semantic types"
     );
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
         .expect("projected parameter and result types should specialize to valid Wasm GC");
+}
+
+#[test]
+fn inferred_iterable_helpers_can_iterate_their_explicit_cursor() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn inspect(values) {
+            print(values)
+            for value in values.iterator().map(value => `{value}y`) {
+                print(value)
+            }
+        }
+
+        setup {
+            inspect(["a", "b", "c"])
+            inspect(0..<10)
+            inspect(10..=20)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("the associated cursor should retain its Iterator constraint");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("specialized iterator helpers should produce valid Wasm GC");
+}
+
+#[test]
+fn inferred_iterable_helpers_accept_iterator_cursors_as_identity_iterables() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn inspect(values) {
+            for value in values {
+                print(value)
+            }
+        }
+
+        setup {
+            inspect(["a", "b", "c"].iterator())
+            inspect((0..<10).iterator())
+            inspect((10..=20).iterator())
+        }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    let checked = database
+        .check()
+        .expect("iterator cursors should satisfy Iterable through identity iteration");
+    assert!(
+        database
+            .hover(source.find("inspect(values)").unwrap())
+            .unwrap()
+            .is_some(),
+        "invalid specializations must not poison editor analysis"
+    );
+    assert!(
+        !database
+            .semantic_highlights()
+            .unwrap()
+            .highlights()
+            .is_empty()
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("identity-iterable cursor specializations should produce valid Wasm GC");
 }

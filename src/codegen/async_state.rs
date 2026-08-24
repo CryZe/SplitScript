@@ -116,13 +116,14 @@ pub(super) fn compile_async_function_poll(
 }
 
 pub(super) fn compile_async_closure_poll(
+    instance: &crate::semantic::ClosureInstance,
     closure: &wasm_ir::ClosureBody,
     function_index: u32,
     layout: &AsyncFrameLayout,
     runtime: &AttachContext<'_>,
 ) -> Function {
     let frame = AsyncFrameRef {
-        struct_type: runtime.lowering.gc.closure_frame_index(closure.expression),
+        struct_type: runtime.lowering.gc.closure_frame_index(instance),
         source: AsyncFrameSource::Local(0),
     };
     compile_async_body(
@@ -133,7 +134,7 @@ pub(super) fn compile_async_closure_poll(
         layout,
         runtime,
         frame,
-        None,
+        instance.owner.as_ref(),
         BareReturn::AsyncFuture {
             frame,
             completion: layout.completion,
@@ -2125,12 +2126,16 @@ fn compile_source_future_poll(
     let closure_candidates = context
         .async_frames
         .closures()
-        .filter(|(expression, _)| {
+        .filter(|(instance, _)| {
             let ty = context
                 .wasm_ir
-                .expression(*expression)
+                .expression(instance.expression)
                 .expect("reachable closure expressions belong to Wasm IR")
                 .ty;
+            let ty = instance
+                .owner
+                .as_ref()
+                .map_or(ty, |owner| context.semantics.specialize_type(owner, ty));
             let TypeKind::Callable { result, .. } = context.semantics.types().kind(ty) else {
                 unreachable!("checked closure expressions have callable types")
             };

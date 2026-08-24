@@ -111,7 +111,7 @@ impl FunctionSignature {
                 &mut substitutions,
             );
             inference
-                .unify(expected, projected)
+                .unify_deferred(expected, projected)
                 .expect("validated generic associated projections remain compatible");
         }
         let type_arguments = self

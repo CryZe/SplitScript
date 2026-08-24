@@ -394,6 +394,10 @@ semantic-review evidence, not as a conformance corpus.
   independent traversal. Lazy source-defined `map` and `filter` adapters store
   ordinary closures, compose without intermediate collections, participate in
   generic capability dispatch, and remain live across suspending loop bodies.
+  Iterator cursors themselves implement `Iterable`; calling `iterator()` is an
+  identity operation that preserves the current cursor position. Generic
+  `T: Iterable` loops lower through `T.iterator()` and `Iterator.next`, while
+  monomorphic collection and range loops retain their direct fast paths.
   Constructed callable layouts, generic standard-library record fields,
   reachability, scratch planning, and intrinsic dependencies all use the same
   demand-driven specialization path rather than adapter-specific intrinsics.
@@ -662,11 +666,14 @@ remaining work is product hardening and distribution.
   those signatures independently at each concrete call site. Async closure
   bodies now use the same typed continuation-frame and runtime-tag dispatch as
   source async functions, including captured values and mutable parameters
-  that survive suspension. Explicit `(parameters) -> Result => body` signatures
+  that survive suspension. A closure declared in a generic helper is emitted
+  independently for every concrete helper instance, including its callable
+  signature, immutable environment, mutable capture cells, and async frame.
+  Explicit `(parameters) -> Result => body` signatures
   constrain closure bodies, and omitted parameter and result types are shown as
-  one complete virtual signature through inlay hints. Finish latent effect inference at invocation sites,
-  generic closure bodies and captures, and named function-to-callable
-  conversion. Preserve ordinary lexical control flow: `return` belongs to the closure, while
+  one complete virtual signature through inlay hints. Finish latent effect
+  inference at invocation sites and named function-to-callable conversion.
+  Preserve ordinary lexical control flow: `return` belongs to the closure, while
   `break` and `continue` cannot target loops outside it. Keep named functions
   and closures on one callable abstraction rather than a closure-only path.
 - [ ] Complete remaining ordinary library gaps when a port needs them:

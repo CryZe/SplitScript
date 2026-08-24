@@ -313,6 +313,70 @@ fn higher_order_helpers_specialize_inferred_callable_parameters() {
 }
 
 #[test]
+fn closures_declared_inside_generic_helpers_are_specialized_per_call() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn describe(value) {
+            let render = item => `{value}: {item}`
+            return render(value)
+        }
+
+        fn doubled(value) {
+            let apply = () => {
+                value += value
+                return value
+            }
+            return apply()
+        }
+
+        whileAttached {
+            print(describe(4u32))
+            print(describe("ready"))
+            print(doubled(3u32))
+            print(doubled(5u64))
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(store.data().messages, ["4: 4", "ready: ready", "6", "10"]);
+}
+
+#[test]
+fn async_closures_declared_inside_generic_helpers_have_specialized_frames() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn afterTick(value) {
+            let delayed = () => {
+                await nextTick()
+                return value
+            }
+            return await delayed()
+        }
+
+        onAttach {
+            print(await afterTick(7u32))
+            print(await afterTick("ready"))
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    for _ in 0..12 {
+        update.call(&mut store, ()).unwrap();
+    }
+
+    assert_eq!(store.data().messages, ["7", "ready"]);
+}
+
+#[test]
 fn mutable_closure_captures_share_one_cell_with_the_declaring_scope() {
     let source = r#"
         state "game.exe" {}

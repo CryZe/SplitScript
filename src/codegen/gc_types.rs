@@ -528,14 +528,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
             },
         });
     }
-    let mut captured_values = wasm_ir.mutably_captured_values().collect::<Vec<_>>();
-    captured_values.sort_by_key(|value| value.index());
-    let mut emitted_capture_cells = std::collections::HashSet::new();
-    for value in captured_values {
-        let ty = value_type(value, semantics);
-        if !ty.has_runtime_value() || !emitted_capture_cells.insert(ty) {
-            continue;
-        }
+    for ty in layout.capture_cell_types() {
         debug_assert_eq!(layout.capture_cell_index(ty), recursive_types.len() as u32);
         recursive_types.push(SubType {
             is_final: true,
@@ -554,14 +547,16 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
             },
         });
     }
-    for closure in reachability
-        .closure_expressions()
-        .filter_map(|expression| wasm_ir.closure(expression))
-        .filter(|closure| !closure.captures.is_empty())
-    {
+    for instance in reachability.closure_instances() {
+        let closure = wasm_ir
+            .closure(instance.expression)
+            .expect("reachable closure instances have bodies");
+        if closure.captures.is_empty() {
+            continue;
+        }
         debug_assert_eq!(
             layout
-                .closure_environment_index(closure.expression)
+                .closure_environment_index(instance)
                 .expect("capturing closures have environment layouts"),
             recursive_types.len() as u32
         );
@@ -574,7 +569,20 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                         .captures
                         .iter()
                         .map(|capture| {
-                            let ty = value_type(capture.value, semantics);
+                            let ty = instance.owner.as_ref().map_or_else(
+                                || value_type(capture.value, semantics),
+                                |owner| {
+                                    super::semantic_type(
+                                        semantics.specialize_type(
+                                            owner,
+                                            semantics
+                                                .value_type(capture.value)
+                                                .expect("checked captures have types"),
+                                        ),
+                                        semantics,
+                                    )
+                                },
+                            );
                             FieldType {
                                 element_type: if capture.mutable && ty.has_runtime_value() {
                                     layout.capture_cell_storage_type(ty)
@@ -670,18 +678,21 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
             },
         });
     }
-    for (expression, frame) in async_frames.closures() {
+    for (instance, frame) in async_frames.closures() {
         let closure_type = wasm_ir
-            .expression(expression)
+            .expression(instance.expression)
             .expect("reachable closure expressions belong to Wasm IR")
             .ty;
+        let closure_type = instance.owner.as_ref().map_or(closure_type, |owner| {
+            semantics.specialize_type(owner, closure_type)
+        });
         let TypeKind::Callable { result, .. } = semantics.types().kind(closure_type) else {
             unreachable!("checked closure expressions have callable types")
         };
         let Type::Async(future) = super::semantic_type(*result, semantics) else {
             unreachable!("suspending closures return async values")
         };
-        let frame_index = layout.closure_frame_index(expression);
+        let frame_index = layout.closure_frame_index(instance);
         debug_assert_eq!(frame_index, recursive_types.len() as u32);
         recursive_types.push(SubType {
             is_final: true,

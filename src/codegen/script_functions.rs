@@ -674,6 +674,7 @@ pub(super) fn compile_user_function(
 }
 
 pub(super) fn compile_closure(
+    instance: &crate::semantic::ClosureInstance,
     closure: &wasm_ir::ClosureBody,
     function_index: u32,
     lowering: &EmissionContext<'_>,
@@ -682,9 +683,12 @@ pub(super) fn compile_closure(
         .wasm_ir
         .expression(closure.expression)
         .expect("closure expressions belong to Wasm IR");
+    let expression_ty = instance.owner.as_ref().map_or(expression.ty, |owner| {
+        lowering.semantics.specialize_type(owner, expression.ty)
+    });
     let crate::types::TypeKind::Callable {
         parameters, result, ..
-    } = lowering.semantics.types().kind(expression.ty)
+    } = lowering.semantics.types().kind(expression_ty)
     else {
         unreachable!("checked closure expressions have callable types")
     };
@@ -723,7 +727,7 @@ pub(super) fn compile_closure(
             wasm_ir: lowering.wasm_ir,
             gc: lowering.gc,
             reachability: lowering.reachability,
-            instance: None,
+            instance: instance.owner.as_ref(),
             include_values: true,
         },
     );
@@ -736,7 +740,21 @@ pub(super) fn compile_closure(
                 capture.value,
                 (
                     field as u32,
-                    value_type(capture.value, lowering.semantics),
+                    instance.owner.as_ref().map_or_else(
+                        || value_type(capture.value, lowering.semantics),
+                        |owner| {
+                            semantic_type(
+                                lowering.semantics.specialize_type(
+                                    owner,
+                                    lowering
+                                        .semantics
+                                        .value_type(capture.value)
+                                        .expect("checked captures have types"),
+                                ),
+                                lowering.semantics,
+                            )
+                        },
+                    ),
                     capture.mutable,
                 ),
             )
@@ -744,7 +762,7 @@ pub(super) fn compile_closure(
         .collect::<HashMap<_, _>>();
     let environment = lowering
         .gc
-        .closure_environment_index(closure.expression)
+        .closure_environment_index(instance)
         .map(|struct_type| ClosureEnvironment {
             local: 0,
             struct_type,
@@ -804,7 +822,7 @@ pub(super) fn compile_closure(
         async_frames: lowering.async_frames,
         intrinsic_capture: None,
         debug: lowering.debug_emission(function_index),
-        function_instance: None,
+        function_instance: instance.owner.as_ref(),
         loop_control: None,
         bare_return: BareReturn::None,
         materialize_none: true,
@@ -819,6 +837,7 @@ pub(super) fn compile_closure(
 }
 
 pub(super) fn compile_async_closure_init(
+    instance: &crate::semantic::ClosureInstance,
     closure: &wasm_ir::ClosureBody,
     layout: &AsyncFrameLayout,
     lowering: &EmissionContext<'_>,
@@ -827,8 +846,11 @@ pub(super) fn compile_async_closure_init(
         .wasm_ir
         .expression(closure.expression)
         .expect("closure expressions belong to Wasm IR");
+    let expression_ty = instance.owner.as_ref().map_or(expression.ty, |owner| {
+        lowering.semantics.specialize_type(owner, expression.ty)
+    });
     let crate::types::TypeKind::Callable { parameters, .. } =
-        lowering.semantics.types().kind(expression.ty)
+        lowering.semantics.types().kind(expression_ty)
     else {
         unreachable!("checked closure expressions have callable types")
     };
@@ -847,12 +869,12 @@ pub(super) fn compile_async_closure_init(
             (*parameter, local)
         })
         .collect::<HashMap<_, _>>();
-    let environment = lowering.gc.closure_environment_index(closure.expression);
+    let environment = lowering.gc.closure_environment_index(instance);
     let mut function = Function::new([]);
     function
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::I32Const(
-            lowering.gc.closure_frame_tag(closure.expression) as i32,
+            lowering.gc.closure_frame_tag(instance) as i32,
         ));
     for (position, ty) in layout.types.iter().copied().enumerate() {
         let field = layout.base_fields + position as u32;
@@ -905,7 +927,7 @@ pub(super) fn compile_async_closure_init(
     }
     function
         .instruction(&Instruction::StructNew(
-            lowering.gc.closure_frame_index(closure.expression),
+            lowering.gc.closure_frame_index(instance),
         ))
         .instruction(&Instruction::End);
     function

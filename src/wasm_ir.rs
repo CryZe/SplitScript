@@ -1622,6 +1622,58 @@ fn generated_iterator_step_call(
     ))
 }
 
+/// Converts a generic `Iterable` operand into the cursor stored by a lowered
+/// `for` loop. Concrete arrays, sets, and ranges retain their specialized
+/// allocation-free lowering; only a loop whose source and storage types differ
+/// needs to dispatch through the protocol. Iterator cursors implement
+/// `Iterable.iterator` as an identity operation, so this representation also
+/// remains correct when a generic iterable is instantiated with a cursor.
+fn generated_iterable_iterator_call(
+    iterable: ExprId,
+    iterable_value: ValueId,
+    index_value: ValueId,
+    semantics: &SemanticModel,
+    wasm_ir: &mut Program,
+) -> ExprId {
+    let source_type = wasm_ir
+        .expression(iterable)
+        .expect("lowered for-loop operands have expressions")
+        .ty;
+    let storage_type = semantics
+        .value_type(iterable_value)
+        .expect("checked for-loop storage has a type");
+    let step_type = semantics
+        .value_type(index_value)
+        .expect("checked for-loop cursor state has a type");
+    let is_cursor_loop = matches!(
+        semantics.types().kind(step_type),
+        TypeKind::Application {
+            constructor: crate::stdlib::StdlibTypeConstructorId::IteratorStep,
+            ..
+        }
+    );
+    if !is_cursor_loop || source_type == storage_type {
+        return iterable;
+    }
+    wasm_ir.push_generated_expression(
+        storage_type,
+        ExpressionKind::Call {
+            target: CallTarget::CapabilityRequirement {
+                item: crate::stdlib::StdlibItemId::IterableIterator,
+                signature: vec![source_type, storage_type],
+                receiver: ResolvedReceiver::Expression {
+                    expression: iterable,
+                    members: Vec::new(),
+                },
+                receiver_type: source_type,
+            },
+            arguments: Vec::new(),
+        },
+        None,
+        None,
+    )
+}
+
 fn mutated_values(program: &TypedProgram) -> HashSet<ValueId> {
     #[derive(Default)]
     struct Collector {
@@ -3828,11 +3880,22 @@ fn lower_async_statements(
                 iterable,
                 body,
             } => {
-                let iterator_step =
-                    generated_iterator_step_call(*iterable_value, *index_value, semantics, wasm_ir);
                 if typed_block_contains_await(body, typed_hir, source.profile) {
                     let normalized =
                         normalize_expression_suspensions(*iterable, typed_hir, semantics, wasm_ir);
+                    let iterable = generated_iterable_iterator_call(
+                        normalized.value,
+                        *iterable_value,
+                        *index_value,
+                        semantics,
+                        wasm_ir,
+                    );
+                    let iterator_step = generated_iterator_step_call(
+                        *iterable_value,
+                        *index_value,
+                        semantics,
+                        wasm_ir,
+                    );
                     let body = lower_async_statements(
                         &body.statements,
                         Block {
@@ -3850,7 +3913,7 @@ fn lower_async_statements(
                             iterable_value: *iterable_value,
                             index_value: *index_value,
                             version_value: *version_value,
-                            iterable: normalized.value,
+                            iterable,
                             iterator_step,
                         }],
                         terminator: Terminator::AsyncFor {
@@ -3882,6 +3945,15 @@ fn lower_async_statements(
                 }
                 let normalized =
                     normalize_expression_suspensions(*iterable, typed_hir, semantics, wasm_ir);
+                let iterable = generated_iterable_iterator_call(
+                    normalized.value,
+                    *iterable_value,
+                    *index_value,
+                    semantics,
+                    wasm_ir,
+                );
+                let iterator_step =
+                    generated_iterator_step_call(*iterable_value, *index_value, semantics, wasm_ir);
                 result.statements.insert(
                     0,
                     Statement::For {
@@ -3889,7 +3961,7 @@ fn lower_async_statements(
                         iterable_value: *iterable_value,
                         index_value: *index_value,
                         version_value: *version_value,
-                        iterable: normalized.value,
+                        iterable,
                         iterator_step,
                         body: lower_block(body, typed_hir, semantics, source, wasm_ir),
                     },

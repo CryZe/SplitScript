@@ -549,30 +549,52 @@ impl InferenceContext {
         name: &'static str,
     ) -> Type {
         let receiver = self.shallow(receiver);
-        if let Some(value) = self.concrete_associated_type(receiver, capability, name) {
-            return value;
-        }
-        let Type::Variable(receiver) = receiver else {
-            panic!("validated associated type `{name}` has no implementation for {receiver}");
+        let value = if let Some(value) = self.concrete_associated_type(receiver, capability, name) {
+            value
+        } else {
+            let Type::Variable(receiver) = receiver else {
+                panic!("validated associated type `{name}` has no implementation for {receiver}");
+            };
+            let receiver = self.root(receiver);
+            if let Some(projection) = self.associated_projections.iter().find(|projection| {
+                projection.receiver == receiver
+                    && projection.capability == capability
+                    && projection.name == name
+            }) {
+                Type::Variable(self.root_without_compression(projection.output))
+            } else {
+                let Type::Variable(output) = self.fresh(Requirements::none(), None) else {
+                    unreachable!("fresh inference values are variables")
+                };
+                self.associated_projections.push(AssociatedProjection {
+                    receiver,
+                    output,
+                    capability,
+                    name,
+                });
+                Type::Variable(output)
+            }
         };
-        let receiver = self.root(receiver);
-        if let Some(projection) = self.associated_projections.iter().find(|projection| {
-            projection.receiver == receiver
-                && projection.capability == capability
-                && projection.name == name
-        }) {
-            return Type::Variable(self.root_without_compression(projection.output));
+        let constraints = self
+            .standard_library
+            .capability(capability)
+            .associated_types
+            .iter()
+            .find(|associated| associated.name == name)
+            .expect("resolved associated types are declared by their capability")
+            .constraints;
+        let requirements = constraints
+            .iter()
+            .fold(Requirements::none(), |requirements, constraint| {
+                requirements | Requirements::capability(*constraint)
+            });
+        if self.require(value, requirements).is_err() {
+            // Catalog validation guarantees that concrete definitions satisfy
+            // their declared associated-type constraints. Preserve editor
+            // analysis if a future structural implementation is incomplete.
+            return self.error_type();
         }
-        let Type::Variable(output) = self.fresh(Requirements::none(), None) else {
-            unreachable!("fresh inference values are variables")
-        };
-        self.associated_projections.push(AssociatedProjection {
-            receiver,
-            output,
-            capability,
-            name,
-        });
-        Type::Variable(output)
+        value
     }
 
     pub(crate) fn associated_projections_for(
@@ -925,6 +947,23 @@ impl InferenceContext {
     pub(crate) fn unify(&mut self, left: Type, right: Type) -> Result<Type, InferenceError> {
         let unified = self.unify_inner(left, right)?;
         self.solve_associated_projections()?;
+        Ok(self.shallow(unified))
+    }
+
+    /// Equates two parts of a freshly instantiated generic signature without
+    /// solving unrelated call-site projections that are still pending.
+    ///
+    /// Associated-type declarations are replayed before arguments constrain
+    /// the fresh receiver variables. Running the global solver at that point
+    /// can revisit an earlier invalid call while a later call is merely being
+    /// instantiated, turning an ordinary source diagnostic into an internal
+    /// panic. Ordinary source unification still runs the complete solver.
+    pub(crate) fn unify_deferred(
+        &mut self,
+        left: Type,
+        right: Type,
+    ) -> Result<Type, InferenceError> {
+        let unified = self.unify_inner(left, right)?;
         Ok(self.shallow(unified))
     }
 

@@ -2198,10 +2198,12 @@ typeConstructor IteratorStep<T> {
 /// let iterator: MapIterator<ArrayIterator<u32>, u32, String> =
 ///     [1, 2].iterator().map(value => `{value}`)
 /// ```
-@capabilities(Iterator)
+@capabilities(Iterator, Iterable)
 typeConstructor MapIterator<I: Iterator, S, U> {
     /// Values produced by this adapter.
     type Item = U;
+    /// This cursor is its own iterable representation.
+    type Iterator = MapIterator<I, S, U>;
 
     /// Cursor being transformed.
     private source: I,
@@ -2227,6 +2229,23 @@ typeConstructor MapIterator<I: Iterator, S, U> {
             End => End,
         }
     }
+
+    /// Returns this cursor without changing its current position.
+    ///
+    /// No new adapter is allocated and already-consumed items remain consumed.
+    ///
+    /// # Example
+    ///
+    /// Reuse a mapped cursor as an iterable
+    ///
+    /// ```splitscript
+    /// let cursor = [1, 2].iterator().map(value => value * 2)
+    /// let sameCursor = cursor.iterator()
+    /// ```
+    @mustUse("The iterator cursor is otherwise discarded.")
+    fn iterator() -> MapIterator<I, S, U> {
+        return self
+    }
 }
 
 /// Lazily filters the items of another iterator.
@@ -2243,10 +2262,12 @@ typeConstructor MapIterator<I: Iterator, S, U> {
 /// let iterator: FilterIterator<ArrayIterator<u32>, u32> =
 ///     [1, 2, 3].iterator().filter(value => value > 1)
 /// ```
-@capabilities(Iterator)
+@capabilities(Iterator, Iterable)
 typeConstructor FilterIterator<I: Iterator, S> {
     /// Values produced by this adapter.
     type Item = S;
+    /// This cursor is its own iterable representation.
+    type Iterator = FilterIterator<I, S>;
 
     /// Cursor being filtered.
     private source: I,
@@ -2278,6 +2299,23 @@ typeConstructor FilterIterator<I: Iterator, S> {
             }
         }
     }
+
+    /// Returns this cursor without changing its current position.
+    ///
+    /// No new adapter is allocated and already-rejected items remain consumed.
+    ///
+    /// # Example
+    ///
+    /// Reuse a filtered cursor as an iterable
+    ///
+    /// ```splitscript
+    /// let cursor = [1, 2].iterator().filter(value => value > 1)
+    /// let sameCursor = cursor.iterator()
+    /// ```
+    @mustUse("The iterator cursor is otherwise discarded.")
+    fn iterator() -> FilterIterator<I, S> {
+        return self
+    }
 }
 
 /// Iterates over an array while detecting structural mutation.
@@ -2291,10 +2329,12 @@ typeConstructor FilterIterator<I: Iterator, S> {
 ///
 /// fn inspect(iterator: ArrayIterator<u32>) {}
 /// ```
-@capabilities(Iterator)
+@capabilities(Iterator, Iterable)
 typeConstructor ArrayIterator<T> {
     /// The array element yielded by this cursor.
     type Item = T;
+    /// This cursor is its own iterable representation.
+    type Iterator = ArrayIterator<T>;
 
     /// Array whose elements are visited by this cursor.
     private source: [T],
@@ -2319,6 +2359,22 @@ typeConstructor ArrayIterator<T> {
     @mustUse("The yielded item or exhausted state must be inspected.")
     fn next() -> IteratorStep<T>;
 
+    /// Returns this cursor without restarting array traversal.
+    ///
+    /// The returned value aliases the same structural-version and index state.
+    ///
+    /// # Example
+    ///
+    /// Preserve an array cursor's position
+    ///
+    /// ```splitscript
+    /// let cursor = [10, 20].iterator()
+    /// let sameCursor = cursor.iterator()
+    /// ```
+    @mustUse("The iterator cursor is otherwise discarded.")
+    fn iterator() -> ArrayIterator<T> {
+        return self
+    }
 }
 
 /// Iterates over a set while detecting structural mutation.
@@ -2332,10 +2388,12 @@ typeConstructor ArrayIterator<T> {
 ///
 /// fn inspect(iterator: SetIterator<String>) {}
 /// ```
-@capabilities(Iterator)
+@capabilities(Iterator, Iterable)
 typeConstructor SetIterator<T: Equatable> {
     /// The set element yielded by this cursor.
     type Item = T;
+    /// This cursor is its own iterable representation.
+    type Iterator = SetIterator<T>;
 
     /// Set whose elements are visited by this cursor.
     private source: Set<T>,
@@ -2361,6 +2419,23 @@ typeConstructor SetIterator<T: Equatable> {
     @mustUse("The yielded item or exhausted state must be inspected.")
     fn next() -> IteratorStep<T>;
 
+    /// Returns this cursor without restarting set traversal.
+    ///
+    /// The returned value aliases the same structural-version and index state.
+    ///
+    /// # Example
+    ///
+    /// Preserve a set cursor's position
+    ///
+    /// ```splitscript
+    /// let values = Set.new<String>()
+    /// let cursor = values.iterator()
+    /// let sameCursor = cursor.iterator()
+    /// ```
+    @mustUse("The iterator cursor is otherwise discarded.")
+    fn iterator() -> SetIterator<T> {
+        return self
+    }
 }
 
 /// Iterates from an included integer start to an excluded end.
@@ -2374,10 +2449,12 @@ typeConstructor SetIterator<T: Equatable> {
 ///
 /// fn inspect(iterator: ExclusiveRangeIterator<u16>) {}
 /// ```
-@capabilities(Iterator)
+@capabilities(Iterator, Iterable)
 typeConstructor ExclusiveRangeIterator<T: Integer> {
     /// The integer yielded by this cursor.
     type Item = T;
+    /// This cursor is its own iterable representation.
+    type Iterator = ExclusiveRangeIterator<T>;
 
     /// Next integer to yield.
     private current: T,
@@ -2400,6 +2477,22 @@ typeConstructor ExclusiveRangeIterator<T: Integer> {
     @mustUse("The yielded item or exhausted state must be inspected.")
     fn next() -> IteratorStep<T>;
 
+    /// Returns this cursor without restarting range traversal.
+    ///
+    /// The returned value aliases the same current endpoint state.
+    ///
+    /// # Example
+    ///
+    /// Preserve an exclusive-range cursor's position
+    ///
+    /// ```splitscript
+    /// let cursor = (1..<3).iterator()
+    /// let sameCursor = cursor.iterator()
+    /// ```
+    @mustUse("The iterator cursor is otherwise discarded.")
+    fn iterator() -> ExclusiveRangeIterator<T> {
+        return self
+    }
 }
 
 /// Iterates from an included integer start through an included end.
@@ -2413,10 +2506,12 @@ typeConstructor ExclusiveRangeIterator<T: Integer> {
 ///
 /// fn inspect(iterator: InclusiveRangeIterator<u16>) {}
 /// ```
-@capabilities(Iterator)
+@capabilities(Iterator, Iterable)
 typeConstructor InclusiveRangeIterator<T: Integer> {
     /// The integer yielded by this cursor.
     type Item = T;
+    /// This cursor is its own iterable representation.
+    type Iterator = InclusiveRangeIterator<T>;
 
     /// Next integer to yield.
     private current: T,
@@ -2441,6 +2536,22 @@ typeConstructor InclusiveRangeIterator<T: Integer> {
     @mustUse("The yielded item or exhausted state must be inspected.")
     fn next() -> IteratorStep<T>;
 
+    /// Returns this cursor without restarting range traversal.
+    ///
+    /// The returned value aliases the same current and finished state.
+    ///
+    /// # Example
+    ///
+    /// Preserve an inclusive-range cursor's position
+    ///
+    /// ```splitscript
+    /// let cursor = (1..=3).iterator()
+    /// let sameCursor = cursor.iterator()
+    /// ```
+    @mustUse("The iterator cursor is otherwise discarded.")
+    fn iterator() -> InclusiveRangeIterator<T> {
+        return self
+    }
 }
 
 /// Supports deserialization from process memory.

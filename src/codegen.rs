@@ -675,30 +675,28 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         &update_context,
     );
     codes.push(&body);
-    for closure in wasm_ir
-        .closures()
-        .filter(|closure| closure_polls.contains_key(&closure.expression))
-    {
-        let layout = async_frames
-            .closure(closure.expression)
-            .expect("async closure poll functions have frame layouts");
+    for (instance, layout) in async_frames.closures() {
+        let closure = wasm_ir
+            .closure(instance.expression)
+            .expect("async closure instances have bodies");
         let body = compile_async_closure_poll(
+            instance,
             closure,
-            closure_polls[&closure.expression],
+            closure_polls[instance],
             layout,
             &runtime,
         );
         codes.push(&body);
     }
-    for closure in wasm_ir
-        .closures()
-        .filter(|closure| closure_functions.contains_key(&closure.expression))
-    {
-        if let Some(layout) = async_frames.closure(closure.expression) {
-            let body = compile_async_closure_init(closure, layout, &lowering);
+    for instance in reachability.closure_instances() {
+        let closure = wasm_ir
+            .closure(instance.expression)
+            .expect("reachable closure instances have bodies");
+        if let Some(layout) = async_frames.closure(instance) {
+            let body = compile_async_closure_init(instance, closure, layout, &lowering);
             codes.push(&body);
         } else {
-            let body = compile_closure(closure, closure_functions[&closure.expression], &lowering);
+            let body = compile_closure(instance, closure, closure_functions[instance], &lowering);
             codes.push(&body);
         }
     }

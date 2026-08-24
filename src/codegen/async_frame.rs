@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     ast::{ActionKind, ExprId, Program, ValueId},
-    semantic::{FunctionInstance, SemanticModel},
+    semantic::{ClosureInstance, FunctionInstance, SemanticModel},
     wasm_ir::{self, BodyOwner, LocalPurpose, TemporaryId},
 };
 
@@ -133,12 +133,18 @@ impl AsyncFrameLayout {
     }
 
     pub(super) fn for_closure(
+        instance: &ClosureInstance,
         closure: &wasm_ir::ClosureBody,
         program: &wasm_ir::Program,
         semantics: &SemanticModel,
     ) -> Self {
         let completion = closure
             .completion
+            .map(|completion| {
+                instance.owner.as_ref().map_or(completion, |owner| {
+                    semantics.specialize_type(owner, completion)
+                })
+            })
             .map(|completion| semantic_type(completion, semantics))
             .filter(|completion| completion.has_runtime_value());
         let captures = closure
@@ -157,7 +163,7 @@ impl AsyncFrameLayout {
             &closure.frame_temporaries,
             program,
             semantics,
-            None,
+            instance.owner.as_ref(),
             2,
             captures.chain(parameters),
         )
@@ -310,8 +316,8 @@ pub(super) struct AsyncFrameLayouts {
     pub attach: Option<AsyncFrameLayout>,
     functions: HashMap<FunctionInstance, AsyncFrameLayout>,
     ordered_functions: Vec<FunctionInstance>,
-    closures: HashMap<ExprId, AsyncFrameLayout>,
-    ordered_closures: Vec<ExprId>,
+    closures: HashMap<ClosureInstance, AsyncFrameLayout>,
+    ordered_closures: Vec<ClosureInstance>,
     intrinsics: HashMap<IntrinsicFutureInstance, IntrinsicFutureLayout>,
     ordered_intrinsics: Vec<IntrinsicFutureInstance>,
 }
@@ -357,17 +363,17 @@ impl AsyncFrameLayouts {
         }
         let mut closures = HashMap::new();
         let mut ordered_closures = Vec::new();
-        for expression in reachability.closure_expressions() {
+        for instance in reachability.closure_instances() {
             let closure = wasm_ir
-                .closure(expression)
+                .closure(instance.expression)
                 .expect("reachable closures have Wasm IR bodies");
             if closure.completion.is_none() {
                 continue;
             }
-            ordered_closures.push(expression);
+            ordered_closures.push(instance.clone());
             closures.insert(
-                expression,
-                AsyncFrameLayout::for_closure(closure, wasm_ir, semantics),
+                instance.clone(),
+                AsyncFrameLayout::for_closure(instance, closure, wasm_ir, semantics),
             );
         }
         let mut intrinsics = HashMap::new();
@@ -429,13 +435,13 @@ impl AsyncFrameLayouts {
                 wasm_ir,
             );
         }
-        for expression in reachability.closure_expressions() {
+        for instance in reachability.closure_instances() {
             let closure = wasm_ir
-                .closure(expression)
+                .closure(instance.expression)
                 .expect("reachable closures have Wasm IR bodies");
             wasm_ir::Visitor::visit_block(
                 &mut DirectIntrinsicPolls {
-                    owner: None,
+                    owner: instance.owner.as_ref(),
                     values: &mut directly_polled,
                 },
                 &closure.entry,
@@ -570,15 +576,16 @@ impl AsyncFrameLayouts {
             .map(|instance| (instance, &self.functions[instance]))
     }
 
-    pub(super) fn closure(&self, expression: ExprId) -> Option<&AsyncFrameLayout> {
-        self.closures.get(&expression)
+    pub(super) fn closure(&self, instance: &ClosureInstance) -> Option<&AsyncFrameLayout> {
+        self.closures.get(instance)
     }
 
-    pub(super) fn closures(&self) -> impl ExactSizeIterator<Item = (ExprId, &AsyncFrameLayout)> {
+    pub(super) fn closures(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&ClosureInstance, &AsyncFrameLayout)> {
         self.ordered_closures
             .iter()
-            .copied()
-            .map(|expression| (expression, &self.closures[&expression]))
+            .map(|instance| (instance, &self.closures[instance]))
     }
 
     pub(super) fn intrinsic(

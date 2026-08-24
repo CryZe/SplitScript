@@ -30,6 +30,23 @@ pub struct FunctionInstance {
     pub signature: Vec<TypeId>,
 }
 
+/// A closure expression as instantiated inside one concrete generic function.
+///
+/// The same source closure can have different parameter, result, capture, and
+/// frame layouts for different function specializations. Top-level action and
+/// state-expression closures have no function owner.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ClosureInstance {
+    pub owner: Option<FunctionInstance>,
+    pub expression: ExprId,
+}
+
+impl ClosureInstance {
+    pub fn new(owner: Option<FunctionInstance>, expression: ExprId) -> Self {
+        Self { owner, expression }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FunctionAssociatedProjection {
     pub receiver: TypeId,

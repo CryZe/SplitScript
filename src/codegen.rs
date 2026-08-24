@@ -362,6 +362,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         wasm_ir,
         &reachability,
         memory_layouts,
+        &dependencies,
     );
     let strings = &static_data.strings;
     let signatures = &static_data.signatures;
@@ -548,6 +549,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         settings_map: &setting_indices,
         gc: &gc,
         memory: static_data.layout(),
+        float_format: static_data.float_format.as_ref(),
     };
     let helper_bodies = runtime_helpers::compile_runtime(&runtime_helpers, &helper_inputs);
     let equality_bodies = runtime_helpers::compile_equality(

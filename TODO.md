@@ -356,11 +356,6 @@ semantic-review evidence, not as a conformance corpus.
   Generated traversal is depth-bounded so mutable recursive container graphs
   render `<cycle>` instead of hanging an autosplitter. Equality, Display, and
   Debug share canonical aggregate metadata and deterministic backend planning.
-- [ ] Complete default `Debug` / `Display` coverage for floating-point values
-  with a correctly rounded, round-trippable runtime formatter rather than an
-  approximate decimal conversion. Once that formatter exists, make `f32` and
-  `f64` participate in the same derived-container rules as the other scalar
-  types.
 - [x] Let catalog-defined structural method contracts be satisfied by ordinary
   user methods without `impl` ceremony. `fn Type.toString() -> String` and
   `fn Type.debugString() -> String` satisfy `Display` and `Debug`

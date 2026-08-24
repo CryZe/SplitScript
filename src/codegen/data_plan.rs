@@ -11,11 +11,18 @@ use crate::{
 
 use super::memory_plan::{LinearMemoryLayout, ScratchRequirements};
 use super::reachability::Reachability;
+use super::{dependencies::BackendDependencies, runtime_helpers::float_format};
 
 pub(super) struct StaticData {
     pub strings: StringPool,
     pub signatures: SignaturePool,
+    pub float_format: Option<FloatFormatData>,
     layout: LinearMemoryLayout,
+}
+
+pub(super) struct FloatFormatData {
+    pub pow10_significands: i32,
+    bytes: Vec<u8>,
 }
 
 pub(super) struct StringPool {
@@ -45,6 +52,7 @@ impl StaticData {
         wasm_ir: &wasm_ir::Program,
         reachability: &Reachability,
         memory: &MemoryLayouts,
+        dependencies: &BackendDependencies,
     ) -> Self {
         let state = program.state.as_ref().expect("checked programs have state");
         let mut strings = StringPool::new();
@@ -119,10 +127,16 @@ impl StaticData {
                 signatures.intern(signature);
             }
         }
+        let float_format_bytes = if dependencies.uses_float_format() {
+            float_format::pow10_significands_bytes()
+        } else {
+            Vec::new()
+        };
         let static_data_len = strings
             .bytes
             .len()
             .checked_add(signatures.bytes.len())
+            .and_then(|length| length.checked_add(float_format_bytes.len()))
             .expect("static data length must fit the host address space");
         let layout = LinearMemoryLayout::plan(
             static_data_len,
@@ -142,9 +156,15 @@ impl StaticData {
                     .expect("string data must fit WebAssembly linear memory"),
             )
             .expect("string data must fit WebAssembly linear memory");
+        let float_format = (!float_format_bytes.is_empty()).then(|| FloatFormatData {
+            pow10_significands: i32::try_from(signatures.base as usize + signatures.bytes.len())
+                .expect("float-format data address must fit wasm32"),
+            bytes: float_format_bytes,
+        });
         Self {
             strings,
             signatures,
+            float_format,
             layout,
         }
     }
@@ -156,7 +176,12 @@ impl StaticData {
     pub fn encode(&self) -> DataSection {
         debug_assert_eq!(
             self.layout.static_data_end(),
-            u64::from(self.signatures.base) + self.signatures.bytes.len() as u64
+            u64::from(self.signatures.base)
+                + self.signatures.bytes.len() as u64
+                + self
+                    .float_format
+                    .as_ref()
+                    .map_or(0, |float_format| float_format.bytes.len() as u64)
         );
         let mut section = DataSection::new();
         if !self.strings.bytes.is_empty() {
@@ -171,6 +196,13 @@ impl StaticData {
                 0,
                 &ConstExpr::i32_const(self.signatures.base as i32),
                 self.signatures.bytes.iter().copied(),
+            );
+        }
+        if let Some(float_format) = &self.float_format {
+            section.active(
+                0,
+                &ConstExpr::i32_const(float_format.pow10_significands),
+                float_format.bytes.iter().copied(),
             );
         }
         section

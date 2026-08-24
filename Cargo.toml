@@ -33,6 +33,7 @@ splitscript-stdlib-loader = { path = "crates/splitscript-stdlib-loader" }
 gimli = { version = "0.33.0", default-features = false, features = ["read"] }
 wasmparser = "0.254.0"
 wasmtime = { version = "45.0.3", default-features = false, features = ["cranelift", "gc", "gc-drc", "runtime", "std"] }
+zmij = "1.0.21"
 
 [[bin]]
 name = "splitc"

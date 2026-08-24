@@ -17,6 +17,7 @@ const UTF16_OUTPUT_CAPACITY: u32 = UTF16_INPUT_CAPACITY / 2 * 3;
 const SIGNATURE_SCAN_WINDOW: u32 = 4_096;
 pub(super) const FLOAT_PARSE_DIGITS: u32 = 768;
 const FLOAT_PARSE_TEMP: u32 = 800;
+const FLOAT_FORMAT_CAPACITY: u32 = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ScratchRequirements {
@@ -134,6 +135,8 @@ pub(super) struct RuntimeScratch {
     pub float_parse_digits: ScratchRegion,
     /// Temporary multiplication output that coexists with the digit buffer.
     pub float_parse_temp: ScratchRegion,
+    /// Temporary ASCII output and significand digits used by float Display.
+    pub float_format: ScratchRegion,
     pub utf16_input: ScratchRegion,
     pub utf16_output: ScratchRegion,
     /// Unbounded host-call staging starts after all immutable data. Helpers
@@ -245,6 +248,11 @@ impl LinearMemoryLayout {
                 bank_1_start,
                 FLOAT_PARSE_TEMP as i32,
             ),
+            float_format: ScratchRegion::new(
+                ScratchAliasClass::Primary,
+                0,
+                FLOAT_FORMAT_CAPACITY as i32,
+            ),
             host_strings_start,
         };
         assert_eq!(scratch.abi_read.start() % 8, 0);
@@ -255,6 +263,7 @@ impl LinearMemoryLayout {
             scratch.c_string,
             scratch.native_utf8,
             scratch.float_parse_digits,
+            scratch.float_format,
             scratch.utf16_input,
         ] {
             assert_eq!(region.alias_class(), ScratchAliasClass::Primary);

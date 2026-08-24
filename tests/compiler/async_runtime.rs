@@ -263,6 +263,67 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
 }
 
 #[test]
+fn float_display_matches_zmij_for_special_boundaries_and_sampled_bits() {
+    use std::fmt::Write as _;
+
+    let mut source = String::from("state \"game.exe\" {}\nsetup {\n");
+    let mut expected = Vec::new();
+    let mut buffer = zmij::Buffer::new();
+    let f32_bits = [
+        0x0000_0000,
+        0x8000_0000,
+        0x0000_0001,
+        0x007f_ffff,
+        0x0080_0000,
+        0x3f80_0000,
+        0x3fc0_0000,
+        0x7f7f_ffff,
+        0x7f80_0000,
+        0xff80_0000,
+        0x7fc0_0000,
+    ];
+    for bits in f32_bits {
+        writeln!(source, "print(f32.fromBits(0x{bits:08x}u32))").unwrap();
+        expected.push(buffer.format(f32::from_bits(bits)).to_owned());
+    }
+    let f64_bits = [
+        0x0000_0000_0000_0000,
+        0x8000_0000_0000_0000,
+        0x0000_0000_0000_0001,
+        0x000f_ffff_ffff_ffff,
+        0x0010_0000_0000_0000,
+        0x3ff0_0000_0000_0000,
+        0x3ff8_0000_0000_0000,
+        0x7fef_ffff_ffff_ffff,
+        0x7ff0_0000_0000_0000,
+        0xfff0_0000_0000_0000,
+        0x7ff8_0000_0000_0000,
+    ];
+    for bits in f64_bits {
+        writeln!(source, "print(f64.fromBits(0x{bits:016x}u64))").unwrap();
+        expected.push(buffer.format(f64::from_bits(bits)).to_owned());
+    }
+    let mut state = 0x4d59_5df4_d0f3_3173u64;
+    for _ in 0..32 {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        let bits32 = state as u32;
+        writeln!(source, "print(f32.fromBits(0x{bits32:08x}u32))").unwrap();
+        expected.push(buffer.format(f32::from_bits(bits32)).to_owned());
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        writeln!(source, "print(f64.fromBits(0x{state:016x}u64))").unwrap();
+        expected.push(buffer.format(f64::from_bits(state)).to_owned());
+    }
+    source.push_str("}\n");
+
+    let (store, _) = execute_with_mock_host(&source);
+    assert_eq!(store.data().messages, expected);
+}
+
+#[test]
 fn closures_execute_through_typed_function_references_and_capture_values() {
     let source = r#"
         state "game.exe" {}
@@ -1143,6 +1204,10 @@ fn structural_debug_formats_nested_containers_and_text_unambiguously() {
             name: String,
         }
 
+        record Measurement {
+            value: f32,
+        }
+
         fn Custom.toString() -> String {
             return `display:{self.name}`
         }
@@ -1177,6 +1242,10 @@ fn structural_debug_formats_nested_containers_and_text_unambiguously() {
             let end: IteratorStep<u32> = End
             print(end)
             print([v"1.2.3.4"])
+            print([1.5 as f32, 2.0 as f32])
+            let measurement: f64? = 1.25
+            print(measurement)
+            print(Measurement { value: -0.0 as f32 })
         }
     "#;
     let (mut store, instance) = execute_with_mock_host(source);
@@ -1206,6 +1275,9 @@ fn structural_debug_formats_nested_containers_and_text_unambiguously() {
             "Item(\n    4,\n)",
             "End",
             "[\n    1.2.3.4,\n]",
+            "[\n    1.5,\n    2.0,\n]",
+            "Some(\n    1.25,\n)",
+            "Measurement {\n    value: -0.0,\n}",
         ]
     );
 }

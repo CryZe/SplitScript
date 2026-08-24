@@ -6,7 +6,7 @@ use crate::{
     intrinsic_registry::{self, DependencyRoot, RuntimeHelperId},
     semantic::SemanticModel,
     stdlib::{CoreTypeId, Implementation, IntrinsicId, StdlibItemId, StdlibTypeId},
-    types::TypeKind,
+    types::{TypeId, TypeKind},
     wasm_ir,
 };
 
@@ -102,11 +102,12 @@ impl BackendDependencies {
                     .map_or(ty, |instance| semantics.specialize_type(instance, ty))
             };
             match &expression.kind {
-                wasm_ir::ExpressionKind::Call { target, .. }
-                    if matches!(
-                        reachability.resolved_call_target(owner.as_ref(), expression.id, target),
-                        wasm_ir::CallTarget::Intrinsic { .. }
-                    ) =>
+                wasm_ir::ExpressionKind::Call {
+                    target, arguments, ..
+                } if matches!(
+                    reachability.resolved_call_target(owner.as_ref(), expression.id, target),
+                    wasm_ir::CallTarget::Intrinsic { .. }
+                ) =>
                 {
                     let wasm_ir::CallTarget::Intrinsic {
                         item, intrinsic, ..
@@ -116,6 +117,22 @@ impl BackendDependencies {
                     };
                     dependencies.stdlib_items.insert(*item);
                     dependencies.require_intrinsic(*intrinsic);
+                    for displayed in intrinsic_registry::contract(*intrinsic)
+                        .dependency_roots
+                        .iter()
+                        .filter_map(|root| match root {
+                            DependencyRoot::DisplayArgument(index) => {
+                                arguments.get(usize::from(*index))
+                            }
+                            DependencyRoot::Helper(_) | DependencyRoot::HostImport(_) => None,
+                        })
+                    {
+                        let ty = wasm_ir
+                            .expression(*displayed)
+                            .expect("intrinsic arguments belong to Wasm IR")
+                            .ty;
+                        dependencies.require_display_helpers(specialize(ty), program, semantics);
+                    }
                 }
                 wasm_ir::ExpressionKind::InterpolatedString(parts) => {
                     dependencies.require(RuntimeHelperId::JoinStrings);
@@ -126,15 +143,10 @@ impl BackendDependencies {
                         } => *string_conversion_source,
                         wasm_ir::InterpolatedPart::Text(_) => None,
                     }) {
-                        dependencies.require(
-                            if matches!(
-                                semantics.types().kind(specialize(source)),
-                                TypeKind::Builtin(CoreTypeId::Char)
-                            ) {
-                                RuntimeHelperId::FormatChar
-                            } else {
-                                RuntimeHelperId::FormatI64
-                            },
+                        dependencies.require_display_helpers(
+                            specialize(source),
+                            program,
+                            semantics,
                         );
                     }
                 }
@@ -149,16 +161,7 @@ impl BackendDependencies {
                         .expect("cast operand belongs to Wasm IR")
                         .ty;
                     let source = specialize(source);
-                    dependencies.require(
-                        if matches!(
-                            semantics.types().kind(source),
-                            TypeKind::Builtin(CoreTypeId::Char)
-                        ) {
-                            RuntimeHelperId::FormatChar
-                        } else {
-                            RuntimeHelperId::FormatI64
-                        },
-                    );
+                    dependencies.require_display_helpers(source, program, semantics);
                 }
                 _ => {}
             }
@@ -174,8 +177,9 @@ impl BackendDependencies {
             dependencies.require(RuntimeHelperId::WrapDebugEntry);
             dependencies.require(RuntimeHelperId::WrapDebugVariant);
             dependencies.require(RuntimeHelperId::QuoteDebugString);
-            dependencies.require(RuntimeHelperId::FormatI64);
-            dependencies.require(RuntimeHelperId::FormatChar);
+            for ty in reachability.derived_debugs() {
+                dependencies.require_display_helpers(ty, program, semantics);
+            }
         }
 
         if !program.settings.is_empty() {
@@ -242,6 +246,10 @@ impl BackendDependencies {
         self.helpers.contains(&helper)
     }
 
+    pub fn uses_float_format(&self) -> bool {
+        self.uses_helper(RuntimeHelperId::FormatF32) || self.uses_helper(RuntimeHelperId::FormatF64)
+    }
+
     pub fn helpers(&self) -> impl Iterator<Item = RuntimeHelperId> + '_ {
         runtime_helper_registry::DESCRIPTORS
             .iter()
@@ -258,6 +266,77 @@ impl BackendDependencies {
             match root {
                 DependencyRoot::Helper(helper) => self.require(*helper),
                 DependencyRoot::HostImport(import) => self.require_import(*import),
+                DependencyRoot::DisplayArgument(_) => {}
+            }
+        }
+    }
+
+    fn require_display_helpers(
+        &mut self,
+        ty: TypeId,
+        program: &Program,
+        semantics: &SemanticModel,
+    ) {
+        let mut pending = vec![ty];
+        let mut visited = BTreeSet::new();
+        while let Some(ty) = pending.pop() {
+            if !visited.insert(ty) {
+                continue;
+            }
+            match semantics.types().kind(ty) {
+                TypeKind::Builtin(CoreTypeId::F32) => self.require(RuntimeHelperId::FormatF32),
+                TypeKind::Builtin(CoreTypeId::F64) => self.require(RuntimeHelperId::FormatF64),
+                TypeKind::Builtin(CoreTypeId::Char) => self.require(RuntimeHelperId::FormatChar),
+                TypeKind::Builtin(
+                    CoreTypeId::I8
+                    | CoreTypeId::U8
+                    | CoreTypeId::I16
+                    | CoreTypeId::U16
+                    | CoreTypeId::I32
+                    | CoreTypeId::U32
+                    | CoreTypeId::I64
+                    | CoreTypeId::U64
+                    | CoreTypeId::Address,
+                ) => self.require(RuntimeHelperId::FormatI64),
+                TypeKind::Record(record) => {
+                    let declaration = &program.records[record.index()];
+                    pending.extend(
+                        declaration
+                            .fields
+                            .iter()
+                            .filter_map(|field| semantics.record_field_type(field.id)),
+                    );
+                }
+                TypeKind::Enum(enumeration) => {
+                    let declaration = &program.enums[enumeration.index()];
+                    pending.extend(
+                        declaration
+                            .variants
+                            .iter()
+                            .filter_map(|variant| semantics.enum_variant_payload(variant.id)),
+                    );
+                }
+                TypeKind::Array { element, .. }
+                | TypeKind::Option { value: element, .. }
+                | TypeKind::Result { value: element, .. }
+                | TypeKind::Set { element, .. }
+                | TypeKind::Range { bound: element, .. } => pending.push(*element),
+                TypeKind::Application { arguments, .. } => {
+                    pending.extend(arguments.iter().copied())
+                }
+                TypeKind::Callable {
+                    parameters, result, ..
+                } => {
+                    pending.extend(parameters.iter().copied());
+                    pending.push(*result);
+                }
+                TypeKind::Async { value, .. } => pending.push(*value),
+                TypeKind::Error
+                | TypeKind::Builtin(_)
+                | TypeKind::Standard(_)
+                | TypeKind::StateSnapshot
+                | TypeKind::SettingsView
+                | TypeKind::GenericParameter { .. } => {}
             }
         }
     }

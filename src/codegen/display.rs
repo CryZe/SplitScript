@@ -594,6 +594,18 @@ fn emit_value(function: &mut Function, ty: TypeId, backend: Type, inputs: &Displ
         function.instruction(&Instruction::Call(*display));
         return;
     }
+    if backend == Type::F32 {
+        function.instruction(&Instruction::Call(
+            inputs.helpers.function(RuntimeHelperId::FormatF32),
+        ));
+        return;
+    }
+    if backend == Type::F64 {
+        function.instruction(&Instruction::Call(
+            inputs.helpers.function(RuntimeHelperId::FormatF64),
+        ));
+        return;
+    }
     emit_integer_to_i64(function, backend);
     function
         .instruction(&Instruction::I32Const(10))

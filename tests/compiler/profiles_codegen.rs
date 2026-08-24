@@ -197,6 +197,48 @@ fn structural_display_helpers_are_materialized_only_when_reachable() {
 }
 
 #[test]
+fn float_format_helpers_and_tables_are_materialized_by_reachable_width() {
+    use splitscript::{BuildProfile, CompilerOptions};
+
+    let compile_debug = |body: &str| {
+        splitscript::compile_with_options(
+            &format!(r#"state "game.exe" {{}} setup {{ {body} }}"#),
+            CompilerOptions {
+                profile: BuildProfile::Debug,
+                ..CompilerOptions::default()
+            },
+        )
+        .expect("the float-format reachability probe should compile")
+    };
+    let names = |wasm: &[u8]| {
+        debug_function_names(wasm)
+            .expect("debug names should exist")
+            .1
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<_>>()
+    };
+
+    let integer = names(&compile_debug("print(1u32)"));
+    assert!(integer.iter().all(|name| !name.contains("FormatF")));
+    assert!(integer.iter().all(|name| !name.contains("Zmij")));
+
+    let f32_names = names(&compile_debug("print(1.25 as f32)"));
+    assert!(f32_names.iter().any(|name| name.ends_with("::FormatF32")));
+    assert!(f32_names.iter().all(|name| !name.ends_with("::FormatF64")));
+    assert!(
+        f32_names
+            .iter()
+            .all(|name| !name.ends_with("::ZmijMul192Hi128"))
+    );
+
+    let f64_names = names(&compile_debug("print(1.25)"));
+    for suffix in ["::FormatF64", "::ZmijDecimalF64", "::ZmijMul192Hi128"] {
+        assert!(f64_names.iter().any(|name| name.ends_with(suffix)));
+    }
+}
+
+#[test]
 fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
     use splitscript::{BuildProfile, CompilerOptions};
 

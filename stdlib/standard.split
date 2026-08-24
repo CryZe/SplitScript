@@ -1619,7 +1619,10 @@ capability Signed<T: Numeric> {
 /// Identifies floating-point types.
 ///
 /// Floating-point constraints accept f32 and f64 values and imply signed
-/// numeric behavior.
+/// numeric behavior together with [`Debug`] and [`Display`]. Their default
+/// text is the shortest correctly rounded decimal that parses back to the
+/// original value. Signed zero remains visible, and non-finite values use
+/// `NaN`, `inf`, and `-inf`.
 ///
 /// # Example
 ///
@@ -1627,9 +1630,10 @@ capability Signed<T: Numeric> {
 ///
 /// ```splitscript
 /// let nearest = 2.5.round()
+/// let text = nearest as String
 /// ```
 @behavior(declared)
-capability Float<T: Signed> {
+capability Float<T: Signed + Debug> {
     /// Returns the principal square root of this value.
     ///
     /// Positive finite values produce a non-negative result. Positive infinity

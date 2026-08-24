@@ -39,6 +39,10 @@ pub(crate) enum RuntimeHelperId {
     PrintString,
     TimerSetVariable,
     FormatI64,
+    ZmijMul128,
+    ZmijMul192Hi128,
+    ZmijDecimalF32,
+    ZmijDecimalF64,
     FormatChar,
     QuoteDebugString,
     StringEquality,
@@ -61,6 +65,8 @@ pub(crate) enum RuntimeHelperId {
     ReadRelative32,
     ScanRelative32TargetRange,
     StringFromMemory,
+    FormatF32,
+    FormatF64,
     Utf16StringFromMemory,
     ReadUtf8String,
     ReadUtf16LeString,
@@ -186,6 +192,10 @@ impl RuntimeHelperId {
 pub(crate) enum DependencyRoot {
     Helper(RuntimeHelperId),
     HostImport(AbiImportId),
+    /// The zero-based source argument is converted through its resolved
+    /// `Display` implementation. Backend planning uses the concrete call-site
+    /// type to retain only the scalar formatters reachable through that value.
+    DisplayArgument(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -444,20 +454,12 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
 
 const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
     use AbiImportId as Host;
-    use DependencyRoot::{Helper, HostImport};
+    use DependencyRoot::{DisplayArgument, Helper, HostImport};
     use RuntimeHelperId as Runtime;
 
     match id {
-        IntrinsicId::Print => &[
-            Helper(Runtime::PrintString),
-            Helper(Runtime::FormatI64),
-            Helper(Runtime::FormatChar),
-        ],
-        IntrinsicId::TimerSetVariable => &[
-            Helper(Runtime::TimerSetVariable),
-            Helper(Runtime::FormatI64),
-            Helper(Runtime::FormatChar),
-        ],
+        IntrinsicId::Print => &[Helper(Runtime::PrintString), DisplayArgument(0)],
+        IntrinsicId::TimerSetVariable => &[Helper(Runtime::TimerSetVariable), DisplayArgument(1)],
         IntrinsicId::IntegerToStringRadix => &[Helper(Runtime::FormatI64)],
         IntrinsicId::RuntimeSetTickRate => &[HostImport(Host::RuntimeSetTickRate)],
         IntrinsicId::SettingsEnabled => &[Helper(Runtime::SettingsEnabled)],

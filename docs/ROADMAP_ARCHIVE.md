@@ -3965,3 +3965,15 @@ language catalog document the refinement rule.
   receiver-type hover, while ensuring compiler-provided values without source
   declarations cannot leave dangling source-definition references that block
   language documentation.
+
+# 2026-08-24: shortest floating-point Display and Debug
+
+- Made `f32` and `f64` implement `Debug` and therefore `Display`, including
+  recursive formatting inside records, arrays, options, results, and the other
+  conditionally debug-printable containers.
+- Adapted zmij's correctness-first Schubfach conversion to lazily emitted
+  Wasm-GC runtime helpers. The power-of-ten data and width-specific formatter
+  are included only when reachable float formatting needs them, with no new
+  host ABI and no approximate intermediate decimal conversion.
+- Covered signed zero, subnormals, finite boundaries, infinities, NaN, and
+  deterministic sampled bit patterns against `zmij::Buffer` at runtime.

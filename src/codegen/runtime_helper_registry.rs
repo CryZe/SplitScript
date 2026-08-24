@@ -42,6 +42,7 @@ pub(super) enum HelperValueType {
     I32,
     I64,
     F64,
+    F32,
     String,
     Standard(StdlibTypeId),
     StringArray,
@@ -81,7 +82,7 @@ macro_rules! helper {
     };
 }
 
-use HelperValueType::{F64, I32, I64, I64Array, Standard, String as StringValue, StringArray};
+use HelperValueType::{F32, F64, I32, I64, I64Array, Standard, String as StringValue, StringArray};
 
 /// Canonical function-index and body order. Dependencies always occur before
 /// the helpers that call them, which is validated by the registry tests.
@@ -89,6 +90,10 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(PrintString, (StringValue) -> (), deps [], imports [RuntimePrintMessage], build_print_string),
     helper!(TimerSetVariable, (StringValue, StringValue) -> (), deps [], imports [TimerSetVariable], build_timer_set_variable),
     helper!(FormatI64, (I64, I32, I32) -> (StringValue), deps [], imports [], build_format_i64),
+    helper!(ZmijMul128, (I64, I64) -> (I64, I64), deps [], imports [], build_zmij_mul128),
+    helper!(ZmijMul192Hi128, (I64, I64, I64) -> (I64, I64), deps [ZmijMul128], imports [], build_zmij_mul192_hi128),
+    helper!(ZmijDecimalF32, (I64, I32, I32) -> (I64, I32), deps [ZmijMul128], imports [], build_zmij_decimal_f32),
+    helper!(ZmijDecimalF64, (I64, I32, I32) -> (I64, I32), deps [ZmijMul192Hi128], imports [], build_zmij_decimal_f64),
     helper!(FormatChar, (I32) -> (StringValue), deps [], imports [], build_format_char),
     helper!(QuoteDebugString, (StringValue, I32) -> (StringValue), deps [], imports [], build_quote_debug_string),
     helper!(StringEquality, (StringValue, StringValue) -> (I32), deps [], imports [], build_string_equality),
@@ -111,6 +116,8 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(ReadRelative32, (I64, I64) -> (I64), deps [], imports [ProcessRead], build_read_relative32),
     helper!(ScanRelative32TargetRange, (I64, I64, I64, I32, I32, I32, I64, I64) -> (I64), deps [ScanProcessRange, ReadRelative32], imports [], build_scan_relative32_target_range),
     helper!(StringFromMemory, (I32, I32) -> (StringValue), deps [], imports [], build_string_from_memory),
+    helper!(FormatF32, (F32) -> (StringValue), deps [ZmijDecimalF32, StringFromMemory], imports [], build_format_f32),
+    helper!(FormatF64, (F64) -> (StringValue), deps [ZmijDecimalF64, StringFromMemory], imports [], build_format_f64),
     helper!(Utf16StringFromMemory, (I32) -> (StringValue), deps [], imports [], build_utf16_string_from_memory),
     helper!(ReadUtf8String, (I64, I64, I32) -> (StringValue), deps [StringFromMemory], imports [ProcessRead], build_read_utf8_string),
     helper!(ReadUtf16LeString, (I64, I64, I32) -> (StringValue), deps [Utf16StringFromMemory], imports [ProcessRead], build_read_utf16_le_string),
@@ -213,6 +220,7 @@ fn collect_root_effects(
             }
         }
         DependencyRoot::HostImport(import) => collect_abi_effects(import, effects, errors),
+        DependencyRoot::DisplayArgument(_) => {}
     }
 }
 
@@ -247,6 +255,7 @@ pub(super) fn resolve_signature(
     let resolve = |ty| match ty {
         HelperValueType::I32 => ValType::I32,
         HelperValueType::I64 => ValType::I64,
+        HelperValueType::F32 => ValType::F32,
         HelperValueType::F64 => ValType::F64,
         HelperValueType::String => gc.val_type(Type::Standard(StdlibTypeId::String)),
         HelperValueType::Standard(standard) => gc.val_type(Type::Standard(standard)),
@@ -287,6 +296,7 @@ fn required_array_layout(
         HelperValueType::I64Array => Type::I64,
         HelperValueType::I32
         | HelperValueType::I64
+        | HelperValueType::F32
         | HelperValueType::F64
         | HelperValueType::String
         | HelperValueType::Standard(_) => return None,

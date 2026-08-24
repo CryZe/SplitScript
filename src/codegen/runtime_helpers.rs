@@ -11,6 +11,7 @@ use crate::{
     types::ResolvedArrayType,
 };
 
+use super::data_plan::FloatFormatData;
 use super::data_plan::StringPool;
 use super::imports::Abi;
 use super::memory_plan::LinearMemoryLayout;
@@ -19,6 +20,7 @@ use super::{GcLayout, RuntimeHelperPlan, SettingStorage, Type, settings, try_arr
 
 mod decimal_conversion;
 mod equality;
+pub(super) mod float_format;
 mod float_parse;
 mod gba;
 mod gcn;
@@ -45,6 +47,7 @@ pub(super) struct RuntimeHelperInputs<'a> {
     pub settings_map: &'a HashMap<ValueId, SettingStorage>,
     pub gc: &'a GcLayout,
     pub memory: LinearMemoryLayout,
+    pub float_format: Option<&'a FloatFormatData>,
 }
 
 pub(super) fn compile_runtime(
@@ -80,6 +83,52 @@ pub(super) fn build_timer_set_variable(inputs: &RuntimeHelperInputs<'_>) -> Func
 
 pub(super) fn build_format_i64(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_format_i64(inputs.gc)
+}
+
+pub(super) fn build_zmij_mul128(_inputs: &RuntimeHelperInputs<'_>) -> Function {
+    float_format::compile_mul128()
+}
+
+pub(super) fn build_zmij_mul192_hi128(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    float_format::compile_mul192_hi128(inputs.plan.function(RuntimeHelperId::ZmijMul128))
+}
+
+pub(super) fn build_zmij_decimal_f32(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    float_format::compile_decimal_f32(
+        inputs
+            .float_format
+            .expect("float helpers require their static data")
+            .pow10_significands,
+        inputs.plan.function(RuntimeHelperId::ZmijMul128),
+    )
+}
+
+pub(super) fn build_zmij_decimal_f64(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    float_format::compile_decimal_f64(
+        inputs
+            .float_format
+            .expect("float helpers require their static data")
+            .pow10_significands,
+        inputs.plan.function(RuntimeHelperId::ZmijMul192Hi128),
+    )
+}
+
+pub(super) fn build_format_f32(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    float_format::compile_format_f32(
+        inputs.plan.function(RuntimeHelperId::ZmijDecimalF32),
+        inputs.plan.function(RuntimeHelperId::StringFromMemory),
+        inputs.memory.scratch().float_format,
+        inputs.gc,
+    )
+}
+
+pub(super) fn build_format_f64(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    float_format::compile_format_f64(
+        inputs.plan.function(RuntimeHelperId::ZmijDecimalF64),
+        inputs.plan.function(RuntimeHelperId::StringFromMemory),
+        inputs.memory.scratch().float_format,
+        inputs.gc,
+    )
 }
 
 pub(super) fn build_format_char(inputs: &RuntimeHelperInputs<'_>) -> Function {

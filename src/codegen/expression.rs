@@ -4931,6 +4931,18 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
             function.instruction(&Instruction::Call(*display));
             return;
         }
+        if source == Type::F32 {
+            function.instruction(&Instruction::Call(
+                context.runtime_helpers.function(RuntimeHelperId::FormatF32),
+            ));
+            return;
+        }
+        if source == Type::F64 {
+            function.instruction(&Instruction::Call(
+                context.runtime_helpers.function(RuntimeHelperId::FormatF64),
+            ));
+            return;
+        }
         emit_integer_to_i64(function, source);
         function
             .instruction(&Instruction::I32Const(10))

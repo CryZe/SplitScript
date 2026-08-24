@@ -1688,7 +1688,7 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         splitscript::compiler::stdlib::CoreTypeId::F64,
         splitscript::compiler::stdlib::StdlibCapabilityId::Float,
     ));
-    assert!(!library.core_type_has_capability(
+    assert!(library.core_type_has_capability(
         splitscript::compiler::stdlib::CoreTypeId::F64,
         splitscript::compiler::stdlib::StdlibCapabilityId::Display,
     ));

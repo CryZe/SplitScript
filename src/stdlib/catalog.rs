@@ -310,9 +310,7 @@ mod tests {
             library.capability_implies(StdlibCapabilityId::Integer, StdlibCapabilityId::Equatable)
         );
         assert!(library.capability_implies(StdlibCapabilityId::Float, StdlibCapabilityId::Numeric));
-        assert!(
-            !library.capability_implies(StdlibCapabilityId::Float, StdlibCapabilityId::Display)
-        );
+        assert!(library.capability_implies(StdlibCapabilityId::Float, StdlibCapabilityId::Display));
         assert_eq!(
             library.minimal_capabilities(&[
                 StdlibCapabilityId::Integer,

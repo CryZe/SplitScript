@@ -30,6 +30,18 @@ pub struct FunctionInstance {
     pub signature: Vec<TypeId>,
 }
 
+/// A source function materialized as a value of one concrete callable type.
+///
+/// The target function and callable layout are both part of the identity: the
+/// backend needs a small captureless adapter because ordinary source functions
+/// do not receive the environment parameter used by callable GC objects. `ty`
+/// is the fully resolved callable type, including its nominal GC layout.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FunctionValueInstance {
+    pub function: FunctionInstance,
+    pub ty: TypeId,
+}
+
 /// A closure expression as instantiated inside one concrete generic function.
 ///
 /// The same source closure can have different parameter, result, capture, and
@@ -303,6 +315,7 @@ pub struct SemanticModel {
     expression_types: HashMap<ExprId, TypeId>,
     calls: HashMap<ExprId, ResolvedCall>,
     dynamic_calls: HashMap<ExprId, DynamicCallCallee>,
+    function_values: HashMap<ExprId, FunctionInstance>,
     values: HashMap<ExprId, ResolvedValue>,
     value_types: HashMap<ValueId, TypeId>,
     function_results: HashMap<FunctionId, TypeId>,
@@ -362,6 +375,10 @@ impl SemanticModel {
 
     pub fn dynamic_call_callee(&self, expression: ExprId) -> Option<DynamicCallCallee> {
         self.dynamic_calls.get(&expression).copied()
+    }
+
+    pub fn function_value(&self, expression: ExprId) -> Option<&FunctionInstance> {
+        self.function_values.get(&expression)
     }
 
     pub fn call(&self, expression: ExprId) -> Option<&ResolvedCall> {
@@ -1153,6 +1170,13 @@ pub(crate) enum PendingResolvedCall {
     },
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PendingFunctionValue {
+    pub function: FunctionId,
+    pub type_arguments: Vec<Type>,
+    pub signature: Vec<Type>,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct PendingValueConversion {
     kind: ValueConversionKind,
@@ -1166,6 +1190,7 @@ pub(crate) struct SemanticBuilder {
     expression_types: HashMap<ExprId, Type>,
     calls: HashMap<ExprId, PendingResolvedCall>,
     dynamic_calls: HashMap<ExprId, DynamicCallCallee>,
+    function_values: HashMap<ExprId, PendingFunctionValue>,
     values: HashMap<ExprId, ResolvedValue>,
     value_types: HashMap<ValueId, Type>,
     function_results: HashMap<FunctionId, Type>,
@@ -1275,6 +1300,18 @@ impl SemanticBuilder {
         debug_assert!(
             previous.is_none(),
             "dynamic call expression IDs must be unique"
+        );
+    }
+
+    pub(crate) fn resolve_function_value(
+        &mut self,
+        expression: ExprId,
+        function: PendingFunctionValue,
+    ) {
+        let previous = self.function_values.insert(expression, function);
+        debug_assert!(
+            previous.is_none(),
+            "function-value expression IDs must be unique"
         );
     }
 
@@ -1503,6 +1540,7 @@ impl SemanticBuilder {
             expression_types,
             calls,
             dynamic_calls,
+            function_values,
             values,
             value_types,
             function_results,
@@ -1637,6 +1675,29 @@ impl SemanticBuilder {
                 .collect();
             (calls, assignment_calls)
         };
+        let function_values = function_values
+            .into_iter()
+            .map(|(expression, function)| {
+                let type_arguments = function
+                    .type_arguments
+                    .into_iter()
+                    .map(|ty| types.intern_inferred(resolve(ty), constructed))
+                    .collect();
+                let signature = function
+                    .signature
+                    .into_iter()
+                    .map(|ty| types.intern_inferred(resolve(ty), constructed))
+                    .collect();
+                (
+                    expression,
+                    FunctionInstance {
+                        function: function.function,
+                        type_arguments,
+                        signature,
+                    },
+                )
+            })
+            .collect();
         let expression_types = expression_types
             .into_iter()
             .map(|(expression, ty)| (expression, types.intern_inferred(resolve(ty), constructed)))
@@ -1740,6 +1801,7 @@ impl SemanticBuilder {
             expression_types,
             calls,
             dynamic_calls,
+            function_values,
             values,
             value_types,
             function_results,

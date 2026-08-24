@@ -564,12 +564,18 @@ const CLOSURE_EXAMPLES: &[Example] = &[
         CLOSURE_SOURCE,
     ),
 ];
-focused_example!(
-    CALLABLE_TYPE_EXAMPLE,
-    "Accept a callable value",
-    "fn apply(value: u32, transform: (u32) -> u32) -> u32 {\n    return transform(value)\n}",
-    CLOSURE_SOURCE
-);
+const CALLABLE_TYPE_EXAMPLE: &[Example] = &[
+    Example::checked(
+        "Accept a callable value",
+        "fn apply(value: u32, transform: (u32) -> u32) -> u32 {\n    return transform(value)\n}",
+        CLOSURE_SOURCE,
+    ),
+    Example::checked(
+        "Store a named function",
+        "fn increment(value: u32) -> u32 {\n    return value + 1\n}\n\nlet later = increment\nprint(later(4))",
+        CLOSURE_SOURCE,
+    ),
+];
 focused_example!(
     RECORD_EXAMPLE,
     "Group related values",
@@ -1109,7 +1115,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "(Parameter, ...) -> Result",
         "Describes a first-class callable value.",
-        "The parameter list may be empty and the result may be any ordinary type, including [`async`] `T`. A value of this type is invoked with ordinary call syntax. [`closure`] expressions infer this type from either direction; named function values will use the same abstraction once supported. Callable values are intentionally not [`Equatable`].",
+        "The parameter list may be empty and the result may be any ordinary type, including [`async`] `T`. A value of this type is invoked with ordinary call syntax. Both named [`fn`] values and [`closure`] expressions infer this type from either direction and share one runtime representation. Merely storing either kind of callable does not execute its effects. Callable values are intentionally not [`Equatable`].",
         CALLABLE_TYPE_EXAMPLE
     ),
     language_item!(

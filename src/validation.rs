@@ -1193,6 +1193,7 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
                 }
             }
             Some(ExpressionResolution::DynamicCall(_)) => {}
+            Some(ExpressionResolution::FunctionValue(_)) => {}
             Some(ExpressionResolution::EnumConstructor {
                 variant: ResolvedEnumVariantId::Source(variant),
             }) => {

@@ -118,6 +118,106 @@ fn higher_order_helpers_infer_callable_parameters_from_usage() {
 }
 
 #[test]
+fn named_functions_share_the_first_class_callable_representation() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn increment(value: u32) -> u32 {
+            return value + 1
+        }
+
+        fn identity(value) {
+            return value
+        }
+
+        fn apply(value, transform) {
+            return transform(value)
+        }
+
+        whileAttached {
+            let incrementLater = increment
+            print(incrementLater(4))
+            print(apply(8u32, identity))
+            for value in [1u32, 2].iterator().map(increment) {
+                print(value)
+            }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("named functions should coerce to inferred callable values");
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("named function adapters should produce valid WebAssembly GC");
+}
+
+#[test]
+fn async_named_functions_are_callable_values() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn afterTick(value: u32) -> async u32 {
+            await nextTick()
+            return value
+        }
+
+        onAttach {
+            let later = afterTick
+            print(await later(4))
+        }
+    "#;
+    let wasm = splitscript::compile(source).expect("async functions should be callable values");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("async named function adapters should validate");
+}
+
+#[test]
+fn named_function_values_remain_function_editor_symbols() {
+    let source = r#"state "game.exe" {}
+fn increment(value: u32) -> u32 {
+    return value + 1
+}
+whileAttached {
+    let later = increment
+    print(later(4))
+}"#;
+    let mut database = CompilerDatabase::new(source);
+    database
+        .check()
+        .expect("function-value fixture should check");
+    let declaration = source.find("increment(value").unwrap();
+    let reference = source.rfind("increment").unwrap();
+    let definition = database
+        .definition_at(reference)
+        .unwrap()
+        .expect("function values should navigate to their declarations");
+    let DefinitionTarget::Source(definition) = definition else {
+        panic!("named function values should have source definitions");
+    };
+    assert_eq!(definition.span.start, declaration);
+    assert!(matches!(definition.id, SourceDefinitionId::Function(_)));
+    assert_eq!(database.references_at(reference, true).unwrap().len(), 2);
+    assert_eq!(database.rename_at(reference, "advance").unwrap().len(), 2);
+    let highlights = database.semantic_highlights().unwrap();
+    let highlight = highlights
+        .highlights()
+        .iter()
+        .find(|highlight| highlight.span.start == reference)
+        .expect("function-value reference should be highlighted");
+    assert_eq!(highlight.kind, SemanticTokenKind::Function);
+    let hover = database
+        .hover(reference)
+        .unwrap()
+        .expect("function values should retain function hover documentation");
+    assert!(
+        hover.markdown.contains("fn increment"),
+        "{}",
+        hover.markdown
+    );
+}
+
+#[test]
 fn closure_parameters_are_first_class_editor_symbols() {
     let source = r#"state "game.exe" {}
 whileAttached {

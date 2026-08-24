@@ -247,6 +247,7 @@ fn root_value_for_resolution(
         ExpressionResolution::Call(call) => call.receiver()?.path().map(|(root, _)| root),
         ExpressionResolution::Member { .. }
         | ExpressionResolution::DynamicCall(_)
+        | ExpressionResolution::FunctionValue(_)
         | ExpressionResolution::RecordLiteral { .. }
         | ExpressionResolution::EnumConstructor { .. } => None,
     }

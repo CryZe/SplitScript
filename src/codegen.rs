@@ -68,8 +68,8 @@ use self::module_start::compile_start;
 use self::runtime_helper_registry::RuntimeHelperPlan;
 use self::script_functions::{
     LocalPlanOptions, compile_action, compile_async_closure_init, compile_async_function_init,
-    compile_closure, compile_read, compile_state_transform, compile_user_function,
-    plan_wasm_locals,
+    compile_closure, compile_function_value_adapter, compile_read, compile_state_transform,
+    compile_user_function, plan_wasm_locals,
 };
 use self::set_functions::SetFunctions;
 use self::update::{ProviderAttach, StatePollFunctions, compile_update};
@@ -417,6 +417,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         sets: set_functions,
         users: user_functions,
         closures: closure_functions,
+        function_values: function_value_functions,
         closure_polls,
         intrinsic_futures,
         displays: display_functions,
@@ -469,6 +470,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         runtime_helpers: &runtime_helpers,
         functions: &user_functions,
         closures: &closure_functions,
+        function_values: &function_value_functions,
         closure_polls: &closure_polls,
         intrinsic_futures: &intrinsic_futures,
         display_functions: &display_functions,
@@ -700,6 +702,10 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             codes.push(&body);
         }
     }
+    for instance in reachability.function_value_instances() {
+        let body = compile_function_value_adapter(instance, &lowering);
+        codes.push(&body);
+    }
 
     let debug_artifacts = debug_recorder.as_ref().map(|recorder| {
         debug_artifacts::DebugArtifactPlan::new(debug_artifacts::DebugArtifactInputs {
@@ -721,7 +727,11 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             functions,
             globals,
             referenced_functions: {
-                let mut functions = closure_functions.values().copied().collect::<Vec<_>>();
+                let mut functions = closure_functions
+                    .values()
+                    .chain(function_value_functions.values())
+                    .copied()
+                    .collect::<Vec<_>>();
                 functions.sort_unstable();
                 functions
             },

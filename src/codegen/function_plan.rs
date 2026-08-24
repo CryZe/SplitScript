@@ -5,7 +5,7 @@ use wasm_encoder::{FunctionSection, HeapType, RefType, TypeSection, ValType};
 use crate::{
     ast::{ActionKind, EnumDecl, Program},
     equality::EqualityCapabilities,
-    semantic::{ClosureInstance, FunctionInstance, SemanticModel},
+    semantic::{ClosureInstance, FunctionInstance, FunctionValueInstance, SemanticModel},
     stdlib::{RuntimeRepresentation, StandardLibrary},
     structural::{StructuralTypeId, StructuralTypes},
     types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, ResolvedSetType},
@@ -31,6 +31,7 @@ pub(super) struct FunctionPlan<'a> {
     pub sets: SetFunctions,
     pub users: HashMap<FunctionInstance, UserFunctionPlan>,
     pub closures: HashMap<ClosureInstance, u32>,
+    pub function_values: HashMap<FunctionValueInstance, u32>,
     pub closure_polls: HashMap<ClosureInstance, u32>,
     pub intrinsic_futures: HashMap<IntrinsicFutureInstance, u32>,
     pub displays: DisplayFunctions,
@@ -511,6 +512,26 @@ pub(super) fn encode<'a>(
         ));
         closures.insert(instance.clone(), function_index);
     }
+    let mut function_values = HashMap::new();
+    for instance in reachability.function_value_instances() {
+        let crate::types::TypeKind::Callable { layout, .. } = semantics.types().kind(instance.ty)
+        else {
+            unreachable!("function-value adapters have callable layouts")
+        };
+        section.function(gc.callable_function_index(*layout));
+        let function_index = next_function;
+        next_function += 1;
+        let function = program
+            .functions
+            .iter()
+            .find(|function| function.id == instance.function.function)
+            .expect("reachable function values have source declarations");
+        debug_names.push((
+            function_index,
+            format!("__splitscript::function-value::{}", function.name),
+        ));
+        function_values.insert(instance.clone(), function_index);
+    }
 
     FunctionPlan {
         section,
@@ -520,6 +541,7 @@ pub(super) fn encode<'a>(
         sets: set_functions,
         users,
         closures,
+        function_values,
         closure_polls,
         intrinsic_futures,
         displays,

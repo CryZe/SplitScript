@@ -129,6 +129,9 @@ pub(super) fn syntax_expression_resolution(
     if let Some(call) = semantics.call(expression.id) {
         return Some(ExpressionResolution::Call(call.clone()));
     }
+    if let Some(function) = semantics.function_value(expression.id) {
+        return Some(ExpressionResolution::FunctionValue(function.clone()));
+    }
     match &expression.kind {
         ExprKind::Path(_) => Some(ExpressionResolution::ValuePath {
             root: semantics.value(expression.id),

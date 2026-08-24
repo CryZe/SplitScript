@@ -300,6 +300,11 @@ fn definition_for_resolution(
                 .map(DefinitionTarget::Source),
             crate::semantic::DynamicCallCallee::Expression(_) => None,
         },
+        ExpressionResolution::FunctionValue(function) => (segment == 0)
+            .then(|| definitions.get(SourceDefinitionId::Function(function.function)))
+            .flatten()
+            .cloned()
+            .map(DefinitionTarget::Source),
         ExpressionResolution::EnumConstructor { variant } => {
             if segment + 1 == analysis.segments.len() {
                 match variant {
@@ -395,6 +400,9 @@ fn source_definition_for_resolution(
             }
             crate::semantic::DynamicCallCallee::Expression(_) => None,
         },
+        ExpressionResolution::FunctionValue(function) => {
+            (segment == 0).then_some(SourceDefinitionId::Function(function.function))
+        }
         ExpressionResolution::EnumConstructor { variant } => (segment + 1 == segment_count)
             .then_some(match variant {
                 ResolvedEnumVariantId::Source(variant) => {

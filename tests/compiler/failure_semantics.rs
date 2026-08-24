@@ -1669,6 +1669,33 @@ fn closure_effects_remain_latent_until_the_callable_is_invoked() {
 }
 
 #[test]
+fn named_function_effects_remain_latent_until_invocation() {
+    let declarations = r#"
+        state "game.exe" {}
+
+        fn readValue(fallback: u32) {
+            return process.read<u32>(0x100) else fallback
+        }
+    "#;
+    let stored =
+        format!("{declarations}\nsetup {{\n    let reader = readValue\n    print(\"ready\")\n}}");
+    splitscript::compile(&stored).expect("storing an effectful named function must not execute it");
+
+    let invoked = format!(
+        "{declarations}\nsetup {{\n    let reader = readValue\n    print(reader(0u32))\n}}"
+    );
+    let diagnostics = splitscript::compile(&invoked)
+        .expect_err("invoking an effectful named function must apply its effects");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message
+                == "`callable` requires an attached process and is unavailable in `setup`"
+        }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn higher_order_effects_are_instantiated_per_call_site() {
     let source = r#"
         state "game.exe" {}

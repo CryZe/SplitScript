@@ -145,6 +145,7 @@ pub enum ExpressionResolution {
     },
     Call(ResolvedCall),
     DynamicCall(DynamicCallCallee),
+    FunctionValue(FunctionInstance),
     RecordLiteral {
         record: ResolvedRecordId,
         fields: Vec<ResolvedRecordFieldId>,
@@ -861,6 +862,8 @@ impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
             Some(ExpressionResolution::Call(call.clone()))
         } else if let Some(callee) = self.semantics.dynamic_call_callee(expression.id) {
             Some(ExpressionResolution::DynamicCall(callee))
+        } else if let Some(function) = self.semantics.function_value(expression.id) {
+            Some(ExpressionResolution::FunctionValue(function.clone()))
         } else {
             match &expression.kind {
                 ExprKind::Path(_) => Some(ExpressionResolution::ValuePath {

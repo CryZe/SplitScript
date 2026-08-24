@@ -11,7 +11,8 @@ use crate::{
     inference::{Requirements, Type},
     migration::{ASL_SETTINGS_LOOKUP_DIAGNOSTIC, migration_diagnostic},
     semantic::{
-        ResolvedEnumVariantId, ResolvedRecordFieldId, ResolvedRecordId, ResolvedWrapperPattern,
+        PendingFunctionValue, ResolvedEnumVariantId, ResolvedRecordFieldId, ResolvedRecordId,
+        ResolvedWrapperPattern,
     },
     signature::parse_signature,
     stdlib::{RuntimeRepresentation, StdlibCapabilityId, StdlibTypeId},
@@ -1165,6 +1166,33 @@ impl Checker {
                         unreachable!("resolved enum paths have two segments")
                     };
                     self.enum_constructor(expr.id, enumeration, variant, &[], expected, expr.span)?
+                } else if let [name] = path.as_slice()
+                    && self.binding(name).is_none()
+                    && let Some(signature) = self.declarations.functions.get(name).cloned()
+                {
+                    let signature = if self.active_function_component.contains(&signature.id) {
+                        signature.monomorphic_call()
+                    } else {
+                        signature.instantiate(&mut self.inference)
+                    };
+                    let callable = Type::Callable(
+                        self.inference
+                            .callable_type(signature.params.clone(), signature.result),
+                    );
+                    self.semantics.resolve_function_value(
+                        expr.id,
+                        PendingFunctionValue {
+                            function: signature.id,
+                            type_arguments: signature.type_arguments,
+                            signature: signature
+                                .params
+                                .iter()
+                                .copied()
+                                .chain([signature.result])
+                                .collect(),
+                        },
+                    );
+                    self.expect_expression(expr.id, callable, expected, expr.span)?
                 } else {
                     let resolution = self.path(path, expr.span, Some(expr.id))?;
                     if let Some(value) = resolution.value {

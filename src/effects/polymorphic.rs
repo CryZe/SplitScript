@@ -39,6 +39,7 @@ enum SymbolicValue {
         body: ExprId,
         captures: Vec<(ValueId, SymbolicValue)>,
     },
+    NamedFunction(FunctionId),
     Record {
         constructor: Option<StdlibTypeConstructorId>,
         fields: Vec<(ResolvedRecordFieldId, SymbolicValue)>,
@@ -96,7 +97,7 @@ impl SymbolicValue {
                 Self::Union(values) => {
                     Self::union(values.into_iter().map(|value| value.project(&[*field])))
                 }
-                Self::Closure { .. } | Self::Unknown => Self::Unknown,
+                Self::Closure { .. } | Self::NamedFunction(_) | Self::Unknown => Self::Unknown,
             };
         }
         value
@@ -123,6 +124,7 @@ impl SymbolicValue {
                     .map(|(id, value)| (*id, value.substitute(arguments, depth + 1)))
                     .collect(),
             },
+            Self::NamedFunction(function) => Self::NamedFunction(*function),
             Self::Record {
                 constructor,
                 fields,
@@ -465,7 +467,12 @@ impl<'a> Evaluator<'a> {
                 self.suspended_expression(*value)
             }
             TypedExpressionKind::Propagate { value, .. } => self.expression(*value),
-            TypedExpressionKind::Path(_) => self.value_path(id),
+            TypedExpressionKind::Path(_) => match &expression.resolution {
+                Some(ExpressionResolution::FunctionValue(function)) => {
+                    SymbolicValue::NamedFunction(function.function)
+                }
+                _ => self.value_path(id),
+            },
             TypedExpressionKind::Member { receiver, .. } => {
                 let receiver = self.expression(*receiver);
                 match &expression.resolution {
@@ -712,6 +719,17 @@ impl<'a> Evaluator<'a> {
                 let returned = SymbolicValue::union(child.returns.into_iter().chain([returned]));
                 (child.accumulator.finish(), returned)
             }
+            SymbolicValue::NamedFunction(function) => {
+                let Some(summary) = self.summaries.get(function.index()) else {
+                    return (
+                        FunctionOperationSemantics::default(),
+                        SymbolicValue::Unknown,
+                    );
+                };
+                let operation = self.instantiate_operation(&summary.operation, arguments);
+                let returned = summary.returned.substitute(arguments, 0);
+                (operation, returned)
+            }
             SymbolicValue::Union(values) => {
                 let mut accumulator = Accumulator::default();
                 let mut returned = Vec::new();
@@ -770,6 +788,7 @@ impl<'a> Evaluator<'a> {
                 accumulator.finish()
             }
             SymbolicValue::Closure { .. }
+            | SymbolicValue::NamedFunction(_)
             | SymbolicValue::Record { .. }
             | SymbolicValue::Unknown => FunctionOperationSemantics::default(),
         }

@@ -178,6 +178,9 @@ pub enum ExpressionKind {
         callee: crate::semantic::DynamicCallCallee,
         arguments: Vec<ExprId>,
     },
+    FunctionValue {
+        function: crate::semantic::FunctionInstance,
+    },
     Closure {
         closure: ExprId,
         parameters: Vec<ValueId>,
@@ -1084,13 +1087,20 @@ fn lower_expression(
             }
         }
         TypedExpressionKind::Path(_) => {
-            let Some(ExpressionResolution::ValuePath { root, members }) = &expression.resolution
-            else {
-                unreachable!("checked value paths have a typed-HIR resolution")
-            };
-            ExpressionKind::Path {
-                root: *root,
-                members: members.clone(),
+            if let Some(ExpressionResolution::FunctionValue(function)) = &expression.resolution {
+                ExpressionKind::FunctionValue {
+                    function: function.clone(),
+                }
+            } else {
+                let Some(ExpressionResolution::ValuePath { root, members }) =
+                    &expression.resolution
+                else {
+                    unreachable!("checked value paths have a typed-HIR resolution")
+                };
+                ExpressionKind::Path {
+                    root: *root,
+                    members: members.clone(),
+                }
             }
         }
         TypedExpressionKind::Member { receiver, .. } => {
@@ -1787,6 +1797,7 @@ fn closure_captures(
                 | Some(hir::ExpressionResolution::DynamicCall(
                     crate::semantic::DynamicCallCallee::Expression(_),
                 ))
+                | Some(hir::ExpressionResolution::FunctionValue(_))
                 | Some(hir::ExpressionResolution::RecordLiteral { .. })
                 | Some(hir::ExpressionResolution::EnumConstructor { .. })
                 | None => {}
@@ -3049,7 +3060,8 @@ fn map_expression_children(
         | ExpressionKind::Break(None)
         | ExpressionKind::Continue
         | ExpressionKind::Return(None)
-        | ExpressionKind::Path { .. } => kind,
+        | ExpressionKind::Path { .. }
+        | ExpressionKind::FunctionValue { .. } => kind,
         ExpressionKind::ValueBlock => kind,
         ExpressionKind::Loop => kind,
         ExpressionKind::InterpolatedString(parts) => ExpressionKind::InterpolatedString(

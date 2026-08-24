@@ -5,7 +5,7 @@ use crate::{
         ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, ExprId, OptionTypeId, Program, RecordId,
         ResultTypeId, TypeApplicationId,
     },
-    semantic::{ClosureInstance, FunctionInstance, SemanticModel},
+    semantic::{ClosureInstance, FunctionInstance, FunctionValueInstance, SemanticModel},
     stdlib::{
         IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibTypeId,
     },
@@ -18,6 +18,7 @@ pub(super) struct Reachability {
     functions: BTreeSet<FunctionInstance>,
     expressions: BTreeSet<ExprId>,
     closures: BTreeSet<ClosureInstance>,
+    function_values: BTreeSet<FunctionValueInstance>,
     expression_instances: BTreeSet<(Option<FunctionInstance>, ExprId)>,
     equality_records: BTreeSet<RecordId>,
     equality_standard_records: BTreeSet<StdlibTypeId>,
@@ -156,6 +157,22 @@ impl Reachability {
                         &mut pending_functions,
                     );
                 }
+            }
+            if let wasm_ir::ExpressionKind::FunctionValue { function } = &expression.kind {
+                let function = owner.as_ref().map_or(function.clone(), |owner| {
+                    semantics.specialize_function_instance(owner, function)
+                });
+                let ty = owner.as_ref().map_or(expression.ty, |owner| {
+                    semantics.specialize_type(owner, expression.ty)
+                });
+                let TypeKind::Callable { .. } = semantics.types().kind(ty) else {
+                    unreachable!("checked function values have callable types")
+                };
+                reachable.function_values.insert(FunctionValueInstance {
+                    function: function.clone(),
+                    ty,
+                });
+                pending_functions.push((None, function));
             }
             if let wasm_ir::ExpressionKind::Call { target, .. } = &expression.kind {
                 let capability_call =
@@ -581,6 +598,10 @@ impl Reachability {
 
     pub fn closure_instances(&self) -> impl Iterator<Item = &ClosureInstance> {
         self.closures.iter()
+    }
+
+    pub fn function_value_instances(&self) -> impl Iterator<Item = &FunctionValueInstance> {
+        self.function_values.iter()
     }
 
     pub fn requires_record_equality(&self, record: RecordId) -> bool {

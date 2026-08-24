@@ -103,6 +103,7 @@ pub(super) struct ExprContext<'a> {
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
     pub closures: &'a HashMap<crate::semantic::ClosureInstance, u32>,
+    pub function_values: &'a HashMap<crate::semantic::FunctionValueInstance, u32>,
     pub closure_polls: &'a HashMap<crate::semantic::ClosureInstance, u32>,
     pub closure_environment: Option<ClosureEnvironment<'a>>,
     pub intrinsic_futures: &'a HashMap<IntrinsicFutureInstance, u32>,
@@ -3055,6 +3056,24 @@ fn compile_expr_unconverted(
                     ty: AbstractHeapType::Any,
                 }));
             }
+            function.instruction(&Instruction::StructNew(
+                context.gc.index(Type::Callable(callable)),
+            ));
+        }
+        wasm_ir::ExpressionKind::FunctionValue { function: target } => {
+            let Type::Callable(callable) = ty else {
+                unreachable!("checked function values have callable types")
+            };
+            let target = context.called_instance(target);
+            let instance = crate::semantic::FunctionValueInstance {
+                function: target,
+                ty: context.expression_type_id(expression),
+            };
+            function.instruction(&Instruction::RefFunc(context.function_values[&instance]));
+            function.instruction(&Instruction::RefNull(HeapType::Abstract {
+                shared: false,
+                ty: AbstractHeapType::Any,
+            }));
             function.instruction(&Instruction::StructNew(
                 context.gc.index(Type::Callable(callable)),
             ));

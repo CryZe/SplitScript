@@ -51,6 +51,7 @@ pub(super) fn compile_read(
             runtime_helpers: lowering.runtime_helpers,
             functions: lowering.functions,
             closures: lowering.closures,
+            function_values: lowering.function_values,
             closure_polls: lowering.closure_polls,
             closure_environment: None,
             intrinsic_futures: lowering.intrinsic_futures,
@@ -315,6 +316,7 @@ pub(super) fn compile_state_transform(
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
         closures: lowering.closures,
+        function_values: lowering.function_values,
         closure_polls: lowering.closure_polls,
         closure_environment: None,
         intrinsic_futures: lowering.intrinsic_futures,
@@ -630,6 +632,7 @@ pub(super) fn compile_user_function(
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
         closures: lowering.closures,
+        function_values: lowering.function_values,
         closure_polls: lowering.closure_polls,
         closure_environment: None,
         intrinsic_futures: lowering.intrinsic_futures,
@@ -802,6 +805,7 @@ pub(super) fn compile_closure(
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
         closures: lowering.closures,
+        function_values: lowering.function_values,
         closure_polls: lowering.closure_polls,
         closure_environment: environment,
         intrinsic_futures: lowering.intrinsic_futures,
@@ -832,6 +836,34 @@ pub(super) fn compile_closure(
     if result.has_runtime_value() {
         function.instruction(&Instruction::Unreachable);
     }
+    function.instruction(&Instruction::End);
+    function
+}
+
+/// Bridges the environment-first callable ABI to an ordinary source function.
+/// Named function values are captureless, so local zero is deliberately
+/// ignored and every physical callable argument is forwarded unchanged.
+pub(super) fn compile_function_value_adapter(
+    instance: &crate::semantic::FunctionValueInstance,
+    lowering: &EmissionContext<'_>,
+) -> Function {
+    let crate::types::TypeKind::Callable { parameters, .. } =
+        lowering.semantics.types().kind(instance.ty)
+    else {
+        unreachable!("function-value adapters have callable layouts")
+    };
+    let mut function = Function::new([]);
+    let mut local = 1;
+    for parameter in parameters {
+        let parameter = semantic_type(*parameter, lowering.semantics);
+        if parameter.has_runtime_value() {
+            function.instruction(&Instruction::LocalGet(local));
+            local += 1;
+        }
+    }
+    function.instruction(&Instruction::Call(
+        lowering.functions[&instance.function].call,
+    ));
     function.instruction(&Instruction::End);
     function
 }
@@ -986,6 +1018,7 @@ pub(super) fn compile_action(
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
         closures: lowering.closures,
+        function_values: lowering.function_values,
         closure_polls: lowering.closure_polls,
         closure_environment: None,
         intrinsic_futures: lowering.intrinsic_futures,

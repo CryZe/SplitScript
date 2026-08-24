@@ -226,7 +226,8 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
         | ExpressionKind::Signature(_)
         | ExpressionKind::Temporary(_)
         | ExpressionKind::FallbackSuccess { .. }
-        | ExpressionKind::Path { .. } => {}
+        | ExpressionKind::Path { .. }
+        | ExpressionKind::FunctionValue { .. } => {}
         ExpressionKind::Member { receiver, .. } => visit(*receiver),
         ExpressionKind::Index { receiver, index } => {
             visit(*receiver);

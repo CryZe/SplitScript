@@ -173,6 +173,7 @@ fn emit_aggregate_global_initializers(
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
         closures: lowering.closures,
+        function_values: lowering.function_values,
         closure_polls: lowering.closure_polls,
         closure_environment: None,
         intrinsic_futures: lowering.intrinsic_futures,

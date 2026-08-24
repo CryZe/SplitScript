@@ -678,9 +678,10 @@ remaining work is product hardening and distribution.
   cannot poison a pure specialization. Function hover exposes which parameters
   are invoked or iterated. Ordinary lexical control flow is enforced: `return`
   belongs to the closure, while `break` and `continue` cannot target loops
-  outside it. Finish named function-to-callable conversion, keeping named
-  functions and closures on one callable abstraction rather than a
-  closure-only path.
+  outside it. Named functions and closures now share the same callable type,
+  typed GC representation, invocation path, and latent-effect analysis. A
+  captureless adapter bridges a named function's ordinary ABI to the callable
+  environment ABI without synthesizing source closures.
 - [ ] Complete remaining ordinary library gaps when a port needs them:
   immutable String operations beyond the corpus-proven P0 slice, additional
   numeric operations, and typed time operations proven useful by maintained

@@ -39,6 +39,7 @@ pub(super) struct EmissionContext<'a> {
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
     pub closures: &'a HashMap<crate::semantic::ClosureInstance, u32>,
+    pub function_values: &'a HashMap<crate::semantic::FunctionValueInstance, u32>,
     pub closure_polls: &'a HashMap<crate::semantic::ClosureInstance, u32>,
     pub intrinsic_futures: &'a HashMap<super::async_frame::IntrinsicFutureInstance, u32>,
     pub display_functions: &'a DisplayFunctions,

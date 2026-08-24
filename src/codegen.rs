@@ -753,6 +753,7 @@ fn resolved_intrinsic(target: &wasm_ir::CallTarget) -> Option<IntrinsicId> {
         | wasm_ir::CallTarget::UserMethod { .. }
         | wasm_ir::CallTarget::LibraryOverload { .. }
         | wasm_ir::CallTarget::CapabilityRequirement { .. }
+        | wasm_ir::CallTarget::DefaultDisplay { .. }
         | wasm_ir::CallTarget::ResultError { .. }
         | wasm_ir::CallTarget::OptionSome { .. }
         | wasm_ir::CallTarget::IteratorItem { .. }

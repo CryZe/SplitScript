@@ -102,6 +102,23 @@ impl BackendDependencies {
                     .map_or(ty, |instance| semantics.specialize_type(instance, ty))
             };
             match &expression.kind {
+                wasm_ir::ExpressionKind::Call { target, .. }
+                    if matches!(
+                        reachability.resolved_call_target(owner.as_ref(), expression.id, target),
+                        wasm_ir::CallTarget::DefaultDisplay { .. }
+                    ) =>
+                {
+                    let wasm_ir::CallTarget::DefaultDisplay { receiver_type, .. } =
+                        reachability.resolved_call_target(owner.as_ref(), expression.id, target)
+                    else {
+                        unreachable!()
+                    };
+                    dependencies.require_display_helpers(
+                        specialize(*receiver_type),
+                        program,
+                        semantics,
+                    );
+                }
                 wasm_ir::ExpressionKind::Call {
                     target, arguments, ..
                 } if matches!(

@@ -1298,6 +1298,10 @@ fn resolved_receiver<'a>(
             receiver_type: Some(receiver_type),
             ..
         } => (receiver, *receiver_type),
+        wasm_ir::CallTarget::DefaultDisplay {
+            receiver,
+            receiver_type,
+        } => (receiver, *receiver_type),
         _ => unreachable!("only method calls have receivers"),
     };
     (receiver, context.ty(receiver_type))
@@ -3178,6 +3182,15 @@ fn compile_expr_unconverted(
                 .expect("library overload calls resolve a hidden function");
                 function.instruction(&Instruction::Call(context.functions[&target].call));
             }
+            wasm_ir::CallTarget::DefaultDisplay { receiver_type, .. } => {
+                compile_receiver(function, target, context);
+                emit_display_value(
+                    function,
+                    context.ty(*receiver_type),
+                    context.type_id(*receiver_type),
+                    context,
+                );
+            }
             wasm_ir::CallTarget::Intrinsic { .. } => {
                 unreachable!("standard-library implementations have intrinsic IDs")
             }
@@ -4894,62 +4907,12 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
         if source == target {
             return;
         }
-        if source == Type::None {
-            emit_string_literal(function, "None", context.gc);
-            return;
-        }
-        if source == Type::Bool {
-            function.instruction(&Instruction::If(BlockType::Result(
-                context.gc.val_type(Type::Standard(StdlibTypeId::String)),
-            )));
-            emit_string_literal(function, "true", context.gc);
-            function.instruction(&Instruction::Else);
-            emit_string_literal(function, "false", context.gc);
-            function.instruction(&Instruction::End);
-            return;
-        }
-        if source == Type::Char {
-            function.instruction(&Instruction::Call(
-                context
-                    .runtime_helpers
-                    .function(RuntimeHelperId::FormatChar),
-            ));
-            return;
-        }
-        let source_type = context.expression_type_id(expression);
-        if let Some(display) = context.display_functions.custom.get(&source_type) {
-            let display = context.called_instance(display);
-            function.instruction(&Instruction::Call(context.functions[&display].call));
-            return;
-        }
-        if let Some(debug) = context.display_functions.custom_debug.get(&source_type) {
-            let debug = context.called_instance(debug);
-            function.instruction(&Instruction::Call(context.functions[&debug].call));
-            return;
-        }
-        if let Some(display) = context.display_functions.derived.get(&source_type) {
-            function.instruction(&Instruction::Call(*display));
-            return;
-        }
-        if source == Type::F32 {
-            function.instruction(&Instruction::Call(
-                context.runtime_helpers.function(RuntimeHelperId::FormatF32),
-            ));
-            return;
-        }
-        if source == Type::F64 {
-            function.instruction(&Instruction::Call(
-                context.runtime_helpers.function(RuntimeHelperId::FormatF64),
-            ));
-            return;
-        }
-        emit_integer_to_i64(function, source);
-        function
-            .instruction(&Instruction::I32Const(10))
-            .instruction(&Instruction::I32Const(source.is_signed() as i32))
-            .instruction(&Instruction::Call(
-                context.runtime_helpers.function(RuntimeHelperId::FormatI64),
-            ));
+        emit_display_value(
+            function,
+            source,
+            context.expression_type_id(expression),
+            context,
+        );
         return;
     }
 
@@ -5017,6 +4980,71 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
     } else if source != target {
         unreachable!("type checking rejected unsupported cast `{source:?} as {target:?}`");
     }
+}
+
+/// Converts an already-emitted value through the same lazy Display plan used
+/// by casts, interpolation, host output, and explicit `.toString()` calls.
+fn emit_display_value(
+    function: &mut Function,
+    source: Type,
+    source_type: TypeId,
+    context: &ExprContext<'_>,
+) {
+    if source == Type::None {
+        emit_string_literal(function, "None", context.gc);
+        return;
+    }
+    if source == Type::Bool {
+        function.instruction(&Instruction::If(BlockType::Result(
+            context.gc.val_type(Type::Standard(StdlibTypeId::String)),
+        )));
+        emit_string_literal(function, "true", context.gc);
+        function.instruction(&Instruction::Else);
+        emit_string_literal(function, "false", context.gc);
+        function.instruction(&Instruction::End);
+        return;
+    }
+    if source == Type::Char {
+        function.instruction(&Instruction::Call(
+            context
+                .runtime_helpers
+                .function(RuntimeHelperId::FormatChar),
+        ));
+        return;
+    }
+    if let Some(display) = context.display_functions.custom.get(&source_type) {
+        let display = context.called_instance(display);
+        function.instruction(&Instruction::Call(context.functions[&display].call));
+        return;
+    }
+    if let Some(debug) = context.display_functions.custom_debug.get(&source_type) {
+        let debug = context.called_instance(debug);
+        function.instruction(&Instruction::Call(context.functions[&debug].call));
+        return;
+    }
+    if let Some(display) = context.display_functions.derived.get(&source_type) {
+        function.instruction(&Instruction::Call(*display));
+        return;
+    }
+    if source == Type::F32 {
+        function.instruction(&Instruction::Call(
+            context.runtime_helpers.function(RuntimeHelperId::FormatF32),
+        ));
+        return;
+    }
+    if source == Type::F64 {
+        function.instruction(&Instruction::Call(
+            context.runtime_helpers.function(RuntimeHelperId::FormatF64),
+        ));
+        return;
+    }
+    emit_integer_to_i64(function, source);
+    function
+        .instruction(&Instruction::I32Const(10))
+        .instruction(&Instruction::I32Const(source.is_signed() as i32))
+        .instruction(&Instruction::Call(
+            context.runtime_helpers.function(RuntimeHelperId::FormatI64),
+        ));
 }
 
 fn emit_integer_to_i64(function: &mut Function, source: Type) {

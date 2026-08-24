@@ -253,6 +253,12 @@ pub enum CallTarget {
         receiver: ResolvedReceiver,
         receiver_type: TypeId,
     },
+    /// The compiler-provided fallback for `Display.toString`, selected after
+    /// generic capability dispatch reaches a concrete primitive or aggregate.
+    DefaultDisplay {
+        receiver: ResolvedReceiver,
+        receiver_type: TypeId,
+    },
     ResultError {
         result: ResultTypeId,
     },
@@ -1549,6 +1555,12 @@ pub(crate) fn resolve_capability_requirement(
                     unreachable!("capability dispatch must select an implementation")
                 }
             }
+        }
+        crate::capabilities::CapabilityMethodImplementation::DefaultDisplay => {
+            Some(CallTarget::DefaultDisplay {
+                receiver: receiver.clone(),
+                receiver_type,
+            })
         }
     }
 }
@@ -4788,7 +4800,11 @@ impl Visitor for LocalPlanner<'_> {
                         | Implementation::LibraryOverloads { .. } => None,
                     }
                 }
-                Some(crate::capabilities::CapabilityMethodImplementation::Source(_)) | None => None,
+                Some(
+                    crate::capabilities::CapabilityMethodImplementation::Source(_)
+                    | crate::capabilities::CapabilityMethodImplementation::DefaultDisplay,
+                )
+                | None => None,
             },
             _ => None,
         };

@@ -39,6 +39,9 @@ pub struct CapabilityAnalysis {
 pub(crate) enum CapabilityMethodImplementation {
     Source(FunctionId),
     Standard(StdlibItemId),
+    /// The compiler-provided fallback used when a value satisfies `Display`
+    /// through its primitive or structurally derived representation.
+    DefaultDisplay,
 }
 
 /// Source declarations and aggregate layouts reached by formatting a value.
@@ -410,7 +413,8 @@ impl CapabilityAnalysis {
             | TypeKind::Async { .. }
             | TypeKind::Callable { .. } => return None,
         };
-        self.standard_library
+        let standard = self
+            .standard_library
             .children_of(owner)
             .filter_map(|symbol| match symbol {
                 crate::stdlib::StdlibSymbolId::Item(item) => Some(item),
@@ -421,7 +425,12 @@ impl CapabilityAnalysis {
                 item.name == requirement.name
                     && item.implementation != Implementation::CapabilityRequirement
             })
-            .map(CapabilityMethodImplementation::Standard)
+            .map(CapabilityMethodImplementation::Standard);
+        if standard.is_some() {
+            return standard;
+        }
+        (requirement.id == StdlibItemId::DisplayToString && self.has_derived_display(ty, semantics))
+            .then_some(CapabilityMethodImplementation::DefaultDisplay)
     }
 
     pub fn structural_method_requirements(
@@ -520,7 +529,11 @@ impl CapabilityAnalysis {
                 let source_functions =
                     match self.resolve_method_requirement(root, requirement, semantics) {
                         Some(CapabilityMethodImplementation::Source(function)) => vec![function],
-                        Some(CapabilityMethodImplementation::Standard(_)) | None => Vec::new(),
+                        Some(
+                            CapabilityMethodImplementation::Standard(_)
+                            | CapabilityMethodImplementation::DefaultDisplay,
+                        )
+                        | None => Vec::new(),
                     };
                 return CapabilityDependencies {
                     source_functions,

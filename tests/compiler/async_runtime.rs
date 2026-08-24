@@ -324,6 +324,22 @@ fn float_display_matches_zmij_for_special_boundaries_and_sampled_bits() {
 }
 
 #[test]
+fn computed_infinity_can_be_converted_to_a_string_explicitly() {
+    let source = r#"
+        state "game.exe" {}
+
+        setup {
+            let inf = 1.0 / 0.0
+            let infStr = inf.toString()
+            print(infStr)
+        }
+    "#;
+
+    let (store, _) = execute_with_mock_host(source);
+    assert_eq!(store.data().messages, ["inf"]);
+}
+
+#[test]
 fn closures_execute_through_typed_function_references_and_capture_values() {
     let source = r#"
         state "game.exe" {}

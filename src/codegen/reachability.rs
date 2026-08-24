@@ -285,6 +285,7 @@ impl Reachability {
                     }
                     wasm_ir::CallTarget::Intrinsic { .. }
                     | wasm_ir::CallTarget::CapabilityRequirement { .. }
+                    | wasm_ir::CallTarget::DefaultDisplay { .. }
                     | wasm_ir::CallTarget::ResultError { .. }
                     | wasm_ir::CallTarget::OptionSome { .. }
                     | wasm_ir::CallTarget::IteratorItem { .. }
@@ -336,6 +337,7 @@ impl Reachability {
                     }));
                 }
                 wasm_ir::ExpressionKind::Call { target, arguments } => {
+                    let target = reachable.resolved_call_target(owner.as_ref(), id, target);
                     let converted = match target {
                         wasm_ir::CallTarget::Intrinsic {
                             intrinsic: IntrinsicId::Print,
@@ -347,6 +349,9 @@ impl Reachability {
                         } => arguments.get(1),
                         _ => None,
                     };
+                    if let wasm_ir::CallTarget::DefaultDisplay { receiver_type, .. } = target {
+                        display_sources.push(*receiver_type);
+                    }
                     if let Some(argument) = converted {
                         display_sources.push(
                             wasm_ir
@@ -485,6 +490,9 @@ impl Reachability {
                         } => {
                             type_roots.push(specialize(*dispatch_type));
                             type_roots.extend(receiver_type.map(specialize));
+                        }
+                        wasm_ir::CallTarget::DefaultDisplay { receiver_type, .. } => {
+                            type_roots.push(specialize(*receiver_type));
                         }
                         wasm_ir::CallTarget::UserFunction { .. }
                         | wasm_ir::CallTarget::CapabilityRequirement { .. }

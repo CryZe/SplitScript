@@ -191,6 +191,7 @@ fn called_function(
                     wasm_ir::resolve_library_overload(&target, None, semantics, library)
                 }
                 wasm_ir::CallTarget::Intrinsic { .. }
+                | wasm_ir::CallTarget::DefaultDisplay { .. }
                 | wasm_ir::CallTarget::ResultError { .. }
                 | wasm_ir::CallTarget::OptionSome { .. }
                 | wasm_ir::CallTarget::IteratorItem { .. }
@@ -201,6 +202,7 @@ fn called_function(
             }
         }
         wasm_ir::CallTarget::Intrinsic { .. }
+        | wasm_ir::CallTarget::DefaultDisplay { .. }
         | wasm_ir::CallTarget::ResultError { .. }
         | wasm_ir::CallTarget::OptionSome { .. }
         | wasm_ir::CallTarget::IteratorItem { .. }
@@ -263,6 +265,9 @@ fn materialize_expression_types(
                 for ty in std::iter::once(*receiver_type).chain(signature.iter().copied()) {
                     materialize_type(semantics, instance, ty, ids, constructed);
                 }
+            }
+            wasm_ir::CallTarget::DefaultDisplay { receiver_type, .. } => {
+                materialize_type(semantics, instance, *receiver_type, ids, constructed);
             }
             wasm_ir::CallTarget::UserFunction { .. }
             | wasm_ir::CallTarget::ResultError { .. }

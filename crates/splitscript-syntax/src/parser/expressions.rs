@@ -455,6 +455,7 @@ impl Parser<'_> {
         }
         if self.at(&TokenKind::LBrace) {
             let block = self.block()?;
+            let block = self.normalize_value_block(block);
             return Ok(self.value_block(block));
         }
         if self.eat(&TokenKind::Bang).is_some() {
@@ -1418,16 +1419,67 @@ impl Parser<'_> {
             return Ok(self.new_expr(ExprKind::Error, span));
         }
         let block = self.block()?;
+        Ok(self.parsed_value_block_expression(block))
+    }
+
+    /// Finishes a block parsed in expression position.
+    ///
+    /// The statement parser deliberately accepts `if` without `else`, so a
+    /// leading `if` is initially represented as a statement. Once the entire
+    /// block is available, an `if ... else ...` in tail position is
+    /// unambiguously value-bearing. Normalize it here so every expression
+    /// context (state fields, locals, arguments, retry, and so on) shares the
+    /// same block semantics.
+    fn normalize_value_block(&mut self, mut block: crate::ast::Block) -> crate::ast::Block {
+        if let Some(statement) = block.statements.pop() {
+            match self.tail_statement_expression(statement) {
+                Ok(expression) => block
+                    .statements
+                    .push(crate::ast::Stmt::Expression(expression)),
+                Err(statement) => block.statements.push(statement),
+            }
+        }
+        block
+    }
+
+    fn parsed_value_block_expression(&mut self, block: crate::ast::Block) -> Expr {
+        let block = self.normalize_value_block(block);
         let span = block.span;
         if block.trailing_semicolon.is_none()
             && let [crate::ast::Stmt::Expression(expression)] = block.statements.as_slice()
         {
             let mut expression = expression.clone();
             expression.span = span;
-            Ok(expression)
+            expression
         } else {
-            Ok(self.value_block(block))
+            self.value_block(block)
         }
+    }
+
+    fn tail_statement_expression(
+        &mut self,
+        statement: crate::ast::Stmt,
+    ) -> Result<Expr, crate::ast::Stmt> {
+        let crate::ast::Stmt::If {
+            condition,
+            then_block,
+            else_block: Some(else_block),
+            span,
+        } = statement
+        else {
+            return Err(statement);
+        };
+
+        let then_expr = self.parsed_value_block_expression(then_block);
+        let else_expr = self.parsed_value_block_expression(else_block);
+        Ok(self.new_expr(
+            ExprKind::If {
+                condition: Box::new(condition),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr),
+            },
+            span,
+        ))
     }
 
     fn value_block(&mut self, block: crate::ast::Block) -> Expr {

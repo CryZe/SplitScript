@@ -1263,6 +1263,41 @@ fn value_blocks_explain_missing_values_function_returns_and_tail_semicolons() {
 }
 
 #[test]
+fn final_if_else_supplies_the_value_of_a_multi_statement_block() {
+    let source = r#"
+        state "game.exe" {
+            rstate: u8 = {
+                let cstate: u8 = process.read<u8>(0xf600)?
+                if cstate != 5 {
+                    0
+                } else {
+                    1
+                }
+            }
+        }
+
+        whileAttached {
+            let local: u8 = {
+                let cstate = current.rstate
+                if cstate != 5 { 0 } else { 1 }
+            }
+            print(local)
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("a final if/else should provide the surrounding value block's value");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("the normalized value-bearing if/else should produce valid Wasm GC");
+
+    let formatted = splitscript::format_source(source)
+        .expect("formatting should preserve a value-bearing final if/else");
+    splitscript::compile(&formatted)
+        .expect("the formatted value-bearing final if/else should still compile");
+}
+
+#[test]
 fn while_loops_typecheck_lower_and_validate() {
     let source = include_str!("../while_loop.split");
     let checked = splitscript::check(splitscript::parse(source).unwrap())

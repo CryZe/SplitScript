@@ -445,6 +445,28 @@ fn syntax_for_binding(
     finder.found
 }
 
+fn syntax_parameter(
+    syntax: &crate::ast::Program,
+    value: crate::ast::ValueId,
+) -> Option<&crate::ast::Parameter> {
+    struct Finder<'ast> {
+        value: crate::ast::ValueId,
+        found: Option<&'ast crate::ast::Parameter>,
+    }
+
+    impl<'ast> crate::visit::Visitor<'ast> for Finder<'ast> {
+        fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
+            if parameter.id == self.value {
+                self.found = Some(parameter);
+            }
+        }
+    }
+
+    let mut finder = Finder { value, found: None };
+    crate::visit::Visitor::visit_program(&mut finder, syntax);
+    finder.found
+}
+
 fn append_attachment_layouts(
     description: &mut String,
     syntax: &crate::ast::Program,
@@ -627,12 +649,7 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                     description.push_str(tooltip);
                 }
                 (format!("settings.{}: {ty}", definition.name), description)
-            } else if syntax
-                .functions
-                .iter()
-                .flat_map(|function| &function.params)
-                .any(|parameter| parameter.id == value)
-            {
+            } else if syntax_parameter(syntax, value).is_some() {
                 (format!("{}: {ty}", definition.name), "Parameter".to_owned())
             } else if syntax_for_binding(syntax, value).is_some() {
                 (

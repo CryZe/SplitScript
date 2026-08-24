@@ -895,11 +895,9 @@ fn value_names(program: &Program) -> HashMap<ValueId, String> {
             self.names.insert(variable.id, variable.name.clone());
             visit::walk_variable(self, variable);
         }
-        fn visit_function(&mut self, function: &'ast crate::ast::FunctionDecl) {
-            for parameter in &function.params {
-                self.names.insert(parameter.id, parameter.name.clone());
-            }
-            visit::walk_function(self, function);
+        fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
+            self.names.insert(parameter.id, parameter.name.clone());
+            visit::walk_parameter(self, parameter);
         }
         fn visit_suspension_binding(&mut self, binding: &'ast crate::ast::SuspensionBinding) {
             self.names.insert(binding.id, binding.name.clone());

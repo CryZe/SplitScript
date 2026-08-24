@@ -204,17 +204,19 @@ impl<'ast> Visitor<'ast> for ValueKindCollector {
         if function.debug_only {
             self.debug_ranges.push(function.span);
         }
-        for (index, parameter) in function.params.iter().enumerate() {
-            self.kinds.insert(
-                parameter.id,
-                if index == 0 && function.method_of.is_some() && parameter.name == "self" {
-                    SemanticTokenKind::Keyword
-                } else {
-                    SemanticTokenKind::Parameter
-                },
-            );
-        }
         visit::walk_function(self, function);
+    }
+
+    fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
+        self.kinds.insert(
+            parameter.id,
+            if parameter.name == "self" {
+                SemanticTokenKind::Keyword
+            } else {
+                SemanticTokenKind::Parameter
+            },
+        );
+        visit::walk_parameter(self, parameter);
     }
 
     fn visit_variable(&mut self, variable: &'ast VariableDecl) {
@@ -932,23 +934,29 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             },
             MODIFIER_DECLARATION,
         );
-        for parameter in &function.params {
-            self.mark_ident(
-                parameter.span,
-                &parameter.name,
-                SemanticTokenKind::Parameter,
-                MODIFIER_DECLARATION,
-            );
-            if let Some(annotation) = parameter.annotation {
-                self.mark_none_type(parameter.span, annotation);
-            }
-        }
         if let (Some(annotation), Some(span)) =
             (function.return_annotation, function.return_annotation_span)
         {
             self.mark_none_type(span, annotation);
         }
         visit::walk_function(self, function);
+    }
+
+    fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
+        self.mark_ident(
+            parameter.name_span,
+            &parameter.name,
+            if parameter.name == "self" {
+                SemanticTokenKind::Keyword
+            } else {
+                SemanticTokenKind::Parameter
+            },
+            MODIFIER_DECLARATION,
+        );
+        if let Some(annotation) = parameter.annotation {
+            self.mark_none_type(parameter.span, annotation);
+        }
+        visit::walk_parameter(self, parameter);
     }
 
     fn visit_action(&mut self, action: &'ast Action) {

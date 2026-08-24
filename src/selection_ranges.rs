@@ -180,13 +180,15 @@ impl<'ast> Visitor<'ast> for SpanCollector {
 
     fn visit_function(&mut self, function: &'ast FunctionDecl) {
         self.push(function.span);
-        for parameter in &function.params {
-            self.push(parameter.span);
-        }
         if let Some(annotation) = function.return_annotation_span {
             self.push(annotation);
         }
         visit::walk_function(self, function);
+    }
+
+    fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
+        self.push(parameter.span);
+        visit::walk_parameter(self, parameter);
     }
 
     fn visit_action(&mut self, action: &'ast Action) {

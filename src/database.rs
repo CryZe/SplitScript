@@ -905,14 +905,6 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
         {
             self.add_reference(target, span);
         }
-        for parameter in &function.params {
-            self.insert_value(parameter.id, &parameter.name, parameter.span);
-            if (function.method_of.is_none() || parameter.name != "self")
-                && let Some(annotation) = parameter.annotation
-            {
-                self.add_type_after_colon(annotation, parameter.span);
-            }
-        }
         if let Some(result) = function.return_annotation {
             self.add_type_after_arrow(
                 result,
@@ -923,6 +915,16 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             );
         }
         visit::walk_function(self, function);
+    }
+
+    fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
+        self.insert_value(parameter.id, &parameter.name, parameter.name_span);
+        if parameter.name != "self"
+            && let Some(annotation) = parameter.annotation
+        {
+            self.add_type_after_colon(annotation, parameter.span);
+        }
+        visit::walk_parameter(self, parameter);
     }
 
     fn visit_variable(&mut self, variable: &'ast crate::ast::VariableDecl) {

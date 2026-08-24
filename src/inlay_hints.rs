@@ -104,15 +104,17 @@ impl<'ast> Visitor<'ast> for InlayHintCollector<'_> {
     }
 
     fn visit_function(&mut self, function: &'ast FunctionDecl) {
-        for parameter in &function.params {
-            if parameter.annotation.is_none() {
-                self.add_inferred_value(parameter.id, &parameter.name, parameter.span);
-            }
-        }
         if function.return_annotation.is_none() {
             self.add_inferred_function_result(function);
         }
         visit::walk_function(self, function);
+    }
+
+    fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
+        if parameter.annotation.is_none() {
+            self.add_inferred_value(parameter.id, &parameter.name, parameter.name_span);
+        }
+        visit::walk_parameter(self, parameter);
     }
 
     fn visit_variable(&mut self, variable: &'ast VariableDecl) {

@@ -65,6 +65,12 @@ pub trait Visitor<'ast>: Sized {
         walk_function(self, function);
     }
 
+    /// Visits a value parameter independently of whether it belongs to a
+    /// named function or a closure expression.
+    fn visit_parameter(&mut self, parameter: &'ast Parameter) {
+        walk_parameter(self, parameter);
+    }
+
     fn visit_action(&mut self, action: &'ast Action) {
         self.visit_block(&action.body);
     }
@@ -203,14 +209,18 @@ pub fn walk_function<'ast, V: Visitor<'ast>>(visitor: &mut V, function: &'ast Fu
         visitor.visit_type_ref(receiver);
     }
     for parameter in &function.params {
-        if let Some(annotation) = &parameter.annotation {
-            visitor.visit_type_ref(annotation);
-        }
+        visitor.visit_parameter(parameter);
     }
     if let Some(result) = &function.return_annotation {
         visitor.visit_type_ref(result);
     }
     visitor.visit_block(&function.body);
+}
+
+pub fn walk_parameter<'ast, V: Visitor<'ast>>(visitor: &mut V, parameter: &'ast Parameter) {
+    if let Some(annotation) = &parameter.annotation {
+        visitor.visit_type_ref(annotation);
+    }
 }
 
 pub fn walk_variable<'ast, V: Visitor<'ast>>(visitor: &mut V, variable: &'ast VariableDecl) {
@@ -358,9 +368,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
         }
         ExprKind::Closure { params, body, .. } => {
             for parameter in params {
-                if let Some(annotation) = &parameter.annotation {
-                    visitor.visit_type_ref(annotation);
-                }
+                visitor.visit_parameter(parameter);
             }
             visitor.visit_expr(body);
         }
@@ -441,6 +449,12 @@ pub trait Folder: Sized {
 
     fn fold_function(&mut self, function: &mut FunctionDecl) {
         walk_function_mut(self, function);
+    }
+
+    /// Folds a value parameter independently of whether it belongs to a
+    /// named function or a closure expression.
+    fn fold_parameter(&mut self, parameter: &mut Parameter) {
+        walk_parameter_mut(self, parameter);
     }
 
     fn fold_action(&mut self, action: &mut Action) {
@@ -571,14 +585,18 @@ pub fn walk_function_mut<F: Folder>(folder: &mut F, function: &mut FunctionDecl)
         folder.fold_type_ref(receiver);
     }
     for parameter in &mut function.params {
-        if let Some(annotation) = &mut parameter.annotation {
-            folder.fold_type_ref(annotation);
-        }
+        folder.fold_parameter(parameter);
     }
     if let Some(result) = &mut function.return_annotation {
         folder.fold_type_ref(result);
     }
     folder.fold_block(&mut function.body);
+}
+
+pub fn walk_parameter_mut<F: Folder>(folder: &mut F, parameter: &mut Parameter) {
+    if let Some(annotation) = &mut parameter.annotation {
+        folder.fold_type_ref(annotation);
+    }
 }
 
 pub fn walk_variable_mut<F: Folder>(folder: &mut F, variable: &mut VariableDecl) {
@@ -730,9 +748,7 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
         }
         ExprKind::Closure { params, body, .. } => {
             for parameter in params {
-                if let Some(annotation) = &mut parameter.annotation {
-                    folder.fold_type_ref(annotation);
-                }
+                folder.fold_parameter(parameter);
             }
             folder.fold_expr(body);
         }
@@ -868,5 +884,34 @@ mod tests {
         let mut strings = StringValues::default();
         strings.visit_program(&syntax);
         assert_eq!(strings.values, ["folded:a", "folded:b", "folded:c"]);
+    }
+
+    #[test]
+    fn visitor_exposes_named_function_and_closure_parameters_uniformly() {
+        let source = r#"
+            state "game.exe" {}
+            fn apply(value: u16, transform: (u16) -> u16) -> u16 {
+                return transform(value)
+            }
+            whileAttached {
+                print(apply(1, (left, right) => left + right))
+            }
+        "#;
+        let tokens = crate::lex(source, crate::SyntaxMode::Program).unwrap();
+        let syntax = crate::parser::parse(source, tokens).unwrap();
+
+        #[derive(Default)]
+        struct ParameterNames(Vec<String>);
+
+        impl<'ast> Visitor<'ast> for ParameterNames {
+            fn visit_parameter(&mut self, parameter: &'ast Parameter) {
+                self.0.push(parameter.name.clone());
+                walk_parameter(self, parameter);
+            }
+        }
+
+        let mut names = ParameterNames::default();
+        names.visit_program(&syntax);
+        assert_eq!(names.0, ["value", "transform", "left", "right"]);
     }
 }

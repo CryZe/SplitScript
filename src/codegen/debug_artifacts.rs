@@ -17,7 +17,8 @@ use wasm_encoder::{Function, IndirectNameMap, NameMap, NameSection};
 use super::{Type, imports::Abi};
 use crate::{
     ast::{
-        EnumDecl, FunctionDecl, MatchArm, MatchPattern, Program, Span, TypeApplicationId, ValueId,
+        EnumDecl, Expr, ExprKind, FunctionDecl, MatchArm, MatchPattern, Program, Span,
+        TypeApplicationId, ValueId,
     },
     semantic::{FunctionInstance, SemanticModel},
     stdlib::StandardLibrary,
@@ -325,16 +326,22 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
 
     impl<'ast> Visitor<'ast> for Collector {
         fn visit_function(&mut self, function: &'ast FunctionDecl) {
-            for parameter in &function.params {
+            self.scopes.push(function.body.span);
+            visit::walk_function(self, function);
+            self.scopes.pop();
+        }
+
+        fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
+            if let Some(scope) = self.scopes.last().copied() {
                 self.insert(
                     parameter.id,
                     &parameter.name,
                     parameter.name_span,
                     parameter.span,
-                    function.body.span,
+                    scope,
                 );
             }
-            visit::walk_function(self, function);
+            visit::walk_parameter(self, parameter);
         }
 
         fn visit_block(&mut self, block: &'ast crate::ast::Block) {
@@ -410,6 +417,19 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
                 );
             }
             visit::walk_match_arm(self, arm);
+        }
+
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if let ExprKind::Closure { params, body, .. } = &expression.kind {
+                self.scopes.push(body.span);
+                for parameter in params {
+                    self.visit_parameter(parameter);
+                }
+                self.visit_expr(body);
+                self.scopes.pop();
+            } else {
+                visit::walk_expr(self, expression);
+            }
         }
     }
 

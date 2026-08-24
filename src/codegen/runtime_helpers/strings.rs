@@ -1586,6 +1586,7 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_parse_integer(gc: &GcL
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::ArrayGetU(string_type))
         .instruction(&Instruction::LocalSet(byte))
+        .instruction(&Instruction::LocalGet(byte))
         .instruction(&Instruction::I32Const(b'0' as i32))
         .instruction(&Instruction::I32LtU)
         .instruction(&Instruction::LocalGet(byte))

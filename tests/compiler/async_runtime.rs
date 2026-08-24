@@ -340,6 +340,42 @@ fn computed_infinity_can_be_converted_to_a_string_explicitly() {
 }
 
 #[test]
+fn floating_point_constants_round_trip_through_display_and_parse() {
+    let source = r#"
+        state "game.exe" {}
+
+        setup {
+            let inf = f32.positiveInfinity
+            let infStr = inf.toString()
+            let infAgain: f64 = infStr.parse() else 0.0
+            print(infAgain)
+        }
+    "#;
+
+    let (store, _) = execute_with_mock_host(source);
+    assert_eq!(store.data().messages, ["inf"]);
+}
+
+#[test]
+fn integer_string_parsing_validates_and_respects_inferred_limits() {
+    let source = r#"
+        state "game.exe" {}
+
+        setup {
+            let minimum: i8 = "-128".parse() else 0
+            let maximum: u64 = "18446744073709551615".parse() else 0
+            let overflow: u8 = "256".parse() else 7
+            print(minimum)
+            print(maximum)
+            print(overflow)
+        }
+    "#;
+
+    let (store, _) = execute_with_mock_host(source);
+    assert_eq!(store.data().messages, ["-128", "18446744073709551615", "7"]);
+}
+
+#[test]
 fn floating_point_constants_preserve_their_width_and_ieee_values() {
     let source = r#"
         state "game.exe" {}

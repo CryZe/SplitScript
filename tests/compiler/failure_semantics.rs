@@ -1641,6 +1641,152 @@ fn attached_process_requirements_propagate_through_function_call_graphs() {
 }
 
 #[test]
+fn closure_effects_remain_latent_until_the_callable_is_invoked() {
+    let declarations = r#"
+        state "game.exe" {}
+
+        fn makeReader() {
+            return () => process.read<u32>(0x100)
+        }
+    "#;
+    let stored = format!(
+        "{declarations}\nsetup {{\n    let reader = makeReader()\n    print(\"ready\")\n}}"
+    );
+    splitscript::compile(&stored)
+        .expect("constructing and storing a process-reading closure must not execute it");
+
+    let invoked =
+        format!("{declarations}\nsetup {{\n    let reader = makeReader()\n    print(reader())\n}}");
+    let diagnostics = splitscript::compile(&invoked)
+        .expect_err("invoking the closure must apply its attached-process requirement");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message
+                == "`callable` requires an attached process and is unavailable in `setup`"
+        }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn higher_order_effects_are_instantiated_per_call_site() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn invoke(callback) {
+            return callback()
+        }
+
+        fn makeReader() {
+            return () => process.read<u32>(0x100)
+        }
+
+        setup {
+            print(invoke(() => 42u32))
+        }
+
+        whileAttached {
+            print(invoke(makeReader()))
+        }
+    "#;
+    splitscript::compile(source).expect(
+        "a pure callback in setup must stay pure even when another specialization reads process memory",
+    );
+    let mut database = splitscript::tooling::database::CompilerDatabase::new(source);
+    let hover = database
+        .hover(source.find("invoke(callback)").unwrap())
+        .unwrap()
+        .expect("higher-order helper hover");
+    assert!(
+        hover
+            .markdown
+            .contains("**Effect dependencies:** invokes `callback`"),
+        "{}",
+        hover.markdown
+    );
+
+    let invalid = source.replace("print(invoke(() => 42u32))", "print(invoke(makeReader()))");
+    let diagnostics = splitscript::compile(&invalid)
+        .expect_err("the concrete effectful callback must be rejected in setup");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message
+                == "`invoke` requires an attached process and is unavailable in `setup`"
+        }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn lazy_iterator_adapters_apply_callback_effects_only_when_consumed() {
+    let declarations = r#"
+        state "game.exe" {}
+
+        fn makeReader() {
+            return (fallback: u32) => process.read<u32>(0x100) else fallback
+        }
+    "#;
+    let stored = format!(
+        "{declarations}\nsetup {{\n    let mapped = [1u32].iterator().map(makeReader())\n    print(\"ready\")\n}}"
+    );
+    splitscript::compile(&stored)
+        .expect("constructing a lazy map adapter must not invoke its callback");
+
+    let consumed = format!(
+        "{declarations}\nsetup {{\n    for value in [1u32].iterator().map(makeReader()) {{\n        print(value)\n    }}\n}}"
+    );
+    let diagnostics = splitscript::compile(&consumed)
+        .expect_err("iterating the adapter must instantiate its callback effects");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("requires an attached process") }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn generic_iterable_helpers_preserve_lazy_adapter_effects() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn consume(values) {
+            for value in values {
+                print(value)
+            }
+        }
+
+        fn makeReader() {
+            return (fallback: u32) => process.read<u32>(0x100) else fallback
+        }
+
+        setup {
+            consume([1u32].iterator().map(value => value + 1))
+        }
+
+        whileAttached {
+            consume([1u32].iterator().map(makeReader()))
+        }
+    "#;
+    splitscript::compile(source)
+        .expect("a generic consumer must instantiate a pure adapter independently");
+
+    let invalid = source.replace(
+        "consume([1u32].iterator().map(value => value + 1))",
+        "consume([1u32].iterator().map(makeReader()))",
+    );
+    let diagnostics = splitscript::compile(&invalid)
+        .expect_err("generic iteration must preserve the concrete adapter callback effects");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message
+                == "`consume` requires an attached process and is unavailable in `setup`"
+        }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn state_snapshot_requirements_propagate_through_function_call_graphs() {
     let source = r#"
         state "game.exe" {

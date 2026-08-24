@@ -53,7 +53,7 @@ pub(crate) fn validate(
         semantics,
         standard_library.clone(),
     );
-    let effects = OperationAnalysis::infer(hir, semantics, &capabilities);
+    let effects = OperationAnalysis::infer(syntax, hir, semantics, &capabilities);
     let mut diagnostics = Vec::new();
     diagnostics.extend(attachment_diagnostics);
     diagnostics.extend(stdlib_bodies::validate_signatures(

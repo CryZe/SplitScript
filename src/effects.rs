@@ -1,4 +1,6 @@
-//! Operational-effect inference over resolved user-function call graphs.
+//! Operational-effect inference over calls and first-class values.
+
+mod polymorphic;
 
 use crate::{
     ast::{ActionKind, FunctionId, Span},
@@ -7,12 +9,31 @@ use crate::{
     stdlib::{
         Availability, CancellationKind, Effect, EffectSet, OperationMetadata, SuspensionKind,
     },
-    types::TypeKind,
 };
+
+/// A latent operation a function performs through one of its parameters.
+///
+/// These requirements are inferred and substituted at call sites; they are
+/// not part of SplitScript's source-level type spelling or runtime ABI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LatentParameterOperation {
+    pub parameter: usize,
+    pub fields: Vec<crate::semantic::ResolvedMember>,
+    pub kind: LatentOperationKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LatentOperationKind {
+    Invoke,
+    Iterate,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionOperationSemantics {
     pub effects: Vec<Effect>,
+    /// Parameter-dependent operations that become concrete when a function is
+    /// called with a particular callable or iterable value.
+    pub latent_parameter_operations: Vec<LatentParameterOperation>,
     pub requires_attached_process: bool,
     pub requires_state_snapshots: bool,
     pub availability: Availability,
@@ -41,6 +62,7 @@ impl FunctionOperationSemantics {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationAnalysis {
     functions: Vec<FunctionOperationSemantics>,
+    calls: std::collections::HashMap<crate::ast::ExprId, FunctionOperationSemantics>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,30 +121,6 @@ pub const fn action_has_state_snapshots(action: ActionKind) -> bool {
     )
 }
 
-struct CallFacts {
-    effects: Vec<Effect>,
-    callees: Vec<FunctionId>,
-    future_callees: Vec<FunctionId>,
-    availability: Availability,
-}
-
-impl Default for CallFacts {
-    fn default() -> Self {
-        Self {
-            effects: Vec::new(),
-            callees: Vec::new(),
-            future_callees: Vec::new(),
-            availability: Availability::Everywhere,
-        }
-    }
-}
-
-struct CallCollector<'a> {
-    facts: &'a mut CallFacts,
-    semantics: &'a SemanticModel,
-    capabilities: &'a crate::capabilities::CapabilityAnalysis,
-}
-
 fn implicit_display_callees(
     expression: &TypedExpression,
     program: &TypedProgram,
@@ -138,184 +136,14 @@ fn implicit_display_callees(
     functions
 }
 
-fn collect_call_facts(
-    facts: &mut CallFacts,
-    call: &ResolvedCall,
-    program: &TypedProgram,
-    creates_future: bool,
-) {
-    if creates_future {
-        facts.effects.push(Effect::Allocates);
-    }
-    match call {
-        ResolvedCall::StandardLibrary { item, .. } => {
-            let functions = program.library_functions(*item).collect::<Vec<_>>();
-            if !functions.is_empty() {
-                if creates_future {
-                    facts.future_callees.extend(functions);
-                } else {
-                    facts.callees.extend(functions);
-                }
-            } else {
-                let metadata = program.standard_library().operation_metadata(*item);
-                if !creates_future {
-                    facts.effects.extend(metadata.effects.iter().copied());
-                }
-                facts.availability = merge_availability(facts.availability, metadata.availability);
-            }
-        }
-        ResolvedCall::UserFunction { function, .. } | ResolvedCall::UserMethod { function, .. } => {
-            if creates_future {
-                facts.future_callees.push(*function)
-            } else {
-                facts.callees.push(*function)
-            }
-        }
-        ResolvedCall::ResultError { .. }
-        | ResolvedCall::OptionSome { .. }
-        | ResolvedCall::IteratorItem { .. }
-        | ResolvedCall::ResultSuccess { .. } => {}
-    }
-}
-
-impl TypedVisitor for CallCollector<'_> {
-    fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
-        self.facts.callees.extend(implicit_display_callees(
-            expression,
-            program,
-            self.semantics,
-            self.capabilities,
-        ));
-        if let Some((
-            Some(
-                crate::semantic::ResolvedValue::CurrentSnapshot
-                | crate::semantic::ResolvedValue::OldSnapshot
-                | crate::semantic::ResolvedValue::CurrentState(_)
-                | crate::semantic::ResolvedValue::OldState(_),
-            ),
-            _,
-        )) = program.value_path(expression.id)
-        {
-            self.facts.effects.push(Effect::RequiresStateSnapshots);
-        }
-        if let Some((Some(crate::semantic::ResolvedValue::Variable(value)), _)) =
-            program.value_path(expression.id)
-            && program.is_attachment_global(value)
-        {
-            self.facts.effects.push(Effect::RequiresAttachedProcess);
-        }
-        if let hir::TypedExpressionKind::Suspend { value, .. } = expression.kind {
-            self.facts
-                .effects
-                .extend([Effect::Suspends, Effect::CancelsOnProcessClose]);
-            self.facts.availability = Availability::OnAttach;
-            if let Some(call) = program.call(value) {
-                collect_call_facts(self.facts, call, program, false);
-            }
-        }
-        if let Some(call) = program.call(expression.id) {
-            if call
-                .receiver()
-                .and_then(|receiver| receiver.path().map(|(root, _)| root))
-                .and_then(|root| root.source_value())
-                .is_some_and(|value| program.is_attachment_global(value))
-            {
-                self.facts.effects.push(Effect::RequiresAttachedProcess);
-            }
-            let creates_future = matches!(
-                self.semantics.types().kind(expression.ty),
-                TypeKind::Async { .. }
-            );
-            collect_call_facts(self.facts, call, program, creates_future);
-        }
-        hir::walk_typed_expression(self, expression, program);
-    }
-
-    fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
-        // `retry` is suspending control flow even when its operand is merely a
-        // synchronous operation returning `T!`. Recording the statement
-        // itself also makes asyncness an authored-body fact rather than an
-        // accidental property of the callee's effect declaration.
-        if matches!(statement.kind, hir::TypedStatementKind::Suspend { .. }) {
-            self.facts
-                .effects
-                .extend([Effect::Suspends, Effect::CancelsOnProcessClose]);
-            self.facts.availability = Availability::OnAttach;
-        }
-        if let hir::TypedStatementKind::Assign { assignment, .. } = &statement.kind
-            && let Some(call) = &assignment.operator
-        {
-            collect_call_facts(self.facts, call, program, false);
-        }
-        if let hir::TypedStatementKind::Assign { assignment, .. } = &statement.kind
-            && program.is_attachment_global(assignment.target)
-        {
-            self.facts.effects.push(Effect::RequiresAttachedProcess);
-        }
-        if matches!(statement.kind, hir::TypedStatementKind::StateAssign { .. }) {
-            self.facts.effects.push(Effect::WritesCurrentState);
-        }
-        if let hir::TypedStatementKind::IndexAssign { assignment, .. } = &statement.kind {
-            collect_call_facts(self.facts, &assignment.operator, program, false);
-        }
-        hir::walk_typed_statement(self, statement, program);
-    }
-}
-
 impl OperationAnalysis {
     pub fn infer(
+        syntax: &crate::ast::Program,
         program: &TypedProgram,
         semantics: &SemanticModel,
         capabilities: &crate::capabilities::CapabilityAnalysis,
     ) -> Self {
-        let function_count = program
-            .all_function_bodies()
-            .map(|body| body.function.function.index() + 1)
-            .max()
-            .unwrap_or(0);
-        let mut direct = (0..function_count)
-            .map(|_| CallFacts::default())
-            .collect::<Vec<_>>();
-        for function in program.all_function_bodies() {
-            CallCollector {
-                facts: &mut direct[function.function.function.index()],
-                semantics,
-                capabilities,
-            }
-            .visit_block(&function.body, program);
-        }
-
-        let mut functions = direct
-            .iter()
-            .map(|facts| function_semantics(facts.effects.clone(), facts.availability))
-            .collect::<Vec<_>>();
-        loop {
-            let mut changed = false;
-            for (index, facts) in direct.iter().enumerate() {
-                let mut effects = facts.effects.clone();
-                let mut availability = facts.availability;
-                for callee in &facts.callees {
-                    if let Some(callee) = functions.get(callee.index()) {
-                        effects.extend_from_slice(&callee.effects);
-                        availability = merge_availability(availability, callee.availability);
-                    }
-                }
-                for callee in &facts.future_callees {
-                    if let Some(callee) = functions.get(callee.index()) {
-                        availability = merge_availability(availability, callee.availability);
-                    }
-                }
-                let inferred = function_semantics(effects, availability);
-                if inferred != functions[index] {
-                    functions[index] = inferred;
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-        Self { functions }
+        polymorphic::infer(syntax, program, semantics, capabilities)
     }
 
     pub fn function(&self, function: FunctionId) -> FunctionOperationSemantics {
@@ -323,6 +151,12 @@ impl OperationAnalysis {
             .get(function.index())
             .cloned()
             .unwrap_or_default()
+    }
+
+    /// Operation semantics after substituting the concrete callable values at
+    /// one invocation site.
+    pub fn call(&self, expression: crate::ast::ExprId) -> Option<&FunctionOperationSemantics> {
+        self.calls.get(&expression)
     }
 
     pub fn attached_process_violations(
@@ -339,6 +173,25 @@ impl OperationAnalysis {
             violations: Vec<AttachedProcessViolation>,
         }
         impl Validator<'_> {
+            fn call_site_violation(
+                &self,
+                expression: &TypedExpression,
+                program: &TypedProgram,
+            ) -> Option<AttachedProcessViolation> {
+                let operation = self.analysis.call(expression.id)?;
+                if !operation.requires_attached_process {
+                    return None;
+                }
+                let (function, standard_library_name) =
+                    call_identity(program.call(expression.id), program, "callable");
+                Some(AttachedProcessViolation {
+                    action: self.action,
+                    expression_span: expression.span,
+                    function,
+                    standard_library_name,
+                })
+            }
+
             fn violation(
                 &self,
                 call: &ResolvedCall,
@@ -398,9 +251,11 @@ impl OperationAnalysis {
                         });
                     }
                 }
-                let violation = program
-                    .call(expression.id)
-                    .and_then(|call| self.violation(call, expression.span, program));
+                let violation = self.call_site_violation(expression, program).or_else(|| {
+                    program
+                        .call(expression.id)
+                        .and_then(|call| self.violation(call, expression.span, program))
+                });
                 if let Some(violation) = violation {
                     self.violations.push(violation);
                 }
@@ -456,6 +311,25 @@ impl OperationAnalysis {
             violations: Vec<StateSnapshotViolation>,
         }
         impl Validator<'_> {
+            fn call_site_violation(
+                &self,
+                expression: &TypedExpression,
+                program: &TypedProgram,
+            ) -> Option<StateSnapshotViolation> {
+                let operation = self.analysis.call(expression.id)?;
+                if !operation.requires_state_snapshots {
+                    return None;
+                }
+                let (function, standard_library_name) =
+                    call_identity(program.call(expression.id), program, "callable");
+                Some(StateSnapshotViolation {
+                    context: self.context,
+                    expression_span: expression.span,
+                    function,
+                    standard_library_name,
+                })
+            }
+
             fn violation(
                 &self,
                 call: &ResolvedCall,
@@ -503,9 +377,12 @@ impl OperationAnalysis {
                         });
                     }
                 }
-                if let Some(violation) = program
-                    .call(expression.id)
-                    .and_then(|call| self.violation(call, expression.span, program))
+                if let Some(violation) =
+                    self.call_site_violation(expression, program).or_else(|| {
+                        program
+                            .call(expression.id)
+                            .and_then(|call| self.violation(call, expression.span, program))
+                    })
                 {
                     self.violations.push(violation);
                 }
@@ -574,6 +451,28 @@ impl OperationAnalysis {
     }
 }
 
+fn call_identity(
+    call: Option<&ResolvedCall>,
+    program: &TypedProgram,
+    dynamic_name: &'static str,
+) -> (Option<FunctionId>, Option<&'static str>) {
+    match call {
+        Some(ResolvedCall::UserFunction { function, .. })
+        | Some(ResolvedCall::UserMethod { function, .. }) => (Some(*function), None),
+        Some(ResolvedCall::StandardLibrary { item, .. }) => (
+            None,
+            Some(program.standard_library().item(*item).qualified_name),
+        ),
+        Some(
+            ResolvedCall::ResultError { .. }
+            | ResolvedCall::OptionSome { .. }
+            | ResolvedCall::IteratorItem { .. }
+            | ResolvedCall::ResultSuccess { .. },
+        ) => (None, None),
+        None => (None, Some(dynamic_name)),
+    }
+}
+
 fn function_semantics(
     mut effects: Vec<Effect>,
     availability: Availability,
@@ -595,6 +494,7 @@ fn function_semantics(
     let operation = metadata.semantics();
     FunctionOperationSemantics {
         effects,
+        latent_parameter_operations: Vec::new(),
         requires_attached_process: operation.requires_attached_process,
         requires_state_snapshots: operation.requires_state_snapshots,
         availability,

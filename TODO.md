@@ -671,10 +671,14 @@ remaining work is product hardening and distribution.
   signature, immutable environment, mutable capture cells, and async frame.
   Explicit `(parameters) -> Result => body` signatures
   constrain closure bodies, and omitted parameter and result types are shown as
-  one complete virtual signature through inlay hints. Finish latent effect
-  inference at invocation sites and named function-to-callable conversion.
-  Ordinary lexical control flow is enforced: `return` belongs to the closure,
-  while `break` and `continue` cannot target loops outside it. Keep named
+  one complete virtual signature through inlay hints. Latent effects now stay
+  symbolic through callable parameters, returned closures, captures, and lazy
+  `map` / `filter` adapter fields; invoking or iterating a concrete value
+  instantiates those effects per call site, so an unrelated effectful callback
+  cannot poison a pure specialization. Function hover exposes which parameters
+  are invoked or iterated. Ordinary lexical control flow is enforced: `return`
+  belongs to the closure, while `break` and `continue` cannot target loops
+  outside it. Finish named function-to-callable conversion, keeping named
   functions and closures on one callable abstraction rather than a
   closure-only path.
 - [ ] Complete remaining ordinary library gaps when a port needs them:

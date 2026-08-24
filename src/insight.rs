@@ -12,7 +12,7 @@ use crate::{
     effects::FunctionOperationSemantics,
     language::{LanguageCatalog, LanguageItem},
     lexer::{Token, TokenKind},
-    semantic::ResolvedCall,
+    semantic::{ResolvedCall, ResolvedMember},
     stdlib::{
         StandardLibrary, StateProviderProcesses, StdlibItem, StdlibItemId, StdlibSymbolId,
         StdlibTypeConstructorId, TypeRef as CatalogTypeRef,
@@ -745,6 +745,17 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                     .effects()
                     .map(|effects| effects.function(function.id)),
             );
+            if let Some(operation) = context
+                .effects()
+                .map(|effects| effects.function(function.id))
+            {
+                append_parameter_effect_dependencies(
+                    &mut description,
+                    function,
+                    &operation,
+                    context,
+                );
+            }
             if let Some(checked) = context.snapshot.checked() {
                 let attachment = checked.attachment_globals();
                 let allowed = attachment.function_layouts(function.id).collect::<Vec<_>>();
@@ -828,6 +839,64 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             ))
         }
     }
+}
+
+fn append_parameter_effect_dependencies(
+    description: &mut String,
+    function: &crate::ast::FunctionDecl,
+    operation: &FunctionOperationSemantics,
+    context: &SemanticContext,
+) {
+    if operation.latent_parameter_operations.is_empty() {
+        return;
+    }
+    let dependencies = operation
+        .latent_parameter_operations
+        .iter()
+        .filter_map(|latent| {
+            let parameter = function.params.get(latent.parameter)?;
+            let mut path = parameter.name.clone();
+            for member in &latent.fields {
+                let name = match member {
+                    ResolvedMember::RecordField(field) => context
+                        .syntax()
+                        .records
+                        .iter()
+                        .flat_map(|record| &record.fields)
+                        .find(|candidate| candidate.id == *field)
+                        .map(|field| field.name.as_str()),
+                    ResolvedMember::StandardField(field) => {
+                        Some(context.standard_library.field(*field).name)
+                    }
+                    ResolvedMember::StateField(field) => context
+                        .syntax()
+                        .state
+                        .iter()
+                        .flat_map(|state| state.all_fields())
+                        .find(|candidate| candidate.id == *field)
+                        .map(|field| field.name.as_str()),
+                    ResolvedMember::SettingField(setting) => context
+                        .syntax()
+                        .settings
+                        .iter()
+                        .find(|candidate| candidate.id == *setting)
+                        .map(|setting| setting.name.as_str()),
+                }?;
+                path.push('.');
+                path.push_str(name);
+            }
+            Some(match latent.kind {
+                crate::effects::LatentOperationKind::Invoke => format!("invokes `{path}`"),
+                crate::effects::LatentOperationKind::Iterate => format!("iterates `{path}`"),
+            })
+        })
+        .collect::<Vec<_>>();
+    if dependencies.is_empty() {
+        return;
+    }
+    description.push_str("\n\n**Effect dependencies:** ");
+    description.push_str(&dependencies.join("; "));
+    description.push_str(". Concrete effects are determined at each call site.");
 }
 
 fn source_function_description(

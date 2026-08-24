@@ -3954,3 +3954,14 @@ language catalog document the refinement rule.
   standard-library types.
 - Kept the LSP as a conversion layer over the shared database products and
   advertised both native protocol capabilities to editor clients.
+
+# 2026-08-24: protocol-aware usage and method receivers
+
+- Unified implicit display recognition for interpolation, string casts,
+  `print`, and custom variables at the typed-HIR boundary, then made unused
+  declaration reachability follow both custom capability methods and fields
+  read by compiler-derived aggregate formatting.
+- Made `self` a documented keyword with semantic highlighting and concrete
+  receiver-type hover, while ensuring compiler-provided values without source
+  declarations cannot leave dangling source-definition references that block
+  language documentation.

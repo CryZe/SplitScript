@@ -204,9 +204,15 @@ impl<'ast> Visitor<'ast> for ValueKindCollector {
         if function.debug_only {
             self.debug_ranges.push(function.span);
         }
-        for parameter in &function.params {
-            self.kinds
-                .insert(parameter.id, SemanticTokenKind::Parameter);
+        for (index, parameter) in function.params.iter().enumerate() {
+            self.kinds.insert(
+                parameter.id,
+                if index == 0 && function.method_of.is_some() && parameter.name == "self" {
+                    SemanticTokenKind::Keyword
+                } else {
+                    SemanticTokenKind::Parameter
+                },
+            );
         }
         visit::walk_function(self, function);
     }
@@ -1096,6 +1102,7 @@ fn is_keyword(name: &str) -> bool {
             | "retry"
             | "match"
             | "as"
+            | "self"
     )
 }
 
@@ -1198,6 +1205,7 @@ mod tests {
             End => break,
         }
     }
+
 }"#;
         let mut database = CompilerDatabase::new(source);
         let highlights = database.semantic_highlights().unwrap();
@@ -1221,6 +1229,27 @@ mod tests {
             &source[highlight.span.start..highlight.span.end] == "None"
                 && highlight.kind == SemanticTokenKind::Constant
         }));
+    }
+
+    #[test]
+    fn implicit_method_self_is_highlighted_as_a_keyword() {
+        let source = r#"
+record Position {
+    x: i32,
+}
+
+state "game.exe" {}
+
+fn Position.value() -> i32 {
+    return self.x
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let highlights = database.semantic_highlights().unwrap();
+        assert_eq!(
+            kind_at(&highlights, source.find("self.x").unwrap()),
+            Some(SemanticTokenKind::Keyword)
+        );
     }
 
     fn contains(

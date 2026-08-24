@@ -21,7 +21,8 @@ use crate::{
         ResolvedValue, SemanticModel,
     },
     stdlib::{
-        Implementation, StandardLibrary, StdlibCapabilityId, StdlibItemId, StdlibTypeConstructorId,
+        Implementation, StandardLibrary, StdlibCapabilityId, StdlibItemId, StdlibOwner,
+        StdlibTypeConstructorId,
     },
     types::TypeKind,
     visit::{self, Visitor as SyntaxVisitor},
@@ -65,7 +66,12 @@ pub(crate) fn validate(
     diagnostics.extend(validate_future_storage(syntax, semantics, enum_types));
     diagnostics.extend(validate_must_use(&standard_library, hir, semantics));
     diagnostics.extend(validate_unused_bindings(syntax, hir));
-    diagnostics.extend(validate_unused_declarations(syntax, hir, semantics));
+    diagnostics.extend(validate_unused_declarations(
+        syntax,
+        hir,
+        semantics,
+        &capabilities,
+    ));
     diagnostics.extend(validate_static_setting_lookups(syntax, hir));
     diagnostics.extend(validate_async_function_results(
         &standard_library,
@@ -1106,8 +1112,8 @@ enum DeclarationWorkItem {
     Function(ast::FunctionId),
 }
 
-#[derive(Default)]
-struct DeclarationDependencyCollector {
+struct DeclarationDependencyCollector<'a> {
+    semantics: &'a SemanticModel,
     dependencies: HashSet<DeclarationWorkItem>,
     types: HashSet<crate::types::TypeId>,
     observed_settings: HashSet<ast::ValueId>,
@@ -1116,11 +1122,52 @@ struct DeclarationDependencyCollector {
     observed_record_fields: HashSet<ast::RecordFieldId>,
     observed_enum_variants: HashSet<ast::EnumVariantId>,
     fully_observed_types: HashSet<crate::types::TypeId>,
+    capability_calls: HashSet<(crate::types::TypeId, StdlibItemId)>,
 }
 
-impl TypedVisitor for DeclarationDependencyCollector {
+impl<'a> DeclarationDependencyCollector<'a> {
+    fn new(semantics: &'a SemanticModel) -> Self {
+        Self {
+            semantics,
+            dependencies: HashSet::new(),
+            types: HashSet::new(),
+            observed_settings: HashSet::new(),
+            literal_setting_keys: HashSet::new(),
+            has_dynamic_setting_lookup: false,
+            observed_record_fields: HashSet::new(),
+            observed_enum_variants: HashSet::new(),
+            fully_observed_types: HashSet::new(),
+            capability_calls: HashSet::new(),
+        }
+    }
+
+    fn expand_capability_dependencies(
+        &mut self,
+        capabilities: &CapabilityAnalysis,
+        semantics: &SemanticModel,
+    ) {
+        for (receiver, requirement) in std::mem::take(&mut self.capability_calls) {
+            let dependencies = capabilities.method_dependencies(receiver, requirement, semantics);
+            self.dependencies.extend(
+                dependencies
+                    .source_functions
+                    .into_iter()
+                    .map(DeclarationWorkItem::Function),
+            );
+            self.fully_observed_types
+                .extend(dependencies.derived_aggregates);
+        }
+    }
+}
+
+impl TypedVisitor for DeclarationDependencyCollector<'_> {
     fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
         self.types.insert(expression.ty);
+        self.capability_calls.extend(
+            hir::implicit_display_types(expression, program, self.semantics)
+                .into_iter()
+                .map(|ty| (ty, StdlibItemId::DisplayToString)),
+        );
         let mut observe_members = |members: &[ResolvedMember]| {
             self.observed_settings
                 .extend(members.iter().filter_map(|member| match member {
@@ -1221,6 +1268,20 @@ impl TypedVisitor for DeclarationDependencyCollector {
                 .insert(DeclarationWorkItem::Function(*function));
         }
 
+        if let Some(ResolvedCall::StandardLibrary {
+            item,
+            receiver_type: Some(receiver),
+            ..
+        }) = program.call(expression.id)
+        {
+            let declaration = program.standard_library().item(*item);
+            if declaration.implementation == Implementation::CapabilityRequirement
+                && matches!(declaration.owner, StdlibOwner::Capability(_))
+            {
+                self.capability_calls.insert((*receiver, *item));
+            }
+        }
+
         hir::walk_typed_expression(self, expression, program);
     }
 
@@ -1242,6 +1303,7 @@ fn validate_unused_declarations(
     syntax: &Program,
     hir: &TypedProgram,
     semantics: &SemanticModel,
+    capabilities: &CapabilityAnalysis,
 ) -> Vec<Diagnostic> {
     let globals = syntax
         .globals
@@ -1266,7 +1328,7 @@ fn validate_unused_declarations(
     let mut observed_enum_variants = HashSet::new();
     let mut fully_observed_types = HashSet::new();
     let mut pending = VecDeque::new();
-    let mut roots = DeclarationDependencyCollector::default();
+    let mut roots = DeclarationDependencyCollector::new(semantics);
     for action in hir.action_bodies() {
         roots.visit_block(&action.body, hir);
     }
@@ -1277,6 +1339,7 @@ fn validate_unused_declarations(
             hir,
         );
     }
+    roots.expand_capability_dependencies(capabilities, semantics);
     reachable_types.extend(roots.types.iter().copied());
     observed_settings.extend(roots.observed_settings.iter().copied());
     literal_setting_keys.extend(roots.literal_setting_keys.iter().cloned());
@@ -1320,7 +1383,7 @@ fn validate_unused_declarations(
             continue;
         }
 
-        let mut collector = DeclarationDependencyCollector::default();
+        let mut collector = DeclarationDependencyCollector::new(semantics);
         match item {
             DeclarationWorkItem::Global(value) => {
                 let Some(expression) = initializers.get(&value).copied() else {
@@ -1351,6 +1414,7 @@ fn validate_unused_declarations(
                 }
             }
         }
+        collector.expand_capability_dependencies(capabilities, semantics);
         reachable_types.extend(collector.types.iter().copied());
         observed_settings.extend(collector.observed_settings.iter().copied());
         literal_setting_keys.extend(collector.literal_setting_keys.iter().cloned());

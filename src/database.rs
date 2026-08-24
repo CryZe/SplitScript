@@ -1,6 +1,9 @@
 //! Revisioned, single-source compiler queries for editor and tooling clients.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 mod cache;
 mod position;
@@ -130,6 +133,69 @@ impl DefinitionIndex {
             index: Self::default(),
         };
         collector.visit_program(syntax);
+        // The semantic model can contain compiler-provided values such as the
+        // implicit method receiver. They intentionally have no source
+        // declaration, so they must not masquerade as dangling source
+        // references and prevent language-symbol fallback in editor queries.
+        let mut defined = HashSet::new();
+        if collector.index.state.is_some() {
+            defined.insert(SourceDefinitionId::State);
+        }
+        if collector.index.settings.is_some() {
+            defined.insert(SourceDefinitionId::Settings);
+        }
+        defined.extend(
+            collector
+                .index
+                .values
+                .keys()
+                .copied()
+                .map(SourceDefinitionId::Value),
+        );
+        defined.extend(
+            collector
+                .index
+                .functions
+                .keys()
+                .copied()
+                .map(SourceDefinitionId::Function),
+        );
+        defined.extend(
+            collector
+                .index
+                .records
+                .keys()
+                .copied()
+                .map(SourceDefinitionId::Record),
+        );
+        defined.extend(
+            collector
+                .index
+                .record_fields
+                .keys()
+                .copied()
+                .map(SourceDefinitionId::RecordField),
+        );
+        defined.extend(
+            collector
+                .index
+                .enums
+                .keys()
+                .copied()
+                .map(SourceDefinitionId::Enum),
+        );
+        defined.extend(
+            collector
+                .index
+                .enum_variants
+                .keys()
+                .copied()
+                .map(SourceDefinitionId::EnumVariant),
+        );
+        collector
+            .index
+            .syntax_references
+            .retain(|reference| defined.contains(&reference.target));
         collector
             .index
             .syntax_references

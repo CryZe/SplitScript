@@ -41,6 +41,18 @@ pub(crate) enum CapabilityMethodImplementation {
     Standard(StdlibItemId),
 }
 
+/// Source declarations and aggregate layouts reached by formatting a value.
+///
+/// A custom formatter contributes an ordinary source-function edge. A
+/// compiler-derived formatter instead reads the complete aggregate shape, so
+/// consumers such as unused-declaration analysis need to observe its fields
+/// even though no source function exists for that work.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CapabilityDependencies {
+    pub(crate) source_functions: Vec<FunctionId>,
+    pub(crate) derived_aggregates: Vec<TypeId>,
+}
+
 impl CapabilityAnalysis {
     pub fn build(
         records: &[RecordDecl],
@@ -488,21 +500,37 @@ impl CapabilityAnalysis {
         }
     }
 
-    /// Source functions invoked by displaying this value, including custom
-    /// overrides nested inside a compiler-derived aggregate formatter.
-    pub fn display_method_implementations(
+    /// Declarations and layouts used by displaying this value, including
+    /// custom overrides nested inside a compiler-derived aggregate formatter.
+    pub(crate) fn method_dependencies(
         &self,
         root: TypeId,
+        requirement: StdlibItemId,
         semantics: &SemanticModel,
-    ) -> Vec<FunctionId> {
+    ) -> CapabilityDependencies {
         #[derive(Clone, Copy)]
         enum Mode {
             Display,
             Debug,
         }
-        let mut pending = vec![(root, Mode::Display)];
+        let initial_mode = match requirement {
+            StdlibItemId::DisplayToString => Mode::Display,
+            StdlibItemId::DebugDebugString => Mode::Debug,
+            _ => {
+                let source_functions =
+                    match self.resolve_method_requirement(root, requirement, semantics) {
+                        Some(CapabilityMethodImplementation::Source(function)) => vec![function],
+                        Some(CapabilityMethodImplementation::Standard(_)) | None => Vec::new(),
+                    };
+                return CapabilityDependencies {
+                    source_functions,
+                    derived_aggregates: Vec::new(),
+                };
+            }
+        };
+        let mut pending = vec![(root, initial_mode)];
         let mut visited = HashSet::new();
-        let mut functions = Vec::new();
+        let mut dependencies = CapabilityDependencies::default();
         while let Some((ty, mode)) = pending.pop() {
             if !visited.insert((ty, matches!(mode, Mode::Debug))) {
                 continue;
@@ -515,7 +543,7 @@ impl CapabilityAnalysis {
                         StdlibItemId::DisplayToString,
                         semantics,
                     ) {
-                        functions.push(function);
+                        dependencies.source_functions.push(function);
                     } else if self.has_derived_display(ty, semantics) {
                         pending.push((ty, Mode::Debug));
                     }
@@ -527,8 +555,9 @@ impl CapabilityAnalysis {
                         StdlibItemId::DebugDebugString,
                         semantics,
                     ) {
-                        functions.push(function);
+                        dependencies.source_functions.push(function);
                     } else if self.has_derived_debug(ty, semantics) {
+                        dependencies.derived_aggregates.push(ty);
                         pending.extend(
                             self.debug_dependency_types(ty, semantics)
                                 .into_iter()
@@ -538,7 +567,31 @@ impl CapabilityAnalysis {
                 }
             }
         }
-        functions
+        dependencies
+            .source_functions
+            .sort_by_key(|function| function.index());
+        dependencies.source_functions.dedup();
+        dependencies.derived_aggregates.sort_by_key(|ty| ty.index());
+        dependencies.derived_aggregates.dedup();
+        dependencies
+    }
+
+    pub(crate) fn display_dependencies(
+        &self,
+        root: TypeId,
+        semantics: &SemanticModel,
+    ) -> CapabilityDependencies {
+        self.method_dependencies(root, StdlibItemId::DisplayToString, semantics)
+    }
+
+    /// Source functions invoked by displaying this value, including custom
+    /// overrides nested inside a compiler-derived aggregate formatter.
+    pub fn display_method_implementations(
+        &self,
+        root: TypeId,
+        semantics: &SemanticModel,
+    ) -> Vec<FunctionId> {
+        self.display_dependencies(root, semantics).source_functions
     }
 
     fn debug_derivation_is_enabled(&self, ty: TypeId, semantics: &SemanticModel) -> bool {

@@ -1436,7 +1436,7 @@ define_language_catalog! {
     language_item!(
         SelfValue,
         "self",
-        LanguageItemKind::Syntax,
+        LanguageItemKind::Keyword,
         "self",
         "Refers to the current method receiver.",
         "A function declared as [`fn`] `Type.name` receives an implicit, precisely typed [`self`] value.",

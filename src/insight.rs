@@ -135,10 +135,27 @@ pub(crate) fn hover(
             render_stdlib_symbol_hover(standard_library.clone(), symbol),
             Some(symbol_uri(symbol, &standard_library)),
         ),
-        DefinitionTarget::Language(item) => (
-            render_language_hover(LanguageCatalog::new().item(item)),
-            Some(language_item_uri(item)),
-        ),
+        DefinitionTarget::Language(item) => {
+            let catalog = LanguageCatalog::new();
+            let item_metadata = catalog.item(item);
+            let form = if item == crate::language::LanguageItemId::SelfValue {
+                database.analysis_at(offset)?.and_then(|analysis| {
+                    semantic_context(database).map(|context| {
+                        let receiver = root_value_for_resolution(&analysis)
+                            .and_then(crate::semantic::ResolvedValue::source_value)
+                            .and_then(|value| context.semantics().value_type(value))
+                            .unwrap_or(analysis.ty);
+                        format!("self: {}", render_type(receiver, &context))
+                    })
+                })
+            } else {
+                None
+            };
+            (
+                render_language_hover_with_form(item_metadata, form.as_deref()),
+                Some(language_item_uri(item)),
+            )
+        }
         DefinitionTarget::Source(definition) => {
             if definition.id == SourceDefinitionId::State
                 && let Some(provider) = database
@@ -208,15 +225,7 @@ fn range_constructor_for_token(kind: &TokenKind) -> Option<StdlibTypeConstructor
 fn provider_value_for_resolution(
     analysis: &crate::database::PositionAnalysis,
 ) -> Option<crate::stdlib::StdlibStateProviderId> {
-    let root = match analysis.resolution.as_ref()? {
-        ExpressionResolution::ValuePath { root, .. } => *root,
-        ExpressionResolution::Call(call) => call.receiver()?.path().map(|(root, _)| root),
-        ExpressionResolution::Member { .. }
-        | ExpressionResolution::DynamicCall(_)
-        | ExpressionResolution::RecordLiteral { .. }
-        | ExpressionResolution::EnumConstructor { .. } => None,
-    }?;
-    match root {
+    match root_value_for_resolution(analysis)? {
         crate::semantic::ResolvedValue::ProviderValue(provider) => Some(provider),
         crate::semantic::ResolvedValue::Variable(_)
         | crate::semantic::ResolvedValue::CurrentSnapshot
@@ -227,6 +236,19 @@ fn provider_value_for_resolution(
         | crate::semantic::ResolvedValue::OldState(_)
         | crate::semantic::ResolvedValue::Setting(_)
         | crate::semantic::ResolvedValue::OldSetting(_) => None,
+    }
+}
+
+fn root_value_for_resolution(
+    analysis: &crate::database::PositionAnalysis,
+) -> Option<crate::semantic::ResolvedValue> {
+    match analysis.resolution.as_ref()? {
+        ExpressionResolution::ValuePath { root, .. } => *root,
+        ExpressionResolution::Call(call) => call.receiver()?.path().map(|(root, _)| root),
+        ExpressionResolution::Member { .. }
+        | ExpressionResolution::DynamicCall(_)
+        | ExpressionResolution::RecordLiteral { .. }
+        | ExpressionResolution::EnumConstructor { .. } => None,
     }
 }
 
@@ -956,14 +978,14 @@ fn render_stdlib_symbol_hover_with_form(
     markdown
 }
 
-fn render_language_hover(item: &LanguageItem) -> String {
+fn render_language_hover_with_form(item: &LanguageItem, form_override: Option<&str>) -> String {
     let prose = crate::documentation::prose_markdown(
         item.documentation.summary,
         item.documentation.details,
     );
     let mut markdown = format!(
         "```splitscript\n{}\n```\n\n{}",
-        item.form,
+        form_override.unwrap_or(item.form),
         crate::documentation::strip_intra_doc_links(&prose)
     );
     append_examples(&mut markdown, item.documentation.examples);
@@ -1284,6 +1306,38 @@ onDetach {
         ));
         assert!(!hover.markdown.contains("explicit\n\noperation"));
         assert!(!hover.markdown.contains("game\n\ntime"));
+    }
+
+    #[test]
+    fn method_self_hover_combines_receiver_type_and_language_documentation() {
+        let source = r#"
+record Position {
+    x: i32,
+}
+
+state "game.exe" {}
+
+fn Position.value() -> i32 {
+    return self.x
+}
+"#;
+        let offset = source.find("self.x").unwrap() + 2;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database.hover(offset).unwrap().expect("self hover");
+        assert!(
+            hover.markdown.contains("self: Position"),
+            "{}",
+            hover.markdown
+        );
+        assert!(
+            hover.markdown.contains("current method receiver"),
+            "{}",
+            hover.markdown
+        );
+        assert_eq!(
+            hover.documentation_uri.as_deref(),
+            Some("/language/self.md")
+        );
     }
 
     #[test]

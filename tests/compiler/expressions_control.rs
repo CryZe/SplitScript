@@ -926,6 +926,47 @@ fn structural_equality_observes_complete_record_and_enum_shapes() {
 }
 
 #[test]
+fn implicit_display_marks_custom_formatters_and_derived_fields_as_used() {
+    let source = r#"
+        record RawPosition {
+            x: u16,
+            y: u16,
+        }
+
+        record Position {
+            x: u16,
+            y: u16,
+        }
+
+        state "game.exe" {}
+
+        fn Position.toString() -> String {
+            return `({self.x}, {self.y})`
+        }
+
+        setup {
+            setVariable("Raw", RawPosition { x: 1, y: 2 })
+            setVariable("Position", Position { x: 3, y: 4 })
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("implicit Display implementations should be reachable");
+    let unused_protocol_declarations = checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.message.contains("RawPosition")
+                || diagnostic.message.contains("Position")
+                || diagnostic.message.contains("toString")
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        unused_protocol_declarations.is_empty(),
+        "{unused_protocol_declarations:#?}"
+    );
+}
+
+#[test]
 fn if_expressions_infer_branches_bidirectionally_and_lower_to_wasm() {
     let source = r#"
         enum Selected {

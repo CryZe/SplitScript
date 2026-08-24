@@ -130,49 +130,8 @@ fn implicit_display_callees(
     capabilities: &crate::capabilities::CapabilityAnalysis,
 ) -> Vec<FunctionId> {
     let mut functions = Vec::new();
-    match &expression.kind {
-        hir::TypedExpressionKind::InterpolatedString(parts) => {
-            for part in parts {
-                let hir::TypedInterpolatedPart::Expression {
-                    conversion: Some(hir::ImplicitConversion::ToString { source }),
-                    ..
-                } = part
-                else {
-                    continue;
-                };
-                functions.extend(capabilities.display_method_implementations(*source, semantics));
-            }
-        }
-        hir::TypedExpressionKind::Cast {
-            expression: value, ..
-        } if matches!(
-            semantics.types().kind(expression.ty),
-            TypeKind::Standard(crate::stdlib::StdlibTypeId::String)
-        ) =>
-        {
-            let source = program
-                .expression(*value)
-                .expect("cast operands belong to typed HIR")
-                .ty;
-            functions.extend(capabilities.display_method_implementations(source, semantics));
-        }
-        _ => {}
-    }
-    if let Some(ResolvedCall::StandardLibrary { item, .. }) = program.call(expression.id)
-        && let hir::TypedExpressionKind::Call { arguments, .. } = &expression.kind
-    {
-        let converted = match *item {
-            crate::stdlib::StdlibItemId::Print => arguments.first(),
-            crate::stdlib::StdlibItemId::SetVariable => arguments.get(1),
-            _ => None,
-        };
-        if let Some(argument) = converted {
-            let ty = program
-                .expression(*argument)
-                .expect("resolved call arguments belong to typed HIR")
-                .ty;
-            functions.extend(capabilities.display_method_implementations(ty, semantics));
-        }
+    for source in hir::implicit_display_types(expression, program, semantics) {
+        functions.extend(capabilities.display_method_implementations(source, semantics));
     }
     functions.sort_by_key(|function| function.index());
     functions.dedup();

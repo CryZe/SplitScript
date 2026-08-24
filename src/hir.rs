@@ -1164,6 +1164,69 @@ pub fn walk_typed_expression<V: TypedVisitor>(
     }
 }
 
+/// Concrete value types whose formatting is implicit in this expression.
+///
+/// Keeping this recognition on typed HIR gives effects, reachability, and
+/// diagnostics one definition of interpolation, string casts, and runtime
+/// text-output calls. Capability analysis remains responsible for deciding
+/// how each returned type implements `Display`.
+pub(crate) fn implicit_display_types(
+    expression: &TypedExpression,
+    program: &TypedProgram,
+    semantics: &SemanticModel,
+) -> Vec<TypeId> {
+    let mut types = Vec::new();
+    match &expression.kind {
+        TypedExpressionKind::InterpolatedString(parts) => {
+            types.extend(parts.iter().filter_map(|part| match part {
+                TypedInterpolatedPart::Expression {
+                    conversion: Some(ImplicitConversion::ToString { source }),
+                    ..
+                } => Some(*source),
+                TypedInterpolatedPart::Text(_)
+                | TypedInterpolatedPart::Expression {
+                    conversion: None, ..
+                } => None,
+            }));
+        }
+        TypedExpressionKind::Cast {
+            expression: value, ..
+        } if matches!(
+            semantics.types().kind(expression.ty),
+            TypeKind::Standard(StdlibTypeId::String)
+        ) =>
+        {
+            types.push(
+                program
+                    .expression(*value)
+                    .expect("cast operands belong to typed HIR")
+                    .ty,
+            );
+        }
+        _ => {}
+    }
+    if let Some(ResolvedCall::StandardLibrary { item, .. }) = program.call(expression.id)
+        && let TypedExpressionKind::Call { arguments, .. } = &expression.kind
+    {
+        let converted = match *item {
+            StdlibItemId::Print => arguments.first(),
+            StdlibItemId::SetVariable => arguments.get(1),
+            _ => None,
+        };
+        if let Some(argument) = converted {
+            types.push(
+                program
+                    .expression(*argument)
+                    .expect("resolved call arguments belong to typed HIR")
+                    .ty,
+            );
+        }
+    }
+    types.sort_by_key(|ty| ty.index());
+    types.dedup();
+    types
+}
+
 pub fn walk_typed_match_arm<V: TypedVisitor>(
     visitor: &mut V,
     arm: &TypedMatchArm,

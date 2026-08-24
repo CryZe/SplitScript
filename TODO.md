@@ -664,22 +664,9 @@ remaining work is product hardening and distribution.
   source async functions, including captured values and mutable parameters
   that survive suspension. Finish latent effect inference at invocation sites,
   generic closure bodies and captures, and named function-to-callable
-  conversion. Lazy `Iterator.map` and `Iterator.filter`, including stored
-  callbacks and direct `for` consumption, are complete. Preserve
-  ordinary lexical control flow: `return` belongs to the closure, while
+  conversion. Preserve ordinary lexical control flow: `return` belongs to the closure, while
   `break` and `continue` cannot target loops outside it. Keep named functions
   and closures on one callable abstraction rather than a closure-only path.
-- [ ] Make reachability-based unused analysis account for implicit protocol
-  use. A user-defined `toString`/`debugString` implementation, its receiver
-  record, and fields read only through that implementation are used whenever
-  the corresponding derived `Display`/`Debug` path is reachable; do not warn
-  about them merely because no ordinary source call names the method. Cover
-  the same rule for future capability-satisfying user methods rather than
-  special-casing display.
-- [ ] Treat the implicit method receiver `self` as a first-class language
-  symbol throughout the editor: keyword highlighting, hover documentation,
-  semantic tokens, selection, and definition behavior should agree with its
-  precisely inferred receiver type.
 - [ ] Complete remaining ordinary library gaps when a port needs them:
   immutable String operations beyond the corpus-proven P0 slice, additional
   numeric operations, and typed time operations proven useful by maintained

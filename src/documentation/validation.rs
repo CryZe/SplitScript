@@ -370,7 +370,7 @@ mod tests {
         let reference = DocumentationReference::default();
         let snapshot = reference_snapshot(&reference);
         assert_eq!(snapshot.page_count, 489);
-        assert_eq!(snapshot.fingerprint, 6_063_487_589_003_726_406);
+        assert_eq!(snapshot.fingerprint, 8_868_631_874_317_465_032);
     }
 
     #[derive(Debug)]

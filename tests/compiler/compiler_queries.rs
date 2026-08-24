@@ -1249,6 +1249,7 @@ fn compiler_database_resolves_expression_segments_to_definitions() {
             let counter = Counter { value: 1 }
             let mode = Mode.Active
             let result = bump(counter)
+            let special = f32.NaN.isNaN()
             print(result as String)
         }
     "#;
@@ -1314,6 +1315,15 @@ fn compiler_database_resolves_expression_segments_to_definitions() {
     assert_eq!(
         database.definition_at(print_call + 1).unwrap(),
         Some(DefinitionTarget::StandardLibrary(StdlibItemId::Print))
+    );
+    let constant = source.find("f32.NaN.isNaN()").unwrap();
+    assert_eq!(
+        database.definition_at(constant + "f32.".len()).unwrap(),
+        Some(DefinitionTarget::StandardLibrary(StdlibItemId::F32NaN))
+    );
+    assert_eq!(
+        database.definition_at(constant + "f32.NaN.".len()).unwrap(),
+        Some(DefinitionTarget::StandardLibrary(StdlibItemId::FloatIsNaN))
     );
     assert_eq!(
         database

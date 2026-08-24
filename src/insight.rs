@@ -226,6 +226,7 @@ fn provider_value_for_resolution(
     analysis: &crate::database::PositionAnalysis,
 ) -> Option<crate::stdlib::StdlibStateProviderId> {
     match root_value_for_resolution(analysis)? {
+        crate::semantic::ResolvedValue::StandardLibraryConstant(_) => None,
         crate::semantic::ResolvedValue::ProviderValue(provider) => Some(provider),
         crate::semantic::ResolvedValue::Variable(_)
         | crate::semantic::ResolvedValue::CurrentSnapshot
@@ -1236,7 +1237,7 @@ fn inferred_method_type_arguments(
 ) -> Vec<TypeId> {
     let declared = match item.kind {
         crate::stdlib::ItemKind::Method { receiver } => receiver,
-        crate::stdlib::ItemKind::Function => {
+        crate::stdlib::ItemKind::Function | crate::stdlib::ItemKind::Constant => {
             return Vec::new();
         }
     };
@@ -1373,6 +1374,28 @@ whileAttached {
         assert!(!hover.markdown.contains("value.min"));
         assert!(!hover.markdown.contains("value.max"));
         assert!(!hover.markdown.contains("setTickRate"));
+    }
+
+    #[test]
+    fn hover_describes_source_defined_associated_constants() {
+        let source = r#"
+state "game.exe" {}
+setup {
+    let value = f32.NaN
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(source.find("NaN").unwrap() + 1)
+            .unwrap()
+            .expect("associated constant hover");
+        assert!(hover.markdown.contains("f32.NaN: f32"));
+        assert!(
+            hover
+                .markdown
+                .contains("The canonical 32-bit not-a-number value")
+        );
+        assert!(hover.markdown.contains("let measurement = f32.NaN"));
     }
 
     #[test]

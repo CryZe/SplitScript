@@ -251,7 +251,7 @@ impl IntrinsicSignature {
             .collect::<Vec<_>>();
         let declared_receiver = match kind {
             ItemKind::Method { receiver } => Some(receiver),
-            ItemKind::Function => None,
+            ItemKind::Function | ItemKind::Constant => None,
         };
         if !matches_optional_type(self.receiver, declared_receiver, &names) {
             return false;

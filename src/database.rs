@@ -245,7 +245,7 @@ fn definition_for_resolution(
 ) -> Option<DefinitionTarget> {
     match analysis.resolution.as_ref()? {
         ExpressionResolution::ValuePath { root, members } => {
-            definition_for_value_path(definitions, *root, members, segment)
+            definition_for_value_path(definitions, *root, members, segment, &standard_library)
         }
         ExpressionResolution::Member { members } => (segment == 0)
             .then(|| members.first())
@@ -277,7 +277,13 @@ fn definition_for_resolution(
                 } => receiver
                     .path()
                     .and_then(|(root, members)| {
-                        definition_for_value_path(definitions, Some(root), members, segment)
+                        definition_for_value_path(
+                            definitions,
+                            Some(root),
+                            members,
+                            segment,
+                            &standard_library,
+                        )
                     })
                     .or_else(|| {
                         receiver
@@ -449,6 +455,9 @@ fn source_definition_for_value_path(
     segment: usize,
 ) -> Option<SourceDefinitionId> {
     let root = root?;
+    if matches!(root, ResolvedValue::StandardLibraryConstant(_)) {
+        return None;
+    }
     if matches!(
         root,
         ResolvedValue::CurrentSnapshot | ResolvedValue::OldSnapshot
@@ -468,6 +477,7 @@ fn source_definition_for_value_path(
         };
     }
     let root_segment = match root {
+        ResolvedValue::StandardLibraryConstant(_) => unreachable!(),
         ResolvedValue::ProviderValue(_) => 0,
         ResolvedValue::Variable(_) => 0,
         ResolvedValue::CurrentSnapshot
@@ -488,6 +498,7 @@ fn source_definition_for_value_path(
                 Some(SourceDefinitionId::Settings)
             }
             ResolvedValue::ProviderValue(_)
+            | ResolvedValue::StandardLibraryConstant(_)
             | ResolvedValue::Variable(_)
             | ResolvedValue::CurrentSnapshot
             | ResolvedValue::OldSnapshot
@@ -516,8 +527,22 @@ fn definition_for_value_path(
     root: Option<ResolvedValue>,
     members: &[ResolvedMember],
     segment: usize,
+    standard_library: &StandardLibrary,
 ) -> Option<DefinitionTarget> {
     let root = root?;
+    if let ResolvedValue::StandardLibraryConstant(item) = root {
+        let constant_segment = standard_library
+            .item_path(standard_library.item(item))?
+            .len()
+            - 1;
+        if segment == constant_segment {
+            return Some(DefinitionTarget::StandardLibrary(item));
+        }
+        let member = segment.checked_sub(constant_segment + 1)?;
+        return members
+            .get(member)
+            .and_then(|member| definition_for_member(definitions, member));
+    }
     if matches!(
         root,
         ResolvedValue::CurrentSnapshot | ResolvedValue::OldSnapshot
@@ -548,6 +573,7 @@ fn definition_for_value_path(
             .map(DefinitionTarget::Source);
     }
     let root_segment = match root {
+        ResolvedValue::StandardLibraryConstant(_) => unreachable!(),
         ResolvedValue::ProviderValue(_) => 0,
         ResolvedValue::Variable(_) => 0,
         ResolvedValue::CurrentSnapshot
@@ -568,6 +594,7 @@ fn definition_for_value_path(
                 SourceDefinitionId::Settings
             }
             ResolvedValue::ProviderValue(_)
+            | ResolvedValue::StandardLibraryConstant(_)
             | ResolvedValue::Variable(_)
             | ResolvedValue::CurrentSnapshot
             | ResolvedValue::OldSnapshot

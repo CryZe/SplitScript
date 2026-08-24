@@ -340,6 +340,28 @@ fn computed_infinity_can_be_converted_to_a_string_explicitly() {
 }
 
 #[test]
+fn floating_point_constants_preserve_their_width_and_ieee_values() {
+    let source = r#"
+        state "game.exe" {}
+
+        setup {
+            let narrowNaN = f32.NaN.isNaN()
+            let narrowPositive = f32.positiveInfinity.toBits() == 0x7f800000u32
+            let narrowNegative = f32.negativeInfinity.toBits() == 0xff800000u32
+            let wideNaN = f64.NaN.isNaN()
+            let widePositive = f64.positiveInfinity.toBits()
+                == 0x7ff0000000000000u64
+            let wideNegative = f64.negativeInfinity.toBits()
+                == 0xfff0000000000000u64
+            print(`{narrowNaN}:{narrowPositive}:{narrowNegative}:{wideNaN}:{widePositive}:{wideNegative}`)
+        }
+    "#;
+
+    let (store, _) = execute_with_mock_host(source);
+    assert_eq!(store.data().messages, ["true:true:true:true:true:true"]);
+}
+
+#[test]
 fn closures_execute_through_typed_function_references_and_capture_values() {
     let source = r#"
         state "game.exe" {}

@@ -184,13 +184,17 @@ mod tests {
                     );
                 }
                 Implementation::LibraryBody { .. } | Implementation::LibraryOverloads { .. } => {
-                    let declaration = format!("fn {}", item.name);
-                    let authored = source.match_indices(&declaration).any(|(position, _)| {
-                        matches!(
-                            source.as_bytes().get(position + declaration.len()),
-                            Some(b'(' | b'<')
-                        )
-                    });
+                    let authored = if item.kind == ItemKind::Constant {
+                        source.contains(&format!("const {}:", item.name))
+                    } else {
+                        let declaration = format!("fn {}", item.name);
+                        source.match_indices(&declaration).any(|(position, _)| {
+                            matches!(
+                                source.as_bytes().get(position + declaration.len()),
+                                Some(b'(' | b'<')
+                            )
+                        })
+                    };
                     assert!(
                         authored,
                         "`{}` must have a source body",

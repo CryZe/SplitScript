@@ -49,6 +49,7 @@ pub enum CompletionKind {
     Struct,
     Enum,
     EnumMember,
+    Constant,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -869,12 +870,12 @@ fn add_standard_library_path_members(
         }
         let label = path[prefix.len()];
         if path.len() == prefix.len() + 1 {
-            builder.add(stdlib_completion(
-                label,
-                item,
-                CompletionKind::Function,
-                library,
-            ));
+            let kind = if item.kind == ItemKind::Constant {
+                CompletionKind::Constant
+            } else {
+                CompletionKind::Function
+            };
+            builder.add(stdlib_completion(label, item, kind, library));
         }
     }
 
@@ -898,8 +899,12 @@ fn stdlib_completion(
         detail: Some(documentation.signature.clone()),
         documentation: Some(documentation.summary_markdown()),
         documentation_uri: Some(symbol_uri(StdlibSymbolId::Item(item.id), library)),
-        insert_text: function_snippet(label, item),
-        is_snippet: true,
+        insert_text: if item.kind == ItemKind::Constant {
+            label.to_owned()
+        } else {
+            function_snippet(label, item)
+        },
+        is_snippet: item.kind != ItemKind::Constant,
     }
 }
 
@@ -1567,6 +1572,7 @@ fn add_inferred_methods(
                                 ItemKind::Function => {
                                     return false;
                                 }
+                                ItemKind::Constant => return false,
                             };
                             let TypeRef::Parameter(parameter) = receiver else {
                                 return false;
@@ -2320,6 +2326,22 @@ whileAttached {
             "state \"game.exe\" {}\nwhileAttached { let number: i32 = 4\nnumber.\n}",
         );
         assert!(labels(&mut bare, "number.").contains(&"min".to_owned()));
+
+        let mut float_type =
+            CompilerDatabase::new("state \"game.exe\" {}\nsetup { let value = f32. }");
+        let completions = float_type
+            .completions(float_type.source().find("f32.").unwrap() + "f32.".len())
+            .expect("float associated items should complete");
+        for name in ["NaN", "positiveInfinity", "negativeInfinity"] {
+            let item = completions
+                .items
+                .iter()
+                .find(|item| item.label == name)
+                .unwrap_or_else(|| panic!("missing `{name}`: {completions:#?}"));
+            assert_eq!(item.kind, CompletionKind::Constant);
+            assert_eq!(item.insert_text, name);
+            assert!(!item.is_snippet);
+        }
 
         let mut keyed_settings = CompilerDatabase::new(
             "state \"game.exe\" {}\nsettings { \"Flag\" => flag key \"flag\": true }\nwhileAttached { settings.en }",

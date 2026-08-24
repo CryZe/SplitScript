@@ -1780,6 +1780,51 @@ capability Float<T: Signed + Debug> {
 }
 
 extend f32 {
+    /// The canonical 32-bit not-a-number value.
+    ///
+    /// NaN represents an undefined or unrepresentable floating-point result.
+    /// It is not equal to itself; use [`Float.isNaN`] when testing a value.
+    ///
+    /// # Example
+    ///
+    /// Initialize an unavailable measurement
+    ///
+    /// ```splitscript
+    /// let measurement = f32.NaN
+    /// if measurement.isNaN() {
+    ///     print("measurement unavailable")
+    /// }
+    /// ```
+    const NaN: f32 = f32.fromBits(0x7fc00000);
+
+    /// Positive infinity as a 32-bit floating-point value.
+    ///
+    /// This value compares greater than every finite 32-bit float and remains
+    /// infinite under operations such as addition by a finite value.
+    ///
+    /// # Example
+    ///
+    /// Start an unbounded minimum search
+    ///
+    /// ```splitscript
+    /// let minimum = f32.positiveInfinity
+    /// ```
+    const positiveInfinity: f32 = f32.fromBits(0x7f800000);
+
+    /// Negative infinity as a 32-bit floating-point value.
+    ///
+    /// This value compares less than every finite 32-bit float. Negating it
+    /// produces [`f32.positiveInfinity`].
+    ///
+    /// # Example
+    ///
+    /// Start an unbounded maximum search
+    ///
+    /// ```splitscript
+    /// let maximum = f32.negativeInfinity
+    /// ```
+    const negativeInfinity: f32 = f32.fromBits(0xff800000);
+
     /// Constructs a 32-bit float from its exact IEEE-754 bit pattern.
     ///
     /// Every bit pattern is accepted, including signed zero, infinities, and
@@ -1818,6 +1863,51 @@ extend f32 {
 }
 
 extend f64 {
+    /// The canonical 64-bit not-a-number value.
+    ///
+    /// NaN represents an undefined or unrepresentable floating-point result.
+    /// It is not equal to itself; use [`Float.isNaN`] when testing a value.
+    ///
+    /// # Example
+    ///
+    /// Initialize an unavailable measurement
+    ///
+    /// ```splitscript
+    /// let measurement = f64.NaN
+    /// if measurement.isNaN() {
+    ///     print("measurement unavailable")
+    /// }
+    /// ```
+    const NaN: f64 = f64.fromBits(0x7ff8000000000000u64);
+
+    /// Positive infinity as a 64-bit floating-point value.
+    ///
+    /// This value compares greater than every finite 64-bit float and remains
+    /// infinite under operations such as addition by a finite value.
+    ///
+    /// # Example
+    ///
+    /// Start an unbounded minimum search
+    ///
+    /// ```splitscript
+    /// let minimum = f64.positiveInfinity
+    /// ```
+    const positiveInfinity: f64 = f64.fromBits(0x7ff0000000000000u64);
+
+    /// Negative infinity as a 64-bit floating-point value.
+    ///
+    /// This value compares less than every finite 64-bit float. Negating it
+    /// produces [`f64.positiveInfinity`].
+    ///
+    /// # Example
+    ///
+    /// Start an unbounded maximum search
+    ///
+    /// ```splitscript
+    /// let maximum = f64.negativeInfinity
+    /// ```
+    const negativeInfinity: f64 = f64.fromBits(0xfff0000000000000u64);
+
     /// Constructs a 64-bit float from its exact IEEE-754 bit pattern.
     ///
     /// Every bit pattern is accepted, including signed zero, infinities, and

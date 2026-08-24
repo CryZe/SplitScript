@@ -177,6 +177,7 @@ fn lexical_kind(
             Some(match library.item(item).kind {
                 crate::stdlib::ItemKind::Function => SemanticTokenKind::Function,
                 crate::stdlib::ItemKind::Method { .. } => SemanticTokenKind::Method,
+                crate::stdlib::ItemKind::Constant => SemanticTokenKind::Constant,
             })
         }
         TokenKind::Ident(name)

@@ -193,6 +193,7 @@ pub struct Parameter {
 pub enum ItemKind {
     Function,
     Method { receiver: TypeRef },
+    Constant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

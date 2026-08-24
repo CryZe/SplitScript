@@ -151,13 +151,32 @@ impl StandardLibrary {
 
     fn initialize_source_body_operations(&self) {
         self.graph.initialize_source_body_operations_with(|| {
-            crate::derive_standard_library_operation_metadata(self.clone()).unwrap_or_else(
-                |diagnostics| {
+            let operations =
+                crate::derive_standard_library_operation_metadata(self.clone()).unwrap_or_else(
+                    |diagnostics| {
+                        panic!(
+                            "source-defined standard-library operation analysis failed:\n{diagnostics:#?}"
+                        )
+                    },
+                );
+            for item in self
+                .all_items()
+                .iter()
+                .filter(|item| item.kind == ItemKind::Constant)
+            {
+                let operation = operations
+                    .get(&item.id)
+                    .expect("source-defined constants have operation metadata");
+                if operation.availability != Availability::Everywhere
+                    || operation.effects != EffectSet::one(Effect::Pure)
+                {
                     panic!(
-                        "source-defined standard-library operation analysis failed:\n{diagnostics:#?}"
+                        "standard-library constant `{}` is not a pure, synchronous, context-independent value",
+                        item.qualified_name
                     )
-                },
-            )
+                }
+            }
+            operations
         });
     }
 
@@ -684,6 +703,13 @@ impl StandardLibrary {
                 receiver.render_with(self, substitutions),
                 item.name
             ),
+            ItemKind::Constant => {
+                return format!(
+                    "{}: {}",
+                    item.qualified_name,
+                    signature.result.render_with(self, substitutions)
+                );
+            }
         };
         if signature.explicit_type_parameters != 0 {
             rendered.push('<');
@@ -1232,6 +1258,12 @@ impl StandardLibrary {
                     ItemKind::Method { receiver } => {
                         format!("method {}.{}", receiver.render(self), item.name)
                     }
+                    ItemKind::Constant => format!(
+                        "constant {}",
+                        path.as_ref()
+                            .expect("constants have source paths")
+                            .join(".")
+                    ),
                 });
             if let Some(path) = &path
                 && path.join(".") != item.qualified_name
@@ -1310,6 +1342,7 @@ impl StandardLibrary {
             let example_call = match item.kind {
                 ItemKind::Function => item.qualified_name.to_owned(),
                 ItemKind::Method { .. } => format!(".{}", item.name),
+                ItemKind::Constant => item.qualified_name.to_owned(),
             };
             for example in item.documentation.examples {
                 if example.title.trim().is_empty()

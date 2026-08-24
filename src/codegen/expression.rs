@@ -1346,6 +1346,27 @@ fn compile_resolved_path(
     context: &ExprContext<'_>,
 ) -> Type {
     let value_type = match value {
+        ResolvedValue::StandardLibraryConstant(item) => {
+            let function_instance = context
+                .wasm_ir
+                .constant_function(item)
+                .expect("source-defined constants have hidden function bodies");
+            let function_instance = context.called_instance(function_instance);
+            function.instruction(&Instruction::Call(
+                context.functions[&function_instance].call,
+            ));
+            let result = function_instance
+                .signature
+                .last()
+                .copied()
+                .or_else(|| {
+                    context
+                        .semantics
+                        .function_result(function_instance.function)
+                })
+                .expect("constant function instances have a result type");
+            semantic_type(result, context.semantics)
+        }
         ResolvedValue::ProviderValue(provider) => {
             let declaration = context.wasm_ir.standard_library().state_provider(provider);
             if declaration.attachment == crate::stdlib::StateProviderAttachment::Identity {

@@ -114,6 +114,9 @@ pub struct FieldDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionDeclaration {
     pub name: String,
+    /// Whether this declaration is an associated constant whose source
+    /// initializer is represented internally as a zero-argument body.
+    pub is_constant: bool,
     /// Whether this callable is available only to trusted standard-library
     /// source bodies.
     pub private: bool,

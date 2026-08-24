@@ -165,6 +165,11 @@ pub struct ValueConversion {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedValue {
+    /// A catalog-declared value whose source implementation is evaluated on
+    /// demand. Constants participate in ordinary value paths; the backend's
+    /// hidden zero-argument function is an implementation detail rather than
+    /// a source-level call.
+    StandardLibraryConstant(StdlibItemId),
     ProviderValue(StdlibStateProviderId),
     Variable(ValueId),
     CurrentSnapshot,
@@ -182,7 +187,8 @@ impl ResolvedValue {
     /// values are compiler/catalog-owned roots and have no source declaration.
     pub fn source_value(self) -> Option<ValueId> {
         match self {
-            Self::ProviderValue(_)
+            Self::StandardLibraryConstant(_)
+            | Self::ProviderValue(_)
             | Self::CurrentSnapshot
             | Self::OldSnapshot
             | Self::SettingsView

@@ -447,7 +447,9 @@ impl<'a> CatalogGenerator<'a> {
                     .constraints
                     .extend(constrained.constraints.clone());
             }
-            let kind = if function.is_static {
+            let kind = if function.is_constant {
+                "ItemKind::Constant".to_owned()
+            } else if function.is_static {
                 "ItemKind::Function".to_owned()
             } else {
                 format!("ItemKind::Method {{ receiver: {receiver} }}")

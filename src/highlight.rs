@@ -562,6 +562,22 @@ impl HighlightCollector<'_> {
         let current_state_path = matches!(resolved_value, Some(ResolvedValue::CurrentState(_)));
         if let Some(value) = resolved_value {
             match value {
+                ResolvedValue::StandardLibraryConstant(item) => {
+                    let constant_segment = self
+                        .standard_library
+                        .item_path(self.standard_library.item(item))
+                        .map_or(0, |path| path.len().saturating_sub(1));
+                    if let Some(owner) = spans.first() {
+                        self.insert(*owner, SemanticTokenKind::Type, MODIFIER_DEFAULT_LIBRARY);
+                    }
+                    if let Some(constant) = spans.get(constant_segment) {
+                        self.insert(
+                            *constant,
+                            SemanticTokenKind::Constant,
+                            MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY,
+                        );
+                    }
+                }
                 ResolvedValue::ProviderValue(_) => {
                     self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
                 }
@@ -1263,6 +1279,32 @@ fn Position.value() -> i32 {
             kind_at(&highlights, source.find("self.x").unwrap()),
             Some(SemanticTokenKind::Keyword)
         );
+    }
+
+    #[test]
+    fn associated_constants_are_highlighted_as_readonly_library_values() {
+        let source = r#"
+state "game.exe" {}
+setup {
+    let value = f32.NaN
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let highlights = database.semantic_highlights().unwrap();
+        assert!(contains(
+            source,
+            &highlights,
+            "f32",
+            SemanticTokenKind::Type,
+            MODIFIER_DEFAULT_LIBRARY
+        ));
+        assert!(contains(
+            source,
+            &highlights,
+            "NaN",
+            SemanticTokenKind::Constant,
+            MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY
+        ));
     }
 
     fn contains(

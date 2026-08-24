@@ -174,6 +174,13 @@ impl Reachability {
                 });
                 pending_functions.push((None, function));
             }
+            for constant in constant_roots(&expression.kind) {
+                let function = wasm_ir
+                    .constant_function(constant)
+                    .expect("resolved constants have hidden function bodies")
+                    .clone();
+                pending_functions.push((owner.clone(), function));
+            }
             if let wasm_ir::ExpressionKind::Call { target, .. } = &expression.kind {
                 let capability_call =
                     matches!(target, wasm_ir::CallTarget::CapabilityRequirement { .. });
@@ -941,6 +948,42 @@ impl Reachability {
             }
         }
     }
+}
+
+fn constant_roots(
+    expression: &wasm_ir::ExpressionKind,
+) -> impl Iterator<Item = crate::stdlib::StdlibItemId> + '_ {
+    let direct = match expression {
+        wasm_ir::ExpressionKind::Path {
+            root: Some(crate::semantic::ResolvedValue::StandardLibraryConstant(item)),
+            ..
+        } => Some(*item),
+        _ => None,
+    };
+    let receiver = match expression {
+        wasm_ir::ExpressionKind::Call { target, .. } => match target {
+            wasm_ir::CallTarget::UserMethod { receiver, .. }
+            | wasm_ir::CallTarget::CapabilityRequirement { receiver, .. }
+            | wasm_ir::CallTarget::DefaultDisplay { receiver, .. } => Some(receiver),
+            wasm_ir::CallTarget::Intrinsic { receiver, .. }
+            | wasm_ir::CallTarget::LibraryOverload { receiver, .. } => receiver.as_ref(),
+            wasm_ir::CallTarget::UserFunction { .. }
+            | wasm_ir::CallTarget::ResultError { .. }
+            | wasm_ir::CallTarget::OptionSome { .. }
+            | wasm_ir::CallTarget::IteratorItem { .. }
+            | wasm_ir::CallTarget::ResultSuccess { .. } => None,
+        },
+        _ => None,
+    }
+    .and_then(|receiver| match receiver {
+        crate::semantic::ResolvedReceiver::Path {
+            root: crate::semantic::ResolvedValue::StandardLibraryConstant(item),
+            ..
+        } => Some(*item),
+        crate::semantic::ResolvedReceiver::Path { .. }
+        | crate::semantic::ResolvedReceiver::Expression { .. } => None,
+    });
+    direct.into_iter().chain(receiver)
 }
 
 fn block_uses_string_match_pattern(block: &wasm_ir::Block, program: &wasm_ir::Program) -> bool {

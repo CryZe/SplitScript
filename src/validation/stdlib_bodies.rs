@@ -86,7 +86,7 @@ fn validate_signature(
     semantics: &SemanticModel,
 ) -> Result<(), String> {
     let expected_parameters = match kind {
-        ItemKind::Function => signature
+        ItemKind::Function | ItemKind::Constant => signature
             .parameters
             .iter()
             .map(|parameter| (parameter.name, parameter.ty))
@@ -128,7 +128,7 @@ fn validate_signature(
 
     for parameter in signature.type_parameters {
         let occurs = match kind {
-            ItemKind::Function => false,
+            ItemKind::Function | ItemKind::Constant => false,
             ItemKind::Method { receiver } => type_ref_contains(receiver, parameter.name),
         } || signature
             .parameters

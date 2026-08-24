@@ -21,7 +21,7 @@ impl CallCandidate {
     pub const fn receiver(&self) -> Option<TypeRef> {
         match self.item.kind {
             ItemKind::Method { receiver } => Some(receiver),
-            ItemKind::Function => None,
+            ItemKind::Function | ItemKind::Constant => None,
         }
     }
 }
@@ -44,7 +44,7 @@ impl StandardLibrarySemanticExt for StandardLibrary {
         if let Some(item) = self.item_by_name(&qualified_name) {
             return match item.kind {
                 ItemKind::Function => vec![CallCandidate { item }],
-                ItemKind::Method { .. } => Vec::new(),
+                ItemKind::Method { .. } | ItemKind::Constant => Vec::new(),
             };
         }
 
@@ -56,7 +56,7 @@ impl StandardLibrarySemanticExt for StandardLibrary {
         if let Some(item) = self.item_by_name_including_private(&qualified_name) {
             return match item.kind {
                 ItemKind::Function => vec![CallCandidate { item }],
-                ItemKind::Method { .. } => Vec::new(),
+                ItemKind::Method { .. } | ItemKind::Constant => Vec::new(),
             };
         }
         Vec::new()
@@ -107,7 +107,7 @@ fn catalog_method_accepts(
 ) -> bool {
     let declared = match item.kind {
         ItemKind::Method { receiver } => receiver,
-        ItemKind::Function => return false,
+        ItemKind::Function | ItemKind::Constant => return false,
     };
     match declared {
         TypeRef::Core(expected) => {

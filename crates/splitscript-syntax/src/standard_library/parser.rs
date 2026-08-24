@@ -275,6 +275,13 @@ impl Parser<'_> {
                     private,
                     functions_are_static || explicitly_static,
                 )?);
+            } else if self.eat_ident("const") {
+                if private || explicitly_static {
+                    return Err(
+                        self.error("an associated constant cannot be `private` or `static`")
+                    );
+                }
+                functions.push(self.constant_declaration(documentation, attributes)?);
             } else if fields_allowed {
                 if explicitly_static {
                     return Err(self.error("expected `fn` after `static`"));
@@ -432,6 +439,13 @@ impl Parser<'_> {
                     private,
                     is_static,
                 )?);
+            } else if self.eat_ident("const") {
+                if private || is_static {
+                    return Err(
+                        self.error("an associated constant cannot be `private` or `static`")
+                    );
+                }
+                functions.push(self.constant_declaration(member_documentation, member_attributes)?);
             } else {
                 if is_static {
                     return Err(self.error("expected `fn` after `static`"));
@@ -518,6 +532,7 @@ impl Parser<'_> {
         };
         Ok(FunctionDeclaration {
             name,
+            is_constant: false,
             private,
             type_parameters,
             where_constraints,
@@ -529,6 +544,58 @@ impl Parser<'_> {
             attributes,
             body,
         })
+    }
+
+    fn constant_declaration(
+        &mut self,
+        documentation: Documentation,
+        attributes: Vec<Attribute>,
+    ) -> Result<FunctionDeclaration, Error> {
+        let name = self.ident("expected an associated constant name")?;
+        self.expect(TokenKind::Colon, "expected `:` after the constant name")?;
+        let result = self.ty()?;
+        self.expect(TokenKind::Assign, "expected `=` before the constant value")?;
+        let start = self.current().span.start;
+        let mut parentheses = 0_u32;
+        let mut brackets = 0_u32;
+        let mut braces = 0_u32;
+        loop {
+            let token = self.current().clone();
+            match token.kind {
+                TokenKind::LParen => parentheses += 1,
+                TokenKind::RParen => parentheses = parentheses.saturating_sub(1),
+                TokenKind::LBracket => brackets += 1,
+                TokenKind::RBracket => brackets = brackets.saturating_sub(1),
+                TokenKind::LBrace => braces += 1,
+                TokenKind::RBrace => braces = braces.saturating_sub(1),
+                TokenKind::Semicolon if parentheses == 0 && brackets == 0 && braces == 0 => {
+                    let value = self.source[start..token.span.start].trim();
+                    if value.is_empty() {
+                        return Err(self.error("expected a value after `=`"));
+                    }
+                    self.bump();
+                    return Ok(FunctionDeclaration {
+                        name,
+                        is_constant: true,
+                        private: false,
+                        type_parameters: Vec::new(),
+                        where_constraints: Vec::new(),
+                        parameters: Vec::new(),
+                        result_is_async: false,
+                        result,
+                        is_static: true,
+                        documentation,
+                        attributes,
+                        body: Some(format!("{{ return {value} }}")),
+                    });
+                }
+                TokenKind::Eof => {
+                    return Err(self.error("expected `;` after the associated constant"));
+                }
+                _ => {}
+            }
+            self.bump();
+        }
     }
 
     /// Captures a body with the ordinary language's exact source spelling.
@@ -1307,6 +1374,28 @@ root {
         let function = &root.functions[0];
         assert!(function.result_is_async);
         assert_eq!(function.result.to_string(), "None");
+    }
+
+    #[test]
+    fn parses_source_defined_associated_constants() {
+        let source = r#"
+extend f32 {
+    /// The canonical not-a-number value.
+    const NaN: f32 = f32.fromBits(0x7fc00000);
+}
+"#;
+        let library = parse(source).expect("associated constants should parse");
+        let Declaration::CoreExtension(extension) = &library.declarations[0] else {
+            panic!("expected a core extension")
+        };
+        let constant = &extension.functions[0];
+        assert!(constant.is_constant);
+        assert_eq!(constant.name, "NaN");
+        assert_eq!(constant.result.to_string(), "f32");
+        assert_eq!(
+            constant.body.as_deref(),
+            Some("{ return f32.fromBits(0x7fc00000) }")
+        );
     }
 
     #[test]

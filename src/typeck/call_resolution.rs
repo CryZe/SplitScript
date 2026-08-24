@@ -1620,6 +1620,25 @@ impl Checker {
         span: Span,
         expression: Option<ExprId>,
     ) -> Option<PathResolution> {
+        let qualified = path.join(".");
+        let constant = if self.is_library_function() {
+            self.standard_library
+                .item_by_name_including_private(&qualified)
+        } else {
+            self.standard_library.item_by_name(&qualified)
+        }
+        .filter(|item| item.kind == ItemKind::Constant);
+        if let Some(constant) = constant {
+            debug_assert!(constant.signature.type_parameters.is_empty());
+            debug_assert!(constant.signature.parameters.is_empty());
+            debug_assert!(!constant.signature.result_is_async);
+            let ty = self.catalog_type(constant.signature.result, &HashMap::new());
+            return Some(PathResolution {
+                ty,
+                value: Some(ResolvedValue::StandardLibraryConstant(constant.id)),
+                members: Some(Vec::new()),
+            });
+        }
         match path {
             [name, fields @ ..]
                 if matches!(

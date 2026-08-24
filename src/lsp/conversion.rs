@@ -328,6 +328,7 @@ const fn completion_kind_number(kind: CompletionKind) -> u32 {
         CompletionKind::Struct => 22,
         CompletionKind::Enum => 13,
         CompletionKind::EnumMember => 20,
+        CompletionKind::Constant => 21,
     }
 }
 

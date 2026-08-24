@@ -550,6 +550,7 @@ fn seed_library_body_signature(
             } => variables[name],
             ItemKind::Method { receiver } => checker.catalog_type(receiver, &variables),
             ItemKind::Function => unreachable!("capability members are receiver methods"),
+            ItemKind::Constant => unreachable!("capabilities do not declare constants"),
         };
         for associated in checker
             .standard_library

@@ -320,6 +320,7 @@ impl DocumentationReference {
                 match item.kind {
                     ItemKind::Function => "function",
                     ItemKind::Method { .. } => "method",
+                    ItemKind::Constant => "constant",
                 }
             },
             summary: compact_prose(item.documentation.summary),
@@ -731,6 +732,7 @@ impl DocumentationReference {
                                 match value.kind {
                                     ItemKind::Function => "Function",
                                     ItemKind::Method { .. } => "Method",
+                                    ItemKind::Constant => "Constant",
                                 }
                             },
                             self.render_signature(

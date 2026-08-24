@@ -652,6 +652,10 @@ pub struct Program {
     closure_captures: HashMap<ExprId, Vec<ClosureCapture>>,
     mutably_captured_values: HashSet<ValueId>,
     expressions: Vec<Expression>,
+    /// Source-defined constants are values in the language and hidden
+    /// zero-argument functions only in the backend. Keep that lowering map in
+    /// one place so value paths, including method receivers, share it.
+    constant_functions: HashMap<crate::stdlib::StdlibItemId, FunctionInstance>,
     temporary_types: std::collections::HashMap<TemporaryId, TypeId>,
     next_generated_expression: u32,
     next_temporary: u32,
@@ -669,6 +673,21 @@ impl Program {
             .all_expressions()
             .map(|expression| lower_expression(expression, typed_hir, semantics))
             .collect::<Vec<_>>();
+        let constant_functions = typed_hir
+            .standard_library()
+            .all_items()
+            .iter()
+            .filter(|item| item.kind == crate::stdlib::ItemKind::Constant)
+            .map(|item| {
+                let function = typed_hir
+                    .library_function(item.id)
+                    .expect("source-defined constants have injected function bodies");
+                let result = semantics
+                    .function_result(function)
+                    .expect("checked constant bodies have result types");
+                (item.id, semantics.function_instance(function, vec![result]))
+            })
+            .collect();
         let next_generated_expression = expressions
             .iter()
             .map(|expression| expression.id.index() as u32)
@@ -696,6 +715,7 @@ impl Program {
             closure_captures: HashMap::new(),
             mutably_captured_values: HashSet::new(),
             expressions,
+            constant_functions,
             temporary_types: std::collections::HashMap::new(),
             next_generated_expression,
             next_temporary: 0,
@@ -857,6 +877,13 @@ impl Program {
 
     pub fn standard_library(&self) -> &StandardLibrary {
         &self.standard_library
+    }
+
+    pub fn constant_function(
+        &self,
+        item: crate::stdlib::StdlibItemId,
+    ) -> Option<&FunctionInstance> {
+        self.constant_functions.get(&item)
     }
 
     /// Whether this source value must use shared GC-cell storage because a

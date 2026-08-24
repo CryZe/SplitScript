@@ -1845,6 +1845,18 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         "T.isFinite() -> bool where T: Float"
     );
     assert_eq!(
+        library.render_signature(StdlibItemId::F32NaN),
+        "f32.NaN: f32"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::F32PositiveInfinity),
+        "f32.positiveInfinity: f32"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::F64NegativeInfinity),
+        "f64.negativeInfinity: f64"
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::F32FromBits),
         "f32.fromBits(bits: u32) -> f32"
     );

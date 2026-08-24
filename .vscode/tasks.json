@@ -26,6 +26,20 @@
       }
     },
     {
+      "label": "package SplitScript VSIX",
+      "type": "process",
+      "command": "npm",
+      "args": [
+        "run",
+        "package:vsix"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/editors/vscode"
+      },
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
       "label": "build release current SplitScript",
       "type": "process",
       "command": "cargo",

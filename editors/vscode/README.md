@@ -72,6 +72,16 @@ compiles the TypeScript extension and its language/build workers, and copies the
 compiler module into the ignored `dist` package directory. Native `splitc` and
 `splitls` builds remain available independently from the repository root.
 
+To create the self-contained `.vsix` that can be installed or shared, run the
+**package SplitScript VSIX** task from the repository or run:
+
+```console
+npm run package:vsix
+```
+
+The package is written to this directory as `splitscript-<version>.vsix`.
+Packaging invokes the production build automatically.
+
 `npm run test:web-host` launches the bundled browser entry headlessly in a real
 Chromium VS Code web host with a virtual workspace. It verifies language-server
 startup and restart, hover, release compilation, debug watch, virtual-file

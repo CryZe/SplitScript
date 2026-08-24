@@ -5,6 +5,10 @@
   "version": "0.1.0",
   "publisher": "livesplit",
   "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CryZe/SplitScript.git"
+  },
   "engines": {
     "vscode": "^1.125.0"
   },
@@ -246,6 +250,7 @@
   "scripts": {
     "vscode:prepublish": "node scripts/build.mjs --production",
     "compile": "node scripts/build.mjs",
+    "package:vsix": "vsce package",
     "clean": "node scripts/clean.mjs",
     "compile:ts": "tsc -p tsconfig.node.json",
     "bundle:web": "node scripts/bundle-web.mjs",
@@ -263,6 +268,7 @@
     "@types/node": "^24.0.0",
     "@types/vscode": "1.125.0",
     "@vscode/test-web": "^0.0.81",
+    "@vscode/vsce": "3.9.2",
     "esbuild": "^0.28.1",
     "typescript": "7.0.2"
   }

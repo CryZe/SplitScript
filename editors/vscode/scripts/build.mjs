@@ -12,7 +12,11 @@ run(process.execPath, [
     resolve(extension, 'node_modules', 'typescript', 'bin', 'tsc'),
     '-p',
     resolve(extension, 'tsconfig.node.json'),
-    ...(production ? ['--sourceMap', 'false'] : []),
+    '--noEmit',
+]);
+run(process.execPath, [
+    resolve(extension, 'scripts', 'bundle-node.mjs'),
+    ...(production ? ['--production'] : []),
 ]);
 run(process.execPath, [
     resolve(extension, 'scripts', 'bundle-web.mjs'),

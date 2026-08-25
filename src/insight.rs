@@ -61,6 +61,65 @@ pub(crate) fn hover(
     let Some(token) = database.token_at(offset)? else {
         return Ok(None);
     };
+    if let Some((provider_name, selector_name, selector_span)) = database
+        .recovering_parse()?
+        .syntax()
+        .state
+        .as_ref()
+        .and_then(|state| state.provider.as_ref())
+        .and_then(|provider| {
+            provider.selector.as_ref().and_then(|selector| {
+                (selector.name_span.start <= offset && offset < selector.name_span.end).then(|| {
+                    (
+                        provider.name.clone(),
+                        selector.name.clone(),
+                        selector.name_span,
+                    )
+                })
+            })
+        })
+        && let Some(provider) = standard_library.state_provider_by_name(&provider_name)
+        && let Some(selector) = provider
+            .selectors
+            .iter()
+            .find(|selector| selector.name == selector_name)
+    {
+        let parameters = selector
+            .parameters
+            .iter()
+            .map(|parameter| {
+                format!(
+                    "{}: {}",
+                    parameter.name,
+                    standard_library.render_type(parameter.ty)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let processes = match provider.processes {
+            StateProviderProcesses::SourceState => " [\"game.exe\"]",
+            StateProviderProcesses::Declared(_) => "",
+        };
+        let form = format!(
+            "state {}.{}({parameters}){processes} {{ ... }}",
+            provider.name, selector.name
+        );
+        let prose = crate::documentation::prose_markdown(
+            selector.documentation.summary,
+            selector.documentation.details,
+        );
+        return Ok(Some(HoverInfo {
+            span: selector_span,
+            markdown: format!(
+                "```splitscript\n{form}\n```\n\n{}",
+                crate::documentation::strip_intra_doc_links(&prose)
+            ),
+            documentation_uri: Some(symbol_uri(
+                StdlibSymbolId::StateProvider(provider.id),
+                &standard_library,
+            )),
+        }));
+    }
     if let Some(markdown) = float_literal_markdown(database, &token, offset)? {
         return Ok(Some(HoverInfo {
             span: token.span,

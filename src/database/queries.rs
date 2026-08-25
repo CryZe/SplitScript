@@ -805,6 +805,28 @@ impl CompilerDatabase {
                     StdlibSymbolId::StateProvider(provider.id),
                 )));
             }
+            if let Some(provider) = recovered
+                .syntax()
+                .state
+                .as_ref()
+                .and_then(|state| state.provider.as_ref())
+                .filter(|provider| {
+                    provider.selector.as_ref().is_some_and(|selector| {
+                        selector.name_span.start <= offset
+                            && offset < selector.name_span.end
+                            && selector.name == *name
+                    })
+                })
+                .and_then(|provider| {
+                    self.context
+                        .standard_library()
+                        .state_provider_by_name(&provider.name)
+                })
+            {
+                return Ok(Some(DefinitionTarget::StandardLibrarySymbol(
+                    StdlibSymbolId::StateProvider(provider.id),
+                )));
+            }
             if (name == "utf8" || name == "utf16le")
                 && recovered
                     .syntax()

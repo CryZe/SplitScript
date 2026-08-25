@@ -180,6 +180,15 @@ pub fn walk_program<'ast, V: Visitor<'ast>>(visitor: &mut V, program: &'ast Prog
 }
 
 pub fn walk_state<'ast, V: Visitor<'ast>>(visitor: &mut V, state: &'ast StateDecl) {
+    if let Some(selector) = state
+        .provider
+        .as_ref()
+        .and_then(|provider| provider.selector.as_ref())
+    {
+        for argument in &selector.arguments {
+            visitor.visit_expr(argument);
+        }
+    }
     for field in &state.fields {
         visitor.visit_state_field(field);
     }

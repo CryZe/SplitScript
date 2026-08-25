@@ -204,10 +204,10 @@ impl StandardLibrary {
         self.graph.state_providers_by_name.get(name).copied()
     }
 
-    pub fn source_state_provider(&self) -> Option<&'static StdlibStateProvider> {
+    pub fn default_state_provider(&self) -> Option<&'static StdlibStateProvider> {
         self.state_providers()
             .iter()
-            .find(|provider| provider.processes == StateProviderProcesses::SourceState)
+            .find(|provider| provider.default)
     }
 
     pub fn core_type(&self, id: CoreTypeId) -> &'static CoreType {
@@ -910,7 +910,7 @@ impl StandardLibrary {
         }
         let mut provider_names = HashSet::new();
         let mut provider_values = HashSet::new();
-        let mut source_state_provider = None;
+        let mut default_state_provider = None;
         for provider in STATE_PROVIDERS {
             if provider.name.trim().is_empty() {
                 errors.push("state provider has an empty name".to_owned());
@@ -941,10 +941,52 @@ impl StandardLibrary {
                     provider.name
                 ));
             }
-            if provider.processes == StateProviderProcesses::SourceState
-                && source_state_provider.replace(provider.name).is_some()
-            {
-                errors.push("multiple state providers use `SourceState` process names".to_owned());
+            if provider.default {
+                if provider.processes != StateProviderProcesses::SourceState {
+                    errors.push(format!(
+                        "default state provider `{}` does not use source process names",
+                        provider.name
+                    ));
+                }
+                if default_state_provider.replace(provider.name).is_some() {
+                    errors.push("multiple default state providers are declared".to_owned());
+                }
+            }
+            let mut selector_names = HashSet::new();
+            for selector in provider.selectors {
+                let qualified = format!("{}.{}", provider.name, selector.name);
+                if selector.name.trim().is_empty() {
+                    errors.push(format!(
+                        "state provider `{}` has an empty selector name",
+                        provider.name
+                    ));
+                } else if !selector_names.insert(selector.name) {
+                    errors.push(format!(
+                        "state provider `{}` repeats selector `{}`",
+                        provider.name, selector.name
+                    ));
+                }
+                if selector.documentation.summary.trim().is_empty()
+                    || selector.documentation.details.trim().is_empty()
+                {
+                    errors.push(format!(
+                        "state-provider selector `{qualified}` has incomplete documentation"
+                    ));
+                }
+                let mut parameter_names = HashSet::new();
+                for parameter in selector.parameters {
+                    if parameter.name.trim().is_empty() {
+                        errors.push(format!(
+                            "state-provider selector `{qualified}` has an empty parameter name"
+                        ));
+                    } else if !parameter_names.insert(parameter.name) {
+                        errors.push(format!(
+                            "state-provider selector `{qualified}` repeats parameter `{}`",
+                            parameter.name
+                        ));
+                    }
+                    validate_catalog_type_ref(parameter.ty, &[], &qualified, &mut errors);
+                }
             }
             let direct_read = ITEMS.iter().find(|item| item.id == provider.direct_read);
             match direct_read {
@@ -1064,7 +1106,7 @@ impl StandardLibrary {
                 }
             }
         }
-        if source_state_provider.is_none() {
+        if default_state_provider.is_none() {
             errors.push("the standard library has no source-state process provider".to_owned());
         }
         for item in ITEMS {

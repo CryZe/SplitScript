@@ -108,6 +108,13 @@ to inference or code generation.
     validation for providers whose process list is instead fixed. Keep provider
     names in their contextual namespace so the future `state Unity` provider
     can coexist with the existing `Unity.*` API namespace.
+  - [x] Model qualified provider configurations in the privileged catalog and
+    ordinary syntax. `state Provider.selector(...) [...]` uses normal typed,
+    compile-time-constant expressions; completion, hover, semantic
+    highlighting, formatting, selection ranges, and provider documentation are
+    derived from the same selector declarations. Distinguish source-process
+    providers from the single catalog-declared default so Native remains the
+    meaning of bare `state "..."` while Unity can also accept source candidates.
   - [ ] Publish the Unity provider only when its schema binder is connected;
     until then, do not accept a `state Unity` program that would silently behave
     like an ordinary native attachment.

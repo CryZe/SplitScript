@@ -13,15 +13,52 @@ use crate::{
 use super::{
     Checker,
     context::{CallableContext, DebugContext, ExpressionMode, FailureContext},
-    control_flow::{contains_propagation, is_constant},
+    control_flow::contains_propagation,
     declarations::Binding,
 };
 
 pub(super) fn check(checker: &mut Checker, program: &Program) {
     check_global_initializers(checker, program);
+    check_state_provider_configuration(checker, program);
     check_function_bodies(checker, program);
     check_state_expressions(checker, program);
     check_action_bodies(checker, program);
+}
+
+fn check_state_provider_configuration(checker: &mut Checker, program: &Program) {
+    let Some(reference) = program
+        .state
+        .as_ref()
+        .and_then(|state| state.provider.as_ref())
+        .and_then(|provider| provider.selector.as_ref())
+    else {
+        return;
+    };
+    let Some(provider_id) = checker.resolutions.state_provider() else {
+        return;
+    };
+    let Some(selector_index) = checker.resolutions.state_provider_selector() else {
+        return;
+    };
+    let selector = checker
+        .standard_library
+        .state_provider(provider_id)
+        .selectors[selector_index];
+    checker.scopes.clear();
+    for (argument, parameter) in reference.arguments.iter().zip(selector.parameters) {
+        let expected = checker.catalog_type(parameter.ty, &HashMap::new());
+        let expected_name = checker.type_name(expected);
+        checker.with_expected_type_source(
+            super::ExpectedTypeSource {
+                span: reference.name_span,
+                label: format!(
+                    "selector parameter `{}` is declared as `{expected_name}`",
+                    parameter.name
+                ),
+            },
+            |checker| checker.expr(argument, Some(expected)),
+        );
+    }
 }
 
 fn check_global_initializers(checker: &mut Checker, program: &Program) {
@@ -44,7 +81,7 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
         let constant_initializer = global
             .value
             .as_ref()
-            .is_some_and(|value| is_constant(value, &checker.resolutions));
+            .is_some_and(|value| crate::constant::is_constant(value, &checker.resolutions));
         let inferred = if let Some(value) = &global.value {
             checker.with_debug_context(
                 DebugContext::from_declaration(global.debug_only),

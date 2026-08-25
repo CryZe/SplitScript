@@ -60,6 +60,10 @@ impl<'a> CatalogGenerator<'a> {
                 let direct_read = attribute_name(&provider.attributes, "directRead");
                 let source_processes =
                     optional_attribute_name(&provider.attributes, "processes") == Some("source");
+                let default = provider
+                    .attributes
+                    .iter()
+                    .any(|attribute| attribute.name == "default");
                 let processes = if source_processes {
                     "StateProviderProcesses::SourceState".to_owned()
                 } else {
@@ -78,8 +82,32 @@ impl<'a> CatalogGenerator<'a> {
                 } else {
                     format!("StateProviderAttachment::Callable(StdlibItemId::{attachment})")
                 };
+                let selectors = provider
+                    .selectors
+                    .iter()
+                    .map(|selector| {
+                        let parameters = selector
+                            .parameters
+                            .iter()
+                            .map(|parameter| {
+                                format!(
+                                    "StateProviderSelectorParameter {{ name: {}, ty: {} }}",
+                                    quote(&parameter.name),
+                                    self.type_ref(&parameter.ty, &[], &[]),
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        format!(
+                            "StateProviderSelector {{ name: {}, parameters: &[{parameters}], documentation: {} }}",
+                            quote(&selector.name),
+                            self.documentation(&selector.documentation),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
                 output.push_str(&format!(
-                    "StdlibStateProvider {{ id: StdlibStateProviderId::{}, name: {}, value_name: {}, processes: {}, process_type: StdlibTypeId::{}, attachment: {}, direct_read: StdlibItemId::{}, documentation: {} }},\n",
+                    "StdlibStateProvider {{ id: StdlibStateProviderId::{}, name: {}, value_name: {}, processes: {}, default: {default}, process_type: StdlibTypeId::{}, attachment: {}, direct_read: StdlibItemId::{}, selectors: &[{selectors}], documentation: {} }},\n",
                     ident(&provider.name),
                     quote(&provider.name),
                     quote(&provider.value_name),
@@ -1718,5 +1746,22 @@ capability Integer<T: Numeric + Display> {}
             "TypeRef::FixedArray { element: &TypeRef::Core(CoreTypeId::U16), length: 3 }"
         ));
         assert!(!generated.contains(&retired_invocation));
+    }
+
+    #[test]
+    fn configured_state_provider_selectors_generate_typed_catalog_data() {
+        let source = include_str!("../../../stdlib/standard.split").replace(
+            "stateProvider Native as process {}",
+            r#"stateProvider Native as process {
+    /// Selects a runtime metadata version.
+    ///
+    /// This bypasses automatic version detection.
+    selector runtime(version: u32, mono: MonoVersion),
+}"#,
+        );
+        let generated = generate_catalog(&parse(&source).unwrap()).unwrap();
+        assert!(generated.contains(
+            "StateProviderSelector { name: \"runtime\", parameters: &[StateProviderSelectorParameter { name: \"version\", ty: TypeRef::Core(CoreTypeId::U32) },StateProviderSelectorParameter { name: \"mono\", ty: TypeRef::Standard(StdlibTypeId::MonoVersion) }]"
+        ));
     }
 }

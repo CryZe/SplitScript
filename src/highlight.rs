@@ -790,6 +790,24 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 SemanticTokenKind::Type,
                 MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY,
             );
+            if let Some(selector) = &provider.selector
+                && self
+                    .standard_library
+                    .state_provider_by_name(&provider.name)
+                    .is_some_and(|provider| {
+                        provider
+                            .selectors
+                            .iter()
+                            .any(|candidate| candidate.name == selector.name)
+                    })
+            {
+                self.mark_ident(
+                    selector.name_span,
+                    &selector.name,
+                    SemanticTokenKind::Method,
+                    MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY,
+                );
+            }
         }
         visit::walk_program(self, program);
     }

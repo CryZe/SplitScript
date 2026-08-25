@@ -1,8 +1,8 @@
 use super::{
     AssociatedTypeDeclaration, Attribute, AttributeArgument, CallableOwnerDeclaration, Declaration,
     Documentation, EnumDeclaration, Error, Example, FieldDeclaration, FunctionDeclaration, Library,
-    Parameter, StateProviderDeclaration, StructDeclaration, Type, TypeConstructorSyntax,
-    TypeParameter, VariantDeclaration,
+    Parameter, StateProviderDeclaration, StateProviderSelectorDeclaration, StructDeclaration, Type,
+    TypeConstructorSyntax, TypeParameter, VariantDeclaration,
 };
 use crate::{SyntaxMode, Token, TokenCursor, TokenKind, lex, parser::parse_integer};
 
@@ -160,14 +160,52 @@ impl Parser<'_> {
             "expected `{` before the provider process names",
         )?;
         let mut processes = Vec::new();
+        let mut selectors = Vec::new();
         while !self.at(&TokenKind::RBrace) {
-            let TokenKind::String(process) = self.current().kind.clone() else {
-                return Err(self.error("expected a quoted process name"));
-            };
-            self.bump();
-            processes.push(process);
+            let documentation = self.documentation()?;
+            if self.eat_ident("selector") {
+                let name = self.ident("expected a state-provider selector name")?;
+                self.expect(
+                    TokenKind::LParen,
+                    "expected `(` after the state-provider selector name",
+                )?;
+                let mut parameters = Vec::new();
+                while !self.at(&TokenKind::RParen) {
+                    let name = self.ident("expected a selector parameter name")?;
+                    self.expect(TokenKind::Colon, "expected `:` after the parameter name")?;
+                    let ty = self.ty()?;
+                    parameters.push(Parameter {
+                        name,
+                        ty,
+                        documentation: Documentation::default(),
+                        attributes: Vec::new(),
+                    });
+                    if !self.eat(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+                self.expect(
+                    TokenKind::RParen,
+                    "expected `)` after the selector parameters",
+                )?;
+                selectors.push(StateProviderSelectorDeclaration {
+                    name,
+                    parameters,
+                    documentation,
+                });
+            } else {
+                if !documentation.summary.is_empty() || !documentation.details.is_empty() {
+                    return Err(self
+                        .error("documentation inside a state provider must describe a selector"));
+                }
+                let TokenKind::String(process) = self.current().kind.clone() else {
+                    return Err(self.error("expected a quoted process name or `selector`"));
+                };
+                self.bump();
+                processes.push(process);
+            }
             if !self.eat(&TokenKind::Comma) && !self.at(&TokenKind::RBrace) {
-                return Err(self.error("expected `,` between process names"));
+                return Err(self.error("expected `,` between state-provider entries"));
             }
         }
         self.bump();
@@ -175,6 +213,7 @@ impl Parser<'_> {
             name,
             value_name,
             processes,
+            selectors,
             documentation,
             attributes,
         })
@@ -1492,6 +1531,21 @@ extend address {}
 @attachment(identity)
 @directRead(GbaEmulatorRead)
 stateProvider GBA as gba { "mGBA.exe", "mGBA" }
+/// Unity engines.
+@processType(Process)
+@processes(source)
+@attachment(identity)
+@directRead(ProcessRead)
+stateProvider Unity as process {
+    /// Selects IL2CPP metadata explicitly.
+    ///
+    /// Skips runtime-version auto-detection.
+    selector il2cpp(version: u32),
+    /// Selects Mono metadata explicitly.
+    ///
+    /// Skips runtime-version auto-detection.
+    selector mono(version: MonoVersion),
+}
 "#;
         let library = parse(source).expect("source should parse");
         assert!(matches!(library.declarations[0], Declaration::Root(_)));
@@ -1516,5 +1570,18 @@ stateProvider GBA as gba { "mGBA.exe", "mGBA" }
         };
         assert_eq!(provider.value_name, "gba");
         assert_eq!(provider.processes, ["mGBA.exe", "mGBA"]);
+        let Declaration::StateProvider(provider) = &library.declarations[6] else {
+            panic!("expected the Unity state provider")
+        };
+        assert!(provider.processes.is_empty());
+        assert_eq!(provider.selectors.len(), 2);
+        assert_eq!(provider.selectors[0].name, "il2cpp");
+        assert_eq!(provider.selectors[0].parameters[0].name, "version");
+        assert_eq!(provider.selectors[0].parameters[0].ty.to_string(), "u32");
+        assert_eq!(provider.selectors[1].name, "mono");
+        assert_eq!(
+            provider.selectors[1].parameters[0].ty.to_string(),
+            "MonoVersion"
+        );
     }
 }

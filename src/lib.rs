@@ -14,6 +14,7 @@ mod codegen;
 mod compilation_cancellation;
 pub mod compiler;
 mod completion;
+mod constant;
 mod database;
 pub use splitscript_syntax::diagnostic;
 mod documentation;

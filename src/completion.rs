@@ -699,7 +699,7 @@ fn selected_provider(
             state
                 .provider
                 .is_none()
-                .then(|| standard_library.source_state_provider())
+                .then(|| standard_library.default_state_provider())
                 .flatten()
         })
 }

@@ -958,6 +958,15 @@ pub struct StateLayoutDecl {
 pub struct StateProviderRef {
     pub name: String,
     pub span: Span,
+    pub selector: Option<StateProviderSelectorRef>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StateProviderSelectorRef {
+    pub name: String,
+    pub name_span: Span,
+    pub arguments: Vec<Expr>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]

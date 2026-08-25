@@ -21,10 +21,10 @@ use crate::{
         RecordField, RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
         SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFamilyDecl,
         SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span, StateDecl,
-        StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource,
-        StateTransform, Stmt, SuspensionMode, TickRateDecl, TickRateValue, TypeApplicationDecl,
-        TypeApplicationId, TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId,
-        VariableDecl,
+        StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
+        StateProviderSelectorRef, StateSource, StateTransform, Stmt, SuspensionMode, TickRateDecl,
+        TickRateValue, TypeApplicationDecl, TypeApplicationId, TypeApplicationOccurrence,
+        TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     diagnostic::{Diagnostic, DiagnosticFix, FixApplicability, TextEdit},
     migration::{ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
@@ -788,6 +788,26 @@ mod tests {
         let state = program.state.unwrap();
         assert_eq!(state.provider.unwrap().name, "Unity");
         assert_eq!(state.processes, ["game.exe"]);
+    }
+
+    #[test]
+    fn state_providers_can_select_typed_configurations() {
+        let source = r#"state Unity.il2cpp(2020) ["game.exe"] {}"#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let provider = program.state.unwrap().provider.unwrap();
+        assert_eq!(provider.name, "Unity");
+        let selector = provider.selector.expect("explicit selector");
+        assert_eq!(selector.name, "il2cpp");
+        assert_eq!(selector.arguments.len(), 1);
+        assert!(matches!(selector.arguments[0].kind, ExprKind::Int { .. }));
+
+        let source = r#"state Unity.mono(MonoVersion.V2) "game.exe" {}"#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let provider = program.state.unwrap().provider.unwrap();
+        let selector = provider.selector.expect("explicit selector");
+        assert_eq!(selector.name, "mono");
+        assert_eq!(selector.arguments.len(), 1);
+        assert!(matches!(selector.arguments[0].kind, ExprKind::Path(_)));
     }
 
     #[test]

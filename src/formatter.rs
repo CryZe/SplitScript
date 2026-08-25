@@ -2518,6 +2518,16 @@ onAttach {
     }
 
     #[test]
+    fn formats_configured_state_provider_selectors_as_ordinary_calls() {
+        let source = r#"state Unity.il2cpp ( 2020 )["game.exe","demo.exe"]{}"#;
+        let expected = r#"state Unity.il2cpp(2020) ["game.exe", "demo.exe"] {}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn keeps_generic_call_arguments_attached_without_a_turbofish() {
         let source = r#"state "game.exe"{}
 whileAttached{let value=process.read<[u8;4]> (0);print<u32> (value [0])}"#;

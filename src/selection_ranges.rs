@@ -126,6 +126,10 @@ impl<'ast> Visitor<'ast> for SpanCollector {
         self.push(state.span);
         if let Some(provider) = &state.provider {
             self.push(provider.span);
+            if let Some(selector) = &provider.selector {
+                self.push(selector.name_span);
+                self.push(selector.span);
+            }
         }
         for layout in &state.layouts {
             self.push(layout.span);

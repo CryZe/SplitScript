@@ -944,7 +944,13 @@ impl<'a> Validator<'a> {
         self.validate_attributes(
             &value.name,
             &value.attributes,
-            &["processType", "processes", "attachment", "directRead"],
+            &[
+                "processType",
+                "processes",
+                "attachment",
+                "directRead",
+                "default",
+            ],
         );
         if let Some(name) =
             self.optional_name_attribute(&value.name, &value.attributes, "processType")
@@ -996,6 +1002,33 @@ impl<'a> Validator<'a> {
                 "state provider `{}` uses `@processes(source)` and cannot also declare process names",
                 value.name
             ));
+        }
+        if has_attribute(&value.attributes, "default") && !source_processes {
+            self.error(format!(
+                "state provider `{}` can be `@default` only when it uses `@processes(source)`",
+                value.name
+            ));
+        }
+        let mut selector_names = HashSet::new();
+        for selector in &value.selectors {
+            let qualified = format!("{}.{}", value.name, selector.name);
+            if !selector_names.insert(selector.name.as_str()) {
+                self.error(format!(
+                    "state provider `{}` repeats selector `{}`",
+                    value.name, selector.name
+                ));
+            }
+            self.validate_documentation(&qualified, &selector.documentation, true, false);
+            let mut parameter_names = HashSet::new();
+            for parameter in &selector.parameters {
+                if !parameter_names.insert(parameter.name.as_str()) {
+                    self.error(format!(
+                        "state-provider selector `{qualified}` repeats parameter `{}`",
+                        parameter.name
+                    ));
+                }
+                self.validate_type(&qualified, &parameter.ty, &[]);
+            }
         }
     }
 

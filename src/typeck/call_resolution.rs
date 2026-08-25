@@ -495,7 +495,7 @@ impl Checker {
 
         if let Some((active_provider, _)) = self.provider_value
             && !matches!(self.callable, CallableContext::LibraryFunction(_))
-            && let Some(native_provider) = self.standard_library.source_state_provider()
+            && let Some(native_provider) = self.standard_library.default_state_provider()
             && active_provider != native_provider.id
             && callee
                 .first()

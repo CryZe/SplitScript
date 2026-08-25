@@ -10,8 +10,8 @@ use super::{
     Parser, PointerPath, PointerPathBase, RecordDecl, RecordField, RecordId, SettingChoiceOption,
     SettingDecl, SettingExternalKey, SettingFamilyDecl, SettingFileFilter, SettingKind,
     SettingTextPart, SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl,
-    StateMemoryDecoder, StateProviderRef, StateSource, StateTransform, TickRateDecl, TickRateValue,
-    TokenKind, TypeRef,
+    StateMemoryDecoder, StateProviderRef, StateProviderSelectorRef, StateSource, StateTransform,
+    TickRateDecl, TickRateValue, TokenKind, TypeRef,
 };
 use crate::{
     diagnostic::{DiagnosticFix, FixApplicability, TextEdit},
@@ -597,12 +597,52 @@ impl Parser<'_> {
         let start = self.expect_ident("state")?.start;
         let (provider, processes) = if matches!(self.current().kind, TokenKind::Ident(_)) {
             let (name, span) = self.expect_any_ident("expected a state provider name")?;
+            let selector = if self.eat(&TokenKind::Dot).is_some() {
+                let selector_start = self.previous().span.start;
+                let (name, name_span) =
+                    self.expect_any_ident("expected a state-provider selector after `.`")?;
+                self.expect(
+                    TokenKind::LParen,
+                    "expected `(` after the state-provider selector",
+                )?;
+                let mut arguments = Vec::new();
+                while !self.at(&TokenKind::RParen) {
+                    arguments.push(self.expression(0)?);
+                    if self.eat(&TokenKind::Comma).is_none() {
+                        break;
+                    }
+                }
+                let end = self
+                    .expect(
+                        TokenKind::RParen,
+                        "expected `)` after the state-provider selector arguments",
+                    )?
+                    .end;
+                Some(StateProviderSelectorRef {
+                    name,
+                    name_span,
+                    arguments,
+                    span: Span {
+                        start: selector_start,
+                        end,
+                    },
+                })
+            } else {
+                None
+            };
             let processes = if self.at(&TokenKind::LBrace) {
                 Vec::new()
             } else {
                 self.process_names()?
             };
-            (Some(StateProviderRef { name, span }), processes)
+            (
+                Some(StateProviderRef {
+                    name,
+                    span,
+                    selector,
+                }),
+                processes,
+            )
         } else {
             (None, self.process_names()?)
         };

@@ -43,10 +43,27 @@ pub struct StdlibStateProvider {
     pub name: &'static str,
     pub value_name: &'static str,
     pub processes: StateProviderProcesses,
+    /// Whether an unqualified `state "..."` declaration selects this
+    /// provider. Exactly one source-process provider has this role.
+    pub default: bool,
     pub process_type: StdlibTypeId,
     pub attachment: StateProviderAttachment,
     pub direct_read: StdlibItemId,
+    pub selectors: &'static [StateProviderSelector],
     pub documentation: Documentation<StdlibSymbolId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StateProviderSelector {
+    pub name: &'static str,
+    pub parameters: &'static [StateProviderSelectorParameter],
+    pub documentation: Documentation<StdlibSymbolId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StateProviderSelectorParameter {
+    pub name: &'static str,
+    pub ty: TypeRef,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

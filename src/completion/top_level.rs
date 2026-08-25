@@ -150,8 +150,14 @@ pub(super) fn complete_state_header(
         for provider in standard_library
             .state_providers()
             .iter()
-            .filter(|provider| matches!(provider.processes, StateProviderProcesses::Declared(_)))
+            .filter(|provider| !provider.default)
         {
+            let insert_text = match provider.processes {
+                StateProviderProcesses::Declared(_) => format!("{} {{\n\t$0\n}}", provider.name),
+                StateProviderProcesses::SourceState => {
+                    format!("{} [\"${{1:game.exe}}\"] {{\n\t$0\n}}", provider.name)
+                }
+            };
             builder.add(CompletionItem {
                 label: provider.name.to_owned(),
                 kind: CompletionKind::Snippet,
@@ -161,7 +167,64 @@ pub(super) fn complete_state_header(
                     StdlibSymbolId::StateProvider(provider.id),
                     standard_library,
                 )),
-                insert_text: format!("{} {{\n\t$0\n}}", provider.name),
+                insert_text,
+                is_snippet: true,
+            });
+        }
+        return Some(builder.finish());
+    }
+
+    if let [provider_token, dot, rest @ ..] = tail.as_slice()
+        && matches!(dot.kind, TokenKind::Dot)
+        && let TokenKind::Ident(provider_name) = &provider_token.kind
+        && let Some(provider) = standard_library.state_provider_by_name(provider_name)
+        && (rest.is_empty()
+            || matches!(rest, [token] if token.span == replacement && matches!(token.kind, TokenKind::Ident(_))))
+    {
+        for selector in provider.selectors {
+            let mut next_placeholder = 1;
+            let arguments = selector
+                .parameters
+                .iter()
+                .map(|parameter| {
+                    let placeholder = format!("${{{next_placeholder}:{}}}", parameter.name);
+                    next_placeholder += 1;
+                    placeholder
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let process_suffix = match provider.processes {
+                StateProviderProcesses::Declared(_) => String::new(),
+                StateProviderProcesses::SourceState => {
+                    let suffix = format!(" [\"${{{next_placeholder}:game.exe}}\"]");
+                    suffix
+                }
+            };
+            let parameters = selector
+                .parameters
+                .iter()
+                .map(|parameter| {
+                    format!(
+                        "{}: {}",
+                        parameter.name,
+                        standard_library.render_type(parameter.ty)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            builder.add(CompletionItem {
+                label: selector.name.to_owned(),
+                kind: CompletionKind::Snippet,
+                detail: Some(format!("state-provider selector ({parameters})")),
+                documentation: Some(render_documentation(&selector.documentation)),
+                documentation_uri: Some(symbol_uri(
+                    StdlibSymbolId::StateProvider(provider.id),
+                    standard_library,
+                )),
+                insert_text: format!(
+                    "{}({arguments}){process_suffix} {{\n\t$0\n}}",
+                    selector.name
+                ),
                 is_snippet: true,
             });
         }

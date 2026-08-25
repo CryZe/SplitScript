@@ -26,6 +26,7 @@ use crate::{
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProgramResolutions {
     state_provider: Option<StdlibStateProviderId>,
+    state_provider_selector: Option<usize>,
     type_names: HashMap<TypeNameId, ResolvedTypeRef>,
     type_applications: HashMap<TypeApplicationId, ResolvedTypeRef>,
     managed_references: HashMap<crate::ast::ManagedReferenceTypeId, ResolvedTypeRef>,
@@ -37,6 +38,10 @@ pub(crate) struct ProgramResolutions {
 impl ProgramResolutions {
     pub(crate) fn state_provider(&self) -> Option<StdlibStateProviderId> {
         self.state_provider
+    }
+
+    pub(crate) fn state_provider_selector(&self) -> Option<usize> {
+        self.state_provider_selector
     }
 
     pub(crate) fn type_ref(&self, ty: TypeRef) -> Option<ResolvedTypeRef> {
@@ -207,6 +212,37 @@ pub(crate) fn resolve_program(
         if let Some(reference) = &state.provider {
             if let Some(provider) = standard_library.state_provider_by_name(&reference.name) {
                 resolutions.state_provider = Some(provider.id);
+                if let Some(reference) = &reference.selector {
+                    if let Some((index, selector)) = provider
+                        .selectors
+                        .iter()
+                        .enumerate()
+                        .find(|(_, selector)| selector.name == reference.name)
+                    {
+                        resolutions.state_provider_selector = Some(index);
+                        if reference.arguments.len() != selector.parameters.len() {
+                            provider_diagnostics.push(Diagnostic::type_error(
+                                format!(
+                                    "state-provider selector `{}.{}` expects {} argument{}, found {}",
+                                    provider.name,
+                                    selector.name,
+                                    selector.parameters.len(),
+                                    if selector.parameters.len() == 1 { "" } else { "s" },
+                                    reference.arguments.len(),
+                                ),
+                                reference.span,
+                            ));
+                        }
+                    } else {
+                        provider_diagnostics.push(Diagnostic::type_error(
+                            format!(
+                                "state provider `{}` has no selector `{}`",
+                                provider.name, reference.name
+                            ),
+                            reference.name_span,
+                        ));
+                    }
+                }
                 match provider.processes {
                     StateProviderProcesses::SourceState if state.processes.is_empty() => {
                         provider_diagnostics.push(
@@ -244,7 +280,7 @@ pub(crate) fn resolve_program(
             }
         } else {
             resolutions.state_provider = standard_library
-                .source_state_provider()
+                .default_state_provider()
                 .map(|provider| provider.id);
         }
     }
@@ -399,6 +435,26 @@ pub(crate) fn resolve_program(
     };
     resolver.visit_program(program);
     provider_diagnostics.extend(resolver.diagnostics);
+    if let Some(selector) = program
+        .state
+        .as_ref()
+        .and_then(|state| state.provider.as_ref())
+        .and_then(|provider| provider.selector.as_ref())
+    {
+        for argument in &selector.arguments {
+            if !crate::constant::is_constant(argument, resolutions) {
+                provider_diagnostics.push(
+                    Diagnostic::type_error(
+                        "state-provider configuration must be a compile-time constant",
+                        argument.span,
+                    )
+                    .with_primary_label(
+                        "use a literal, enum variant, or a constant expression composed from them",
+                    ),
+                );
+            }
+        }
+    }
     provider_diagnostics
 }
 

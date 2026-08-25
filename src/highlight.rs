@@ -611,12 +611,6 @@ impl HighlightCollector<'_> {
                         self.insert(*field, SemanticTokenKind::Property, MODIFIER_READONLY);
                     }
                 }
-                ResolvedValue::ManagedLayout { .. } => {
-                    self.insert(spans[0], SemanticTokenKind::Type, 0);
-                    if let Some(layout) = spans.get(1) {
-                        self.insert(*layout, SemanticTokenKind::Property, MODIFIER_READONLY);
-                    }
-                }
                 ResolvedValue::Variable(id) => {
                     let readonly = self.syntax.state.as_ref().is_some_and(|state| {
                         state.layout_value == Some(id)
@@ -1031,16 +1025,6 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             self.insert(from, SemanticTokenKind::Keyword, 0);
         }
         visit::walk_managed_class(self, class);
-    }
-
-    fn visit_managed_layout(&mut self, layout: &'ast crate::ast::ManagedLayoutDecl) {
-        self.insert(layout.keyword_span, SemanticTokenKind::Keyword, 0);
-        self.insert(
-            layout.name_span,
-            SemanticTokenKind::EnumMember,
-            MODIFIER_DECLARATION | MODIFIER_READONLY,
-        );
-        visit::walk_managed_layout(self, layout);
     }
 
     fn visit_managed_field(&mut self, field: &'ast crate::ast::ManagedFieldDecl) {
@@ -1619,12 +1603,14 @@ whileAttached {
     #[test]
     fn highlights_managed_schema_declarations_by_their_language_roles() {
         let source = r#"
-state "game.exe" {}
+enum Edition { Alternate }
+state "game.exe" { layout { edition: Edition } }
+onAttach { return Layout { edition: Edition.Alternate } }
 image "Assembly-CSharp" {
     namespace Game {
         class Player from "RuntimePlayer" {
             static f32 health from "_health";
-            layout Alternate {
+            if layout.edition == Edition.Alternate {
                 f32 armor;
             }
         }
@@ -1638,7 +1624,15 @@ let player: Player.Ref? = None
             .expect("managed schema highlighting fixture");
         let highlights = database.semantic_highlights().unwrap();
 
-        for keyword in ["image", "namespace", "class", "from", "static", "layout"] {
+        for keyword in [
+            "image",
+            "namespace",
+            "class",
+            "from",
+            "static",
+            "layout",
+            "if",
+        ] {
             assert!(contains(
                 source,
                 &highlights,

@@ -230,16 +230,19 @@ impl Parser<'_> {
                 name = replacement.to_owned();
             }
             if let Some(dot) = self.eat(&TokenKind::Dot) {
-                let (member, member_span) =
-                    self.expect_any_ident("expected `Ref` or `Layout` after `.`")?;
-                if member == "Layout" {
-                    let qualified = format!("{name}.Layout");
-                    let ty = self.resolve_type(&qualified, start.join(member_span))?;
-                    return Ok((ty, start, member_span));
-                }
+                let (member, member_span) = self.expect_any_ident("expected `Ref` after `.`")?;
                 if member != "Ref" {
+                    if member == "Layout" {
+                        return Err(Diagnostic::new(
+                            "managed classes do not define nested layout types",
+                            start.join(member_span),
+                        )
+                        .with_primary_label(
+                            "declare attachment-wide dimensions in the state `layout { ... }` block and use the generated `Layout` record",
+                        ));
+                    }
                     return Err(Diagnostic::new(
-                        "a managed class type can only be followed by `.Ref` or `.Layout`",
+                        "a managed class type can only be followed by `.Ref`",
                         start.join(member_span),
                     ));
                 }

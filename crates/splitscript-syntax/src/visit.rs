@@ -48,10 +48,6 @@ pub trait Visitor<'ast>: Sized {
         walk_managed_class(self, class);
     }
 
-    fn visit_managed_layout(&mut self, layout: &'ast ManagedLayoutDecl) {
-        walk_managed_layout(self, layout);
-    }
-
     fn visit_managed_field(&mut self, field: &'ast ManagedFieldDecl) {
         self.visit_type_ref(&field.ty);
     }
@@ -271,18 +267,6 @@ pub fn walk_managed_class<'ast, V: Visitor<'ast>>(visitor: &mut V, class: &'ast 
         for field in &group.fields {
             visitor.visit_managed_field(field);
         }
-    }
-    for layout in &class.layouts {
-        visitor.visit_managed_layout(layout);
-    }
-}
-
-pub fn walk_managed_layout<'ast, V: Visitor<'ast>>(
-    visitor: &mut V,
-    layout: &'ast ManagedLayoutDecl,
-) {
-    for field in &layout.fields {
-        visitor.visit_managed_field(field);
     }
 }
 
@@ -537,10 +521,6 @@ pub trait Folder: Sized {
         walk_managed_class_mut(self, class);
     }
 
-    fn fold_managed_layout(&mut self, layout: &mut ManagedLayoutDecl) {
-        walk_managed_layout_mut(self, layout);
-    }
-
     fn fold_managed_field(&mut self, field: &mut ManagedFieldDecl) {
         self.fold_type_ref(&mut field.ty);
     }
@@ -725,15 +705,6 @@ pub fn walk_managed_class_mut<F: Folder>(folder: &mut F, class: &mut ManagedClas
         for field in &mut group.fields {
             folder.fold_managed_field(field);
         }
-    }
-    for layout in &mut class.layouts {
-        folder.fold_managed_layout(layout);
-    }
-}
-
-pub fn walk_managed_layout_mut<F: Folder>(folder: &mut F, layout: &mut ManagedLayoutDecl) {
-    for field in &mut layout.fields {
-        folder.fold_managed_field(field);
     }
 }
 

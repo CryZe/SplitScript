@@ -7,9 +7,8 @@ use crate::{
     Diagnostic,
     ast::{
         Action, EnumDecl, Expr, ExprKind, FunctionDecl, ManagedClassDecl, ManagedImageDecl,
-        ManagedLayoutDecl, ManagedNamespaceDecl, MatchArm, Program, RecordDecl, SettingDecl,
-        SettingFamilyDecl, SettingKind, StateDecl, StateField, Stmt, TypeApplicationDecl,
-        VariableDecl,
+        ManagedNamespaceDecl, MatchArm, Program, RecordDecl, SettingDecl, SettingFamilyDecl,
+        SettingKind, StateDecl, StateField, Stmt, TypeApplicationDecl, VariableDecl,
     },
     lexer::{Lexeme, Token, TokenKind, TriviaKind},
     syntax::SourceDocument,
@@ -114,11 +113,6 @@ impl<'ast> Visitor<'ast> for HeaderCollector {
             self.push(group.span.start, group.opening_span.start);
         }
         visit::walk_state(self, state);
-    }
-
-    fn visit_managed_layout(&mut self, layout: &'ast ManagedLayoutDecl) {
-        self.push(layout.span.start, layout.opening_span.start);
-        visit::walk_managed_layout(self, layout);
     }
 
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
@@ -321,8 +315,7 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
                 .fields
                 .iter()
                 .map(|field| field.span.end)
-                .chain(class.conditional_fields.iter().map(|group| group.span.end))
-                .chain(class.layouts.iter().map(|layout| layout.span.end)),
+                .chain(class.conditional_fields.iter().map(|group| group.span.end)),
         );
         for group in &class.conditional_fields {
             self.mark_declaration_items_vertical(
@@ -331,14 +324,6 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             );
         }
         visit::walk_managed_class(self, class);
-    }
-
-    fn visit_managed_layout(&mut self, layout: &'ast ManagedLayoutDecl) {
-        self.mark_declaration_items_vertical(
-            layout.span,
-            layout.fields.iter().map(|field| field.span.end),
-        );
-        visit::walk_managed_layout(self, layout);
     }
 
     fn visit_state(&mut self, state: &'ast StateDecl) {
@@ -1404,7 +1389,7 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
                 self.mark_comma_for_items(
                     expression.span,
                     fields.iter().map(|(_, value)| value.span),
-                    false,
+                    true,
                 );
             }
             ExprKind::Match { arms, .. } if !arms.is_empty() => {
@@ -1767,10 +1752,25 @@ onAttach {
 
     #[test]
     fn formats_managed_schemas_as_vertical_semicolon_delimited_declarations() {
-        let source = r#"state"game.exe"{}
-image"Assembly-CSharp"{namespace Game{class Player from"RuntimePlayer"{f32 health;}}class GameManager{static GameManager instance from["Instance","_instance",];i32 points from"_points";layout Base{i32 gameState;i32 currentLevel;}layout DlcDemo{i32 gameState from"GameState";String currentScene from"_currentScene";}}}
+        let source = r#"enum Edition{Base,DlcDemo}
+state"game.exe"{layout{edition:Edition}}
+onAttach{return Layout{edition:Edition.Base}}
+image"Assembly-CSharp"{namespace Game{class Player from"RuntimePlayer"{f32 health;}}class GameManager{static GameManager instance from["Instance","_instance",];i32 points from"_points";if layout.edition==Edition.Base{i32 gameState;i32 currentLevel;}if layout.edition==Edition.DlcDemo{i32 gameState from"GameState";String currentScene from"_currentScene";}}}
 fn identity(value:GameManager.Ref)->GameManager.Ref{return value}"#;
-        let expected = r#"state "game.exe" {}
+        let expected = r#"enum Edition {
+    Base,
+    DlcDemo,
+}
+state "game.exe" {
+    layout {
+        edition: Edition,
+    }
+}
+onAttach {
+    return Layout {
+        edition: Edition.Base,
+    }
+}
 image "Assembly-CSharp" {
     namespace Game {
         class Player from "RuntimePlayer" {
@@ -1780,11 +1780,11 @@ image "Assembly-CSharp" {
     class GameManager {
         static GameManager instance from ["Instance", "_instance"];
         i32 points from "_points";
-        layout Base {
+        if layout.edition == Edition.Base {
             i32 gameState;
             i32 currentLevel;
         }
-        layout DlcDemo {
+        if layout.edition == Edition.DlcDemo {
             i32 gameState from "GameState";
             String currentScene from "_currentScene";
         }

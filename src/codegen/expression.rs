@@ -16,7 +16,7 @@ use crate::{
     stdlib::{
         IntrinsicId, MANAGED_BINDINGS_TYPE, MANAGED_POINTER_SIZE_FIELD, RuntimeRepresentation,
         StandardLibrary, StdlibFieldId, StdlibOwner, StdlibTypeConstructorId, StdlibTypeId,
-        managed_field_offset_name, managed_layout_index_name, managed_static_table_name,
+        managed_field_offset_name, managed_static_table_name,
     },
     types::{EnumTypeId, ResolvedArrayType, TypeId},
     wasm_ir::{self, TemporaryId},
@@ -1446,16 +1446,6 @@ fn compile_resolved_path(
             function.instruction(&Instruction::I64Add);
             emit_managed_read_at_address(function, binding, context)
         }
-        ResolvedValue::ManagedLayout { class, .. } => {
-            emit_managed_binding_field(
-                function,
-                &managed_layout_index_name(class.index()),
-                context,
-            );
-            resolved_value_type_id(value, context)
-                .map(|ty| semantic_type(ty, context.semantics))
-                .expect("checked managed layout values retain their enum type")
-        }
         ResolvedValue::CurrentSnapshot | ResolvedValue::OldSnapshot => {
             function
                 .instruction(&Instruction::GlobalGet(
@@ -2347,8 +2337,7 @@ fn resolved_value_type_id(value: ResolvedValue, context: &ExprContext<'_>) -> Op
     match value {
         ResolvedValue::Variable(value)
         | ResolvedValue::CurrentState(value)
-        | ResolvedValue::OldState(value)
-        | ResolvedValue::ManagedLayout { value, .. } => context.semantics.value_type(value)?,
+        | ResolvedValue::OldState(value) => context.semantics.value_type(value)?,
         ResolvedValue::Setting(value) | ResolvedValue::OldSetting(value) => {
             context.semantics.value_type(value)?
         }
@@ -2372,16 +2361,12 @@ fn managed_field_binding<'context>(
         .classes
         .iter()
         .flat_map(|class| {
-            class
-                .fields
-                .iter()
-                .chain(
-                    class
-                        .conditional_fields
-                        .iter()
-                        .flat_map(|group| &group.fields),
-                )
-                .chain(class.layouts.iter().flat_map(|layout| &layout.fields))
+            class.fields.iter().chain(
+                class
+                    .conditional_fields
+                    .iter()
+                    .flat_map(|group| &group.fields),
+            )
         })
         .find(|candidate| candidate.id == field)
         .expect("resolved managed fields belong to the binding plan")

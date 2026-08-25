@@ -319,7 +319,7 @@ pub(super) fn compile_update(
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End);
-        emit_managed_layout_validation(&mut function, program, lowering);
+        emit_managed_field_presence_validation(&mut function, program, lowering);
         function
             .instruction(&Instruction::I32Const(1))
             .instruction(&Instruction::GlobalSet(globals.attach_ready))
@@ -604,7 +604,7 @@ fn emit_layout_constraints(
     }
 }
 
-fn emit_managed_layout_validation(
+fn emit_managed_field_presence_validation(
     function: &mut Function,
     program: &Program,
     lowering: &UpdateContext<'_>,

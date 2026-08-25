@@ -160,7 +160,6 @@ struct Checker {
     provider_value: Option<(StdlibStateProviderId, Type)>,
     layout_value: Option<ValueId>,
     active_state_layout: Option<crate::ast::EnumVariantId>,
-    active_managed_layouts: HashMap<crate::ast::ManagedClassId, crate::ast::EnumVariantId>,
     active_layout_constraints: HashMap<crate::ast::RecordFieldId, crate::ast::EnumVariantId>,
     scopes: Vec<HashMap<String, Binding>>,
     return_ty: Type,
@@ -202,28 +201,6 @@ impl Checker {
         let previous = std::mem::replace(&mut self.active_state_layout, layout);
         let output = operation(self);
         self.active_state_layout = previous;
-        output
-    }
-
-    fn with_managed_layout<T>(
-        &mut self,
-        class: Option<crate::ast::ManagedClassId>,
-        layout: Option<crate::ast::EnumVariantId>,
-        operation: impl FnOnce(&mut Self) -> T,
-    ) -> T {
-        let previous = class.and_then(|class| {
-            layout
-                .map(|layout| self.active_managed_layouts.insert(class, layout))
-                .unwrap_or_else(|| self.active_managed_layouts.remove(&class))
-        });
-        let output = operation(self);
-        if let Some(class) = class {
-            if let Some(previous) = previous {
-                self.active_managed_layouts.insert(class, previous);
-            } else {
-                self.active_managed_layouts.remove(&class);
-            }
-        }
         output
     }
 

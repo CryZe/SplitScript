@@ -288,7 +288,6 @@ fn provider_value_for_resolution(
         crate::semantic::ResolvedValue::StandardLibraryConstant(_) => None,
         crate::semantic::ResolvedValue::ProviderValue(provider) => Some(provider),
         crate::semantic::ResolvedValue::ManagedStatic { .. } => None,
-        crate::semantic::ResolvedValue::ManagedLayout { .. } => None,
         crate::semantic::ResolvedValue::Variable(_)
         | crate::semantic::ResolvedValue::CurrentSnapshot
         | crate::semantic::ResolvedValue::OldSnapshot
@@ -904,7 +903,6 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
         id @ (SourceDefinitionId::ManagedImage(_)
         | SourceDefinitionId::ManagedNamespace(_)
         | SourceDefinitionId::ManagedClass(_)
-        | SourceDefinitionId::ManagedLayout(_)
         | SourceDefinitionId::ManagedField(_)) => match find_managed_declaration(syntax, id)? {
             ManagedSourceDeclaration::Image(image) => Some(source_markdown(
                 &format!("image \"{}\"", image.name),
@@ -922,13 +920,6 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 &documented_description(
                     "Managed reference and snapshot schema",
                     class.documentation.as_deref(),
-                ),
-            )),
-            ManagedSourceDeclaration::Layout(layout) => Some(source_markdown(
-                &format!("layout {}", layout.name),
-                &documented_description(
-                    "Alternative managed class layout",
-                    layout.documentation.as_deref(),
                 ),
             )),
             ManagedSourceDeclaration::Field(field) => Some(source_markdown(
@@ -958,7 +949,6 @@ enum ManagedSourceDeclaration<'ast> {
     Image(&'ast crate::ast::ManagedImageDecl),
     Namespace(&'ast crate::ast::ManagedNamespaceDecl),
     Class(&'ast crate::ast::ManagedClassDecl),
-    Layout(&'ast crate::ast::ManagedLayoutDecl),
     Field(&'ast crate::ast::ManagedFieldDecl),
 }
 
@@ -993,14 +983,6 @@ fn find_managed_declaration(
                 self.found = Some(ManagedSourceDeclaration::Class(class));
             } else {
                 crate::visit::walk_managed_class(self, class);
-            }
-        }
-
-        fn visit_managed_layout(&mut self, layout: &'ast crate::ast::ManagedLayoutDecl) {
-            if self.target == SourceDefinitionId::ManagedLayout(layout.id) {
-                self.found = Some(ManagedSourceDeclaration::Layout(layout));
-            } else {
-                crate::visit::walk_managed_layout(self, layout);
             }
         }
 
@@ -1528,7 +1510,9 @@ mod tests {
     #[test]
     fn hover_uses_resolved_catalog_signature_effects_and_examples() {
         let source = r#"
-state "game.exe" {}
+enum Edition { Alternate }
+state "game.exe" { layout { edition: Edition } }
+onAttach { return Layout { edition: Edition.Alternate } }
 
 whileAttached {
     let value: i32 = 8
@@ -2279,7 +2263,9 @@ split {
     #[test]
     fn managed_schema_declarations_have_source_hover_and_documentation() {
         let source = r#"
-state "game.exe" {}
+enum Edition { Alternate }
+state "game.exe" { layout { edition: Edition } }
+onAttach { return Layout { edition: Edition.Alternate } }
 /// Gameplay metadata.
 image "Assembly-CSharp" {
     /// Runtime namespace.
@@ -2289,8 +2275,8 @@ image "Assembly-CSharp" {
             /// Current hit points.
             static f32 health from "_health";
 
-            /// Alternate release layout.
-            layout Alternate {
+            if layout.edition == Edition.Alternate {
+                /// Armor in the alternate release.
                 f32 armor;
             }
         }
@@ -2309,11 +2295,7 @@ let player: Player.Ref? = None
             ("Game {", "namespace Game", "Runtime namespace."),
             ("Player {", "class Player", "The player component."),
             ("health from", "static f32 health", "Current hit points."),
-            (
-                "Alternate {",
-                "Player.Layout.Alternate",
-                "Alternate release layout.",
-            ),
+            ("armor;", "f32 armor", "Armor in the alternate release."),
         ] {
             let hover = database
                 .hover(source.find(needle).unwrap() + 1)

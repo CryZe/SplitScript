@@ -125,7 +125,12 @@ whileAttached {
     })
 }"#;
 
-const MANAGED_IMAGE_SOURCE: &str = r#"image "Assembly-CSharp" {
+const MANAGED_IMAGE_SOURCE: &str = r#"enum Edition {
+    BaseGame,
+    Demo,
+}
+
+image "Assembly-CSharp" {
     class Player {
         u32 score;
     }
@@ -134,29 +139,36 @@ const MANAGED_IMAGE_SOURCE: &str = r#"image "Assembly-CSharp" {
         static GameManager instance;
         Player player;
 
-        layout BaseGame {
+        if layout.edition == Edition.BaseGame {
             u32 level;
         }
 
-        layout Demo {
+        if layout.edition == Edition.Demo {
             u32 scene;
         }
     }
 }
 
 state Unity ["game.exe"] {
+    layout {
+        edition: Edition,
+    }
     score: u32 = GameManager.instance?.player?.score?
+}
+
+onAttach {
+    return Layout {
+        edition: Edition.BaseGame,
+    }
 }
 
 whileAttached {
     let manager = GameManager.instance else return
-    match GameManager.layout {
-        GameManager.Layout.BaseGame => {
-            print(manager.level else 0)
-        },
-        GameManager.Layout.Demo => {
-            print(manager.scene else 0)
-        },
+    if layout.edition == Edition.BaseGame {
+        print(manager.level else 0)
+    }
+    if layout.edition == Edition.Demo {
+        print(manager.scene else 0)
     }
 }"#;
 
@@ -1173,7 +1185,7 @@ define_language_catalog! {
         "An [`image`] schema names the managed assembly image that owns its classes. The [`Unity`] state provider resolves the image and every declared class once per attachment before state polling begins. Schema declarations describe metadata; they do not read live game memory until a static or instance field path is evaluated.",
         &[Example::checked(
             "Describe a managed assembly image",
-            "image \"Assembly-CSharp\" {\n    class Player {\n        u32 score;\n    }\n\n    class GameManager from [\"Manager\", \"GameManager\"] {\n        static GameManager instance;\n        Player player;\n\n        layout BaseGame {\n            u32 level;\n        }\n\n        layout Demo {\n            u32 scene;\n        }\n    }\n}",
+            "image \"Assembly-CSharp\" {\n    class Player {\n        u32 score;\n    }\n\n    class GameManager from [\"Manager\", \"GameManager\"] {\n        static GameManager instance;\n        Player player;\n\n        if layout.edition == Edition.BaseGame {\n            u32 level;\n        }\n\n        if layout.edition == Edition.Demo {\n            u32 scene;\n        }\n    }\n}",
             MANAGED_IMAGE_SOURCE,
         )]
     ),
@@ -1181,9 +1193,9 @@ define_language_catalog! {
         ManagedClass,
         "class",
         LanguageItemKind::Declaration,
-        "class Name from [\"Alias\", ...] { Type field; static Type field; layout Name { ... } }",
+        "class Name from [\"Alias\", ...] { Type field; static Type field; if layout.dimension == Variant { ... } }",
         "Declares a typed managed class binding.",
-        "Fields without [`static`](syntax@managed static field) are read from a live class reference; static fields are read through the class name. Each field hop is independently fallible and yields [`T!`], so postfix [`?`] can propagate an unsuccessful lookup to the surrounding state field, function, or [`retry`] boundary. The optional `from` list tries the written managed type names in order and binds the first complete schema. Fields declared directly in the class are available for every binding; fields inside a [`layout`] require a direct match on the generated read-only `Class.layout` value.",
+        "Fields without [`static`](syntax@managed static field) are read from a live class reference; static fields are read through the class name. Each field hop is independently fallible and yields [`T!`], so postfix [`?`] can propagate an unsuccessful lookup to the surrounding state field, function, or [`retry`] boundary. The optional `from` list tries the written managed type names in order and binds the first complete schema. Fields declared directly in the class are always available. Put build-specific fields in an [`if`] group over the attachment-wide [`layout`] value; the same predicate then refines those fields in ordinary code.",
         &[Example::checked(
             "Follow a typed managed field path",
             "score: u32 = GameManager.instance?.player?.score?",
@@ -1229,9 +1241,9 @@ define_language_catalog! {
         StateLayout,
         "layout",
         LanguageItemKind::Declaration,
-        "state { layout Name { field at address } } | class Name { layout Name { Type field; } }",
-        "Declares one named state or managed-class layout.",
-        "Inside [`state`], fields with the same compatible type in every named layout form the common snapshot interface. Other fields become available after a direct [`match`] on the generated read-only `layout: StateLayout` value. [`onAttach`] returns the selected variant before polling begins; [`await`] [`Process.closed`] represents an unsupported build without repeatedly reattaching. Inside a managed [`class`], fields declared outside every layout are common. The [`Unity`] provider selects exactly one complete managed layout during attachment and caches its generated `Class.Layout` enum value. Match the read-only `Class.layout` value directly to access layout-specific static and instance fields in the corresponding arm. Each managed field path remains independently fallible after refinement.",
+        "state { layout { dimension: Type } ... } | state { layout Name { field at address } }",
+        "Declares attachment-wide build dimensions or a named state memory shape.",
+        "An unnamed `layout { ... }` declares independent attachment-wide dimensions. [`onAttach`] returns the generated `Layout` record once, and the read-only [`layout`] value is then available to state expressions, managed [`class`] conditions, and lifecycle code. A predicate such as `layout.edition == Edition.BaseGame` refines every state and managed field declared under that same predicate. This keeps build facts in one place even when native state and several managed classes vary independently. A named `layout Name { ... }` instead declares one complete state memory shape. Compatible fields shared by every named shape form the common snapshot interface; other fields become available after a direct [`match`] on the generated `StateLayout` value. [`await`] [`Process.closed`] represents an unsupported build without repeatedly reattaching.",
         &[
             Example::checked(
                 "Select and refine a supported build",
@@ -1239,8 +1251,8 @@ define_language_catalog! {
                 MULTI_LAYOUT_STATE_SOURCE,
             ),
             Example::checked(
-                "Refine a managed class layout",
-                "match GameManager.layout {\n    GameManager.Layout.BaseGame => {\n        print(manager.level else 0)\n    },\n    GameManager.Layout.Demo => {\n        print(manager.scene else 0)\n    },\n}",
+                "Refine managed fields with the shared layout",
+                "if layout.edition == Edition.BaseGame {\n    print(manager.level else 0)\n}\nif layout.edition == Edition.Demo {\n    print(manager.scene else 0)\n}",
                 MANAGED_IMAGE_SOURCE,
             ),
         ]

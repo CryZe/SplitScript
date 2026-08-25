@@ -49,12 +49,12 @@ to inference or code generation.
 ### P0.1 — represent managed metadata in ordinary compiler architecture
 
 - [x] Add first-class `image`, `namespace`, `class`, field, static-field,
-  metadata-name (`from`), and class-layout declarations to syntax, AST/HIR,
-  recovery, formatting, and source traversal. Declarations use mandatory
-  semicolons and never depend on line breaks. Preserve documentation on every
-  declared image, namespace, class, layout, and field.
+  metadata-name (`from`), and conditional-field declarations to syntax,
+  AST/HIR, recovery, formatting, and source traversal. Declarations use
+  mandatory semicolons and never depend on line breaks. Preserve documentation
+  on every declared image, namespace, class, and field.
 - [ ] Resolve image schemas through the normal semantic symbol tables. Give
-  every generated class, layout, reference, field, and static member a stable
+  every generated class, reference, field, and static member a stable
   identity used by type inference, diagnostics, rename, go-to-definition,
   completion, hover, semantic highlighting, selection ranges, documentation,
   and unused analysis. Do not teach those consumers unrelated lists of Unity
@@ -121,7 +121,7 @@ to inference or code generation.
     and diagnose zero or ambiguous assignments with labels on the declarations
     that supplied the constraints. Do not eagerly enumerate an unbounded
     cartesian product of dimensions.
-  - [ ] Remove generated `<Class>.Layout` enums, `<Class>.layout` values, and
+  - [x] Remove generated `<Class>.Layout` enums, `<Class>.layout` values, and
     per-class public refinement. If a genuinely observable class-only schema
     distinction is needed, declare it as another global dimension; if the
     distinction preserves the public API, keep it as a private binding
@@ -131,15 +131,6 @@ to inference or code generation.
     attachment binding probes complete alternatives without adding a public
     lookup API or duplicating the metadata scanner. Reuse this mechanism as
     the low-level evidence source for global layout constraints.
-  - [x] Expose the selected layout as the nested `T.Layout` enum and read-only
-    attachment value `T.layout`. Matching the value refines both live
-    references and static access to exactly that layout's fields; common fields
-    remain available without refinement. The attachment cache stores the enum
-    value once rather than reconstructing it during every access, and the
-    compiler, Wasm backend, completion, navigation, hover, and semantic
-    highlighting share its generated semantic identities. This is an
-    intentionally temporary implementation to remove while migrating those
-    consumers to global dimensions.
   - [ ] Replace the temporary inert zero/multiple-match behavior with a focused
     attachment diagnostic carrying labels for the responsible layouts.
 
@@ -177,9 +168,9 @@ to inference or code generation.
   attachment. Re-follow dynamic object pointers on each read so replaceable
   singletons remain correct. Scalar live paths allocate no fresh GC object per
   tick.
-- [x] Extend the attachment cache with the selected class-layout enum value and
-  that layout's field offsets. Strings, arrays, and explicit snapshots may
-  still allocate their returned values.
+- [x] Extend the attachment cache with managed field offsets and presence
+  evidence used to validate the attachment-wide layout. Strings, arrays, and
+  explicit snapshots may still allocate their returned values.
 - [x] Preserve the existing transactional state-field failure boundary for
   generated member reads. A failed pointer hop or memory read retains the last
   accepted field value; Unity declarations must not introduce a second failure

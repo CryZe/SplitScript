@@ -146,6 +146,72 @@ state declaration. Fields present in every layout with a compatible type form
 the common snapshot interface; field order may differ. A missing field or a
 same-named field with a conflicting type remains specific to its layout.
 
+When several independent build facts affect state fields, managed classes, or
+both, declare those facts once in an unnamed `layout` block. Every dimension is
+an enum, and [`onAttach`] returns the generated `Layout` record:
+
+```splitscript
+enum Edition {
+    BaseGame,
+    Demo,
+}
+
+enum Storefront {
+    Steam,
+    GOG,
+}
+
+state Unity ["game.exe"] {
+    layout {
+        edition: Edition,
+        storefront: Storefront,
+    }
+
+    if layout.edition == Edition.BaseGame {
+        level: u32 at 0x1000;
+    }
+}
+
+onAttach {
+    return Layout {
+        edition: Edition.BaseGame,
+        storefront: Storefront.Steam,
+    }
+}
+```
+
+The generated `layout: Layout` value is read-only and stable for the whole
+attachment. The same equality predicate refines every declaration guarded by
+it, including managed fields:
+
+```splitscript
+image "Assembly-CSharp" {
+    class GameManager {
+        static GameManager instance;
+
+        if layout.edition == Edition.BaseGame {
+            u32 level;
+        }
+    }
+}
+
+whileAttached {
+    if layout.edition == Edition.BaseGame {
+        let manager = GameManager.instance else return
+        print(manager.level else 0)
+    }
+}
+```
+
+Dimensions are independent, so an edition and storefront do not require a
+cartesian product of public variants. Managed classes do not create their own
+layout types or selectors. A class-only distinction that affects its public
+fields is another attachment-wide dimension; metadata spellings that preserve
+the public shape stay private binding alternatives.
+
+Named state layouts remain the concise form when one choice selects an entire
+native memory shape:
+
 ```text
 state "game.exe" {
     layout Steam {

@@ -1642,46 +1642,6 @@ impl Checker {
                 members: Some(Vec::new()),
             });
         }
-        if let [class_name, member] = path
-            && member == "layout"
-            && let Some(class) = self
-                .declarations
-                .managed_classes
-                .iter()
-                .find(|class| class.name == *class_name)
-                .cloned()
-            && let Some((value, ty)) = self
-                .declarations
-                .managed_layout_values
-                .get(&class.id)
-                .copied()
-        {
-            if !self.managed_provider_available() {
-                self.errors.push(
-                    Diagnostic::type_error(
-                        "managed layout selection requires a Unity state provider",
-                        span,
-                    )
-                    .with_primary_label(
-                        "declare the state as `state Unity [\"game.exe\"] { ... }`",
-                    ),
-                );
-                return None;
-            }
-            return Some(PathResolution {
-                ty,
-                value: Some(ResolvedValue::ManagedLayout {
-                    class: class.id,
-                    enumeration: class
-                        .layout_enum
-                        .as_ref()
-                        .expect("managed layout values retain their nested enum")
-                        .id,
-                    value,
-                }),
-                members: Some(Vec::new()),
-            });
-        }
         if let [class_name, field_name] = path
             && let Some(class) = self
                 .declarations
@@ -1729,27 +1689,6 @@ impl Checker {
             self.error(
                 format!(
                     "managed field `{class_name}.{field_name}` is conditional; access it only where its `layout` predicate is established"
-                ),
-                span,
-            );
-            return None;
-        }
-        if let [class_name, field_name] = path
-            && let Some(class) = self
-                .declarations
-                .managed_classes
-                .iter()
-                .find(|class| class.name == *class_name)
-            && class.layouts.iter().any(|layout| {
-                layout
-                    .fields
-                    .iter()
-                    .any(|field| field.is_static && field.name == *field_name)
-            })
-        {
-            self.error(
-                format!(
-                    "managed field `{class_name}.{field_name}` is layout-specific; access it inside the corresponding `match {class_name}.layout` arm"
                 ),
                 span,
             );
@@ -2174,13 +2113,9 @@ impl Checker {
                         .find(|candidate| candidate.id == *class)
                         .is_some_and(|class| {
                             class
-                                .layouts
+                                .conditional_fields
                                 .iter()
-                                .any(|layout| layout.fields.iter().any(|item| item.name == field))
-                                || class
-                                    .conditional_fields
-                                    .iter()
-                                    .any(|group| group.fields.iter().any(|item| item.name == field))
+                                .any(|group| group.fields.iter().any(|item| item.name == field))
                         }) =>
             {
                 let class = self
@@ -2188,28 +2123,14 @@ impl Checker {
                     .managed_classes
                     .iter()
                     .find(|candidate| candidate.id == *class)
-                    .expect("the layout-specific field belongs to a managed class");
-                if class
-                    .conditional_fields
-                    .iter()
-                    .any(|group| group.fields.iter().any(|item| item.name == field))
-                {
-                    self.error(
-                        format!(
-                            "managed field `{}.{field}` is conditional; access it only where its `layout` predicate is established",
-                            class.name
-                        ),
-                        span,
-                    )
-                } else {
-                    self.error(
-                        format!(
-                            "managed field `{}.{field}` is layout-specific; access it inside the corresponding `match {}.layout` arm",
-                            class.name, class.name
-                        ),
-                        span,
-                    )
-                }
+                    .expect("the conditional field belongs to a managed class");
+                self.error(
+                    format!(
+                        "managed field `{}.{field}` is conditional; access it only where its `layout` predicate is established",
+                        class.name
+                    ),
+                    span,
+                )
             }
             Type::Known(id)
                 if matches!(
@@ -2381,22 +2302,6 @@ impl Checker {
             .fields
             .iter()
             .find(|field| field.is_static == is_static && field.name == name)
-            .or_else(|| {
-                self.active_managed_layouts
-                    .get(&class_id)
-                    .and_then(|variant| {
-                        class
-                            .layouts
-                            .iter()
-                            .find(|layout| layout.variant == *variant)
-                    })
-                    .and_then(|layout| {
-                        layout
-                            .fields
-                            .iter()
-                            .find(|field| field.is_static == is_static && field.name == name)
-                    })
-            })
             .or_else(|| {
                 class
                     .conditional_fields

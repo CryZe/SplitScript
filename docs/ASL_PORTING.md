@@ -705,6 +705,46 @@ is still appropriate when consumers already define that value as unavailable;
 the A Plague Tale Xbox layout uses `cutsceneState: i32 = 0` for exactly that
 reason.
 
+When the original script has several independent build facts, avoid turning
+their cartesian product into many version-labelled states. Declare enum-valued
+dimensions in one unnamed state [`layout`] block and return the generated
+`Layout` record from [`onAttach`]. The selected [`layout`] value can guard native
+state fields and managed class fields with the same predicate:
+
+```splitscript
+enum Edition {
+    Full,
+    Demo,
+}
+
+enum Storefront {
+    Steam,
+    GOG,
+}
+
+state Unity ["game.exe"] {
+    layout {
+        edition: Edition,
+        storefront: Storefront,
+    }
+
+    if layout.edition == Edition.Full {
+        level: u32 at 0x1000;
+    }
+}
+
+onAttach {
+    return Layout {
+        edition: Edition.Full,
+        storefront: Storefront.Steam,
+    }
+}
+```
+
+Use a named `layout Steam { ... }` state when one selection genuinely chooses
+the complete memory shape. Use dimensions when edition, storefront, renderer,
+or another fact can vary independently or is shared with managed metadata.
+
 ## Attached process identity
 
 ASL exposes the selected process through `game.ProcessName`. In a native

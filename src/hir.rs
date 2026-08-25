@@ -10,9 +10,9 @@ use crate::{
     ast::{
         ActionKind, AssignmentId, BinaryOp, Block, EnumId, EnumVariantId, Expr, ExprId, ExprKind,
         FunctionId, InterpolatedPart, ManagedClassId, ManagedFieldId, ManagedImageId,
-        ManagedItemDecl, ManagedLayoutId, ManagedNamespaceId, MatchArm, MatchPattern,
-        PatternBinding, PatternId, Program as SyntaxProgram, RecordId, SettingChoiceOptionId,
-        SettingKind, Span, Stmt, SuspensionMode, TypeRef, UnaryOp, ValueId,
+        ManagedItemDecl, ManagedNamespaceId, MatchArm, MatchPattern, PatternBinding, PatternId,
+        Program as SyntaxProgram, RecordId, SettingChoiceOptionId, SettingKind, Span, Stmt,
+        SuspensionMode, TypeRef, UnaryOp, ValueId,
     },
     semantic::{
         DynamicCallCallee, FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember,
@@ -34,7 +34,6 @@ pub enum DeclarationId {
     ManagedImage(ManagedImageId),
     ManagedNamespace(ManagedNamespaceId),
     ManagedClass(ManagedClassId),
-    ManagedLayout(ManagedLayoutId),
     ManagedField(ManagedFieldId),
     Function(FunctionId),
     Action(ActionKind),
@@ -160,29 +159,13 @@ impl DeclarationIndex {
                         &class.name,
                         class.span,
                     );
-                    for field in &class.fields {
+                    for field in class.all_fields() {
                         self.push(
                             DeclarationId::ManagedField(field.id),
                             Some(DeclarationId::ManagedClass(class.id)),
                             &field.name,
                             field.span,
                         );
-                    }
-                    for layout in &class.layouts {
-                        self.push(
-                            DeclarationId::ManagedLayout(layout.id),
-                            Some(DeclarationId::ManagedClass(class.id)),
-                            &layout.name,
-                            layout.span,
-                        );
-                        for field in &layout.fields {
-                            self.push(
-                                DeclarationId::ManagedField(field.id),
-                                Some(DeclarationId::ManagedLayout(layout.id)),
-                                &field.name,
-                                field.span,
-                            );
-                        }
                     }
                 }
             }

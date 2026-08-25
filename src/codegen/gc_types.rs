@@ -217,7 +217,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
             Type::ManagedClass(id) => {
                 let class = program
                     .managed_class(id)
-                    .expect("reachable managed class layouts have declarations");
+                    .expect("reachable managed class shapes have declarations");
                 (
                     CompositeInnerType::Struct(StructType {
                         fields: class

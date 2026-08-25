@@ -39,7 +39,7 @@ the test requires many cooperative scan polls and proves the attached rate is
 selected before scanning starts. It executes the generated WebAssembly GC module in both base and
 DLC configurations and verifies:
 
-- class-layout and executable fallback selection;
+- base-game/DLC schema and executable fallback selection;
 - automatic and runner-initiated starts;
 - Results and credits splits;
 - first-level rollback reset;

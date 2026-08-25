@@ -14,17 +14,17 @@ use crate::{
         ConditionalFieldsDecl, ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference,
         EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, ForBinding, FunctionDecl, FunctionId,
         InterpolatedPart, ManagedClassDecl, ManagedClassId, ManagedFieldDecl, ManagedFieldId,
-        ManagedImageDecl, ManagedImageId, ManagedItemDecl, ManagedLayoutDecl, ManagedLayoutId,
-        ManagedMetadataName, ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId,
-        ManagedReferenceTypeDecl, ManagedReferenceTypeId, MatchArm, MatchPattern, OptionTypeDecl,
-        OptionTypeId, Parameter, PatternBinding, PatternId, PointerPath, PointerPathBase, Program,
-        RangeKind, RangeTypeDecl, RangeTypeId, RecordDecl, RecordField, RecordFieldId, RecordId,
-        ResultTypeDecl, ResultTypeId, SettingChoiceOption, SettingChoiceOptionId, SettingDecl,
-        SettingExternalKey, SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart,
-        SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder,
-        StateProviderRef, StateProviderSelectorRef, StateSource, StateTransform, Stmt,
-        SuspensionMode, TickRateDecl, TickRateValue, TypeApplicationDecl, TypeApplicationId,
-        TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
+        ManagedImageDecl, ManagedImageId, ManagedItemDecl, ManagedMetadataName,
+        ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId, ManagedReferenceTypeDecl,
+        ManagedReferenceTypeId, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter,
+        PatternBinding, PatternId, PointerPath, PointerPathBase, Program, RangeKind, RangeTypeDecl,
+        RangeTypeId, RecordDecl, RecordField, RecordFieldId, RecordId, ResultTypeDecl,
+        ResultTypeId, SettingChoiceOption, SettingChoiceOptionId, SettingDecl, SettingExternalKey,
+        SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern,
+        Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
+        StateProviderSelectorRef, StateSource, StateTransform, Stmt, SuspensionMode, TickRateDecl,
+        TickRateValue, TypeApplicationDecl, TypeApplicationId, TypeApplicationOccurrence,
+        TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     diagnostic::{Diagnostic, DiagnosticFix, FixApplicability, TextEdit},
     migration::{ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
@@ -104,7 +104,6 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         next_managed_image_id: 0,
         next_managed_namespace_id: 0,
         next_managed_class_id: 0,
-        next_managed_layout_id: 0,
         next_managed_field_id: 0,
         next_pattern_id: 0,
         next_setting_choice_option_id: 0,
@@ -150,7 +149,6 @@ struct Parser<'a> {
     next_managed_image_id: u32,
     next_managed_namespace_id: u32,
     next_managed_class_id: u32,
-    next_managed_layout_id: u32,
     next_managed_field_id: u32,
     next_pattern_id: u32,
     next_setting_choice_option_id: u32,
@@ -529,7 +527,9 @@ mod tests {
     #[test]
     fn parses_documented_managed_image_schemas_with_stable_member_shapes() {
         let source = r#"
-            state "Lunistice.exe" {}
+            enum Edition { Base, DlcDemo }
+            state "Lunistice.exe" { layout { edition: Edition } }
+            onAttach { return Layout { edition: Edition.Base } }
 
             /// Game-specific managed metadata.
             image "Assembly-CSharp" {
@@ -545,13 +545,13 @@ mod tests {
                     static GameManager instance from ["Instance", "_instance",];
                     i32 points from "_points";
 
-                    /// Fields used by the base game.
-                    layout Base {
+                    if layout.edition == Edition.Base {
+                        /// State used by the base game.
                         i32 gameState;
                         i32 currentLevel;
                     }
 
-                    layout DlcDemo {
+                    if layout.edition == Edition.DlcDemo {
                         i32 gameState from "GameState";
                         String currentScene from "_currentScene";
                     }
@@ -594,22 +594,15 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["Instance", "_instance"]
         );
-        assert_eq!(manager.layouts.len(), 2);
-        assert_eq!(manager.layouts[0].name, "Base");
-        assert_eq!(manager.layouts[1].fields[1].name, "currentScene");
-        let layout_enum = manager
-            .layout_enum
-            .as_ref()
-            .expect("named class layouts should expose a nested enum");
-        assert_eq!(layout_enum.name, "GameManager.Layout");
-        assert_eq!(layout_enum.variants[0].name, "Base");
-        assert_eq!(layout_enum.variants[0].id, manager.layouts[0].variant);
-        assert!(manager.layout_value.is_some());
-        assert!(
-            program
-                .enum_declarations()
-                .any(|enumeration| enumeration.id == layout_enum.id)
+        assert_eq!(manager.conditional_fields.len(), 2);
+        assert_eq!(manager.conditional_fields[0].fields[0].name, "gameState");
+        assert_eq!(
+            manager.conditional_fields[0].fields[0]
+                .documentation
+                .as_deref(),
+            Some("State used by the base game.")
         );
+        assert_eq!(manager.conditional_fields[1].fields[1].name, "currentScene");
     }
 
     #[test]
@@ -639,6 +632,38 @@ mod tests {
             program.functions[0].return_annotation,
             Some(TypeRef::ManagedReference(id)) if id == reference.id
         ));
+    }
+
+    #[test]
+    fn rejects_per_class_layouts_with_global_dimension_guidance() {
+        let source = r#"
+            state Unity ["game.exe"] {}
+            image "Assembly-CSharp" {
+                class GameManager {
+                    layout Demo {
+                        String scene;
+                    }
+                }
+            }
+        "#;
+        let error = parse(source, lex(source, SyntaxMode::Program).unwrap())
+            .expect_err("managed classes must not create independent layouts");
+        assert_eq!(
+            error.message,
+            "managed classes use attachment-wide layout dimensions"
+        );
+
+        let source = r#"
+            state Unity ["game.exe"] {}
+            image "Assembly-CSharp" { class GameManager {} }
+            let selected: GameManager.Layout
+        "#;
+        let error = parse(source, lex(source, SyntaxMode::Program).unwrap())
+            .expect_err("managed classes must not expose nested layout types");
+        assert_eq!(
+            error.message,
+            "managed classes do not define nested layout types"
+        );
     }
 
     #[test]

@@ -187,7 +187,6 @@ fn initialize_checker(
         provider_value,
         layout_value: program.state.as_ref().and_then(|state| state.layout_value),
         active_state_layout: None,
-        active_managed_layouts: std::collections::HashMap::new(),
         active_layout_constraints: std::collections::HashMap::new(),
         scopes: Vec::new(),
         return_ty: none_type,

@@ -183,8 +183,6 @@ pub(super) struct DeclarationEnvironment {
         HashMap<String, Vec<(ValueId, Type, Vec<LayoutConstraint>)>>,
     /// Canonical layout facts guarding each conditionally bound managed field.
     pub(super) conditional_managed_fields: HashMap<ManagedFieldId, Vec<LayoutConstraint>>,
-    /// Read-only attachment values exposed as `<Class>.layout`.
-    pub(super) managed_layout_values: HashMap<crate::ast::ManagedClassId, (ValueId, Type)>,
     /// Concrete declarations mapped to their physical snapshot field. Common
     /// declarations from later layouts map to the first layout's identity.
     pub(super) state_storage_fields: HashMap<ValueId, ValueId>,
@@ -217,7 +215,6 @@ impl DeclarationEnvironment {
             layout_state_fields: HashMap::new(),
             conditional_state_fields: HashMap::new(),
             conditional_managed_fields: HashMap::new(),
-            managed_layout_values: HashMap::new(),
             state_storage_fields: HashMap::new(),
             settings: HashMap::new(),
             settings_by_runtime_key: HashMap::new(),

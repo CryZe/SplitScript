@@ -24,8 +24,8 @@ use crate::{
     CheckedProgram, Diagnostic, RecoveredCheck,
     ast::{
         EnumId, EnumVariantId, ExprKind, FunctionId, ManagedClassId, ManagedFieldId,
-        ManagedImageId, ManagedLayoutId, ManagedNamespaceId, MatchPattern, RecordFieldId, RecordId,
-        Span, Stmt, TypeRef as SyntaxTypeRef, ValueId,
+        ManagedImageId, ManagedNamespaceId, MatchPattern, RecordFieldId, RecordId, Span, Stmt,
+        TypeRef as SyntaxTypeRef, ValueId,
     },
     hir::ExpressionResolution,
     language::LanguageItemId,
@@ -58,7 +58,6 @@ pub enum SourceDefinitionId {
     ManagedImage(ManagedImageId),
     ManagedNamespace(ManagedNamespaceId),
     ManagedClass(ManagedClassId),
-    ManagedLayout(ManagedLayoutId),
     ManagedField(ManagedFieldId),
 }
 
@@ -91,7 +90,6 @@ pub struct DefinitionIndex {
     managed_images: HashMap<ManagedImageId, SourceDefinition>,
     managed_namespaces: HashMap<ManagedNamespaceId, SourceDefinition>,
     managed_classes: HashMap<ManagedClassId, SourceDefinition>,
-    managed_layouts: HashMap<ManagedLayoutId, SourceDefinition>,
     managed_fields: HashMap<ManagedFieldId, SourceDefinition>,
     syntax_references: Vec<SyntaxReference>,
 }
@@ -230,14 +228,6 @@ impl DefinitionIndex {
         defined.extend(
             collector
                 .index
-                .managed_layouts
-                .keys()
-                .copied()
-                .map(SourceDefinitionId::ManagedLayout),
-        );
-        defined.extend(
-            collector
-                .index
                 .managed_fields
                 .keys()
                 .copied()
@@ -268,7 +258,6 @@ impl DefinitionIndex {
             SourceDefinitionId::ManagedImage(id) => self.managed_images.get(&id),
             SourceDefinitionId::ManagedNamespace(id) => self.managed_namespaces.get(&id),
             SourceDefinitionId::ManagedClass(id) => self.managed_classes.get(&id),
-            SourceDefinitionId::ManagedLayout(id) => self.managed_layouts.get(&id),
             SourceDefinitionId::ManagedField(id) => self.managed_fields.get(&id),
         }
     }
@@ -534,16 +523,6 @@ fn source_definition_for_value_path(
             _ => None,
         };
     }
-    if let ResolvedValue::ManagedLayout {
-        class, enumeration, ..
-    } = root
-    {
-        return match segment {
-            0 => Some(SourceDefinitionId::ManagedClass(class)),
-            1 => Some(SourceDefinitionId::Enum(enumeration)),
-            _ => None,
-        };
-    }
     if matches!(root, ResolvedValue::StandardLibraryConstant(_)) {
         return None;
     }
@@ -570,7 +549,6 @@ fn source_definition_for_value_path(
         ResolvedValue::ProviderValue(_) => 0,
         ResolvedValue::Variable(_) => 0,
         ResolvedValue::ManagedStatic { .. } => unreachable!(),
-        ResolvedValue::ManagedLayout { .. } => unreachable!(),
         ResolvedValue::CurrentSnapshot
         | ResolvedValue::OldSnapshot
         | ResolvedValue::SettingsView
@@ -591,7 +569,6 @@ fn source_definition_for_value_path(
             ResolvedValue::ProviderValue(_)
             | ResolvedValue::StandardLibraryConstant(_)
             | ResolvedValue::ManagedStatic { .. }
-            | ResolvedValue::ManagedLayout { .. }
             | ResolvedValue::Variable(_)
             | ResolvedValue::CurrentSnapshot
             | ResolvedValue::OldSnapshot
@@ -628,20 +605,6 @@ fn definition_for_value_path(
         let definition = match segment {
             0 => SourceDefinitionId::ManagedClass(class),
             1 => SourceDefinitionId::ManagedField(field),
-            _ => return None,
-        };
-        return definitions
-            .get(definition)
-            .cloned()
-            .map(DefinitionTarget::Source);
-    }
-    if let ResolvedValue::ManagedLayout {
-        class, enumeration, ..
-    } = root
-    {
-        let definition = match segment {
-            0 => SourceDefinitionId::ManagedClass(class),
-            1 => SourceDefinitionId::Enum(enumeration),
             _ => return None,
         };
         return definitions
@@ -696,7 +659,6 @@ fn definition_for_value_path(
         ResolvedValue::ProviderValue(_) => 0,
         ResolvedValue::Variable(_) => 0,
         ResolvedValue::ManagedStatic { .. } => unreachable!(),
-        ResolvedValue::ManagedLayout { .. } => unreachable!(),
         ResolvedValue::CurrentSnapshot
         | ResolvedValue::OldSnapshot
         | ResolvedValue::SettingsView
@@ -717,7 +679,6 @@ fn definition_for_value_path(
             ResolvedValue::ProviderValue(_)
             | ResolvedValue::StandardLibraryConstant(_)
             | ResolvedValue::ManagedStatic { .. }
-            | ResolvedValue::ManagedLayout { .. }
             | ResolvedValue::Variable(_)
             | ResolvedValue::CurrentSnapshot
             | ResolvedValue::OldSnapshot
@@ -831,9 +792,6 @@ impl DefinitionCollector<'_> {
             }
             SourceDefinitionId::ManagedClass(id) => {
                 self.index.managed_classes.insert(id, definition);
-            }
-            SourceDefinitionId::ManagedLayout(id) => {
-                self.index.managed_layouts.insert(id, definition);
             }
             SourceDefinitionId::ManagedField(id) => {
                 self.index.managed_fields.insert(id, definition);
@@ -1121,44 +1079,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             name: class.name.clone(),
             span: class.name_span,
         });
-        if let Some(enumeration) = &class.layout_enum {
-            // The nested type and read-only selector are synthesized from the
-            // class layout declarations. Their logical definition is the
-            // class schema; individual variants point at their written layout
-            // names below.
-            self.insert_definition(SourceDefinition {
-                id: SourceDefinitionId::Enum(enumeration.id),
-                name: enumeration.name.clone(),
-                span: class.name_span,
-            });
-            if let Some(value) = class.layout_value {
-                self.index.values.insert(
-                    value,
-                    SourceDefinition {
-                        id: SourceDefinitionId::Value(value),
-                        name: "layout".to_owned(),
-                        span: class.name_span,
-                    },
-                );
-            }
-            for (layout, variant) in class.layouts.iter().zip(&enumeration.variants) {
-                self.insert_definition(SourceDefinition {
-                    id: SourceDefinitionId::EnumVariant(variant.id),
-                    name: variant.name.clone(),
-                    span: layout.name_span,
-                });
-            }
-        }
         visit::walk_managed_class(self, class);
-    }
-
-    fn visit_managed_layout(&mut self, layout: &'ast crate::ast::ManagedLayoutDecl) {
-        self.insert_definition(SourceDefinition {
-            id: SourceDefinitionId::ManagedLayout(layout.id),
-            name: layout.name.clone(),
-            span: layout.name_span,
-        });
-        visit::walk_managed_layout(self, layout);
     }
 
     fn visit_managed_field(&mut self, field: &'ast crate::ast::ManagedFieldDecl) {

@@ -623,39 +623,6 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
                 );
             }
         }
-
-        let mut layouts = HashSet::new();
-        for layout in &class.layouts {
-            if !layouts.insert(layout.name.clone()) {
-                checker.error(
-                    format!(
-                        "duplicate layout `{}` in class `{}`",
-                        layout.name, class.name
-                    ),
-                    layout.span,
-                );
-            }
-            let mut layout_fields = common_fields.clone();
-            let mut layout_metadata_names = common_metadata_names.clone();
-            for field in &layout.fields {
-                collect_managed_field(
-                    checker,
-                    class.name.as_str(),
-                    field,
-                    &mut layout_fields,
-                    &mut layout_metadata_names,
-                );
-            }
-        }
-
-        if let (Some(layout_enum), Some(layout_value)) = (&class.layout_enum, class.layout_value) {
-            let ty = checker.enum_type(EnumTypeId::Source(layout_enum.id));
-            checker.semantics.resolve_value_type(layout_value, ty);
-            checker
-                .declarations
-                .managed_layout_values
-                .insert(class.id, (layout_value, ty));
-        }
     }
 
     let mut enum_names = HashSet::new();

@@ -6,13 +6,12 @@ use super::{
     Action, ActionKind, AttachmentLayoutDecl, ConditionalFieldsDecl, Diagnostic, EnumDecl, EnumId,
     EnumReference, EnumVariant, FunctionDecl, FunctionId, ManagedClassDecl, ManagedClassId,
     ManagedFieldDecl, ManagedFieldId, ManagedImageDecl, ManagedImageId, ManagedItemDecl,
-    ManagedLayoutDecl, ManagedLayoutId, ManagedMetadataName, ManagedMetadataNames,
-    ManagedNamespaceDecl, ManagedNamespaceId, Parameter, Parser, PointerPath, PointerPathBase,
-    RecordDecl, RecordField, RecordId, SettingChoiceOption, SettingDecl, SettingExternalKey,
-    SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span,
-    StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
-    StateProviderSelectorRef, StateSource, StateTransform, TickRateDecl, TickRateValue, TokenKind,
-    TypeRef,
+    ManagedMetadataName, ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId, Parameter,
+    Parser, PointerPath, PointerPathBase, RecordDecl, RecordField, RecordId, SettingChoiceOption,
+    SettingDecl, SettingExternalKey, SettingFamilyDecl, SettingFileFilter, SettingKind,
+    SettingTextPart, SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl,
+    StateMemoryDecoder, StateProviderRef, StateProviderSelectorRef, StateSource, StateTransform,
+    TickRateDecl, TickRateValue, TokenKind, TypeRef,
 };
 use crate::{
     diagnostic::{DiagnosticFix, FixApplicability, TextEdit},
@@ -115,8 +114,6 @@ impl Parser<'_> {
         )?;
         let mut fields = Vec::new();
         let mut conditional_fields = Vec::new();
-        let mut layouts = Vec::new();
-        let mut layout_variants = Vec::new();
         let body_depth = self.brace_depth_before(self.cursor.position());
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
@@ -131,24 +128,18 @@ impl Parser<'_> {
                     conditional_fields.push(group);
                 }
             } else if self.at_ident("layout") {
-                let parsed = self.managed_layout_decl().map(|mut layout| {
-                    layout.documentation = documentation;
-                    let variant = EnumVariant {
-                        id: layout.variant,
-                        name: layout.name.clone(),
-                        name_span: layout.name_span,
-                        documentation: layout.documentation.clone(),
-                        payload: None,
-                        span: layout.name_span,
-                    };
-                    (layout, variant)
-                });
-                if let Some((layout, variant)) =
-                    self.recover_delimited_item(parsed, item_start, body_depth)
-                {
-                    layouts.push(layout);
-                    layout_variants.push(variant);
-                }
+                let diagnostic = Diagnostic::new(
+                    "managed classes use attachment-wide layout dimensions",
+                    self.current().span,
+                )
+                .with_primary_label(
+                    "declare the dimension in the state `layout { ... }` block and guard these fields with `if layout.<dimension> == ...`",
+                );
+                self.recover_delimited_item::<ManagedFieldDecl>(
+                    Err(diagnostic),
+                    item_start,
+                    body_depth,
+                );
             } else {
                 let parsed = self.managed_field_decl().map(|mut field| {
                     field.documentation = documentation;
@@ -162,25 +153,6 @@ impl Parser<'_> {
         let closing = self
             .eat(&TokenKind::RBrace)
             .unwrap_or_else(|| self.current().span);
-        let (layout_enum, layout_value) = if layouts.is_empty() {
-            (None, None)
-        } else {
-            let enum_id = EnumId::from_index(self.next_enum_id);
-            self.next_enum_id += 1;
-            (
-                Some(EnumDecl {
-                    id: enum_id,
-                    name: format!("{name}.Layout"),
-                    documentation: Some(format!(
-                        "The managed metadata layout selected for `{name}`."
-                    )),
-                    name_span,
-                    variants: layout_variants,
-                    span: start.join(closing),
-                }),
-                Some(self.new_value_id()),
-            )
-        };
         Ok(ManagedClassDecl {
             id,
             keyword_span: start,
@@ -191,9 +163,6 @@ impl Parser<'_> {
             opening_span,
             fields,
             conditional_fields,
-            layouts,
-            layout_enum,
-            layout_value,
             span: start.join(closing),
         })
     }
@@ -240,50 +209,6 @@ impl Parser<'_> {
             opening_span,
             fields,
             span: keyword_span.join(closing),
-        })
-    }
-
-    fn managed_layout_decl(&mut self) -> Result<ManagedLayoutDecl, Diagnostic> {
-        let start = self.expect_ident("layout")?;
-        let (name, name_span) = self.expect_any_ident("expected a managed class layout name")?;
-        let id = ManagedLayoutId::from_index(self.next_managed_layout_id);
-        self.next_managed_layout_id += 1;
-        let variant = self.new_enum_variant_id();
-        let opening_span = self.expect(TokenKind::LBrace, "expected `{` after the layout name")?;
-        let mut fields = Vec::new();
-        let body_depth = self.brace_depth_before(self.cursor.position());
-        while !self.at(&TokenKind::RBrace) {
-            if self.at(&TokenKind::Eof) {
-                self.record_missing_closing("unterminated managed class layout");
-                break;
-            }
-            let item_start = self.cursor.position();
-            let documentation = self.take_source_documentation();
-            let parsed = if self.at_ident("layout") {
-                Err(self.error("managed class layouts cannot contain nested layouts"))
-            } else {
-                self.managed_field_decl().map(|mut field| {
-                    field.documentation = documentation;
-                    field
-                })
-            };
-            if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
-                fields.push(field);
-            }
-        }
-        let closing = self
-            .eat(&TokenKind::RBrace)
-            .unwrap_or_else(|| self.current().span);
-        Ok(ManagedLayoutDecl {
-            id,
-            variant,
-            keyword_span: start,
-            name,
-            name_span,
-            documentation: None,
-            opening_span,
-            fields,
-            span: start.join(closing),
         })
     }
 

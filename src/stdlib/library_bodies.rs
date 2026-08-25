@@ -185,13 +185,6 @@ fn managed_preparation_source(program: &Program, preparation: &str, arguments: &
                 managed_static_table_name(class.class.id.index())
             ));
         }
-        if !class.class.layouts.is_empty() {
-            source.push_str(&format!(
-                "    {}: {}.Layout,\n",
-                managed_layout_index_name(class.class.id.index()),
-                class.class.name,
-            ));
-        }
         for field in class_fields(class.class) {
             source.push_str(&format!(
                 "    {}: u32,\n",
@@ -287,9 +280,6 @@ fn managed_backend_binding_source(
                 push_optional_managed_field_binding(&mut source, &class_local, field);
             }
         }
-        if !class.class.layouts.is_empty() {
-            push_managed_layout_binding(&mut source, &class_local, class.class);
-        }
     }
     source.push_str(&format!("            {MANAGED_BINDINGS_TYPE} {{\n"));
     source.push_str(&format!(
@@ -298,10 +288,6 @@ fn managed_backend_binding_source(
     for class in classes {
         if class_fields(class.class).any(|field| field.is_static) {
             let name = managed_static_table_name(class.class.id.index());
-            source.push_str(&format!("                {name}: {name},\n"));
-        }
-        if !class.class.layouts.is_empty() {
-            let name = managed_layout_index_name(class.class.id.index());
             source.push_str(&format!("                {name}: {name},\n"));
         }
         for field in class_fields(class.class) {
@@ -363,64 +349,6 @@ fn push_optional_managed_field_binding(
     ));
 }
 
-fn push_managed_layout_binding(source: &mut String, class_local: &str, class: &ManagedClassDecl) {
-    let selected = format!("__class_{}_selected_layout", class.id.index());
-    for layout in &class.layouts {
-        for field in &layout.fields {
-            let offset = managed_field_offset_name(field.id.index());
-            source.push_str(&format!("            let {offset}: u32 = 0\n"));
-        }
-    }
-    source.push_str(&format!(
-        "            let {selected}: {}.Layout? = None\n",
-        class.name
-    ));
-    for layout in &class.layouts {
-        let probes = layout
-            .fields
-            .iter()
-            .map(|field| {
-                let probe = format!("__field_{}_probe", field.id.index());
-                let candidates = managed_field_candidates(field);
-                source.push_str(&format!(
-                    "            let {probe} = await {class_local}.probeFieldAny([{candidates}])\n"
-                ));
-                probe
-            })
-            .collect::<Vec<_>>();
-        let condition = if probes.is_empty() {
-            "true".to_owned()
-        } else {
-            probes
-                .iter()
-                .map(|probe| format!("match {probe} {{ Some(_) => true, None => false }}"))
-                .collect::<Vec<_>>()
-                .join(" && ")
-        };
-        source.push_str(&format!("            if {condition} {{\n"));
-        source.push_str(&format!(
-            "                if match {selected} {{ Some(_) => true, None => false }} {{ await process.closed() }}\n"
-        ));
-        source.push_str(&format!(
-            "                {selected} = {}.Layout.{}\n",
-            class.name, layout.name
-        ));
-        for (field, probe) in layout.fields.iter().zip(probes) {
-            let value = format!("__field_{}_selected", field.id.index());
-            let offset = managed_field_offset_name(field.id.index());
-            source.push_str(&format!(
-                "                let {value} = {probe} else await process.closed()\n"
-            ));
-            source.push_str(&format!("                {offset} = {value}.offset\n"));
-        }
-        source.push_str("            }\n");
-    }
-    let layout = managed_layout_index_name(class.id.index());
-    source.push_str(&format!(
-        "            let {layout} = {selected} else await process.closed()\n"
-    ));
-}
-
 fn schema_classes(program: &Program) -> Vec<SchemaClass<'_>> {
     let mut classes = Vec::new();
     for image in &program.managed_images {
@@ -452,16 +380,12 @@ fn collect_schema_classes<'ast>(
 }
 
 fn class_fields(class: &ManagedClassDecl) -> impl Iterator<Item = &crate::ast::ManagedFieldDecl> {
-    class
-        .fields
-        .iter()
-        .chain(
-            class
-                .conditional_fields
-                .iter()
-                .flat_map(|group| &group.fields),
-        )
-        .chain(class.layouts.iter().flat_map(|layout| &layout.fields))
+    class.fields.iter().chain(
+        class
+            .conditional_fields
+            .iter()
+            .flat_map(|group| &group.fields),
+    )
 }
 
 pub(crate) fn managed_field_offset_name(field: usize) -> String {
@@ -474,10 +398,6 @@ pub(crate) fn managed_field_presence_name(field: usize) -> String {
 
 pub(crate) fn managed_static_table_name(class: usize) -> String {
     format!("__class_{class}_static_table")
-}
-
-pub(crate) fn managed_layout_index_name(class: usize) -> String {
-    format!("__class_{class}_layout")
 }
 
 fn selected_provider_preparation<'source>(

@@ -204,12 +204,6 @@ impl<'ast> Visitor<'ast> for SpanCollector {
         visit::walk_managed_class(self, class);
     }
 
-    fn visit_managed_layout(&mut self, layout: &'ast crate::ast::ManagedLayoutDecl) {
-        self.push(layout.span);
-        self.push(layout.name_span);
-        visit::walk_managed_layout(self, layout);
-    }
-
     fn visit_managed_field(&mut self, field: &'ast crate::ast::ManagedFieldDecl) {
         self.push(field.span);
         self.push(field.type_span);

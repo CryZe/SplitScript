@@ -8,7 +8,7 @@
 use crate::{
     ast::{
         ManagedBindingNameKind, ManagedClassDecl, ManagedClassId, ManagedFieldDecl, ManagedFieldId,
-        ManagedImageId, ManagedItemDecl, ManagedLayoutId, Program, Span,
+        ManagedImageId, ManagedItemDecl, Program, Span,
     },
     semantic::SemanticModel,
     types::TypeId,
@@ -34,23 +34,12 @@ pub(crate) struct ManagedClassBinding {
     pub metadata_names: Vec<ManagedMetadataCandidate>,
     pub fields: Vec<ManagedFieldBinding>,
     pub conditional_fields: Vec<ManagedConditionalBinding>,
-    pub layouts: Vec<ManagedLayoutBinding>,
 }
 
 /// Managed fields guarded by attachment-wide layout facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ManagedConditionalBinding {
     pub constraints: Vec<crate::semantic::ResolvedLayoutConstraint>,
-    pub fields: Vec<ManagedFieldBinding>,
-}
-
-/// One complete alternative metadata shape for a class.
-///
-/// `fields` contains only the layout-specific declarations. Binding checks the
-/// class's common `fields` together with these fields as one transaction.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ManagedLayoutBinding {
-    pub id: ManagedLayoutId,
     pub fields: Vec<ManagedFieldBinding>,
 }
 
@@ -179,18 +168,6 @@ fn class_binding(
                     .collect(),
             })
             .collect(),
-        layouts: class
-            .layouts
-            .iter()
-            .map(|layout| ManagedLayoutBinding {
-                id: layout.id,
-                fields: layout
-                    .fields
-                    .iter()
-                    .map(|field| field_binding(field, semantics))
-                    .collect(),
-            })
-            .collect(),
     }
 }
 
@@ -236,10 +213,12 @@ mod tests {
     use crate::{check, parse, types::TypeKind};
 
     #[test]
-    fn binding_plan_preserves_ownership_types_layouts_and_metadata_order() {
+    fn binding_plan_preserves_ownership_types_conditions_and_metadata_order() {
         let checked = check(
             parse(
                 r#"
+enum Edition { Demo }
+
 image "Assembly-CSharp" {
     namespace Game {
         namespace Core {
@@ -250,7 +229,7 @@ image "Assembly-CSharp" {
                 Player player;
                 i32 points from "<Points>k__BackingField";
 
-                layout Demo {
+                if layout.edition == Edition.Demo {
                     u16 scene;
                 }
             }
@@ -258,7 +237,8 @@ image "Assembly-CSharp" {
     }
 }
 
-state "game.exe" {}
+state "game.exe" { layout { edition: Edition } }
+onAttach { return Layout { edition: Edition.Demo } }
 "#,
             )
             .unwrap(),
@@ -316,7 +296,8 @@ state "game.exe" {}
             ["<Points>k__BackingField"]
         );
 
-        let layout = &manager.layouts[0];
-        assert_eq!(manager.fields.iter().chain(&layout.fields).count(), 4);
+        let conditional = &manager.conditional_fields[0];
+        assert_eq!(manager.fields.iter().chain(&conditional.fields).count(), 4);
+        assert_eq!(conditional.constraints.len(), 1);
     }
 }

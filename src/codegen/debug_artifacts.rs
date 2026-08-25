@@ -861,6 +861,7 @@ fn scalar_type_entry(
         | Type::StateSnapshot
         | Type::SettingsView
         | Type::Record(_)
+        | Type::ManagedClass(_)
         | Type::Enum(_)
         | Type::ArrayStorage(_)
         | Type::Array(_)

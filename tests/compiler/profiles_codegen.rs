@@ -146,6 +146,37 @@ fn compiler_profiles_flow_through_staged_and_one_shot_compilation() {
 }
 
 #[test]
+fn reachable_managed_snapshot_types_have_gc_layouts() {
+    let source = r#"
+        image "Assembly-CSharp" {
+            class Player {
+                f32 health;
+            }
+            class GameManager {
+                static GameManager instance;
+                Player player;
+                i32 points;
+            }
+        }
+
+        state "game.exe" {}
+
+        fn keep(manager: GameManager) -> GameManager {
+            return manager
+        }
+
+        setup {
+            let callback = keep
+        }
+    "#;
+
+    let wasm = splitscript::compile(source).expect("managed snapshot fixture should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("managed snapshot GC layouts should validate");
+}
+
+#[test]
 fn structural_display_helpers_are_materialized_only_when_reachable() {
     use splitscript::{BuildProfile, CompilerOptions};
 

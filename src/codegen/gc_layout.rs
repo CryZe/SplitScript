@@ -126,6 +126,15 @@ impl GcLayout {
             ordered.push(Type::Record(record.id));
             next += 1;
         }
+        for class in program
+            .managed_class_declarations()
+            .into_iter()
+            .filter(|class| reachability.contains_managed_class_type(class.id))
+        {
+            dynamic.insert(Type::ManagedClass(class.id), next);
+            ordered.push(Type::ManagedClass(class.id));
+            next += 1;
+        }
         for enumeration in enums
             .iter()
             .filter(|enumeration| reachability.contains_enum_type(enumeration.id))
@@ -521,6 +530,7 @@ impl GcLayout {
                 .expect("reachable async values have erased GC headers"),
             Type::Standard(standard) => self.standard_index(standard),
             Type::Record(_)
+            | Type::ManagedClass(_)
             | Type::Enum(_)
             | Type::ArrayStorage(_)
             | Type::Array(_)
@@ -577,6 +587,7 @@ impl GcLayout {
                 }
             }
             Type::Record(_)
+            | Type::ManagedClass(_)
             | Type::Enum(_)
             | Type::ArrayStorage(_)
             | Type::Array(_)

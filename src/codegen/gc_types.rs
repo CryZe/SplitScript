@@ -22,8 +22,8 @@ use crate::{
 use super::{
     GcLayout, Type, array_element_type,
     async_frame::{AsyncFrameLayout, AsyncFrameLayouts},
-    enum_variant_payload, option_value_type, reachability, record_field_type, result_value_type,
-    semantic_type, standard_field_type, value_type,
+    enum_variant_payload, managed_snapshot_field_type, option_value_type, reachability,
+    record_field_type, result_value_type, semantic_type, standard_field_type, value_type,
 };
 
 pub(super) struct EncodedTypes {
@@ -206,6 +206,27 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                             .map(|field| FieldType {
                                 element_type: layout
                                     .storage_type(record_field_type(field.id, semantics)),
+                                mutable: false,
+                            })
+                            .collect(),
+                    }),
+                    true,
+                    None,
+                )
+            }
+            Type::ManagedClass(id) => {
+                let class = program
+                    .managed_class(id)
+                    .expect("reachable managed class layouts have declarations");
+                (
+                    CompositeInnerType::Struct(StructType {
+                        fields: class
+                            .fields
+                            .iter()
+                            .filter(|field| !field.is_static)
+                            .map(|field| FieldType {
+                                element_type: layout
+                                    .storage_type(managed_snapshot_field_type(field.id, semantics)),
                                 mutable: false,
                             })
                             .collect(),

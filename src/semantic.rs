@@ -1047,6 +1047,19 @@ impl SemanticModel {
         self.managed_field_types.get(&field).copied()
     }
 
+    /// Returns the source value produced by reading a managed field.
+    ///
+    /// A class name in a managed schema describes the metadata field's class,
+    /// while its runtime value is a live managed reference. Primitive and
+    /// aggregate value fields retain their declared type.
+    pub fn managed_field_value_type(&self, field: ManagedFieldId) -> Option<TypeId> {
+        let declared = self.managed_field_type(field)?;
+        Some(match self.types.kind(declared) {
+            TypeKind::ManagedClass(class) => self.types.id_for_managed_reference(*class),
+            _ => declared,
+        })
+    }
+
     pub fn managed_field_types(&self) -> impl Iterator<Item = (ManagedFieldId, TypeId)> + '_ {
         self.managed_field_types
             .iter()

@@ -6,8 +6,8 @@
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, OptionTypeId, RangeTypeId, RecordId,
-        ResultTypeId, TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, ManagedClassId, OptionTypeId,
+        RangeTypeId, RecordId, ResultTypeId, TypeApplicationId,
     },
     stdlib::{
         CoreTypeId, DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibTypeId,
@@ -24,6 +24,8 @@ macro_rules! define_backend_type {
             StateSnapshot,
             SettingsView,
             Record(RecordId),
+            /// Immutable snapshot of the common fields declared by a managed class schema.
+            ManagedClass(ManagedClassId),
             Enum(EnumId),
             /// Compiler-internal raw Wasm GC array storage.
             ArrayStorage(ArrayTypeId),

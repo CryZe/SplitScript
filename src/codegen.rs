@@ -781,9 +781,7 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
         TypeKind::SettingsView => Type::SettingsView,
         TypeKind::Record(record) => Type::Record(*record),
         TypeKind::Enum(enumeration) => Type::Enum(*enumeration),
-        TypeKind::ManagedClass(_) => {
-            unreachable!("managed class schemas do not yet reach backend value lowering")
-        }
+        TypeKind::ManagedClass(class) => Type::ManagedClass(*class),
         TypeKind::ManagedReference(_) => Type::Address,
         TypeKind::GenericParameter { .. } => {
             unreachable!("generic template types must be substituted before code generation")
@@ -859,6 +857,18 @@ fn record_field_type(field: RecordFieldId, semantics: &SemanticModel) -> Type {
         semantics
             .record_field_type(field)
             .expect("checked record fields have semantic types"),
+        semantics,
+    )
+}
+
+fn managed_snapshot_field_type(
+    field: crate::ast::ManagedFieldId,
+    semantics: &SemanticModel,
+) -> Type {
+    semantic_type(
+        semantics
+            .managed_field_value_type(field)
+            .expect("checked managed fields have semantic value types"),
         semantics,
     )
 }

@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, ExprId, OptionTypeId, Program, RecordId,
-        ResultTypeId, TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, ExprId, ManagedClassId, OptionTypeId,
+        Program, RecordId, ResultTypeId, TypeApplicationId,
     },
     semantic::{ClosureInstance, FunctionInstance, FunctionValueInstance, SemanticModel},
     stdlib::{
@@ -27,6 +27,7 @@ pub(super) struct Reachability {
     equality_results: BTreeSet<ResultTypeId>,
     string_equality: bool,
     gc_records: BTreeSet<RecordId>,
+    gc_managed_classes: BTreeSet<ManagedClassId>,
     gc_enums: BTreeSet<EnumId>,
     gc_arrays: BTreeSet<ArrayTypeId>,
     gc_array_storage: BTreeSet<ArrayTypeId>,
@@ -647,6 +648,10 @@ impl Reachability {
         self.gc_records.contains(&record)
     }
 
+    pub fn contains_managed_class_type(&self, class: ManagedClassId) -> bool {
+        self.gc_managed_classes.contains(&class)
+    }
+
     pub fn contains_enum_type(&self, enumeration: EnumId) -> bool {
         self.gc_enums.contains(&enumeration)
     }
@@ -714,9 +719,25 @@ impl Reachability {
                     unreachable!("failed inference reached code-generation reachability")
                 }
                 TypeKind::Builtin(_)
-                | TypeKind::ManagedClass(_)
                 | TypeKind::ManagedReference(_)
                 | TypeKind::GenericParameter { .. } => {}
+                TypeKind::ManagedClass(class) => {
+                    self.gc_managed_classes.insert(*class);
+                    let declaration = program
+                        .managed_class(*class)
+                        .expect("semantic managed classes belong to source declarations");
+                    pending.extend(
+                        declaration
+                            .fields
+                            .iter()
+                            .filter(|field| !field.is_static)
+                            .map(|field| {
+                                semantics
+                                    .managed_field_value_type(field.id)
+                                    .expect("checked managed fields have semantic value types")
+                            }),
+                    );
+                }
                 TypeKind::StateSnapshot => {
                     pending.extend(
                         program

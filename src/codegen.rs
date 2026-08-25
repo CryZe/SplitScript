@@ -586,6 +586,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         gc: &gc,
         runtime_globals,
         semantics,
+        managed: &managed,
         globals: &global_indices,
         global_types: &global_types,
         attachment_globals: &attachment_globals,

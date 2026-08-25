@@ -1,6 +1,238 @@
 use wasmparser::{Validator, WasmFeatures};
 
 #[test]
+fn attachment_layout_dimensions_are_an_ordinary_typed_global_record() {
+    let source = r#"
+        enum Edition {
+            BaseGame,
+            DlcDemo,
+        }
+
+        enum Storefront {
+            Steam,
+            GOG,
+        }
+
+        state "game.exe" {
+            layout {
+                edition: Edition,
+                storefront: Storefront,
+            }
+
+            level: u32 at 0x100
+        }
+
+        onAttach {
+            return Layout {
+                edition: Edition.BaseGame,
+                storefront: Storefront.Steam,
+            }
+        }
+
+        split {
+            return layout.edition == Edition.BaseGame
+                && layout.storefront == Storefront.Steam
+                && old.level != current.level
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("provider-independent layout dimensions should compile as an ordinary record");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("layout records should lower to valid Wasm GC");
+}
+
+#[test]
+fn attachment_layout_dimensions_require_nonempty_source_enum_fields() {
+    let non_enum = r#"
+        state "game.exe" {
+            layout {
+                edition: u32,
+            }
+        }
+        onAttach { return Layout { edition: 1 } }
+    "#;
+    let diagnostics = splitscript::compile(non_enum).expect_err("integers are not dimensions");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message == "layout dimension `edition` must use a source enum type"
+    }));
+
+    let empty = r#"
+        state "game.exe" {
+            layout {}
+        }
+        onAttach { return Layout {} }
+    "#;
+    let diagnostics = splitscript::compile(empty).expect_err("empty layouts are meaningless");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message == "an attachment layout needs at least one dimension"
+    }));
+}
+
+#[test]
+fn attachment_layout_type_value_and_dimensions_have_source_identity() {
+    use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
+
+    let source = r#"
+        enum Edition { BaseGame }
+        state "game.exe" {
+            /// The distributed game edition.
+            layout {
+                /// Selects the game's content set.
+                edition: Edition,
+            }
+        }
+        onAttach { return Layout { edition: Edition.BaseGame } }
+        split { return layout.edition == Edition.BaseGame }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+
+    let type_use = source.find("Layout {").unwrap() + 1;
+    let DefinitionTarget::Source(layout_type) = database.definition_at(type_use).unwrap().unwrap()
+    else {
+        panic!("Layout should navigate to the attachment declaration");
+    };
+    assert!(matches!(layout_type.id, SourceDefinitionId::Record(_)));
+    assert_eq!(
+        &source[layout_type.span.start..layout_type.span.end],
+        "layout"
+    );
+
+    let value_use = source.find("layout.edition").unwrap() + 1;
+    let DefinitionTarget::Source(layout_value) =
+        database.definition_at(value_use).unwrap().unwrap()
+    else {
+        panic!("layout should navigate to the attachment declaration");
+    };
+    assert!(matches!(layout_value.id, SourceDefinitionId::Value(_)));
+    assert_eq!(
+        &source[layout_value.span.start..layout_value.span.end],
+        "layout"
+    );
+
+    let dimension_use = source.find("layout.edition").unwrap() + "layout.".len();
+    let DefinitionTarget::Source(dimension) =
+        database.definition_at(dimension_use).unwrap().unwrap()
+    else {
+        panic!("the dimension should navigate to its declaration");
+    };
+    assert!(matches!(dimension.id, SourceDefinitionId::RecordField(_)));
+    assert_eq!(&source[dimension.span.start..dimension.span.end], "edition");
+
+    let hover = database.hover(dimension_use).unwrap().unwrap();
+    assert!(hover.markdown.contains("Layout.edition: Edition"));
+    assert!(hover.markdown.contains("Selects the game's content set."));
+}
+
+#[test]
+fn conditional_state_fields_refine_multiple_attachment_dimensions() {
+    let source = r#"
+        enum Edition { BaseGame, DlcDemo }
+        enum Storefront { Steam, GOG }
+
+        state "game.exe" {
+            layout {
+                edition: Edition,
+                storefront: Storefront,
+            }
+            common: u8 at 0x100;
+            if layout.edition == Edition.BaseGame
+                && layout.storefront == Storefront.Steam
+            {
+                steamLevel: u16 at 0x200;
+            }
+        }
+
+        onAttach {
+            return Layout {
+                edition: Edition.BaseGame,
+                storefront: Storefront.Steam,
+            }
+        }
+
+        split {
+            if layout.edition == Edition.BaseGame
+                && layout.storefront == Storefront.Steam
+            {
+                return current.steamLevel != old.steamLevel
+            }
+            return current.common != old.common
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("layout predicates should refine and gate conditional state fields");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("conditional state polling should produce valid Wasm GC");
+
+    let unrefined = source.replace(
+        "return current.common != old.common",
+        "return current.steamLevel != old.steamLevel",
+    );
+    let diagnostics =
+        splitscript::compile(&unrefined).expect_err("conditional fields need refinement");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("state field `steamLevel` is conditional")
+    }));
+}
+
+#[test]
+fn managed_fields_share_the_attachment_layout_refinement_model() {
+    let source = r#"
+        enum Edition { BaseGame, Demo }
+
+        image "Assembly-CSharp" {
+            class GameManager {
+                static GameManager instance;
+                if layout.edition == Edition.BaseGame {
+                    u32 level;
+                }
+                if layout.edition == Edition.Demo {
+                    u32 scene;
+                }
+            }
+        }
+
+        state Unity ["game.exe"] {
+            layout { edition: Edition }
+        }
+
+        onAttach { return Layout { edition: Edition.BaseGame } }
+
+        whileAttached {
+            let manager = GameManager.instance else return
+            if layout.edition == Edition.BaseGame {
+                print(manager.level else 0)
+            }
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("managed fields should consume the global layout predicate");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("conditional managed bindings should produce valid Wasm GC");
+
+    let unrefined = source.replace(
+        "if layout.edition == Edition.BaseGame {\n                print(manager.level else 0)\n            }",
+        "print(manager.level else 0)",
+    );
+    let diagnostics =
+        splitscript::compile(&unrefined).expect_err("managed fields need layout refinement");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("unknown field or method `level`")
+                || diagnostic.message.contains("conditional")
+        }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn sonic_three_air_shaped_range_discovery_and_filtered_state_compile_cleanly() {
     let source = r#"
         let wramBase

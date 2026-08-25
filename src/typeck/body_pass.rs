@@ -20,9 +20,30 @@ use super::{
 pub(super) fn check(checker: &mut Checker, program: &Program) {
     check_global_initializers(checker, program);
     check_state_provider_configuration(checker, program);
+    check_layout_conditions(checker, program);
     check_function_bodies(checker, program);
     check_state_expressions(checker, program);
     check_action_bodies(checker, program);
+}
+
+fn check_layout_conditions(checker: &mut Checker, program: &Program) {
+    checker.scopes.clear();
+    let expected = checker.core_type(CoreTypeId::Bool);
+    for condition in program
+        .state
+        .iter()
+        .flat_map(|state| &state.conditional_fields)
+        .map(|group| &group.condition)
+        .chain(
+            program
+                .managed_class_declarations()
+                .into_iter()
+                .flat_map(|class| &class.conditional_fields)
+                .map(|group| &group.condition),
+        )
+    {
+        checker.expr(condition, Some(expected));
+    }
 }
 
 fn check_state_provider_configuration(checker: &mut Checker, program: &Program) {
@@ -722,7 +743,7 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
             && program
                 .state
                 .as_ref()
-                .is_some_and(|state| !state.layouts.is_empty())
+                .is_some_and(|state| state.layout.is_some() || !state.layouts.is_empty())
             && !block_is_terminal(checker, &action.body)
         {
             let mut diagnostic = Diagnostic::type_error(
@@ -759,7 +780,7 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
     if let Some(state) = program
         .state
         .as_ref()
-        .filter(|state| !state.layouts.is_empty())
+        .filter(|state| state.layout.is_some() || !state.layouts.is_empty())
         && !actions.contains(&ActionKind::OnAttach)
     {
         checker
@@ -769,6 +790,16 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
 }
 
 fn missing_layout_selector_diagnostic(state: &StateDecl) -> Diagnostic {
+    if state.layout.is_some() {
+        return Diagnostic::type_error(
+            "layout dimensions require an `onAttach` block that returns the selected `Layout`",
+            state.span,
+        )
+        .with_primary_label("these dimensions need an explicit attach-time value")
+        .with_note(
+            "construct `Layout { ... }` after identifying the attached build; automatic provider constraints will be able to supply dimensions in a later implementation slice",
+        );
+    }
     let diagnostic = Diagnostic::type_error(
         "named state layouts require an `onAttach` block that returns the selected layout",
         state.span,
@@ -879,14 +910,18 @@ fn action_return_type(checker: &Checker, program: &Program, action: ActionKind) 
         ActionKind::Setup | ActionKind::OnDetach | ActionKind::OnStateReady => {
             checker.core_type(CoreTypeId::None)
         }
-        ActionKind::OnAttach => program
-            .state
-            .as_ref()
-            .and_then(|state| state.layout_enum.as_ref())
-            .map_or_else(
-                || checker.core_type(CoreTypeId::None),
-                |enumeration| checker.enum_type(crate::types::EnumTypeId::Source(enumeration.id)),
-            ),
+        ActionKind::OnAttach => program.state.as_ref().map_or_else(
+            || checker.core_type(CoreTypeId::None),
+            |state| {
+                if let Some(layout) = &state.layout {
+                    checker.record_type(layout.record)
+                } else if let Some(enumeration) = &state.layout_enum {
+                    checker.enum_type(crate::types::EnumTypeId::Source(enumeration.id))
+                } else {
+                    checker.core_type(CoreTypeId::None)
+                }
+            },
+        ),
         ActionKind::WhileAttached
         | ActionKind::Start
         | ActionKind::Split

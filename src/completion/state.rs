@@ -13,7 +13,9 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Context {
     StateBody,
-    LayoutBody,
+    NamedLayoutBody,
+    AttachmentLayoutBody,
+    ConditionalStateBody,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +40,7 @@ pub(super) fn complete_state_dsl(
         .state
         .as_ref()
         .is_some_and(|state| state.provider.is_some());
-    let body_kind = if context == Context::LayoutBody {
+    let body_kind = if context != Context::StateBody {
         StateBodyKind::Fields
     } else {
         state_body_kind(&tokens, state_open, offset)
@@ -62,11 +64,15 @@ pub(super) fn complete_state_dsl(
             && significant[0].span == replacement
             && matches!(significant[0].kind, TokenKind::Ident(_))
     {
+        if context == Context::AttachmentLayoutBody {
+            add_dimension_completion(&mut builder);
+            return Some(builder.finish());
+        }
         if body_kind != StateBodyKind::Layouts {
             add_field_completions(&mut builder, provider_is_specialized);
         }
         if context == Context::StateBody && body_kind != StateBodyKind::Fields {
-            add_layout_completion(&mut builder);
+            add_layout_completion(&mut builder, body_kind == StateBodyKind::Unknown);
         }
         return Some(builder.finish());
     }
@@ -167,9 +173,9 @@ fn innermost_context(
                     .last()
                     .and_then(|(_, context)| *context)
                     .and_then(|context| {
-                        (context == Context::StateBody
-                            && is_layout_header(tokens, braces.last().unwrap().0, index))
-                        .then_some(Context::LayoutBody)
+                        (context == Context::StateBody).then(|| {
+                            declaration_group_kind(tokens, braces.last().unwrap().0, index)
+                        })?
                     });
                 braces.push((index, context));
             }
@@ -183,21 +189,34 @@ fn innermost_context(
     Some((open, context?))
 }
 
-fn is_layout_header(
+fn declaration_group_kind(
     tokens: &[&crate::lexer::Token],
     parent_open: usize,
     child_open: usize,
-) -> bool {
+) -> Option<Context> {
     let segment = current_segment(
         tokens,
         parent_open,
         tokens[child_open].span.start,
         TokenKind::Comma,
     );
-    let mut significant = segment
+    let significant = segment
         .into_iter()
-        .filter(|token| !matches!(token.kind, TokenKind::DocComment(_)));
-    matches!(significant.next().map(|token| &token.kind), Some(TokenKind::Ident(name)) if name == "layout")
+        .filter(|token| !matches!(token.kind, TokenKind::DocComment(_)))
+        .collect::<Vec<_>>();
+    if matches!(significant.first().map(|token| &token.kind), Some(TokenKind::Ident(name)) if name == "if")
+    {
+        return Some(Context::ConditionalStateBody);
+    }
+    if !matches!(significant.first().map(|token| &token.kind), Some(TokenKind::Ident(name)) if name == "layout")
+    {
+        return None;
+    }
+    Some(if significant.len() == 1 {
+        Context::AttachmentLayoutBody
+    } else {
+        Context::NamedLayoutBody
+    })
 }
 
 fn state_body_kind(
@@ -224,7 +243,16 @@ fn state_body_kind(
                 if brace_depth == 0 && bracket_depth == 0 && paren_depth == 0 =>
             {
                 return if name == "layout" {
-                    StateBodyKind::Layouts
+                    let structured = tokens
+                        .iter()
+                        .skip_while(|candidate| candidate.span.end <= token.span.end)
+                        .find(|candidate| !matches!(candidate.kind, TokenKind::DocComment(_)))
+                        .is_some_and(|candidate| matches!(candidate.kind, TokenKind::LBrace));
+                    if structured {
+                        StateBodyKind::Fields
+                    } else {
+                        StateBodyKind::Layouts
+                    }
                 } else {
                     StateBodyKind::Fields
                 };
@@ -320,13 +348,32 @@ fn add_field_completions(builder: &mut CompletionBuilder, provider_is_specialize
     );
 }
 
-fn add_layout_completion(builder: &mut CompletionBuilder) {
+fn add_layout_completion(builder: &mut CompletionBuilder, allow_dimensions: bool) {
+    if allow_dimensions {
+        add_snippet(
+            builder,
+            "layout dimensions",
+            "attachment-wide layout dimensions",
+            "layout {\n\t${1:dimension}: ${2:Enum},\n}",
+            "Declares independent enum-valued facts that describe the selected attachment layout.",
+        );
+    }
     add_snippet(
         builder,
         "named layout",
         "version-specific state layout",
         "layout ${1:Name} {\n\t$0\n},",
         "Adds one named memory layout. An `onAttach` block selects its generated `StateLayout` variant.",
+    );
+}
+
+fn add_dimension_completion(builder: &mut CompletionBuilder) {
+    add_snippet(
+        builder,
+        "layout dimension",
+        "enum-valued layout dimension",
+        "${1:name}: ${2:Enum},",
+        "Adds one independent enum-valued fact to the attachment-wide `Layout` record.",
     );
 }
 

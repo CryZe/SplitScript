@@ -198,6 +198,17 @@ fn managed_preparation_source(program: &Program, preparation: &str, arguments: &
                 managed_field_offset_name(field.id.index())
             ));
         }
+        for field in class
+            .class
+            .conditional_fields
+            .iter()
+            .flat_map(|group| &group.fields)
+        {
+            source.push_str(&format!(
+                "    {}: bool,\n",
+                managed_field_presence_name(field.id.index())
+            ));
+        }
     }
     source.push_str("}\n");
     source.push_str(&format!(
@@ -271,6 +282,11 @@ fn managed_backend_binding_source(
         for field in &class.class.fields {
             push_required_managed_field_binding(&mut source, &class_local, field);
         }
+        for group in &class.class.conditional_fields {
+            for field in &group.fields {
+                push_optional_managed_field_binding(&mut source, &class_local, field);
+            }
+        }
         if !class.class.layouts.is_empty() {
             push_managed_layout_binding(&mut source, &class_local, class.class);
         }
@@ -290,6 +306,15 @@ fn managed_backend_binding_source(
         }
         for field in class_fields(class.class) {
             let name = managed_field_offset_name(field.id.index());
+            source.push_str(&format!("                {name}: {name},\n"));
+        }
+        for field in class
+            .class
+            .conditional_fields
+            .iter()
+            .flat_map(|group| &group.fields)
+        {
+            let name = managed_field_presence_name(field.id.index());
             source.push_str(&format!("                {name}: {name},\n"));
         }
     }
@@ -315,6 +340,26 @@ fn push_required_managed_field_binding(
     let offset = managed_field_offset_name(field.id.index());
     source.push_str(&format!(
         "            let {offset} = (await {class_local}.fieldAny([{candidates}])).offset\n"
+    ));
+}
+
+fn push_optional_managed_field_binding(
+    source: &mut String,
+    class_local: &str,
+    field: &crate::ast::ManagedFieldDecl,
+) {
+    let candidates = managed_field_candidates(field);
+    let offset = managed_field_offset_name(field.id.index());
+    let probe = format!("__field_{}_conditional_probe", field.id.index());
+    source.push_str(&format!(
+        "            let {probe} = await {class_local}.probeFieldAny([{candidates}])\n"
+    ));
+    source.push_str(&format!(
+        "            let {offset}: u32 = match {probe} {{ Some(field) => field.offset, None => 0 }}\n"
+    ));
+    let present = managed_field_presence_name(field.id.index());
+    source.push_str(&format!(
+        "            let {present} = match {probe} {{ Some(_) => true, None => false }}\n"
     ));
 }
 
@@ -410,11 +455,21 @@ fn class_fields(class: &ManagedClassDecl) -> impl Iterator<Item = &crate::ast::M
     class
         .fields
         .iter()
+        .chain(
+            class
+                .conditional_fields
+                .iter()
+                .flat_map(|group| &group.fields),
+        )
         .chain(class.layouts.iter().flat_map(|layout| &layout.fields))
 }
 
 pub(crate) fn managed_field_offset_name(field: usize) -> String {
     format!("__field_{field}_offset")
+}
+
+pub(crate) fn managed_field_presence_name(field: usize) -> String {
+    format!("__field_{field}_present")
 }
 
 pub(crate) fn managed_static_table_name(class: usize) -> String {

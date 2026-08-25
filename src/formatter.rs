@@ -103,7 +103,17 @@ impl<'ast> Visitor<'ast> for HeaderCollector {
 
     fn visit_managed_class(&mut self, class: &'ast ManagedClassDecl) {
         self.push(class.span.start, class.opening_span.start);
+        for group in &class.conditional_fields {
+            self.push(group.span.start, group.opening_span.start);
+        }
         visit::walk_managed_class(self, class);
+    }
+
+    fn visit_state(&mut self, state: &'ast StateDecl) {
+        for group in &state.conditional_fields {
+            self.push(group.span.start, group.opening_span.start);
+        }
+        visit::walk_state(self, state);
     }
 
     fn visit_managed_layout(&mut self, layout: &'ast ManagedLayoutDecl) {
@@ -311,8 +321,15 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
                 .fields
                 .iter()
                 .map(|field| field.span.end)
+                .chain(class.conditional_fields.iter().map(|group| group.span.end))
                 .chain(class.layouts.iter().map(|layout| layout.span.end)),
         );
+        for group in &class.conditional_fields {
+            self.mark_declaration_items_vertical(
+                group.span,
+                group.fields.iter().map(|field| field.span.end),
+            );
+        }
         visit::walk_managed_class(self, class);
     }
 
@@ -325,6 +342,9 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
     }
 
     fn visit_state(&mut self, state: &'ast StateDecl) {
+        if let Some(layout) = &state.layout {
+            self.break_after.insert(layout.span.end);
+        }
         for layout in &state.layouts {
             self.mark_separator_after(layout.span.end);
             for field in &layout.fields {
@@ -333,6 +353,13 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
         }
         for field in &state.fields {
             self.visit_state_field(field);
+        }
+        for group in &state.conditional_fields {
+            self.break_after.insert(group.span.end);
+            self.continuation_before_block(group.span.start, group.opening_span.start);
+            for field in &group.fields {
+                self.visit_state_field(field);
+            }
         }
         self.break_after.insert(state.span.end);
     }
@@ -1303,7 +1330,13 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
     }
 
     fn visit_state(&mut self, state: &'ast StateDecl) {
-        if !state.fields.is_empty() {
+        let last_field = state.fields.iter().map(|field| field.span.end).max();
+        let last_group = state
+            .conditional_fields
+            .iter()
+            .map(|group| group.span.end)
+            .max();
+        if last_field.is_some_and(|field| last_group.is_none_or(|group| field > group)) {
             self.mark_semicolon(state.span);
         } else if !state.layouts.is_empty() {
             self.mark_comma(state.span);
@@ -1318,6 +1351,15 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
         }
         for field in &state.fields {
             self.visit_state_field(field);
+        }
+        for group in &state.conditional_fields {
+            if !group.fields.is_empty() {
+                self.mark_semicolon(group.span);
+            }
+            self.visit_expr(&group.condition);
+            for field in &group.fields {
+                self.visit_state_field(field);
+            }
         }
     }
 
@@ -2510,6 +2552,72 @@ tickRate {
 }
 onAttach {
     return StateLayout.Steam
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn formats_attachment_layout_dimensions_as_a_nested_record_shape() {
+        let source = r#"enum Edition{Base,Demo}
+enum Storefront{Steam,GOG}
+state "game.exe"{layout{edition:Edition,storefront:Storefront}level:u32 at 0x100}
+onAttach{return Layout{
+edition:Edition.Base,
+storefront:Storefront.Steam
+}}"#;
+        let expected = r#"enum Edition {
+    Base,
+    Demo,
+}
+enum Storefront {
+    Steam,
+    GOG,
+}
+state "game.exe" {
+    layout {
+        edition: Edition,
+        storefront: Storefront,
+    }
+    level: u32 at 0x100;
+}
+onAttach {
+    return Layout {
+        edition: Edition.Base,
+        storefront: Storefront.Steam,
+    }
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn formats_shared_layout_conditions_in_state_and_managed_schemas() {
+        let source = r#"enum Edition{Base,Demo}
+image "Assembly-CSharp"{class GameManager{if layout.edition==Edition.Base{static u32 level;}}}
+state Unity ["game.exe"]{layout{edition:Edition}if layout.edition==Edition.Demo{scene:u8 at 0x100;}}"#;
+        let expected = r#"enum Edition {
+    Base,
+    Demo,
+}
+image "Assembly-CSharp" {
+    class GameManager {
+        if layout.edition == Edition.Base {
+            static u32 level;
+        }
+    }
+}
+state Unity ["game.exe"] {
+    layout {
+        edition: Edition,
+    }
+    if layout.edition == Edition.Demo {
+        scene: u8 at 0x100;
+    }
 }
 "#;
         let formatted = format_source(source).unwrap();

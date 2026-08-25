@@ -10,6 +10,7 @@ mod driver;
 mod expressions;
 mod finalization;
 mod function_graph;
+mod layout_refinement;
 mod statements;
 
 use context::{
@@ -160,6 +161,7 @@ struct Checker {
     layout_value: Option<ValueId>,
     active_state_layout: Option<crate::ast::EnumVariantId>,
     active_managed_layouts: HashMap<crate::ast::ManagedClassId, crate::ast::EnumVariantId>,
+    active_layout_constraints: HashMap<crate::ast::RecordFieldId, crate::ast::EnumVariantId>,
     scopes: Vec<HashMap<String, Binding>>,
     return_ty: Type,
     callable: CallableContext,

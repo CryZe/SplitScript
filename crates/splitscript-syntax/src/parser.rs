@@ -10,21 +10,21 @@ use crate::{
     Token, TokenCursor, TokenKind,
     ast::{
         Action, ActionKind, ArrayTypeDecl, ArrayTypeId, AssignmentId, AsyncTypeDecl, AsyncTypeId,
-        BinaryOp, Block, CallableTypeDecl, CallableTypeId, ConstructedTypeIdAllocator, EnumDecl,
-        EnumId, EnumReference, EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, ForBinding,
-        FunctionDecl, FunctionId, InterpolatedPart, ManagedClassDecl, ManagedClassId,
-        ManagedFieldDecl, ManagedFieldId, ManagedImageDecl, ManagedImageId, ManagedItemDecl,
-        ManagedLayoutDecl, ManagedLayoutId, ManagedMetadataName, ManagedMetadataNames,
-        ManagedNamespaceDecl, ManagedNamespaceId, ManagedReferenceTypeDecl, ManagedReferenceTypeId,
-        MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter, PatternBinding, PatternId,
-        PointerPath, PointerPathBase, Program, RangeKind, RangeTypeDecl, RangeTypeId, RecordDecl,
-        RecordField, RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
-        SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFamilyDecl,
-        SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span, StateDecl,
-        StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
-        StateProviderSelectorRef, StateSource, StateTransform, Stmt, SuspensionMode, TickRateDecl,
-        TickRateValue, TypeApplicationDecl, TypeApplicationId, TypeApplicationOccurrence,
-        TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
+        AttachmentLayoutDecl, BinaryOp, Block, CallableTypeDecl, CallableTypeId,
+        ConditionalFieldsDecl, ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference,
+        EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, ForBinding, FunctionDecl, FunctionId,
+        InterpolatedPart, ManagedClassDecl, ManagedClassId, ManagedFieldDecl, ManagedFieldId,
+        ManagedImageDecl, ManagedImageId, ManagedItemDecl, ManagedLayoutDecl, ManagedLayoutId,
+        ManagedMetadataName, ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId,
+        ManagedReferenceTypeDecl, ManagedReferenceTypeId, MatchArm, MatchPattern, OptionTypeDecl,
+        OptionTypeId, Parameter, PatternBinding, PatternId, PointerPath, PointerPathBase, Program,
+        RangeKind, RangeTypeDecl, RangeTypeId, RecordDecl, RecordField, RecordFieldId, RecordId,
+        ResultTypeDecl, ResultTypeId, SettingChoiceOption, SettingChoiceOptionId, SettingDecl,
+        SettingExternalKey, SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart,
+        SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder,
+        StateProviderRef, StateProviderSelectorRef, StateSource, StateTransform, Stmt,
+        SuspensionMode, TickRateDecl, TickRateValue, TypeApplicationDecl, TypeApplicationId,
+        TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     diagnostic::{Diagnostic, DiagnosticFix, FixApplicability, TextEdit},
     migration::{ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
@@ -108,6 +108,7 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         next_managed_field_id: 0,
         next_pattern_id: 0,
         next_setting_choice_option_id: 0,
+        generated_records: Vec::new(),
         diagnostics: Vec::new(),
         recovery_nodes: Vec::new(),
     }
@@ -153,6 +154,10 @@ struct Parser<'a> {
     next_managed_field_id: u32,
     next_pattern_id: u32,
     next_setting_choice_option_id: u32,
+    /// Domain declarations lower generated nominal records through the same
+    /// ordinary record pipeline. They are merged by stable ID before parsing
+    /// completes so downstream consumers never need a parallel type registry.
+    generated_records: Vec<RecordDecl>,
     diagnostics: Vec<Diagnostic>,
     recovery_nodes: Vec<RecoveryNode>,
 }
@@ -417,6 +422,8 @@ impl Parser<'_> {
         program.type_names = self.type_names;
         program.type_name_spans = self.type_name_spans;
         program.type_name_occurrences = self.type_name_occurrences;
+        program.records.append(&mut self.generated_records);
+        program.records.sort_by_key(|record| record.id.index());
         ParseOutput {
             program,
             diagnostics: self.diagnostics,
@@ -866,6 +873,76 @@ mod tests {
             Some("Steam build.")
         );
         assert_eq!(program.actions[0].kind, ActionKind::OnAttach);
+    }
+
+    #[test]
+    fn parses_provider_independent_attachment_layout_dimensions() {
+        let source = r#"
+            enum Edition { BaseGame, DlcDemo }
+            enum Storefront { Steam, GOG }
+
+            state Unity ["game.exe", "game-demo.exe"] {
+                /// Facts describing the selected attached build.
+                layout {
+                    /// Product edition.
+                    edition: Edition,
+                    /// Distribution channel.
+                    storefront: Storefront,
+                }
+
+                frameCount: u32 = 0
+            }
+
+            onAttach {
+                return Layout {
+                    edition: Edition.BaseGame,
+                    storefront: Storefront.Steam,
+                }
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let state = program.state.as_ref().unwrap();
+        let layout = state.layout.as_ref().expect("attachment layout");
+        let record = &program.records[layout.record.index()];
+        assert_eq!(record.name, "Layout");
+        assert_eq!(record.fields.len(), 2);
+        assert_eq!(record.fields[0].name, "edition");
+        assert_eq!(
+            record.fields[0].documentation.as_deref(),
+            Some("Product edition.")
+        );
+        assert_eq!(record.fields[1].name, "storefront");
+        assert_eq!(state.fields[0].name, "frameCount");
+        assert!(state.layout_enum.is_none());
+        assert!(state.layout_value.is_some());
+    }
+
+    #[test]
+    fn parses_conditional_state_and_managed_fields_against_shared_dimensions() {
+        let source = r#"
+            enum Edition { BaseGame, Demo }
+            image "Assembly-CSharp" {
+                class GameManager {
+                    if layout.edition == Edition.BaseGame {
+                        static u32 level;
+                    }
+                }
+            }
+            state Unity ["game.exe"] {
+                layout { edition: Edition }
+                if layout.edition == Edition.Demo {
+                    scene: u8 at 0x100;
+                }
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let class = program.managed_class_declarations()[0];
+        assert_eq!(class.conditional_fields.len(), 1);
+        assert_eq!(class.conditional_fields[0].fields[0].name, "level");
+        assert!(class.conditional_fields[0].fields[0].is_static);
+        let state = program.state.as_ref().unwrap();
+        assert_eq!(state.conditional_fields.len(), 1);
+        assert_eq!(state.conditional_fields[0].fields[0].name, "scene");
     }
 
     #[test]

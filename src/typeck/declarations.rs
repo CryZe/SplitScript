@@ -7,9 +7,19 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{EnumDecl, EnumVariantId, FunctionId, RecordDecl, Span, ValueId},
+    ast::{
+        EnumDecl, EnumVariantId, FunctionId, ManagedFieldId, RecordDecl, RecordFieldId, Span,
+        ValueId,
+    },
     inference::Type,
 };
+
+/// One fact established about the attachment-wide `layout` value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct LayoutConstraint {
+    pub(super) dimension: RecordFieldId,
+    pub(super) variant: EnumVariantId,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum RuntimeSettingKind {
@@ -168,6 +178,11 @@ pub(super) struct DeclarationEnvironment {
     pub(super) state_field_spans: HashMap<ValueId, crate::ast::Span>,
     /// Concrete fields available after refining `layout` to a variant.
     pub(super) layout_state_fields: HashMap<EnumVariantId, HashMap<String, (ValueId, Type)>>,
+    /// State declarations guarded by attachment-wide layout facts.
+    pub(super) conditional_state_fields:
+        HashMap<String, Vec<(ValueId, Type, Vec<LayoutConstraint>)>>,
+    /// Canonical layout facts guarding each conditionally bound managed field.
+    pub(super) conditional_managed_fields: HashMap<ManagedFieldId, Vec<LayoutConstraint>>,
     /// Read-only attachment values exposed as `<Class>.layout`.
     pub(super) managed_layout_values: HashMap<crate::ast::ManagedClassId, (ValueId, Type)>,
     /// Concrete declarations mapped to their physical snapshot field. Common
@@ -200,6 +215,8 @@ impl DeclarationEnvironment {
             state_fields_by_id: HashMap::new(),
             state_field_spans: HashMap::new(),
             layout_state_fields: HashMap::new(),
+            conditional_state_fields: HashMap::new(),
+            conditional_managed_fields: HashMap::new(),
             managed_layout_values: HashMap::new(),
             state_storage_fields: HashMap::new(),
             settings: HashMap::new(),

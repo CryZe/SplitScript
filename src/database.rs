@@ -940,14 +940,25 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                 self.definition(SourceDefinitionId::State, "state", state.span)
         {
             if let Some(value) = state.layout_value {
+                let span = state
+                    .layout
+                    .as_ref()
+                    .map_or(definition.span, |layout| layout.keyword_span);
                 self.index.values.insert(
                     value,
                     SourceDefinition {
                         id: SourceDefinitionId::Value(value),
                         name: "layout".to_owned(),
-                        span: definition.span,
+                        span,
                     },
                 );
+            }
+            if let Some(layout) = &state.layout {
+                self.insert_definition(SourceDefinition {
+                    id: SourceDefinitionId::Record(layout.record),
+                    name: "Layout".to_owned(),
+                    span: layout.keyword_span,
+                });
             }
             if let Some(enumeration) = &state.layout_enum {
                 self.index.enums.insert(
@@ -1035,12 +1046,20 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
     }
 
     fn visit_record(&mut self, record: &'ast crate::ast::RecordDecl) {
-        if let Some(definition) = self.definition(
-            SourceDefinitionId::Record(record.id),
-            &record.name,
-            record.span,
-        ) {
-            self.insert_definition(definition);
+        let is_attachment_layout = self
+            .syntax
+            .state
+            .as_ref()
+            .and_then(|state| state.layout.as_ref())
+            .is_some_and(|layout| layout.record == record.id);
+        if !is_attachment_layout {
+            if let Some(definition) = self.definition(
+                SourceDefinitionId::Record(record.id),
+                &record.name,
+                record.span,
+            ) {
+                self.insert_definition(definition);
+            }
         }
         for field in &record.fields {
             if let Some(definition) = self.definition(

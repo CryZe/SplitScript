@@ -33,7 +33,15 @@ pub(crate) struct ManagedClassBinding {
     pub namespace: Vec<String>,
     pub metadata_names: Vec<ManagedMetadataCandidate>,
     pub fields: Vec<ManagedFieldBinding>,
+    pub conditional_fields: Vec<ManagedConditionalBinding>,
     pub layouts: Vec<ManagedLayoutBinding>,
+}
+
+/// Managed fields guarded by attachment-wide layout facts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManagedConditionalBinding {
+    pub constraints: Vec<crate::semantic::ResolvedLayoutConstraint>,
+    pub fields: Vec<ManagedFieldBinding>,
 }
 
 /// One complete alternative metadata shape for a class.
@@ -150,6 +158,26 @@ fn class_binding(
             .fields
             .iter()
             .map(|field| field_binding(field, semantics))
+            .collect(),
+        conditional_fields: class
+            .conditional_fields
+            .iter()
+            .map(|group| ManagedConditionalBinding {
+                constraints: group
+                    .fields
+                    .first()
+                    .map(|field| {
+                        semantics
+                            .managed_field_layout_constraints(field.id)
+                            .to_vec()
+                    })
+                    .unwrap_or_default(),
+                fields: group
+                    .fields
+                    .iter()
+                    .map(|field| field_binding(field, semantics))
+                    .collect(),
+            })
             .collect(),
         layouts: class
             .layouts

@@ -94,23 +94,52 @@ to inference or code generation.
     report zero or multiple runtime matches against the responsible source
     aliases. A missing candidate must be distinguishable from a transient
     process-memory failure so layout discovery cannot retry forever.
-- [ ] Implement class `layout` variants for alternative field schemas. Select a
-  layout only when its complete required metadata shape binds, expose common
-  compatible members without refinement, and require matching the generated
-  layout enum for layout-specific members. Diagnose zero and multiple matches
-  with labels on the responsible declarations.
+- [ ] Replace independent state and managed-class layouts with one
+  attachment-wide `layout: Layout` record composed from explicitly declared,
+  enum-valued dimensions such as edition, storefront, renderer, or build.
+  Matching one dimension refines every state field, managed field, snapshot,
+  and attachment-scoped global conditioned on that value without requiring a
+  cartesian product of public layout variants. Keep ordinary metadata aliases
+  and equivalent class-binding alternatives private: a class must never expose
+  a second public `.layout` selector merely because the same logical schema has
+  multiple metadata spellings.
+  - [x] Add dimension declarations to the state DSL and represent the generated
+    `Layout` record and read-only `layout` value through ordinary record/value
+    identities. Require finite enum-valued dimensions initially, preserve their
+    documentation, and integrate formatting, recovery, navigation, completion,
+    hover, semantic highlighting, reference docs, and unused analysis.
+  - [x] Allow state and managed-class fields to be conditioned by ordinary,
+    statically decidable predicates over global layout dimensions. Type-check
+    those predicates once, reject runtime-dependent conditions, and use the
+    same predicate representation for member availability, control-flow
+    refinement, binding, diagnostics, and code generation.
+  - [ ] Make managed schema probes contribute constraints to the global layout
+    dimensions. Probe results now preserve both offsets and presence, and an
+    explicit `onAttach` selection is validated once before polling; a
+    contradiction rejects that process for the remainder of its lifetime.
+    Next, select automatically when the complete program leaves one assignment
+    and diagnose zero or ambiguous assignments with labels on the declarations
+    that supplied the constraints. Do not eagerly enumerate an unbounded
+    cartesian product of dimensions.
+  - [ ] Remove generated `<Class>.Layout` enums, `<Class>.layout` values, and
+    per-class public refinement. If a genuinely observable class-only schema
+    distinction is needed, declare it as another global dimension; if the
+    distinction preserves the public API, keep it as a private binding
+    alternative.
   - [x] Give both backends one internal three-state field probe that separates
     transient read failure, completed absence, and a found offset. Generated
-    attachment binding probes every complete layout, selects exactly one, and
-    caches only the selected layout's offsets without adding a public lookup
-    API or duplicating the metadata scanner.
+    attachment binding probes complete alternatives without adding a public
+    lookup API or duplicating the metadata scanner. Reuse this mechanism as
+    the low-level evidence source for global layout constraints.
   - [x] Expose the selected layout as the nested `T.Layout` enum and read-only
     attachment value `T.layout`. Matching the value refines both live
     references and static access to exactly that layout's fields; common fields
     remain available without refinement. The attachment cache stores the enum
     value once rather than reconstructing it during every access, and the
     compiler, Wasm backend, completion, navigation, hover, and semantic
-    highlighting share its generated semantic identities.
+    highlighting share its generated semantic identities. This is an
+    intentionally temporary implementation to remove while migrating those
+    consumers to global dimensions.
   - [ ] Replace the temporary inert zero/multiple-match behavior with a focused
     attachment diagnostic carrying labels for the responsible layouts.
 

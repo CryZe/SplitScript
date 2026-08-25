@@ -2375,6 +2375,12 @@ fn managed_field_binding<'context>(
             class
                 .fields
                 .iter()
+                .chain(
+                    class
+                        .conditional_fields
+                        .iter()
+                        .flat_map(|group| &group.fields),
+                )
                 .chain(class.layouts.iter().flat_map(|layout| &layout.fields))
         })
         .find(|candidate| candidate.id == field)

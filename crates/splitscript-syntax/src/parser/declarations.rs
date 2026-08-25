@@ -3,15 +3,16 @@
 //! Declaration grammar.
 
 use super::{
-    Action, ActionKind, Diagnostic, EnumDecl, EnumId, EnumReference, EnumVariant, FunctionDecl,
-    FunctionId, ManagedClassDecl, ManagedClassId, ManagedFieldDecl, ManagedFieldId,
-    ManagedImageDecl, ManagedImageId, ManagedItemDecl, ManagedLayoutDecl, ManagedLayoutId,
-    ManagedMetadataName, ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId, Parameter,
-    Parser, PointerPath, PointerPathBase, RecordDecl, RecordField, RecordId, SettingChoiceOption,
-    SettingDecl, SettingExternalKey, SettingFamilyDecl, SettingFileFilter, SettingKind,
-    SettingTextPart, SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl,
-    StateMemoryDecoder, StateProviderRef, StateProviderSelectorRef, StateSource, StateTransform,
-    TickRateDecl, TickRateValue, TokenKind, TypeRef,
+    Action, ActionKind, AttachmentLayoutDecl, ConditionalFieldsDecl, Diagnostic, EnumDecl, EnumId,
+    EnumReference, EnumVariant, FunctionDecl, FunctionId, ManagedClassDecl, ManagedClassId,
+    ManagedFieldDecl, ManagedFieldId, ManagedImageDecl, ManagedImageId, ManagedItemDecl,
+    ManagedLayoutDecl, ManagedLayoutId, ManagedMetadataName, ManagedMetadataNames,
+    ManagedNamespaceDecl, ManagedNamespaceId, Parameter, Parser, PointerPath, PointerPathBase,
+    RecordDecl, RecordField, RecordId, SettingChoiceOption, SettingDecl, SettingExternalKey,
+    SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span,
+    StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
+    StateProviderSelectorRef, StateSource, StateTransform, TickRateDecl, TickRateValue, TokenKind,
+    TypeRef,
 };
 use crate::{
     diagnostic::{DiagnosticFix, FixApplicability, TextEdit},
@@ -113,6 +114,7 @@ impl Parser<'_> {
             "expected `{` after the managed class name",
         )?;
         let mut fields = Vec::new();
+        let mut conditional_fields = Vec::new();
         let mut layouts = Vec::new();
         let mut layout_variants = Vec::new();
         let body_depth = self.brace_depth_before(self.cursor.position());
@@ -123,7 +125,12 @@ impl Parser<'_> {
             }
             let item_start = self.cursor.position();
             let documentation = self.take_source_documentation();
-            if self.at_ident("layout") {
+            if self.at_ident("if") {
+                let parsed = self.managed_conditional_fields_decl(documentation);
+                if let Some(group) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                    conditional_fields.push(group);
+                }
+            } else if self.at_ident("layout") {
                 let parsed = self.managed_layout_decl().map(|mut layout| {
                     layout.documentation = documentation;
                     let variant = EnumVariant {
@@ -183,10 +190,56 @@ impl Parser<'_> {
             metadata_names,
             opening_span,
             fields,
+            conditional_fields,
             layouts,
             layout_enum,
             layout_value,
             span: start.join(closing),
+        })
+    }
+
+    fn managed_conditional_fields_decl(
+        &mut self,
+        documentation: Option<String>,
+    ) -> Result<ConditionalFieldsDecl<ManagedFieldDecl>, Diagnostic> {
+        let keyword_span = self.expect_ident("if")?;
+        if documentation.is_some() {
+            self.diagnostics.push(Diagnostic::new(
+                "document the fields inside a conditional managed group",
+                keyword_span,
+            ));
+        }
+        let condition = self.root_expression();
+        let opening_span = self.expect(
+            TokenKind::LBrace,
+            "expected `{` after the managed-field layout condition",
+        )?;
+        let body_depth = self.brace_depth_before(self.cursor.position());
+        let mut fields = Vec::new();
+        while !self.at(&TokenKind::RBrace) {
+            if self.at(&TokenKind::Eof) {
+                self.record_missing_closing("unterminated conditional managed fields");
+                break;
+            }
+            let item_start = self.cursor.position();
+            let field_documentation = self.take_source_documentation();
+            let parsed = self.managed_field_decl().map(|mut field| {
+                field.documentation = field_documentation;
+                field
+            });
+            if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                fields.push(field);
+            }
+        }
+        let closing = self
+            .eat(&TokenKind::RBrace)
+            .unwrap_or_else(|| self.current().span);
+        Ok(ConditionalFieldsDecl {
+            keyword_span,
+            condition,
+            opening_span,
+            fields,
+            span: keyword_span.join(closing),
         })
     }
 
@@ -687,6 +740,8 @@ impl Parser<'_> {
         )?;
         let body_depth = self.brace_depth_before(self.cursor.position());
         let mut fields = Vec::new();
+        let mut conditional_fields = Vec::new();
+        let mut attachment_layout: Option<AttachmentLayoutDecl> = None;
         let mut layouts = Vec::new();
         let mut layout_variants = Vec::new();
         while !self.at(&TokenKind::RBrace) {
@@ -702,7 +757,27 @@ impl Parser<'_> {
                 );
                 break;
             }
-            if self.at_ident("layout") {
+            if self.at_ident("if") {
+                let parsed = self.state_conditional_fields_decl(documentation);
+                if let Some(group) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                    conditional_fields.push(group);
+                }
+            } else if self.at_ident("layout") && self.peek(1).kind == TokenKind::LBrace {
+                let parsed = self.attachment_layout_decl(documentation);
+                if let Some(layout) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                    if let Some(previous) = &attachment_layout {
+                        self.diagnostics.push(
+                            Diagnostic::new(
+                                "only one attachment layout declaration is allowed",
+                                layout.span,
+                            )
+                            .with_secondary_label(previous.span, "the first declaration is here"),
+                        );
+                    } else {
+                        attachment_layout = Some(layout);
+                    }
+                }
+            } else if self.at_ident("layout") {
                 let parsed = self.state_layout_decl(documentation);
                 if let Some((layout, variant)) =
                     self.recover_delimited_item(parsed, item_start, body_depth)
@@ -728,8 +803,23 @@ impl Parser<'_> {
                 Span { start, end },
             ));
         }
+        if attachment_layout.is_some() && !layouts.is_empty() {
+            self.diagnostics.push(Diagnostic::new(
+                "an attachment layout declaration cannot be combined with legacy named layouts",
+                Span { start, end },
+            ));
+        }
+        if !conditional_fields.is_empty() && !layouts.is_empty() {
+            self.diagnostics.push(Diagnostic::new(
+                "conditional state fields cannot be combined with legacy named layouts",
+                Span { start, end },
+            ));
+        }
         let (layout_enum, layout_value) = if layouts.is_empty() {
-            (None, None)
+            (
+                None,
+                attachment_layout.as_ref().map(|_| self.new_value_id()),
+            )
         } else {
             let id = EnumId::from_index(self.next_enum_id);
             self.next_enum_id += 1;
@@ -755,10 +845,116 @@ impl Parser<'_> {
             provider,
             processes,
             fields,
+            conditional_fields,
+            layout: attachment_layout,
             layouts,
             layout_enum,
             layout_value,
             span: Span { start, end },
+        })
+    }
+
+    fn state_conditional_fields_decl(
+        &mut self,
+        documentation: Option<String>,
+    ) -> Result<ConditionalFieldsDecl<StateField>, Diagnostic> {
+        let keyword_span = self.expect_ident("if")?;
+        if documentation.is_some() {
+            self.diagnostics.push(Diagnostic::new(
+                "document the fields inside a conditional state group",
+                keyword_span,
+            ));
+        }
+        let condition = self.root_expression();
+        let opening_span = self.expect(
+            TokenKind::LBrace,
+            "expected `{` after the state-field layout condition",
+        )?;
+        let body_depth = self.brace_depth_before(self.cursor.position());
+        let mut fields = Vec::new();
+        while !self.at(&TokenKind::RBrace) {
+            if self.at(&TokenKind::Eof) {
+                self.record_missing_closing("unterminated conditional state fields");
+                break;
+            }
+            let item_start = self.cursor.position();
+            let field_documentation = self.take_source_documentation();
+            let parsed = self.state_field(field_documentation);
+            if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                fields.push(field);
+                self.require_semicolon_between("state fields");
+            }
+        }
+        let closing = self
+            .eat(&TokenKind::RBrace)
+            .unwrap_or_else(|| self.current().span);
+        Ok(ConditionalFieldsDecl {
+            keyword_span,
+            condition,
+            opening_span,
+            fields,
+            span: keyword_span.join(closing),
+        })
+    }
+
+    fn attachment_layout_decl(
+        &mut self,
+        documentation: Option<String>,
+    ) -> Result<AttachmentLayoutDecl, Diagnostic> {
+        let keyword_span = self.expect_ident("layout")?;
+        let opening_span = self.expect(TokenKind::LBrace, "expected `{` after `layout`")?;
+        let id = RecordId::from_index(self.next_record_id);
+        self.next_record_id += 1;
+        let body_depth = self.brace_depth_before(self.cursor.position());
+        let mut fields = Vec::new();
+        while !self.at(&TokenKind::RBrace) {
+            if self.at(&TokenKind::Eof) {
+                self.record_missing_closing("unterminated attachment layout declaration");
+                break;
+            }
+            let item_start = self.cursor.position();
+            let field_documentation = self.take_source_documentation();
+            let parsed = (|| {
+                let (name, name_span) =
+                    self.expect_any_ident("expected a layout dimension name")?;
+                self.expect(
+                    TokenKind::Colon,
+                    "expected `:` after the layout dimension name",
+                )?;
+                let (ty, type_span) = self.parse_type("expected a layout dimension type")?;
+                Ok(RecordField {
+                    id: self.new_record_field_id(),
+                    name,
+                    name_span,
+                    documentation: field_documentation,
+                    ty,
+                    span: name_span.join(type_span),
+                })
+            })();
+            if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                fields.push(field);
+                self.require_comma_between("layout dimensions");
+            }
+        }
+        let closing = self
+            .eat(&TokenKind::RBrace)
+            .unwrap_or_else(|| self.current().span);
+        let span = keyword_span.join(closing);
+        let layout_documentation = documentation.clone();
+        self.generated_records.push(RecordDecl {
+            id,
+            name: "Layout".to_owned(),
+            documentation,
+            name_span: keyword_span,
+            fields,
+            span,
+        });
+        Ok(AttachmentLayoutDecl {
+            keyword_span,
+            documentation: layout_documentation,
+            opening_span,
+            record: id,
+            span,
         })
     }
 
@@ -1723,6 +1919,8 @@ impl Parser<'_> {
             provider: None,
             processes: vec![process],
             fields,
+            conditional_fields: Vec::new(),
+            layout: None,
             layouts: Vec::new(),
             layout_enum: None,
             layout_value: None,

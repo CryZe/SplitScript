@@ -43,7 +43,7 @@ pub(super) struct RuntimeGlobals {
     pub provider_preparation_frame: Option<u32>,
     /// Whether preparation completed for the current process attachment.
     pub provider_prepared: Option<u32>,
-    /// The typed enum value returned by `onAttach` for versioned state.
+    /// The typed attachment layout returned by `onAttach`.
     pub selected_layout: Option<u32>,
     pub current: u32,
     pub old: u32,
@@ -185,22 +185,27 @@ pub(super) fn encode(
         );
         index
     });
-    let selected_layout = program
+    let selected_layout_type = program
         .state
         .as_ref()
-        .and_then(|state| state.layout_enum.as_ref())
-        .map(|enumeration| {
-            let selected = section.len();
-            section.global(
-                GlobalType {
-                    val_type: gc.val_type(Type::Enum(enumeration.id)),
-                    mutable: true,
-                    shared: false,
-                },
-                &ConstExpr::ref_null(HeapType::Concrete(gc.index(Type::Enum(enumeration.id)))),
-            );
-            selected
-        });
+        .and_then(|state| state.layout_value)
+        .map(|value| value_type(value, semantics));
+    let selected_layout = selected_layout_type.map(|layout_type| {
+        let selected = section.len();
+        let mut val_type = gc.val_type(layout_type);
+        if let ValType::Ref(reference) = &mut val_type {
+            reference.nullable = true;
+        }
+        section.global(
+            GlobalType {
+                val_type,
+                mutable: true,
+                shared: false,
+            },
+            &default_const_expr(val_type),
+        );
+        selected
+    });
     let nullable_state = ValType::Ref(RefType {
         nullable: true,
         heap_type: HeapType::Concrete(STATE_TYPE),
@@ -266,14 +271,11 @@ pub(super) fn encode(
     let mut variables = HashMap::new();
     let mut variable_types = HashMap::new();
     if let Some(state) = &program.state
-        && let (Some(value), Some(global), Some(enumeration)) = (
-            state.layout_value,
-            selected_layout,
-            state.layout_enum.as_ref(),
-        )
+        && let (Some(value), Some(global), Some(ty)) =
+            (state.layout_value, selected_layout, selected_layout_type)
     {
         variables.insert(value, global);
-        variable_types.insert(value, Type::Enum(enumeration.id));
+        variable_types.insert(value, ty);
     }
     for variable in program
         .globals

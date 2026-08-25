@@ -56,6 +56,51 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
                 );
             }
         }
+        for group in &state.conditional_fields {
+            let constraints = checker
+                .require_layout_constraints(&group.condition)
+                .unwrap_or_default();
+            let mut names = state
+                .fields
+                .iter()
+                .map(|field| field.name.clone())
+                .collect::<HashSet<_>>();
+            for field in &group.fields {
+                let ty = collect_state_field_type(checker, field, provider);
+                checker.semantics.resolve_value_type(field.id, ty);
+                checker.declarations.state_fields_by_id.insert(field.id, ty);
+                checker
+                    .declarations
+                    .state_field_spans
+                    .insert(field.id, field.span);
+                checker
+                    .declarations
+                    .state_storage_fields
+                    .insert(field.id, field.id);
+                checker
+                    .declarations
+                    .conditional_state_fields
+                    .entry(field.name.clone())
+                    .or_default()
+                    .push((field.id, ty, constraints.clone()));
+                checker.semantics.resolve_conditional_state_field(
+                    field.id,
+                    constraints
+                        .iter()
+                        .map(|constraint| crate::semantic::ResolvedLayoutConstraint {
+                            dimension: constraint.dimension,
+                            variant: constraint.variant,
+                        })
+                        .collect(),
+                );
+                if !names.insert(field.name.clone()) {
+                    checker.error(
+                        format!("duplicate conditional state field `{}`", field.name),
+                        field.span,
+                    );
+                }
+            }
+        }
     } else {
         // First collect every physical declaration independently. Layouts are
         // allowed to omit names or use the same name with a different type.
@@ -136,8 +181,14 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
         }
     }
 
-    if let (Some(layout_enum), Some(layout_value)) = (&state.layout_enum, state.layout_value) {
-        let ty = checker.enum_type(EnumTypeId::Source(layout_enum.id));
+    if let Some(layout_value) = state.layout_value {
+        let ty = if let Some(layout) = &state.layout {
+            checker.record_type(layout.record)
+        } else if let Some(layout_enum) = &state.layout_enum {
+            checker.enum_type(EnumTypeId::Source(layout_enum.id))
+        } else {
+            unreachable!("a layout value has either a structured or legacy layout type")
+        };
         checker.semantics.resolve_value_type(layout_value, ty);
         checker.declarations.globals.insert(
             "layout".to_owned(),
@@ -152,7 +203,7 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
     }
 
     let storage_fields = if state.layouts.is_empty() {
-        state.fields.iter().map(|field| field.id).collect()
+        state.all_fields().map(|field| field.id).collect()
     } else {
         let mut fields = state.layouts[0]
             .fields
@@ -455,6 +506,11 @@ fn setting_value_type(checker: &Checker, setting: &SettingDecl) -> Option<Type> 
 }
 
 fn collect_named_type_members(checker: &mut Checker, program: &Program) {
+    let attachment_layout_record = program
+        .state
+        .as_ref()
+        .and_then(|state| state.layout.as_ref())
+        .map(|layout| layout.record);
     let mut record_names = HashSet::new();
     for record in &program.records {
         if !record_names.insert(record.name.clone()) {
@@ -466,6 +522,27 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
             checker
                 .semantics
                 .resolve_record_field_type(field.id, field_ty);
+            if attachment_layout_record == Some(record.id) {
+                let Type::Known(ty) = checker.shallow_type(field_ty) else {
+                    checker.error(
+                        "a layout dimension must use a concrete enum type",
+                        field.span,
+                    );
+                    continue;
+                };
+                if !matches!(
+                    checker.inference.type_store().kind(ty),
+                    crate::types::TypeKind::Enum(_)
+                ) {
+                    checker.error(
+                        format!(
+                            "layout dimension `{}` must use a source enum type",
+                            field.name
+                        ),
+                        field.span,
+                    );
+                }
+            }
             if !fields.insert(field.name.clone()) {
                 checker.error(
                     format!(
@@ -487,6 +564,23 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
         }
     }
 
+    if let Some(layout) = program
+        .state
+        .as_ref()
+        .and_then(|state| state.layout.as_ref())
+    {
+        let record = program
+            .records
+            .get(layout.record.index())
+            .expect("generated attachment layout records retain stable indexes");
+        if record.fields.is_empty() {
+            checker.error(
+                "an attachment layout needs at least one dimension",
+                layout.span,
+            );
+        }
+    }
+
     for class in program.managed_class_declarations() {
         let mut common_fields = HashSet::new();
         let mut common_metadata_names = HashMap::new();
@@ -498,6 +592,36 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
                 &mut common_fields,
                 &mut common_metadata_names,
             );
+        }
+        for group in &class.conditional_fields {
+            let constraints = checker
+                .require_layout_constraints(&group.condition)
+                .unwrap_or_default();
+            let mut fields = common_fields.clone();
+            let mut metadata_names = common_metadata_names.clone();
+            for field in &group.fields {
+                collect_managed_field(
+                    checker,
+                    class.name.as_str(),
+                    field,
+                    &mut fields,
+                    &mut metadata_names,
+                );
+                checker
+                    .declarations
+                    .conditional_managed_fields
+                    .insert(field.id, constraints.clone());
+                checker.semantics.resolve_conditional_managed_field(
+                    field.id,
+                    constraints
+                        .iter()
+                        .map(|constraint| crate::semantic::ResolvedLayoutConstraint {
+                            dimension: constraint.dimension,
+                            variant: constraint.variant,
+                        })
+                        .collect(),
+                );
+            }
         }
 
         let mut layouts = HashSet::new();

@@ -211,7 +211,10 @@ impl Checker {
                     condition,
                     Some(self.core_type(crate::stdlib::CoreTypeId::Bool)),
                 );
-                self.block(then_block, true);
+                let constraints = self.layout_constraints(condition);
+                self.with_layout_constraints(constraints.as_deref(), |checker| {
+                    checker.block(then_block, true);
+                });
                 if let Some(else_block) = else_block {
                     self.block(else_block, true);
                 }

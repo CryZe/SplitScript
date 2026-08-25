@@ -428,6 +428,9 @@ pub struct ManagedClassDecl {
     pub metadata_names: ManagedMetadataNames,
     pub opening_span: Span,
     pub fields: Vec<ManagedFieldDecl>,
+    /// Fields available only while the attachment-wide layout satisfies the
+    /// written predicate.
+    pub conditional_fields: Vec<ConditionalFieldsDecl<ManagedFieldDecl>>,
     pub layouts: Vec<ManagedLayoutDecl>,
     /// The nested enum exposed as `<Class>.Layout` when named layouts exist.
     pub layout_enum: Option<EnumDecl>,
@@ -437,6 +440,14 @@ pub struct ManagedClassDecl {
 }
 
 impl ManagedClassDecl {
+    pub fn all_fields(&self) -> impl Iterator<Item = &ManagedFieldDecl> {
+        self.fields.iter().chain(
+            self.conditional_fields
+                .iter()
+                .flat_map(|group| &group.fields),
+        )
+    }
+
     /// Metadata names to probe for this class in declaration order.
     ///
     /// Omitting `from` makes the source declaration name the sole candidate.
@@ -905,6 +916,13 @@ pub struct StateDecl {
     /// Fields of the ordinary single-layout form. This is empty when named
     /// layouts are present.
     pub fields: Vec<StateField>,
+    /// Fields available only while the attachment-wide layout satisfies the
+    /// written predicate.
+    pub conditional_fields: Vec<ConditionalFieldsDecl<StateField>>,
+    /// Independent attachment-wide layout dimensions. The generated `Layout`
+    /// record is an ordinary nominal source type whose fields are the written
+    /// dimensions; the read-only `layout` value has this type while attached.
+    pub layout: Option<AttachmentLayoutDecl>,
     /// Versioned memory layouts. Semantic analysis projects compatible fields
     /// into a common interface and retains missing or conflicting fields as
     /// layout-specific declarations.
@@ -913,6 +931,22 @@ pub struct StateDecl {
     pub layout_enum: Option<EnumDecl>,
     /// Stable identity of the implicit read-only `layout` value.
     pub layout_value: Option<ValueId>,
+    pub span: Span,
+}
+
+/// The attachment-wide structural facts selected for one attached process.
+///
+/// This belongs to the state language rather than any individual provider.
+/// Native processes, emulators, and managed runtimes all consume the same
+/// generated record and refinement model.
+#[derive(Debug, Clone)]
+pub struct AttachmentLayoutDecl {
+    pub keyword_span: Span,
+    pub documentation: Option<String>,
+    pub opening_span: Span,
+    /// Stable identity of the generated ordinary `Layout` record stored in
+    /// [`Program::records`].
+    pub record: RecordId,
     pub span: Span,
 }
 
@@ -926,6 +960,11 @@ impl StateDecl {
     pub fn all_fields(&self) -> impl Iterator<Item = &StateField> {
         self.fields
             .iter()
+            .chain(
+                self.conditional_fields
+                    .iter()
+                    .flat_map(|group| &group.fields),
+            )
             .chain(self.layouts.iter().flat_map(|layout| &layout.fields))
     }
 
@@ -959,6 +998,21 @@ impl StateDecl {
             .iter()
             .filter(|field| self.is_common_field(&field.name))
     }
+}
+
+/// A group of declarations guarded by a statically decidable predicate over
+/// the attachment-wide [`Layout`](AttachmentLayoutDecl) value.
+///
+/// The same declaration shape is shared by native/emulator state fields and
+/// managed metadata fields. Provider-specific binding turns the predicate
+/// into constraints, but does not alter its source-level meaning.
+#[derive(Debug, Clone)]
+pub struct ConditionalFieldsDecl<Field> {
+    pub keyword_span: Span,
+    pub condition: Expr,
+    pub opening_span: Span,
+    pub fields: Vec<Field>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]

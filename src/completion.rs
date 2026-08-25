@@ -585,6 +585,7 @@ fn complete_member(
 ) -> CompletionList {
     let standard_library = compiler_context.standard_library();
     let mut builder = CompletionBuilder::new(context.prefix.clone(), context.replacement);
+    let active_layout_facts = active_attachment_layout_facts(syntax, context.dot);
     let path = context
         .receiver_path
         .iter()
@@ -608,6 +609,17 @@ fn complete_member(
                                 &field.name,
                                 CompletionKind::StateField,
                                 "layout-specific state field",
+                            ));
+                        }
+                    }
+                }
+                for group in &state.conditional_fields {
+                    if layout_facts_satisfy(syntax, &active_layout_facts, &group.condition) {
+                        for field in &group.fields {
+                            builder.add(simple_completion(
+                                &field.name,
+                                CompletionKind::StateField,
+                                "conditional state field",
                             ));
                         }
                     }
@@ -655,6 +667,7 @@ fn complete_member(
                     &TypeKind::Standard(provider.process_type),
                     &standard_library,
                     None,
+                    &active_layout_facts,
                 );
                 add_inferred_methods(
                     &mut builder,
@@ -701,6 +714,19 @@ fn complete_member(
                         builder.add(completion);
                     }
                 }
+                for group in &class.conditional_fields {
+                    if layout_facts_satisfy(syntax, &active_layout_facts, &group.condition) {
+                        for field in group.fields.iter().filter(|field| field.is_static) {
+                            let mut completion = simple_completion(
+                                &field.name,
+                                CompletionKind::Property,
+                                "conditional managed static field",
+                            );
+                            completion.documentation = field.documentation.clone();
+                            builder.add(completion);
+                        }
+                    }
+                }
             }
         }
         _ => {}
@@ -744,6 +770,7 @@ fn complete_member(
             &receiver,
             &standard_library,
             active_managed_layout,
+            &active_layout_facts,
         );
         add_inferred_methods(
             &mut builder,
@@ -1362,6 +1389,7 @@ fn add_inferred_fields(
     receiver: &TypeKind,
     standard_library: &StandardLibrary,
     active_managed_layout: Option<crate::ast::EnumVariantId>,
+    active_layout_facts: &[(crate::ast::RecordFieldId, crate::ast::EnumVariantId)],
 ) {
     match receiver {
         TypeKind::Error => {}
@@ -1373,6 +1401,17 @@ fn add_inferred_fields(
                         CompletionKind::Property,
                         "state field",
                     ));
+                }
+                for group in &state.conditional_fields {
+                    if layout_facts_satisfy(syntax, active_layout_facts, &group.condition) {
+                        for field in &group.fields {
+                            builder.add(simple_completion(
+                                &field.name,
+                                CompletionKind::Property,
+                                "conditional state field",
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -1415,6 +1454,15 @@ fn add_inferred_fields(
                     .fields
                     .iter()
                     .chain(layout_fields)
+                    .chain(
+                        class
+                            .conditional_fields
+                            .iter()
+                            .filter(|group| {
+                                layout_facts_satisfy(syntax, active_layout_facts, &group.condition)
+                            })
+                            .flat_map(|group| &group.fields),
+                    )
                     .filter(|field| !field.is_static)
                 {
                     let mut completion = simple_completion(
@@ -1680,6 +1728,137 @@ fn active_managed_layout<'ast>(
         .layouts
         .iter()
         .find(|layout| layout.variant == variant)
+}
+
+fn active_attachment_layout_facts(
+    syntax: &Program,
+    offset: usize,
+) -> Vec<(crate::ast::RecordFieldId, crate::ast::EnumVariantId)> {
+    struct Finder<'a> {
+        syntax: &'a Program,
+        offset: usize,
+        facts: Vec<(crate::ast::RecordFieldId, crate::ast::EnumVariantId)>,
+    }
+
+    impl<'ast> Visitor<'ast> for Finder<'ast> {
+        fn visit_stmt(&mut self, statement: &'ast Stmt) {
+            if let Stmt::If {
+                condition,
+                then_block,
+                ..
+            } = statement
+                && contains_offset(then_block.span, self.offset)
+            {
+                collect_attachment_layout_facts(self.syntax, condition, &mut self.facts);
+            }
+            visit::walk_stmt(self, statement);
+        }
+
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if let ExprKind::If {
+                condition,
+                then_expr,
+                ..
+            } = &expression.kind
+                && contains_offset(then_expr.span, self.offset)
+            {
+                collect_attachment_layout_facts(self.syntax, condition, &mut self.facts);
+            }
+            visit::walk_expr(self, expression);
+        }
+    }
+
+    let mut finder = Finder {
+        syntax,
+        offset,
+        facts: Vec::new(),
+    };
+    finder.visit_program(syntax);
+    finder.facts.sort_by_key(|(field, _)| field.index());
+    finder.facts.dedup();
+    finder.facts
+}
+
+fn layout_facts_satisfy(
+    syntax: &Program,
+    active: &[(crate::ast::RecordFieldId, crate::ast::EnumVariantId)],
+    condition: &Expr,
+) -> bool {
+    let mut required = Vec::new();
+    collect_attachment_layout_facts(syntax, condition, &mut required);
+    !required.is_empty() && required.iter().all(|fact| active.contains(fact))
+}
+
+fn collect_attachment_layout_facts(
+    syntax: &Program,
+    expression: &Expr,
+    output: &mut Vec<(crate::ast::RecordFieldId, crate::ast::EnumVariantId)>,
+) {
+    match &expression.kind {
+        ExprKind::Binary {
+            op: crate::ast::BinaryOp::And,
+            left,
+            right,
+        } => {
+            collect_attachment_layout_facts(syntax, left, output);
+            collect_attachment_layout_facts(syntax, right, output);
+        }
+        ExprKind::Binary {
+            op: crate::ast::BinaryOp::Eq,
+            left,
+            right,
+        } => {
+            if let Some(fact) = attachment_layout_fact(syntax, left, right)
+                .or_else(|| attachment_layout_fact(syntax, right, left))
+            {
+                output.push(fact);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn attachment_layout_fact(
+    syntax: &Program,
+    dimension: &Expr,
+    variant: &Expr,
+) -> Option<(crate::ast::RecordFieldId, crate::ast::EnumVariantId)> {
+    let dimension = completion_expression_path(dimension)?;
+    let ["layout", dimension_name] = dimension.as_slice() else {
+        return None;
+    };
+    let variant = completion_expression_path(variant)?;
+    let [enum_name, variant_name] = variant.as_slice() else {
+        return None;
+    };
+    let layout = syntax
+        .records
+        .iter()
+        .find(|record| record.name == "Layout")?;
+    let field = layout
+        .fields
+        .iter()
+        .find(|field| field.name == *dimension_name)?;
+    let enumeration = syntax
+        .enum_declarations()
+        .find(|enumeration| enumeration.name == *enum_name)?;
+    let variant = enumeration
+        .variants
+        .iter()
+        .find(|variant| variant.name == *variant_name)?;
+    Some((field.id, variant.id))
+}
+
+fn completion_expression_path(expression: &Expr) -> Option<Vec<&str>> {
+    match &expression.kind {
+        ExprKind::Path(path) => Some(path.iter().map(String::as_str).collect()),
+        ExprKind::Member { receiver, name, .. } => {
+            let mut path = completion_expression_path(receiver)?;
+            path.push(name);
+            Some(path)
+        }
+        _ => None,
+    }
 }
 
 fn cursor_is_inside_braces(source: &str, start: usize, offset: usize) -> bool {
@@ -2197,6 +2376,7 @@ whileAttached {
             "module pointer field",
             "UTF-8 string field",
             "UTF-16LE string field",
+            "layout dimensions",
             "named layout",
         ] {
             assert!(
@@ -2215,6 +2395,38 @@ whileAttached {
         let mut source_kind = CompilerDatabase::new(source);
         let candidates = labels(&mut source_kind, "i32 a");
         assert_eq!(candidates, vec!["at"]);
+    }
+
+    #[test]
+    fn layout_refinement_completes_conditional_state_and_managed_fields() {
+        let source = r#"
+enum Edition { Base, Demo }
+image "Assembly-CSharp" {
+    class GameManager {
+        static GameManager instance;
+        if layout.edition == Edition.Base { u32 level; }
+    }
+}
+state Unity ["game.exe"] {
+    layout { edition: Edition }
+    if layout.edition == Edition.Base { scene: u8 at 0x100; }
+}
+onAttach { return Layout { edition: Edition.Base } }
+split {
+    let manager = GameManager.instance else return false
+    if layout.edition == Edition.Base {
+        current.
+        manager.
+    }
+    return false
+}
+"#;
+        let mut state = CompilerDatabase::new(source);
+        assert!(labels(&mut state, "current.").contains(&"scene".to_owned()));
+        let managed_source = source.replace("        current.\n", "        current.scene\n");
+        let mut managed = CompilerDatabase::new(&managed_source);
+        let managed = labels(&mut managed, "manager.");
+        assert!(managed.contains(&"level".to_owned()), "{managed:#?}");
     }
 
     #[test]
@@ -2356,6 +2568,16 @@ fn inspect() {
             labels(&mut layouts, "/// outer marker\n    "),
             vec!["named layout"]
         );
+
+        let source =
+            "enum Edition { BaseGame }\nstate \"game.exe\" {\n    layout {\n        \n    }\n}";
+        let mut dimensions = CompilerDatabase::new(source);
+        assert_eq!(
+            labels(&mut dimensions, "layout {"),
+            vec!["layout dimension"]
+        );
+        let candidates = labels(&mut dimensions, "layout {\n        ");
+        assert_eq!(candidates, vec!["layout dimension"]);
     }
 
     #[test]

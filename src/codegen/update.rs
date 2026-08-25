@@ -13,7 +13,8 @@ use crate::{
 
 use super::{
     GcLayout, STATE_TYPE, Type, data_plan::StringPool, emit_typed_struct_get,
-    global_plan::RuntimeGlobals, imports::Abi, semantic_type, state_storage_index, value_type,
+    global_plan::RuntimeGlobals, imports::Abi, record_field_type, semantic_type,
+    state_storage_index, value_type,
 };
 
 /// Per-tick runtime view of the completed backend plans.
@@ -23,6 +24,7 @@ pub(super) struct UpdateContext<'a> {
     pub gc: &'a GcLayout,
     pub runtime_globals: RuntimeGlobals,
     pub semantics: &'a crate::semantic::SemanticModel,
+    pub managed: &'a crate::managed::ManagedBindingPlan,
     pub globals: &'a HashMap<ValueId, u32>,
     pub global_types: &'a HashMap<ValueId, Type>,
     pub attachment_globals: &'a [ValueId],
@@ -192,14 +194,10 @@ pub(super) fn compile_update(
             .instruction(&Instruction::I32Const(0))
             .instruction(&Instruction::GlobalSet(preparation.ready_global));
     }
-    if let (Some(selected), Some(enumeration)) =
-        (globals.selected_layout, state.layout_enum.as_ref())
-    {
-        function
-            .instruction(&Instruction::RefNull(HeapType::Concrete(
-                lowering.gc.index(Type::Enum(enumeration.id)),
-            )))
-            .instruction(&Instruction::GlobalSet(selected));
+    if let (Some(selected), Some(layout_value)) = (globals.selected_layout, state.layout_value) {
+        let layout_type = lowering.global_types[&layout_value];
+        emit_storage_default(&mut function, lowering.gc.val_type(layout_type));
+        function.instruction(&Instruction::GlobalSet(selected));
     }
     for value in lowering.attachment_globals {
         let ty = lowering.global_types[value];
@@ -320,17 +318,36 @@ pub(super) fn compile_update(
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::Return)
-            .instruction(&Instruction::End)
+            .instruction(&Instruction::End);
+        emit_managed_layout_validation(&mut function, program, lowering);
+        function
             .instruction(&Instruction::I32Const(1))
             .instruction(&Instruction::GlobalSet(globals.attach_ready))
             .instruction(&Instruction::End);
     }
+
+    // `2` records that metadata evidence contradicted the layout chosen by
+    // `onAttach`. Keep the process attached so the normal process-lifetime
+    // boundary resets everything when it exits, without repeatedly invoking
+    // user attachment code or polling an invalid schema.
+    function
+        .instruction(&Instruction::GlobalGet(globals.attach_ready))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
 
     function
         .instruction(&Instruction::StructNewDefault(STATE_TYPE))
         .instruction(&Instruction::LocalSet(candidate_state));
     if state.layouts.is_empty() {
         for (read_index, field) in all_fields.iter().enumerate() {
+            let constraints = semantics.state_field_layout_constraints(field.id);
+            if !constraints.is_empty() {
+                emit_layout_constraints(&mut function, program, constraints, lowering);
+                function.instruction(&Instruction::If(BlockType::Empty));
+            }
             emit_state_field_poll(
                 &mut function,
                 field.id,
@@ -340,6 +357,9 @@ pub(super) fn compile_update(
                 candidate_state,
                 lowering,
             );
+            if !constraints.is_empty() {
+                function.instruction(&Instruction::End);
+            }
         }
     } else {
         let selected = globals
@@ -510,6 +530,133 @@ pub(super) fn compile_update(
         .instruction(&Instruction::End)
         .instruction(&Instruction::End);
     function
+}
+
+fn emit_layout_constraints(
+    function: &mut Function,
+    program: &Program,
+    constraints: &[crate::semantic::ResolvedLayoutConstraint],
+    lowering: &UpdateContext<'_>,
+) {
+    let state = program
+        .state
+        .as_ref()
+        .expect("state polling has a state declaration");
+    let layout = state
+        .layout
+        .as_ref()
+        .expect("conditional fields require attachment layout dimensions");
+    let record = program
+        .records
+        .get(layout.record.index())
+        .expect("attachment Layout is an ordinary record");
+    let selected = lowering
+        .runtime_globals
+        .selected_layout
+        .expect("conditional fields have selected-layout storage");
+    for (index, constraint) in constraints.iter().enumerate() {
+        let field_index = record
+            .fields
+            .iter()
+            .position(|field| field.id == constraint.dimension)
+            .expect("layout constraints refer to Layout fields") as u32;
+        let field_type = semantic_type(
+            lowering
+                .semantics
+                .record_field_type(constraint.dimension)
+                .expect("layout dimensions have checked enum types"),
+            lowering.semantics,
+        );
+        let Type::Enum(enumeration) = field_type else {
+            unreachable!("validated layout dimensions are source enums")
+        };
+        let enumeration_decl = program
+            .enum_declarations()
+            .find(|candidate| candidate.id == enumeration)
+            .expect("layout dimension enums belong to the source program");
+        let variant_index = enumeration_decl
+            .variants
+            .iter()
+            .position(|variant| variant.id == constraint.variant)
+            .expect("layout constraints refer to variants of their dimension")
+            as i32;
+
+        function
+            .instruction(&Instruction::GlobalGet(selected))
+            .instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(
+            function,
+            lowering.gc.index(Type::Record(layout.record)),
+            field_index,
+            field_type,
+        );
+        function
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::StructGet {
+                struct_type_index: lowering.gc.index(field_type),
+                field_index: 0,
+            })
+            .instruction(&Instruction::I32Const(variant_index))
+            .instruction(&Instruction::I32Eq);
+        if index != 0 {
+            function.instruction(&Instruction::I32And);
+        }
+    }
+}
+
+fn emit_managed_layout_validation(
+    function: &mut Function,
+    program: &Program,
+    lowering: &UpdateContext<'_>,
+) {
+    use crate::stdlib::{MANAGED_BINDINGS_TYPE, managed_field_presence_name};
+
+    let Some(bindings_global) = lowering.runtime_globals.provider_preparation_value else {
+        return;
+    };
+    let Some(bindings) = program
+        .records
+        .iter()
+        .find(|record| record.name == MANAGED_BINDINGS_TYPE)
+    else {
+        return;
+    };
+
+    for class in &lowering.managed.classes {
+        for group in &class.conditional_fields {
+            emit_layout_constraints(function, program, &group.constraints, lowering);
+            function.instruction(&Instruction::If(BlockType::Empty));
+            for field in &group.fields {
+                let name = managed_field_presence_name(field.id.index());
+                let (field_index, presence) = bindings
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, candidate)| candidate.name == name)
+                    .expect("conditional managed fields have generated presence storage");
+                let presence_type = record_field_type(presence.id, lowering.semantics);
+                function
+                    .instruction(&Instruction::GlobalGet(bindings_global))
+                    .instruction(&Instruction::RefAsNonNull);
+                emit_typed_struct_get(
+                    function,
+                    lowering.gc.index(Type::Record(bindings.id)),
+                    field_index as u32,
+                    presence_type,
+                );
+                function
+                    .instruction(&Instruction::I32Eqz)
+                    .instruction(&Instruction::If(BlockType::Empty))
+                    .instruction(&Instruction::I32Const(2))
+                    .instruction(&Instruction::GlobalSet(
+                        lowering.runtime_globals.attach_ready,
+                    ))
+                    .instruction(&Instruction::Return)
+                    .instruction(&Instruction::End);
+            }
+            function.instruction(&Instruction::End);
+        }
+    }
 }
 
 /// Clears attachment-owned storage without constructing source defaults.

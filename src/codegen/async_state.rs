@@ -59,7 +59,7 @@ pub(super) fn compile_async_attach(
     let result_global = runtime
         .lowering
         .state
-        .layout_enum
+        .layout_value
         .is_some()
         .then_some(runtime.lowering.runtime_globals.selected_layout)
         .flatten();

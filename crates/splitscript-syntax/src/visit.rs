@@ -192,6 +192,12 @@ pub fn walk_state<'ast, V: Visitor<'ast>>(visitor: &mut V, state: &'ast StateDec
     for field in &state.fields {
         visitor.visit_state_field(field);
     }
+    for group in &state.conditional_fields {
+        visitor.visit_expr(&group.condition);
+        for field in &group.fields {
+            visitor.visit_state_field(field);
+        }
+    }
     for layout in &state.layouts {
         for field in &layout.fields {
             visitor.visit_state_field(field);
@@ -259,6 +265,12 @@ pub fn walk_managed_namespace<'ast, V: Visitor<'ast>>(
 pub fn walk_managed_class<'ast, V: Visitor<'ast>>(visitor: &mut V, class: &'ast ManagedClassDecl) {
     for field in &class.fields {
         visitor.visit_managed_field(field);
+    }
+    for group in &class.conditional_fields {
+        visitor.visit_expr(&group.condition);
+        for field in &group.fields {
+            visitor.visit_managed_field(field);
+        }
     }
     for layout in &class.layouts {
         visitor.visit_managed_layout(layout);
@@ -641,6 +653,12 @@ pub fn walk_state_mut<F: Folder>(folder: &mut F, state: &mut StateDecl) {
     for field in &mut state.fields {
         folder.fold_state_field(field);
     }
+    for group in &mut state.conditional_fields {
+        folder.fold_expr(&mut group.condition);
+        for field in &mut group.fields {
+            folder.fold_state_field(field);
+        }
+    }
     for layout in &mut state.layouts {
         for field in &mut layout.fields {
             folder.fold_state_field(field);
@@ -701,6 +719,12 @@ pub fn walk_managed_namespace_mut<F: Folder>(folder: &mut F, namespace: &mut Man
 pub fn walk_managed_class_mut<F: Folder>(folder: &mut F, class: &mut ManagedClassDecl) {
     for field in &mut class.fields {
         folder.fold_managed_field(field);
+    }
+    for group in &mut class.conditional_fields {
+        folder.fold_expr(&mut group.condition);
+        for field in &mut group.fields {
+            folder.fold_managed_field(field);
+        }
     }
     for layout in &mut class.layouts {
         folder.fold_managed_layout(layout);

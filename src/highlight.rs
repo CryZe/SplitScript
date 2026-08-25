@@ -956,12 +956,22 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 
     fn visit_record(&mut self, record: &'ast crate::ast::RecordDecl) {
-        self.mark_ident(
-            record.span,
-            &record.name,
-            SemanticTokenKind::Struct,
-            MODIFIER_DECLARATION,
-        );
+        let attachment_layout = self
+            .syntax
+            .state
+            .as_ref()
+            .and_then(|state| state.layout.as_ref())
+            .filter(|layout| layout.record == record.id);
+        if let Some(layout) = attachment_layout {
+            self.insert(layout.keyword_span, SemanticTokenKind::Keyword, 0);
+        } else {
+            self.mark_ident(
+                record.span,
+                &record.name,
+                SemanticTokenKind::Struct,
+                MODIFIER_DECLARATION,
+            );
+        }
         for field in &record.fields {
             self.mark_ident(
                 field.span,

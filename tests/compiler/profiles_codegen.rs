@@ -182,6 +182,54 @@ fn reachable_managed_snapshot_types_have_gc_layouts() {
 }
 
 #[test]
+fn managed_schema_declarations_retain_their_logical_hierarchy() {
+    use splitscript::compiler::hir::DeclarationId;
+
+    let source = r#"
+        image "Assembly-CSharp" {
+            namespace Game {
+                class GameManager {
+                    i32 points;
+                    layout Demo {
+                        String scene;
+                    }
+                }
+            }
+        }
+        state "game.exe" {}
+    "#;
+    let lowered = splitscript::lower(splitscript::parse(source).unwrap());
+    let declarations = lowered.hir();
+
+    let image = declarations
+        .declarations_named("Assembly-CSharp")
+        .next()
+        .unwrap();
+    let namespace = declarations.declarations_named("Game").next().unwrap();
+    let class = declarations
+        .declarations_named("GameManager")
+        .next()
+        .unwrap();
+    let layout = declarations.declarations_named("Demo").next().unwrap();
+    let points = declarations.declarations_named("points").next().unwrap();
+    let scene = declarations.declarations_named("scene").next().unwrap();
+
+    assert_eq!(namespace.owner, Some(image.id));
+    assert_eq!(class.owner, Some(namespace.id));
+    assert_eq!(layout.owner, Some(class.id));
+    assert_eq!(points.owner, Some(class.id));
+    assert_eq!(scene.owner, Some(layout.id));
+    assert!(matches!(image.id, DeclarationId::ManagedImage(_)));
+    assert_eq!(
+        declarations
+            .children(class.id)
+            .map(|child| child.id)
+            .collect::<Vec<_>>(),
+        vec![points.id, layout.id]
+    );
+}
+
+#[test]
 fn structural_display_helpers_are_materialized_only_when_reachable() {
     use splitscript::{BuildProfile, CompilerOptions};
 

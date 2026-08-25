@@ -43,6 +43,7 @@ pub enum DeclarationId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Declaration {
     pub id: DeclarationId,
+    pub owner: Option<DeclarationId>,
     pub name: String,
     pub span: Span,
 }
@@ -58,12 +59,18 @@ impl DeclarationIndex {
         let mut program = Self::default();
         if let Some(state) = &syntax.state {
             for field in state.all_fields() {
-                program.push(DeclarationId::StateField(field.id), &field.name, field.span);
+                program.push(
+                    DeclarationId::StateField(field.id),
+                    None,
+                    &field.name,
+                    field.span,
+                );
             }
             if let (Some(value), Some(enumeration)) = (state.layout_value, &state.layout_enum) {
-                program.push(DeclarationId::Global(value), "layout", state.span);
+                program.push(DeclarationId::Global(value), None, "layout", state.span);
                 program.push(
                     DeclarationId::Enum(enumeration.id),
+                    None,
                     &enumeration.name,
                     enumeration.span,
                 );
@@ -73,20 +80,32 @@ impl DeclarationIndex {
             if setting.source_visible {
                 program.push(
                     DeclarationId::Setting(setting.id),
+                    None,
                     &setting.name,
                     setting.span,
                 );
             }
         }
         for global in &syntax.globals {
-            program.push(DeclarationId::Global(global.id), &global.name, global.span);
+            program.push(
+                DeclarationId::Global(global.id),
+                None,
+                &global.name,
+                global.span,
+            );
         }
         for record in &syntax.records {
-            program.push(DeclarationId::Record(record.id), &record.name, record.span);
+            program.push(
+                DeclarationId::Record(record.id),
+                None,
+                &record.name,
+                record.span,
+            );
         }
         for enumeration in &syntax.enums {
             program.push(
                 DeclarationId::Enum(enumeration.id),
+                None,
                 &enumeration.name,
                 enumeration.span,
             );
@@ -94,14 +113,16 @@ impl DeclarationIndex {
         for image in &syntax.managed_images {
             program.push(
                 DeclarationId::ManagedImage(image.id),
+                None,
                 &image.name,
                 image.span,
             );
-            program.lower_managed_items(&image.items);
+            program.lower_managed_items(&image.items, DeclarationId::ManagedImage(image.id));
         }
         for function in &syntax.functions {
             program.push(
                 DeclarationId::Function(function.id),
+                None,
                 &function.name,
                 function.span,
             );
@@ -109,6 +130,7 @@ impl DeclarationIndex {
         for action in &syntax.actions {
             program.push(
                 DeclarationId::Action(action.kind),
+                None,
                 action.kind.name(),
                 action.span,
             );
@@ -116,26 +138,32 @@ impl DeclarationIndex {
         program
     }
 
-    fn lower_managed_items(&mut self, items: &[ManagedItemDecl]) {
+    fn lower_managed_items(&mut self, items: &[ManagedItemDecl], owner: DeclarationId) {
         for item in items {
             match item {
                 ManagedItemDecl::Namespace(namespace) => {
                     self.push(
                         DeclarationId::ManagedNamespace(namespace.id),
+                        Some(owner),
                         &namespace.name,
                         namespace.span,
                     );
-                    self.lower_managed_items(&namespace.items);
+                    self.lower_managed_items(
+                        &namespace.items,
+                        DeclarationId::ManagedNamespace(namespace.id),
+                    );
                 }
                 ManagedItemDecl::Class(class) => {
                     self.push(
                         DeclarationId::ManagedClass(class.id),
+                        Some(owner),
                         &class.name,
                         class.span,
                     );
                     for field in &class.fields {
                         self.push(
                             DeclarationId::ManagedField(field.id),
+                            Some(DeclarationId::ManagedClass(class.id)),
                             &field.name,
                             field.span,
                         );
@@ -143,12 +171,14 @@ impl DeclarationIndex {
                     for layout in &class.layouts {
                         self.push(
                             DeclarationId::ManagedLayout(layout.id),
+                            Some(DeclarationId::ManagedClass(class.id)),
                             &layout.name,
                             layout.span,
                         );
                         for field in &layout.fields {
                             self.push(
                                 DeclarationId::ManagedField(field.id),
+                                Some(DeclarationId::ManagedLayout(layout.id)),
                                 &field.name,
                                 field.span,
                             );
@@ -159,10 +189,11 @@ impl DeclarationIndex {
         }
     }
 
-    fn push(&mut self, id: DeclarationId, name: &str, span: Span) {
+    fn push(&mut self, id: DeclarationId, owner: Option<DeclarationId>, name: &str, span: Span) {
         let index = self.declarations.len();
         self.declarations.push(Declaration {
             id,
+            owner,
             name: name.to_owned(),
             span,
         });
@@ -188,6 +219,17 @@ impl DeclarationIndex {
         self.declarations
             .iter()
             .find(|declaration| declaration.id == id)
+    }
+
+    pub fn owner(&self, id: DeclarationId) -> Option<&Declaration> {
+        let owner = self.declaration(id)?.owner?;
+        self.declaration(owner)
+    }
+
+    pub fn children(&self, id: DeclarationId) -> impl Iterator<Item = &Declaration> {
+        self.declarations
+            .iter()
+            .filter(move |declaration| declaration.owner == Some(id))
     }
 }
 

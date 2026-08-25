@@ -482,6 +482,7 @@ fn source_definition_for_member(member: &ResolvedMember) -> Option<SourceDefinit
             Some(SourceDefinitionId::Value(*field))
         }
         ResolvedMember::RecordField(field) => Some(SourceDefinitionId::RecordField(*field)),
+        ResolvedMember::ManagedField(field) => Some(SourceDefinitionId::ManagedField(*field)),
         ResolvedMember::StandardField(_) => None,
     }
 }
@@ -497,6 +498,10 @@ fn definition_for_member(
             .map(DefinitionTarget::Source),
         ResolvedMember::RecordField(field) => definitions
             .get(SourceDefinitionId::RecordField(*field))
+            .cloned()
+            .map(DefinitionTarget::Source),
+        ResolvedMember::ManagedField(field) => definitions
+            .get(SourceDefinitionId::ManagedField(*field))
             .cloned()
             .map(DefinitionTarget::Source),
         ResolvedMember::StandardField(field) => Some(DefinitionTarget::StandardLibrarySymbol(
@@ -574,6 +579,7 @@ fn source_definition_for_value_path(
             Some(SourceDefinitionId::Value(*field))
         }
         ResolvedMember::RecordField(field) => Some(SourceDefinitionId::RecordField(*field)),
+        ResolvedMember::ManagedField(field) => Some(SourceDefinitionId::ManagedField(*field)),
         ResolvedMember::StandardField(_) => None,
     }
 }
@@ -682,6 +688,10 @@ fn definition_for_value_path(
             .map(DefinitionTarget::Source),
         ResolvedMember::RecordField(field) => definitions
             .get(SourceDefinitionId::RecordField(*field))
+            .cloned()
+            .map(DefinitionTarget::Source),
+        ResolvedMember::ManagedField(field) => definitions
+            .get(SourceDefinitionId::ManagedField(*field))
             .cloned()
             .map(DefinitionTarget::Source),
         ResolvedMember::StandardField(field) => Some(DefinitionTarget::StandardLibrarySymbol(

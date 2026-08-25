@@ -982,6 +982,13 @@ fn append_parameter_effect_dependencies(
                         .flat_map(|record| &record.fields)
                         .find(|candidate| candidate.id == *field)
                         .map(|field| field.name.as_str()),
+                    ResolvedMember::ManagedField(field) => context
+                        .syntax()
+                        .managed_class_declarations()
+                        .into_iter()
+                        .flat_map(|class| &class.fields)
+                        .find(|candidate| candidate.id == *field)
+                        .map(|field| field.name.as_str()),
                     ResolvedMember::StandardField(field) => {
                         Some(context.standard_library.field(*field).name)
                     }

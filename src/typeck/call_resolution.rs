@@ -1975,6 +1975,14 @@ impl Checker {
             Type::Known(_) if self.source_record_id(ty).is_some() => {
                 self.error(format!("unknown record field `{field}`"), span)
             }
+            Type::Known(id)
+                if matches!(
+                    self.inference.type_store().kind(id),
+                    TypeKind::ManagedClass(_)
+                ) =>
+            {
+                self.error(format!("unknown managed snapshot field `{field}`"), span)
+            }
             Type::Known(id) => {
                 let name = self.type_name(Type::Known(id));
                 self.error(format!("{name} has no field `{field}`"), span)
@@ -2053,6 +2061,39 @@ impl Checker {
                 .collect();
             let field_type = self.catalog_type(field.ty, &variables);
             return Some((field_type, ResolvedMember::StandardField(field.id)));
+        }
+        if let Type::Known(id) = ty
+            && let TypeKind::ManagedClass(class_id) = self.inference.type_store().kind(id)
+            && let Some(field) = self
+                .declarations
+                .managed_classes
+                .iter()
+                .find(|class| class.id == *class_id)
+                .and_then(|class| {
+                    class
+                        .fields
+                        .iter()
+                        .find(|item| !item.is_static && item.name == field)
+                })
+        {
+            let declared = self.syntax_type(field.ty);
+            let value = match declared {
+                Type::Known(declared_id)
+                    if matches!(
+                        self.inference.type_store().kind(declared_id),
+                        TypeKind::ManagedClass(_)
+                    ) =>
+                {
+                    let TypeKind::ManagedClass(class) =
+                        self.inference.type_store().kind(declared_id)
+                    else {
+                        unreachable!()
+                    };
+                    Type::Known(self.inference.type_store().id_for_managed_reference(*class))
+                }
+                _ => declared,
+            };
+            return Some((value, ResolvedMember::ManagedField(field.id)));
         }
         match self.source_record_id(ty) {
             Some(record_id) => self

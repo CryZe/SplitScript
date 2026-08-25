@@ -182,6 +182,7 @@ fn emit_aggregate_global_initializers(
         array_functions: lowering.array_functions,
         set_functions: lowering.set_functions,
         records: lowering.records,
+        managed_classes: lowering.managed_classes,
         enums: lowering.enums,
         arrays: lowering.arrays,
         memory: lowering.memory,

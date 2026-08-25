@@ -183,12 +183,14 @@ pub(super) struct DeclarationEnvironment {
     pub(super) debug_functions: HashSet<FunctionId>,
     pub(super) records: Vec<RecordDecl>,
     pub(super) enums: Vec<EnumDecl>,
+    pub(super) managed_classes: Vec<crate::ast::ManagedClassDecl>,
 }
 
 impl DeclarationEnvironment {
     pub(super) fn new(
         records: Vec<RecordDecl>,
         enums: Vec<EnumDecl>,
+        managed_classes: Vec<crate::ast::ManagedClassDecl>,
         debug_functions: HashSet<FunctionId>,
     ) -> Self {
         Self {
@@ -207,6 +209,7 @@ impl DeclarationEnvironment {
             debug_functions,
             records,
             enums,
+            managed_classes,
         }
     }
 }

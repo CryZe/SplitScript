@@ -264,6 +264,7 @@ pub enum ResolvedMember {
     StateField(ValueId),
     SettingField(ValueId),
     RecordField(RecordFieldId),
+    ManagedField(ManagedFieldId),
     StandardField(StdlibFieldId),
 }
 

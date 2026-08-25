@@ -1176,6 +1176,7 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
                     ResolvedMember::SettingField(setting) => Some(*setting),
                     ResolvedMember::StateField(_)
                     | ResolvedMember::RecordField(_)
+                    | ResolvedMember::ManagedField(_)
                     | ResolvedMember::StandardField(_) => None,
                 }));
             self.observed_record_fields
@@ -1183,6 +1184,7 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
                     ResolvedMember::RecordField(field) => Some(*field),
                     ResolvedMember::StateField(_)
                     | ResolvedMember::SettingField(_)
+                    | ResolvedMember::ManagedField(_)
                     | ResolvedMember::StandardField(_) => None,
                 }));
         };

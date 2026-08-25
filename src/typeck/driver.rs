@@ -175,6 +175,7 @@ fn initialize_checker(
         declarations: DeclarationEnvironment::new(
             records,
             enums,
+            managed_classes,
             program
                 .functions
                 .iter()

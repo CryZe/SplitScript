@@ -863,9 +863,12 @@ fn managed_class_types_use_the_source_symbol_graph() {
             }
             class GameManager {
                 static Player player;
+                /// The most recently captured point total.
+                i32 points;
             }
         }
         fn inspect(player: Player.Ref) {}
+        fn inspectSnapshot(manager: GameManager) -> i32 { return manager.points }
     "#;
     let mut database = CompilerDatabase::new(source);
     database.check().expect("managed type fixture should check");
@@ -893,6 +896,16 @@ fn managed_class_types_use_the_source_symbol_graph() {
 
     let edits = database.rename_at(parameter_type, "PlayerState").unwrap();
     assert_eq!(edits.len(), 3);
+
+    let field_declaration = source.find("i32 points").unwrap() + "i32 ".len();
+    let field_access = source.rfind("manager.points").unwrap() + "manager.".len();
+    assert!(matches!(
+        database.definition_at(field_access).unwrap(),
+        Some(splitscript::tooling::database::DefinitionTarget::Source(definition))
+            if matches!(definition.id, SourceDefinitionId::ManagedField(_))
+                && definition.span.start == field_declaration
+    ));
+    assert_eq!(database.references_at(field_access, true).unwrap().len(), 2);
 }
 
 #[test]

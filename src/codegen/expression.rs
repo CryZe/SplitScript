@@ -6,7 +6,10 @@ use wasm_encoder::{AbstractHeapType, BlockType, Function, HeapType, Instruction,
 
 use crate::{
     abi::AbiImportId,
-    ast::{ActionKind, BinaryOp, EnumDecl, ExprId, RangeKind, RecordDecl, ResultTypeId, ValueId},
+    ast::{
+        ActionKind, BinaryOp, EnumDecl, ExprId, ManagedClassDecl, RangeKind, RecordDecl,
+        ResultTypeId, ValueId,
+    },
     intrinsic_registry::RuntimeHelperId,
     memory::MemoryLayouts,
     semantic::{
@@ -30,7 +33,7 @@ use super::{
     emit_typed_struct_get, enum_variant_payload,
     global_plan::RuntimeGlobals,
     imports::Abi,
-    memarg,
+    managed_snapshot_field_type, memarg,
     memory_plan::AbiReadScratch,
     range_bound_type, record_field_type, resolved_intrinsic, result_value_type,
     runtime_helpers::emit_value_equality,
@@ -112,6 +115,7 @@ pub(super) struct ExprContext<'a> {
     pub array_functions: &'a super::ArrayFunctions,
     pub set_functions: &'a SetFunctions,
     pub records: &'a [RecordDecl],
+    pub managed_classes: &'a [ManagedClassDecl],
     pub enums: &'a [EnumDecl],
     pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,
@@ -2230,6 +2234,27 @@ fn emit_path_fields(
                     context.gc.index(Type::Record(record.id)),
                     field_index,
                     record_field_type(field.id, context.semantics),
+                )
+            }
+            ResolvedMember::ManagedField(field) => {
+                let (class, field_index, field) = context
+                    .managed_classes
+                    .iter()
+                    .find_map(|class| {
+                        class
+                            .fields
+                            .iter()
+                            .filter(|candidate| !candidate.is_static)
+                            .enumerate()
+                            .find(|(_, candidate)| candidate.id == *field)
+                            .map(|(index, field)| (class, index as u32, field))
+                    })
+                    .expect("resolved managed field belongs to a checked declaration");
+                debug_assert_eq!(current_type, Type::ManagedClass(class.id));
+                (
+                    context.gc.index(Type::ManagedClass(class.id)),
+                    field_index,
+                    managed_snapshot_field_type(field.id, context.semantics),
                 )
             }
         };

@@ -701,6 +701,9 @@ impl HighlightCollector<'_> {
                     ResolvedMember::RecordField(_) => {
                         (SemanticTokenKind::Property, MODIFIER_READONLY)
                     }
+                    ResolvedMember::ManagedField(_) => {
+                        (SemanticTokenKind::Property, MODIFIER_READONLY)
+                    }
                 };
                 self.insert(*span, kind, modifiers);
             }

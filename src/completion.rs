@@ -1329,17 +1329,20 @@ fn add_inferred_fields(
                 }
             }
         }
-        TypeKind::ManagedClass(id) | TypeKind::ManagedReference(id) => {
+        TypeKind::ManagedClass(id) => {
             if let Some(class) = syntax.managed_class(*id) {
-                for field in &class.fields {
-                    builder.add(simple_completion(
+                for field in class.fields.iter().filter(|field| !field.is_static) {
+                    let mut completion = simple_completion(
                         &field.name,
                         CompletionKind::Property,
-                        "managed class field",
-                    ));
+                        "managed snapshot field",
+                    );
+                    completion.documentation = field.documentation.clone();
+                    builder.add(completion);
                 }
             }
         }
+        TypeKind::ManagedReference(_) => {}
         TypeKind::Standard(owner) => {
             for field in standard_library.public_fields(*owner) {
                 builder.add(CompletionItem {

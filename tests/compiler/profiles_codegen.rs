@@ -161,12 +161,17 @@ fn reachable_managed_snapshot_types_have_gc_layouts() {
 
         state "game.exe" {}
 
-        fn keep(manager: GameManager) -> GameManager {
-            return manager
+        fn points(manager: GameManager) -> i32 {
+            return manager.points
+        }
+
+        fn player(manager: GameManager) -> Player.Ref {
+            return manager.player
         }
 
         setup {
-            let callback = keep
+            let pointsCallback = points
+            let playerCallback = player
         }
     "#;
 

@@ -909,6 +909,42 @@ fn managed_class_types_use_the_source_symbol_graph() {
 }
 
 #[test]
+fn managed_schema_metadata_aliases_reject_ambiguous_field_bindings() {
+    let source = r#"
+        image "Assembly-CSharp" {
+            class GameManager {
+                i32 points from "score";
+                i32 resets from ["deaths", "score"];
+            }
+        }
+        state "game.exe" {}
+    "#;
+
+    let diagnostics = splitscript::compile(source).expect_err("ambiguous metadata must fail");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic
+                .message
+                .contains("claimed by both `points` and `resets`")
+        })
+        .expect("the collision should identify both source fields");
+    assert_eq!(diagnostic.labels.len(), 2);
+    assert!(
+        diagnostic
+            .labels
+            .iter()
+            .any(|label| matches!(label.style, splitscript::DiagnosticLabelStyle::Primary))
+    );
+    assert!(
+        diagnostic
+            .labels
+            .iter()
+            .any(|label| matches!(label.style, splitscript::DiagnosticLabelStyle::Secondary))
+    );
+}
+
+#[test]
 fn rename_queries_validate_identifiers_reservations_and_binding_identity() {
     use splitscript::tooling::database::{CompilerDatabase, RenameError};
 

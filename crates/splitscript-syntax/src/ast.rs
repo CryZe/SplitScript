@@ -432,6 +432,25 @@ pub struct ManagedClassDecl {
     pub span: Span,
 }
 
+impl ManagedClassDecl {
+    /// Metadata names to probe for this class in declaration order.
+    ///
+    /// Omitting `from` makes the source declaration name the sole candidate.
+    pub fn metadata_name_candidates(&self) -> impl Iterator<Item = (&str, Span)> {
+        self.metadata_names
+            .values
+            .is_empty()
+            .then_some((self.name.as_str(), self.name_span))
+            .into_iter()
+            .chain(
+                self.metadata_names
+                    .values
+                    .iter()
+                    .map(|name| (name.value.as_str(), name.span)),
+            )
+    }
+}
+
 /// One alternative complete field shape for a managed class.
 #[derive(Debug, Clone)]
 pub struct ManagedLayoutDecl {
@@ -458,6 +477,25 @@ pub struct ManagedFieldDecl {
     pub documentation: Option<String>,
     pub metadata_names: ManagedMetadataNames,
     pub span: Span,
+}
+
+impl ManagedFieldDecl {
+    /// Metadata names to probe for this field in declaration order.
+    ///
+    /// Omitting `from` makes the source declaration name the sole candidate.
+    pub fn metadata_name_candidates(&self) -> impl Iterator<Item = (&str, Span)> {
+        self.metadata_names
+            .values
+            .is_empty()
+            .then_some((self.name.as_str(), self.name_span))
+            .into_iter()
+            .chain(
+                self.metadata_names
+                    .values
+                    .iter()
+                    .map(|name| (name.value.as_str(), name.span)),
+            )
+    }
 }
 
 /// Explicit metadata spellings supplied by `from`.

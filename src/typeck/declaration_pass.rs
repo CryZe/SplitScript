@@ -489,8 +489,15 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
 
     for class in program.managed_class_declarations() {
         let mut common_fields = HashSet::new();
+        let mut common_metadata_names = HashMap::new();
         for field in &class.fields {
-            collect_managed_field(checker, class.name.as_str(), field, &mut common_fields);
+            collect_managed_field(
+                checker,
+                class.name.as_str(),
+                field,
+                &mut common_fields,
+                &mut common_metadata_names,
+            );
         }
 
         let mut layouts = HashSet::new();
@@ -505,8 +512,15 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
                 );
             }
             let mut layout_fields = common_fields.clone();
+            let mut layout_metadata_names = common_metadata_names.clone();
             for field in &layout.fields {
-                collect_managed_field(checker, class.name.as_str(), field, &mut layout_fields);
+                collect_managed_field(
+                    checker,
+                    class.name.as_str(),
+                    field,
+                    &mut layout_fields,
+                    &mut layout_metadata_names,
+                );
             }
         }
     }
@@ -560,6 +574,7 @@ fn collect_managed_field(
     class_name: &str,
     field: &crate::ast::ManagedFieldDecl,
     fields: &mut HashSet<String>,
+    metadata_names: &mut HashMap<String, (String, Span)>,
 ) {
     let field_ty = checker.syntax_type(field.ty);
     checker
@@ -572,9 +587,9 @@ fn collect_managed_field(
         );
     }
 
-    let mut metadata_names = HashSet::new();
+    let mut candidate_names_seen = HashSet::new();
     for metadata_name in &field.metadata_names.values {
-        if !metadata_names.insert(metadata_name.value.clone()) {
+        if !candidate_names_seen.insert(metadata_name.value.clone()) {
             checker.error(
                 format!(
                     "duplicate metadata name `{}` for field `{}`",
@@ -582,6 +597,29 @@ fn collect_managed_field(
                 ),
                 metadata_name.span,
             );
+        }
+    }
+
+    for (candidate, span) in field.metadata_name_candidates() {
+        match metadata_names.entry(candidate.to_owned()) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert((field.name.clone(), span));
+            }
+            std::collections::hash_map::Entry::Occupied(entry) if entry.get().0 != field.name => {
+                let (first_field, first_span) = entry.get();
+                checker.errors.push(
+                    crate::Diagnostic::type_error(
+                        format!(
+                            "managed metadata name `{candidate}` is claimed by both `{first_field}` and `{}` in class `{class_name}`",
+                            field.name
+                        ),
+                        span,
+                    )
+                    .with_primary_label("this metadata name is ambiguous")
+                    .with_secondary_label(*first_span, "the first field claims the same name"),
+                );
+            }
+            std::collections::hash_map::Entry::Occupied(_) => {}
         }
     }
 }

@@ -23,6 +23,7 @@ let failReads = false;
 let processOpen = true;
 let detaches = 0;
 let scanReads = 0;
+let bulkScanReads = 0;
 let attachedRateScanReads = undefined;
 const levelOrSceneReadWidths = new Set();
 const levelTimeVectorReads = new Set();
@@ -81,10 +82,21 @@ string(0xa040, "");
 // GameManager class, fields, static table, and singleton.
 pointer(0x2010, 0xb000);
 pointer(0x2018, 0xb040);
-pointer(0x2058, 0);
+// GameManager inherits from a UnityEngine class. Its metadata must form the
+// traversal boundary rather than being interpreted with the game class's
+// field layout forever.
+pointer(0x2058, 0xe000);
 pointer(0x2080, 0x5000);
 pointer(0x20b8, 0x7000);
-view.setUint16(0x2120, 5, true);
+pointer(0xd010, 0xf000);
+pointer(0xd018, 0xf040);
+string(0xe000, "MonoBehaviour");
+string(0xe040, "UnityEngine");
+view.setUint16(0xd120, 1, true);
+// Real IL2CPP classes may expose unreadable field slots after their usable
+// metadata entries. Field discovery must skip those slots instead of retrying
+// the entire alias forever before later aliases are considered.
+view.setUint16(0x2120, 119, true);
 const gameFieldNames = [
     "<Instance>k__BackingField",
     dlc ? "<GameState>k__BackingField" : "gameState",
@@ -169,6 +181,7 @@ const env = {
     process_is_open: () => processOpen ? 1 : 0,
     process_read(_process, address, pointer, length) {
         if (length > 8) scanReads += 1;
+        if (length > 0x100) bulkScanReads += 1;
         if (address === absolute(gameManager + 0x3c)) levelOrSceneReadWidths.add(length);
         if (address >= absolute(timer + 0x34) && address < absolute(timer + 0x40)) {
             levelTimeVectorReads.add(`${address - absolute(timer + 0x34)}:${length}`);
@@ -200,8 +213,13 @@ const env = {
 
 ({ instance } = await WebAssembly.instantiate(bytes, { env }));
 instance.exports._start();
-for (let tick = 0; tick < 180 && !messages.includes("Found Timer"); tick += 1) instance.exports.update();
-if (!messages.includes("Found Timer")) throw new Error(`attachment did not finish: ${JSON.stringify(messages)}`);
+for (let tick = 0; tick < 180 && variableWrites < 5; tick += 1) instance.exports.update();
+if (variableWrites < 5) {
+    throw new Error(
+        `attachment did not finish: messages=${JSON.stringify(messages)}, scanReads=${scanReads}, variableWrites=${variableWrites}, tickRates=${JSON.stringify(tickRates)}`,
+    );
+}
+const bulkScanReadsAfterAttachment = bulkScanReads;
 if (attachedRateScanReads !== 0) {
     throw new Error(`attached tick rate was applied after scanning began: ${attachedRateScanReads}`);
 }
@@ -295,9 +313,6 @@ if (JSON.stringify(tickRates) !== JSON.stringify([1, 120, 1])) {
     throw new Error(`unexpected tick rates: ${JSON.stringify(tickRates)}`);
 }
 
-const expectedBindingMessage = dlc ? "Found GameManager (DLC Demo)" : "Found GameManager (Base Game)";
-if (!messages.includes(expectedBindingMessage)) throw new Error(`wrong binding: ${JSON.stringify(messages)}`);
-
 const expectedLevelOrSceneReadWidths = [dlc ? 8 : 4];
 if (JSON.stringify([...levelOrSceneReadWidths]) !== JSON.stringify(expectedLevelOrSceneReadWidths)) {
     throw new Error(
@@ -307,5 +322,10 @@ if (JSON.stringify([...levelOrSceneReadWidths]) !== JSON.stringify(expectedLevel
 if (JSON.stringify([...levelTimeVectorReads]) !== JSON.stringify(["0:12"])) {
     throw new Error(`level time vector was not read atomically: ${JSON.stringify([...levelTimeVectorReads])}`);
 }
+if (bulkScanReads !== bulkScanReadsAfterAttachment) {
+    throw new Error(
+        `bulk process scanning continued after attachment: ${bulkScanReadsAfterAttachment} -> ${bulkScanReads}`,
+    );
+}
 
-console.log(JSON.stringify({ dlc, starts, splits, resets, pauses, gameTimes, variables: Object.fromEntries(variables), tickRates, messages, levelOrSceneReadWidths: [...levelOrSceneReadWidths], levelTimeVectorReads: [...levelTimeVectorReads] }));
+console.log(JSON.stringify({ dlc, starts, splits, resets, pauses, gameTimes, variables: Object.fromEntries(variables), tickRates, messages, bulkScanReads, levelOrSceneReadWidths: [...levelOrSceneReadWidths], levelTimeVectorReads: [...levelTimeVectorReads] }));

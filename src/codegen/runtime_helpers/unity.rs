@@ -19,6 +19,39 @@ const LOOKUP_RETRY: i32 = 0;
 const LOOKUP_MISSING: i32 = 1;
 const LOOKUP_FOUND: i32 = 2;
 
+/// Stops the surrounding class traversal when the remote C string exactly
+/// matches an internal IL2CPP boundary name. A failed metadata read also ends
+/// traversal, matching ASR's best-effort parent iterator.
+fn emit_break_if_c_string_equals_literal(
+    function: &mut Function,
+    abi: &Abi,
+    abi_read: AbiReadScratch,
+    process: u32,
+    address: u32,
+    expected: &[u8],
+    break_depth: u32,
+) {
+    let length = expected.len() + 1;
+    function
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::I32Const(abi_read.start()))
+        .instruction(&Instruction::I32Const(length as i32))
+        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::BrIf(break_depth))
+        .instruction(&Instruction::I32Const(1));
+    for (index, byte) in expected.iter().copied().chain([0]).enumerate() {
+        function
+            .instruction(&Instruction::I32Const(abi_read.start() + index as i32))
+            .instruction(&Instruction::I32Load8U(memarg()))
+            .instruction(&Instruction::I32Const(byte as i32))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::I32And);
+    }
+    function.instruction(&Instruction::BrIf(break_depth));
+}
+
 pub(super) fn compile_c_string_eq(abi: &Abi, gc: &GcLayout, c_string: ScratchRegion) -> Function {
     let c_string_start = c_string.start();
     let mut function = Function::new([(1, ValType::I32)]);
@@ -678,6 +711,61 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::LocalGet(current))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::BrIf(1))
+        // ASR only walks user-defined inheritance. UnityEngine base classes
+        // use metadata shapes outside the game image and must not be scanned
+        // as though they were another managed game class.
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(current))
+        .instruction(&Instruction::I64Const(
+            OBJECT_LAYOUT.class_name_offset as i64,
+        ))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::I32Const(abi_read.destination(POINTER_SIZE)))
+        .instruction(&Instruction::I32Const(POINTER_SIZE as i32))
+        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::I32Const(abi_read.start()))
+        .instruction(&Instruction::I64Load(memarg()))
+        .instruction(&Instruction::LocalTee(name_ptr))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::BrIf(1));
+    emit_break_if_c_string_equals_literal(
+        &mut function,
+        abi,
+        abi_read,
+        process,
+        name_ptr,
+        b"Object",
+        1,
+    );
+    function
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(current))
+        .instruction(&Instruction::I64Const(
+            OBJECT_LAYOUT.class_namespace_offset as i64,
+        ))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::I32Const(abi_read.destination(POINTER_SIZE)))
+        .instruction(&Instruction::I32Const(POINTER_SIZE as i32))
+        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::I32Const(abi_read.start()))
+        .instruction(&Instruction::I64Load(memarg()))
+        .instruction(&Instruction::LocalTee(name_ptr))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::BrIf(1));
+    emit_break_if_c_string_equals_literal(
+        &mut function,
+        abi,
+        abi_read,
+        process,
+        name_ptr,
+        b"UnityEngine",
+        1,
+    );
+    function
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(current))
         .instruction(&Instruction::LocalGet(field_count_offset))
@@ -742,6 +830,11 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::LocalGet(count))
         .instruction(&Instruction::I64GeU)
         .instruction(&Instruction::BrIf(1))
+        // Match ASR's field iterator: an individual unreadable metadata entry
+        // is not evidence that the class itself is unavailable. Skip that
+        // entry and keep traversing the remaining declared slots. Structural
+        // reads and the offset of an entry whose name matched still retry.
+        .instruction(&Instruction::Block(BlockType::Empty))
         .instruction(&Instruction::LocalGet(fields))
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::I64Const(OBJECT_LAYOUT.field_stride as i64))
@@ -758,20 +851,12 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::I32Const(POINTER_SIZE as i32))
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
         .instruction(&Instruction::I32Eqz)
-        .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
-        .instruction(&Instruction::I64Const(0))
-        .instruction(&Instruction::Return)
-        .instruction(&Instruction::End)
+        .instruction(&Instruction::BrIf(0))
         .instruction(&Instruction::I32Const(abi_read.start()))
         .instruction(&Instruction::I64Load(memarg()))
         .instruction(&Instruction::LocalTee(name_ptr))
         .instruction(&Instruction::I64Eqz)
-        .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
-        .instruction(&Instruction::I64Const(0))
-        .instruction(&Instruction::Return)
-        .instruction(&Instruction::End)
+        .instruction(&Instruction::BrIf(0))
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(name_ptr))
         .instruction(&Instruction::LocalGet(expected_name))
@@ -783,11 +868,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::LocalTee(comparison))
         .instruction(&Instruction::I32Const(-1))
         .instruction(&Instruction::I32Eq)
-        .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
-        .instruction(&Instruction::I64Const(0))
-        .instruction(&Instruction::Return)
-        .instruction(&Instruction::End)
+        .instruction(&Instruction::BrIf(0))
         .instruction(&Instruction::LocalGet(comparison))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
@@ -798,11 +879,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::LocalTee(comparison))
         .instruction(&Instruction::I32Const(-1))
         .instruction(&Instruction::I32Eq)
-        .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
-        .instruction(&Instruction::I64Const(0))
-        .instruction(&Instruction::Return)
-        .instruction(&Instruction::End)
+        .instruction(&Instruction::BrIf(1))
         .instruction(&Instruction::LocalGet(comparison))
         .instruction(&Instruction::Else)
         .instruction(&Instruction::I32Const(1))
@@ -836,6 +913,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::I32Const(LOOKUP_FOUND))
         .instruction(&Instruction::LocalGet(encoded))
         .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::I64Const(1))

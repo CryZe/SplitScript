@@ -23,7 +23,7 @@ image "Assembly-CSharp" {
         /// The live game-manager singleton.
         static GameManager instance from "Instance";
         /// The current high-level game state.
-        i32 gameState from ["gameState", "GameState"];
+        i32 gameState from ["gameState", "<GameState>k__BackingField"];
         /// Points collected in this run.
         u32 points from "_points";
         /// Deaths accumulated in this run.

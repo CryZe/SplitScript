@@ -487,6 +487,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         debug_recorder.as_ref(),
     );
     let managed = crate::managed::ManagedBindingPlan::build(program, semantics);
+    let explicit_layout_selection = crate::layout_selection::has_explicit_layout_return(program);
     let lowering = EmissionContext {
         standard_library: &standard_library,
         reachability: &reachability,
@@ -518,6 +519,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         wasm_ir,
         gc: &gc,
         async_frames: &async_frames,
+        explicit_layout_selection,
         debug: debug_recorder.as_ref(),
     };
     let runtime = AttachContext {
@@ -587,6 +589,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         runtime_globals,
         semantics,
         managed: &managed,
+        explicit_layout_selection,
         globals: &global_indices,
         global_types: &global_types,
         attachment_globals: &attachment_globals,

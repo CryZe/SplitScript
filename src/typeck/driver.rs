@@ -186,6 +186,7 @@ fn initialize_checker(
         inference,
         provider_value,
         layout_value: program.state.as_ref().and_then(|state| state.layout_value),
+        layout_available_in_on_attach: false,
         active_state_layout: None,
         active_layout_constraints: std::collections::HashMap::new(),
         scopes: Vec::new(),

@@ -719,6 +719,13 @@ fn generalize_component(checker: &mut Checker, functions: &[FunctionId]) {
 }
 
 fn check_action_bodies(checker: &mut Checker, program: &Program) {
+    let explicit_attachment_layout = crate::layout_selection::has_explicit_layout_return(program);
+    let automatic_attachment_layout = !explicit_attachment_layout
+        && matches!(
+            automatic_layout_selection(checker, program),
+            crate::layout_selection::AutomaticLayoutSelection::Available(_)
+        );
+    checker.layout_available_in_on_attach = automatic_attachment_layout;
     let mut actions = HashSet::new();
     for action in &program.actions {
         if !actions.insert(action.kind) {
@@ -728,7 +735,8 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
             );
             continue;
         }
-        let return_ty = action_return_type(checker, program, action.kind);
+        let return_ty =
+            action_return_type(checker, program, action.kind, automatic_attachment_layout);
         checker.with_callable_context(
             CallableContext::Action(action.kind),
             return_ty,
@@ -740,10 +748,10 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
             },
         );
         if action.kind == ActionKind::OnAttach
-            && program
-                .state
-                .as_ref()
-                .is_some_and(|state| state.layout.is_some() || !state.layouts.is_empty())
+            && program.state.as_ref().is_some_and(|state| {
+                !state.layouts.is_empty()
+                    || (state.layout.is_some() && !automatic_attachment_layout)
+            })
             && !block_is_terminal(checker, &action.body)
         {
             let mut diagnostic = Diagnostic::type_error(
@@ -777,28 +785,84 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
             checker.errors.push(diagnostic);
         }
     }
-    if let Some(state) = program
-        .state
-        .as_ref()
-        .filter(|state| state.layout.is_some() || !state.layouts.is_empty())
-        && !actions.contains(&ActionKind::OnAttach)
-    {
-        checker
-            .errors
-            .push(missing_layout_selector_diagnostic(state));
+    if let Some(state) = program.state.as_ref() {
+        let missing_named = !state.layouts.is_empty() && !actions.contains(&ActionKind::OnAttach);
+        let missing_dimensions =
+            state.layout.is_some() && !automatic_attachment_layout && !explicit_attachment_layout;
+        if missing_named || missing_dimensions {
+            let selection = automatic_layout_selection(checker, program);
+            checker
+                .errors
+                .push(missing_layout_selector_diagnostic(state, &selection));
+        }
     }
 }
 
-fn missing_layout_selector_diagnostic(state: &StateDecl) -> Diagnostic {
+fn automatic_layout_selection(
+    checker: &mut Checker,
+    program: &Program,
+) -> crate::layout_selection::AutomaticLayoutSelection {
+    let mut enum_by_dimension = HashMap::new();
+    if let Some(layout) = program
+        .state
+        .as_ref()
+        .and_then(|state| state.layout.as_ref())
+    {
+        let record = &program.records[layout.record.index()];
+        for field in &record.fields {
+            let ty = checker.syntax_type(field.ty);
+            let Type::Known(ty) = checker.shallow_type(ty) else {
+                continue;
+            };
+            if let crate::types::TypeKind::Enum(enumeration) =
+                checker.inference.type_store().kind(ty)
+            {
+                enum_by_dimension.insert(field.id, *enumeration);
+            }
+        }
+    }
+    let selection = crate::layout_selection::automatic_layout_selection_with(
+        program,
+        |field| enum_by_dimension.get(&field).copied(),
+        |field| {
+            checker
+                .declarations
+                .conditional_managed_fields
+                .get(&field)
+                .into_iter()
+                .flatten()
+                .map(|constraint| (constraint.dimension, constraint.variant))
+                .collect()
+        },
+    );
+    if let crate::layout_selection::AutomaticLayoutSelection::Available(plan) = &selection
+        && !plan.evidence_fields.is_empty()
+        && checker.resolutions.state_provider() != Some(crate::stdlib::StdlibStateProviderId::Unity)
+    {
+        crate::layout_selection::AutomaticLayoutSelection::RequiresExplicit(
+            crate::layout_selection::ExplicitSelectionReason::EvidenceUnavailable,
+        )
+    } else {
+        selection
+    }
+}
+
+fn missing_layout_selector_diagnostic(
+    state: &StateDecl,
+    selection: &crate::layout_selection::AutomaticLayoutSelection,
+) -> Diagnostic {
     if state.layout.is_some() {
-        return Diagnostic::type_error(
+        let mut diagnostic = Diagnostic::type_error(
             "layout dimensions require an `onAttach` block that returns the selected `Layout`",
             state.span,
         )
-        .with_primary_label("these dimensions need an explicit attach-time value")
-        .with_note(
-            "construct `Layout { ... }` after identifying the attached build; automatic provider constraints will be able to supply dimensions in a later implementation slice",
-        );
+        .with_primary_label("these dimensions need an explicit attach-time value");
+        if let crate::layout_selection::AutomaticLayoutSelection::RequiresExplicit(reason) =
+            selection
+        {
+            diagnostic = diagnostic.with_note(reason.note());
+        }
+        return diagnostic;
     }
     let diagnostic = Diagnostic::type_error(
         "named state layouts require an `onAttach` block that returns the selected layout",
@@ -905,7 +969,12 @@ fn expression_is_never(checker: &mut Checker, expression: &crate::ast::Expr) -> 
         .is_some_and(|ty| checker.is_never_type(ty))
 }
 
-fn action_return_type(checker: &Checker, program: &Program, action: ActionKind) -> Type {
+fn action_return_type(
+    checker: &Checker,
+    program: &Program,
+    action: ActionKind,
+    automatic_attachment_layout: bool,
+) -> Type {
     match action {
         ActionKind::Setup | ActionKind::OnDetach | ActionKind::OnStateReady => {
             checker.core_type(CoreTypeId::None)
@@ -913,7 +982,9 @@ fn action_return_type(checker: &Checker, program: &Program, action: ActionKind) 
         ActionKind::OnAttach => program.state.as_ref().map_or_else(
             || checker.core_type(CoreTypeId::None),
             |state| {
-                if let Some(layout) = &state.layout {
+                if automatic_attachment_layout {
+                    checker.core_type(CoreTypeId::None)
+                } else if let Some(layout) = &state.layout {
                     checker.record_type(layout.record)
                 } else if let Some(enumeration) = &state.layout_enum {
                     checker.enum_type(crate::types::EnumTypeId::Source(enumeration.id))

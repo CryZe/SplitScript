@@ -44,6 +44,77 @@ fn attachment_layout_dimensions_are_an_ordinary_typed_global_record() {
 }
 
 #[test]
+fn managed_metadata_can_select_multiple_attachment_dimensions_automatically() {
+    let source = r#"
+        enum Edition { Base, Demo }
+        enum Storefront { Steam, GOG }
+
+        image "Assembly-CSharp" {
+            class GameManager {
+                if layout.edition == Edition.Base && layout.storefront == Storefront.Steam {
+                    u32 baseSteamMarker;
+                }
+                if layout.edition == Edition.Base && layout.storefront == Storefront.GOG {
+                    u32 baseGogMarker;
+                }
+                if layout.edition == Edition.Demo && layout.storefront == Storefront.Steam {
+                    u32 demoSteamMarker;
+                }
+                if layout.edition == Edition.Demo && layout.storefront == Storefront.GOG {
+                    u32 demoGogMarker;
+                }
+            }
+        }
+
+        state Unity ["game.exe"] {
+            layout {
+                edition: Edition,
+                storefront: Storefront,
+            }
+        }
+
+        onAttach {
+            print(layout.edition)
+        }
+
+        whileAttached {
+            if layout.edition == Edition.Base {
+                print("base")
+            }
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("distinct managed presence patterns should select every dimension");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("automatic multi-dimensional layout selection should emit valid Wasm");
+}
+
+#[test]
+fn automatic_layout_selection_requires_distinguishable_metadata_evidence() {
+    let source = r#"
+        enum Edition { Base, Demo }
+        image "Assembly-CSharp" {
+            class GameManager {
+                u32 marker;
+            }
+        }
+        state Unity ["game.exe"] {
+            layout { edition: Edition }
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("unconditional metadata cannot identify either layout");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("do not distinguish every layout combination"))
+    }));
+}
+
+#[test]
 fn attachment_layout_dimensions_require_nonempty_source_enum_fields() {
     let non_enum = r#"
         state "game.exe" {

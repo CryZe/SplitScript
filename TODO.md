@@ -94,7 +94,7 @@ to inference or code generation.
     report zero or multiple runtime matches against the responsible source
     aliases. A missing candidate must be distinguishable from a transient
     process-memory failure so layout discovery cannot retry forever.
-- [ ] Replace independent state and managed-class layouts with one
+- [x] Replace independent state and managed-class layouts with one
   attachment-wide `layout: Layout` record composed from explicitly declared,
   enum-valued dimensions such as edition, storefront, renderer, or build.
   Matching one dimension refines every state field, managed field, snapshot,
@@ -113,14 +113,15 @@ to inference or code generation.
     those predicates once, reject runtime-dependent conditions, and use the
     same predicate representation for member availability, control-flow
     refinement, binding, diagnostics, and code generation.
-  - [ ] Make managed schema probes contribute constraints to the global layout
-    dimensions. Probe results now preserve both offsets and presence, and an
-    explicit `onAttach` selection is validated once before polling; a
-    contradiction rejects that process for the remainder of its lifetime.
-    Next, select automatically when the complete program leaves one assignment
-    and diagnose zero or ambiguous assignments with labels on the declarations
-    that supplied the constraints. Do not eagerly enumerate an unbounded
-    cartesian product of dimensions.
+  - [x] Make managed schema probes contribute constraints to the global layout
+    dimensions. Probe results preserve both offsets and presence. When the
+    complete set of conditional fields gives every bounded layout combination
+    a distinct exact presence pattern, attachment selects the generated
+    `Layout` automatically before user `onAttach` code runs. Otherwise require
+    an explicit `onAttach` return and explain why automatic selection is not
+    decisive. The compiler bounds the product rather than eagerly enumerating
+    an unbounded cartesian product, and a failed automatic match rejects that
+    process for the remainder of its lifetime.
   - [x] Remove generated `<Class>.Layout` enums, `<Class>.layout` values, and
     per-class public refinement. If a genuinely observable class-only schema
     distinction is needed, declare it as another global dimension; if the

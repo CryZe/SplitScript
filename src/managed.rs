@@ -22,6 +22,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct ManagedBindingPlan {
     pub classes: Vec<ManagedClassBinding>,
+    pub automatic_layout: Option<crate::layout_selection::LayoutSelectionPlan>,
 }
 
 /// One nominal managed class together with its metadata ownership path.
@@ -91,7 +92,16 @@ impl ManagedBindingPlan {
                 semantics,
             );
         }
-        Self { classes }
+        let automatic_layout =
+            match crate::layout_selection::automatic_layout_selection(program, semantics) {
+                crate::layout_selection::AutomaticLayoutSelection::Available(plan) => Some(plan),
+                crate::layout_selection::AutomaticLayoutSelection::NotDeclared
+                | crate::layout_selection::AutomaticLayoutSelection::RequiresExplicit(_) => None,
+            };
+        Self {
+            classes,
+            automatic_layout,
+        }
     }
 }
 

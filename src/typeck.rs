@@ -159,6 +159,7 @@ struct Checker {
     inference: InferenceContext,
     provider_value: Option<(StdlibStateProviderId, Type)>,
     layout_value: Option<ValueId>,
+    layout_available_in_on_attach: bool,
     active_state_layout: Option<crate::ast::EnumVariantId>,
     active_layout_constraints: HashMap<crate::ast::RecordFieldId, crate::ast::EnumVariantId>,
     scopes: Vec<HashMap<String, Binding>>,

@@ -17,6 +17,10 @@ use super::{
     state_storage_index, value_type,
 };
 
+const ATTACH_READY: i32 = 1;
+const ATTACH_REJECTED: i32 = 2;
+const ATTACH_LAYOUT_SELECTED: i32 = 3;
+
 /// Per-tick runtime view of the completed backend plans.
 pub(super) struct UpdateContext<'a> {
     pub standard_library: &'a crate::stdlib::StandardLibrary,
@@ -25,6 +29,7 @@ pub(super) struct UpdateContext<'a> {
     pub runtime_globals: RuntimeGlobals,
     pub semantics: &'a crate::semantic::SemanticModel,
     pub managed: &'a crate::managed::ManagedBindingPlan,
+    pub explicit_layout_selection: bool,
     pub globals: &'a HashMap<ValueId, u32>,
     pub global_types: &'a HashMap<ValueId, Type>,
     pub attachment_globals: &'a [ValueId],
@@ -308,7 +313,58 @@ pub(super) fn compile_update(
             .instruction(&Instruction::End);
     }
 
-    if let Some(on_attach) = actions.get(&ActionKind::OnAttach) {
+    let automatic_layout = if lowering.explicit_layout_selection {
+        None
+    } else {
+        lowering.managed.automatic_layout.as_ref().filter(|plan| {
+            plan.evidence_fields.is_empty()
+                || semantics.state_provider() == Some(crate::stdlib::StdlibStateProviderId::Unity)
+        })
+    };
+    if let Some(plan) = automatic_layout {
+        function
+            .instruction(&Instruction::GlobalGet(globals.attach_ready))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::If(BlockType::Empty));
+        emit_automatic_layout_selection(&mut function, program, plan, lowering);
+        function
+            .instruction(&Instruction::GlobalGet(
+                globals
+                    .selected_layout
+                    .expect("automatic layout selection has global storage"),
+            ))
+            .instruction(&Instruction::RefIsNull)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::I32Const(ATTACH_REJECTED))
+            .instruction(&Instruction::GlobalSet(globals.attach_ready))
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::I32Const(
+                if actions.contains_key(&ActionKind::OnAttach) {
+                    ATTACH_LAYOUT_SELECTED
+                } else {
+                    ATTACH_READY
+                },
+            ))
+            .instruction(&Instruction::GlobalSet(globals.attach_ready))
+            .instruction(&Instruction::End);
+        if let Some(on_attach) = actions.get(&ActionKind::OnAttach) {
+            function
+                .instruction(&Instruction::GlobalGet(globals.attach_ready))
+                .instruction(&Instruction::I32Const(ATTACH_LAYOUT_SELECTED))
+                .instruction(&Instruction::I32Eq)
+                .instruction(&Instruction::If(BlockType::Empty))
+                .instruction(&Instruction::GlobalGet(globals.process))
+                .instruction(&Instruction::Call(*on_attach))
+                .instruction(&Instruction::I32Eqz)
+                .instruction(&Instruction::If(BlockType::Empty))
+                .instruction(&Instruction::Return)
+                .instruction(&Instruction::End)
+                .instruction(&Instruction::I32Const(ATTACH_READY))
+                .instruction(&Instruction::GlobalSet(globals.attach_ready))
+                .instruction(&Instruction::End);
+        }
+    } else if let Some(on_attach) = actions.get(&ActionKind::OnAttach) {
         function
             .instruction(&Instruction::GlobalGet(globals.attach_ready))
             .instruction(&Instruction::I32Eqz)
@@ -321,7 +377,7 @@ pub(super) fn compile_update(
             .instruction(&Instruction::End);
         emit_managed_field_presence_validation(&mut function, program, lowering);
         function
-            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::I32Const(ATTACH_READY))
             .instruction(&Instruction::GlobalSet(globals.attach_ready))
             .instruction(&Instruction::End);
     }
@@ -332,7 +388,7 @@ pub(super) fn compile_update(
     // user attachment code or polling an invalid schema.
     function
         .instruction(&Instruction::GlobalGet(globals.attach_ready))
-        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::I32Const(ATTACH_REJECTED))
         .instruction(&Instruction::I32Eq)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::Return)
@@ -647,7 +703,7 @@ fn emit_managed_field_presence_validation(
                 function
                     .instruction(&Instruction::I32Eqz)
                     .instruction(&Instruction::If(BlockType::Empty))
-                    .instruction(&Instruction::I32Const(2))
+                    .instruction(&Instruction::I32Const(ATTACH_REJECTED))
                     .instruction(&Instruction::GlobalSet(
                         lowering.runtime_globals.attach_ready,
                     ))
@@ -656,6 +712,93 @@ fn emit_managed_field_presence_validation(
             }
             function.instruction(&Instruction::End);
         }
+    }
+}
+
+fn emit_automatic_layout_selection(
+    function: &mut Function,
+    program: &Program,
+    plan: &crate::layout_selection::LayoutSelectionPlan,
+    lowering: &UpdateContext<'_>,
+) {
+    use crate::stdlib::{MANAGED_BINDINGS_TYPE, managed_field_presence_name};
+
+    let bindings = (!plan.evidence_fields.is_empty()).then(|| {
+        let global = lowering
+            .runtime_globals
+            .provider_preparation_value
+            .expect("managed layout evidence has provider preparation storage");
+        let record = program
+            .records
+            .iter()
+            .find(|record| record.name == MANAGED_BINDINGS_TYPE)
+            .expect("managed layout evidence has generated bindings");
+        (global, record)
+    });
+    let layout = program
+        .state
+        .as_ref()
+        .and_then(|state| state.layout.as_ref())
+        .expect("automatic selection has attachment layout dimensions");
+    let selected = lowering
+        .runtime_globals
+        .selected_layout
+        .expect("automatic selection has layout storage");
+
+    for candidate in &plan.candidates {
+        if let Some((bindings_global, bindings_record)) = bindings {
+            for (index, field) in plan.evidence_fields.iter().enumerate() {
+                let name = managed_field_presence_name(field.index());
+                let (field_index, declaration) = bindings_record
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, candidate)| candidate.name == name)
+                    .expect("layout evidence has generated presence storage");
+                let field_type = record_field_type(declaration.id, lowering.semantics);
+                function
+                    .instruction(&Instruction::GlobalGet(bindings_global))
+                    .instruction(&Instruction::RefAsNonNull);
+                emit_typed_struct_get(
+                    function,
+                    lowering.gc.index(Type::Record(bindings_record.id)),
+                    field_index as u32,
+                    field_type,
+                );
+                if !candidate.present_fields.contains(field) {
+                    function.instruction(&Instruction::I32Eqz);
+                }
+                if index != 0 {
+                    function.instruction(&Instruction::I32And);
+                }
+            }
+        } else {
+            function.instruction(&Instruction::I32Const(1));
+        }
+        function.instruction(&Instruction::If(BlockType::Empty));
+        for (dimension, variant) in plan.dimensions.iter().zip(&candidate.variants) {
+            let enumeration = program
+                .enum_declaration(dimension.enumeration)
+                .expect("layout dimension enum belongs to the source program");
+            let variant_index = enumeration
+                .variants
+                .iter()
+                .position(|candidate| candidate.id == *variant)
+                .expect("layout candidate uses a declared variant");
+            function.instruction(&Instruction::I32Const(variant_index as i32));
+            for _ in &enumeration.variants {
+                function.instruction(&Instruction::I32Const(0));
+            }
+            function.instruction(&Instruction::StructNew(
+                lowering.gc.index(Type::Enum(enumeration.id)),
+            ));
+        }
+        function
+            .instruction(&Instruction::StructNew(
+                lowering.gc.index(Type::Record(layout.record)),
+            ))
+            .instruction(&Instruction::GlobalSet(selected))
+            .instruction(&Instruction::End);
     }
 }
 

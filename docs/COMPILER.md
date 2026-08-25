@@ -679,6 +679,14 @@ standard-library source body. Compiler-start validation and architecture tests
 reject malformed, duplicated, misaligned, incomplete, or redeclared backend
 layout facts before an emitter can silently drift.
 
+[`src/layout_selection.rs`](../src/layout_selection.rs) derives the bounded,
+backend-independent decision plan for attachment-wide layout dimensions.
+Conditional managed fields contribute exact presence evidence. The same plan
+drives semantic validation and Wasm emission, so automatic selection cannot
+silently disagree with the conditions used for member refinement. Payload
+dimensions, indistinguishable evidence, unavailable provider probes, and
+oversized products retain explicit user selection through [`onAttach`].
+
 [`src/codegen/dependencies.rs`](../src/codegen/dependencies.rs) scans resolved
 standard-library calls in Wasm IR and closes descriptor-declared helper and ABI
 dependencies transitively. The first consumer is static-data planning: Unity's

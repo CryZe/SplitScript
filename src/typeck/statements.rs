@@ -694,6 +694,7 @@ impl Checker {
         let binding = self.binding(name)?;
         if binding.id == self.layout_value
             && matches!(self.callable, CallableContext::Action(ActionKind::OnAttach))
+            && !self.layout_available_in_on_attach
         {
             self.error(
                 "`layout` is only available after `onAttach` has returned it",

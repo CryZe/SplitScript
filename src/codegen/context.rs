@@ -58,6 +58,7 @@ pub(super) struct EmissionContext<'a> {
     pub wasm_ir: &'a wasm_ir::Program,
     pub gc: &'a GcLayout,
     pub async_frames: &'a super::async_frame::AsyncFrameLayouts,
+    pub explicit_layout_selection: bool,
     pub debug: Option<&'a DebugRecorder>,
 }
 

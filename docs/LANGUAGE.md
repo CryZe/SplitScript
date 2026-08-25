@@ -148,7 +148,8 @@ same-named field with a conflicting type remains specific to its layout.
 
 When several independent build facts affect state fields, managed classes, or
 both, declare those facts once in an unnamed `layout` block. Every dimension is
-an enum, and [`onAttach`] returns the generated `Layout` record:
+an enum. You can always select the generated `Layout` record explicitly in
+[`onAttach`]:
 
 ```splitscript
 enum Edition {
@@ -192,6 +193,10 @@ image "Assembly-CSharp" {
         if layout.edition == Edition.BaseGame {
             u32 level;
         }
+
+        if layout.edition == Edition.Demo {
+            u32 scene;
+        }
     }
 }
 
@@ -203,11 +208,18 @@ whileAttached {
 }
 ```
 
+If conditional managed fields give each possible dimension combination a
+unique presence pattern, attachment selects `layout` automatically before user
+[`onAttach`] code runs. In that case `onAttach` need not return a `Layout` and
+can already read `layout`.
+
 Dimensions are independent, so an edition and storefront do not require a
 cartesian product of public variants. Managed classes do not create their own
 layout types or selectors. A class-only distinction that affects its public
 fields is another attachment-wide dimension; metadata spellings that preserve
-the public shape stay private binding alternatives.
+the public shape stay private binding alternatives. If the managed metadata
+cannot uniquely identify every combination, [`onAttach`] must instead return
+`Layout { ... }` explicitly after checking the remaining build facts.
 
 Named state layouts remain the concise form when one choice selects an entire
 native memory shape:

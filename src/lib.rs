@@ -29,6 +29,7 @@ mod inlay_hints;
 mod insight;
 mod intrinsic_registry;
 mod language;
+mod layout_selection;
 mod lexer;
 mod lsp;
 mod managed;

@@ -1902,8 +1902,9 @@ fn compile_suspension_poll(
                         .runtime_helpers
                         .function(RuntimeHelperId::UnityGetFieldAny),
                 ))
-                .instruction(&Instruction::LocalTee(unity_field_local))
-                .instruction(&Instruction::RefIsNull)
+                .instruction(&Instruction::LocalSet(unity_field_local))
+                .instruction(&Instruction::I32Const(2))
+                .instruction(&Instruction::I32Ne)
                 .instruction(&Instruction::If(BlockType::Empty))
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
@@ -1912,6 +1913,47 @@ fn compile_suspension_poll(
                 context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(unity_field_local))
+                    .instruction(&Instruction::StructSet {
+                        struct_type_index: context.locals.frame().struct_type,
+                        field_index: field,
+                    });
+            }
+        }
+        Some(IntrinsicId::UnityClassProbeFieldAny) => {
+            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+            compile_receiver(function, target, context);
+            compile_expr(function, args[0], context);
+            function
+                .instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::UnityGetFieldAny),
+                ))
+                .instruction(&Instruction::LocalSet(unity_field_local))
+                // Status zero means that metadata could not be read this poll.
+                .instruction(&Instruction::I32Eqz)
+                .instruction(&Instruction::If(BlockType::Empty))
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::Return)
+                .instruction(&Instruction::End);
+            if let Some((field, Type::Option(option))) = layout.field(destination) {
+                context.locals.frame().emit(function);
+                function
+                    .instruction(&Instruction::LocalGet(unity_field_local))
+                    .instruction(&Instruction::RefIsNull)
+                    .instruction(&Instruction::If(BlockType::Result(
+                        context.gc.val_type(Type::Option(option)),
+                    )))
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(
+                        context.gc.index(Type::Option(option)),
+                    )))
+                    .instruction(&Instruction::Else)
+                    .instruction(&Instruction::LocalGet(unity_field_local))
+                    .instruction(&Instruction::RefAsNonNull)
+                    .instruction(&Instruction::StructNew(
+                        context.gc.index(Type::Option(option)),
+                    ))
+                    .instruction(&Instruction::End)
                     .instruction(&Instruction::StructSet {
                         struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
@@ -1928,8 +1970,9 @@ fn compile_suspension_poll(
                         .runtime_helpers
                         .function(RuntimeHelperId::UnityGetFieldOffset),
                 ))
-                .instruction(&Instruction::LocalTee(module_address_local))
-                .instruction(&Instruction::I64Eqz)
+                .instruction(&Instruction::LocalSet(module_address_local))
+                .instruction(&Instruction::I32Const(2))
+                .instruction(&Instruction::I32Ne)
                 .instruction(&Instruction::If(BlockType::Empty))
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)

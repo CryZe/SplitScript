@@ -99,6 +99,15 @@ to inference or code generation.
   compatible members without refinement, and require matching the generated
   layout enum for layout-specific members. Diagnose zero and multiple matches
   with labels on the responsible declarations.
+  - [x] Give both backends one internal three-state field probe that separates
+    transient read failure, completed absence, and a found offset. Generated
+    attachment binding probes every complete layout, selects exactly one, and
+    caches only the selected layout's offsets without adding a public lookup
+    API or duplicating the metadata scanner.
+  - [ ] Expose the selected layout through an approved generated enum/value
+    shape and use match refinement to make only that layout's fields visible.
+  - [ ] Replace the temporary inert zero/multiple-match behavior with a focused
+    attachment diagnostic carrying labels for the responsible layouts.
 
 ### P0.2 — bind schemas once per attachment
 
@@ -134,8 +143,8 @@ to inference or code generation.
   attachment. Re-follow dynamic object pointers on each read so replaceable
   singletons remain correct. Scalar live paths allocate no fresh GC object per
   tick.
-- [ ] Extend that cache to selected class-layout variants once complete-layout
-  matching is implemented; strings, arrays, and explicit snapshots may then
+- [x] Extend the attachment cache with the selected class-layout index and that
+  layout's field offsets. Strings, arrays, and explicit snapshots may still
   allocate their returned values.
 - [x] Preserve the existing transactional state-field failure boundary for
   generated member reads. A failed pointer hop or memory read retains the last

@@ -6276,6 +6276,13 @@ struct UnityClass {
         names: [String],
     ) -> async UnityField;
 
+    // Completes after one successful metadata traversal, preserving absence.
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
+    @intrinsic(UnityClassProbeFieldAny)
+    private fn probeFieldAny(names: [String]) -> async UnityField?;
+
     /// Finds a class's static-field table.
     ///
     /// Suspends until the static storage pointer is non-null.
@@ -6751,54 +6758,61 @@ struct MonoModule {
         }
     }
 
+    // Completes after one fully readable traversal, preserving absence.
+    private fn probeFieldAnyInClass(
+        classAddress: address,
+        names: [String],
+    ) -> async UnityField? {
+        let current = classAddress
+        while current != 0 {
+            let count = retry process.read<i32>(
+                current.add(self.layout.classFieldCount),
+            )
+            if count > 0 {
+                let fields = retry self.readPointer(
+                    current.add(self.layout.classFields),
+                )
+                let index: i32 = 0
+                while index < count {
+                    let field = fields.add((index as u64) * self.layout.fieldStride)
+                    let namePointer = retry self.readPointer(
+                        field.add(self.layout.fieldName),
+                    )
+                    let candidate = retry process.readUtf8(namePointer, 256)
+                    let candidateIndex: u32 = 0
+                    while candidateIndex < names.length() {
+                        let name = names[candidateIndex]
+                        if candidate == name || candidate == `<{name}>k__BackingField` {
+                            let offset = retry process.read<u32>(
+                                field.add(self.layout.fieldValue),
+                            )
+                            return UnityField {
+                                offset: offset,
+                                index: candidateIndex,
+                            }
+                        }
+                        candidateIndex += 1
+                    }
+                    index += 1
+                }
+            }
+            current = retry self.readPointer(current.add(self.layout.classParent))
+        }
+        return None
+    }
+
     // Finds the first candidate field while traversing one class hierarchy.
     private fn fieldAnyInClass(
         classAddress: address,
         names: [String],
     ) -> async UnityField {
         while true {
-            let current = classAddress
-            while current != 0 {
-                let count = match process.read<i32>(
-                    current.add(self.layout.classFieldCount),
-                ) {
-                    Ok(value) => value,
-                    Err(_) => 0,
-                }
-                if count > 0 {
-                    let fields = retry self.readPointer(
-                        current.add(self.layout.classFields),
-                    )
-                    let index: i32 = 0
-                    while index < count {
-                        let field = fields.add((index as u64) * self.layout.fieldStride)
-                        let namePointer = retry self.readPointer(
-                            field.add(self.layout.fieldName),
-                        )
-                        let candidate = retry process.readUtf8(namePointer, 256)
-                        let candidateIndex: u32 = 0
-                        while candidateIndex < names.length() {
-                            let name = names[candidateIndex]
-                            if candidate == name || candidate == `<{name}>k__BackingField` {
-                                let offset = retry process.read<u32>(
-                                    field.add(self.layout.fieldValue),
-                                )
-                                return UnityField {
-                                    offset: offset,
-                                    index: candidateIndex,
-                                }
-                            }
-                            candidateIndex += 1
-                        }
-                        index += 1
-                    }
-                }
-                current = match self.readPointer(current.add(self.layout.classParent)) {
-                    Ok(address) => address,
-                    Err(_) => 0 as address,
-                }
+            let found = await self.probeFieldAnyInClass(classAddress, names)
+            let field = found else {
+                await nextTick()
+                continue
             }
-            await nextTick()
+            return field
         }
         return UnityField {
             offset: 0,
@@ -6981,6 +6995,11 @@ struct MonoClass {
     // Finds the first field matching an ordered set of metadata names.
     private fn fieldAny(names: [String]) -> async UnityField {
         return await self.module.fieldAnyInClass(self.address, names)
+    }
+
+    // Completes after one successful metadata traversal, preserving absence.
+    private fn probeFieldAny(names: [String]) -> async UnityField? {
+        return await self.module.probeFieldAnyInClass(self.address, names)
     }
 
     /// Finds the class's static-field storage table.

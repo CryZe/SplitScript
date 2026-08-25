@@ -1147,6 +1147,14 @@ fn unity_provider_preparation_is_selected_typed_and_lowered_before_attachment() 
         image "Assembly-CSharp" {
             class Player {
                 u32 score;
+
+                layout BaseGame {
+                    u32 level;
+                }
+
+                layout Demo {
+                    String scene;
+                }
             }
 
             class GameManager from ["Manager", "GameManager"] {

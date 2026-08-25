@@ -386,6 +386,9 @@ const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::UnityImageClass
         | IntrinsicId::UnityImageClassAny
         | IntrinsicId::UnityClassFieldAny => scratch(ScratchType::Expression, 1),
+        IntrinsicId::UnityClassProbeFieldAny => {
+            scratch(ScratchType::Standard(StdlibTypeId::UnityField), 1)
+        }
         _ => None,
     }
 }
@@ -511,6 +514,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::UnityImageClassAny => &[Helper(Runtime::UnityGetClassAny)],
         IntrinsicId::UnityClassField => &[Helper(Runtime::UnityGetFieldOffset)],
         IntrinsicId::UnityClassFieldAny => &[Helper(Runtime::UnityGetFieldAny)],
+        IntrinsicId::UnityClassProbeFieldAny => &[Helper(Runtime::UnityGetFieldAny)],
         IntrinsicId::UnityClassStaticInstance => &[Helper(Runtime::UnityGetStaticInstance)],
         IntrinsicId::GBAEmulatorRead => &[Helper(Runtime::GBAReadMemory)],
         IntrinsicId::GCNEmulatorRead => &[Helper(Runtime::GCNReadMemory)],
@@ -644,6 +648,10 @@ const UNITY_MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Un
 const UNITY_IMAGE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityImage);
 const UNITY_CLASS: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityClass);
 const UNITY_FIELD: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityField);
+const UNITY_FIELD_OPTION: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Option,
+    arguments: &[UNITY_FIELD],
+};
 const GBA_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GBAEmulator);
 const GCN_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GCNEmulator);
 const WII_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::WiiEmulator);
@@ -1923,6 +1931,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 Some(UNITY_CLASS),
                 params![value(STRING_ARRAY)],
                 UNITY_FIELD,
+            ),
+            PROCESS_SUSPEND,
+            OnAttach,
+            Suspension
+        ),
+        IntrinsicId::UnityClassProbeFieldAny => contract!(
+            UnityClassProbeFieldAny,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(UNITY_CLASS),
+                params![value(STRING_ARRAY)],
+                UNITY_FIELD_OPTION,
             ),
             PROCESS_SUSPEND,
             OnAttach,

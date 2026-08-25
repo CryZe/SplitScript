@@ -118,6 +118,7 @@ macro_rules! trusted_intrinsics {
             UnityImageClassAny,
             UnityClassField,
             UnityClassFieldAny,
+            UnityClassProbeFieldAny,
             UnityClassStaticTable,
             UnityClassStaticInstance,
             GBAEmulatorRead,

@@ -185,6 +185,12 @@ fn managed_preparation_source(program: &Program, preparation: &str, arguments: &
                 managed_static_table_name(class.class.id.index())
             ));
         }
+        if !class.class.layouts.is_empty() {
+            source.push_str(&format!(
+                "    {}: u32,\n",
+                managed_layout_index_name(class.class.id.index())
+            ));
+        }
         for field in class_fields(class.class) {
             source.push_str(&format!(
                 "    {}: u32,\n",
@@ -261,17 +267,11 @@ fn managed_backend_binding_source(
                 managed_static_table_name(class.class.id.index())
             ));
         }
-        for field in class_fields(class.class) {
-            let candidates = field
-                .binding_name_candidates()
-                .into_iter()
-                .map(|(name, _, _)| format!("{name:?}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let offset = managed_field_offset_name(field.id.index());
-            source.push_str(&format!(
-                "            let {offset} = (await {class_local}.fieldAny([{candidates}])).offset\n"
-            ));
+        for field in &class.class.fields {
+            push_required_managed_field_binding(&mut source, &class_local, field);
+        }
+        if !class.class.layouts.is_empty() {
+            push_managed_layout_binding(&mut source, &class_local, class.class);
         }
     }
     source.push_str(&format!("            {MANAGED_BINDINGS_TYPE} {{\n"));
@@ -283,6 +283,10 @@ fn managed_backend_binding_source(
             let name = managed_static_table_name(class.class.id.index());
             source.push_str(&format!("                {name}: {name},\n"));
         }
+        if !class.class.layouts.is_empty() {
+            let name = managed_layout_index_name(class.class.id.index());
+            source.push_str(&format!("                {name}: {name},\n"));
+        }
         for field in class_fields(class.class) {
             let name = managed_field_offset_name(field.id.index());
             source.push_str(&format!("                {name}: {name},\n"));
@@ -290,6 +294,79 @@ fn managed_backend_binding_source(
     }
     source.push_str("            }\n");
     source
+}
+
+fn managed_field_candidates(field: &crate::ast::ManagedFieldDecl) -> String {
+    field
+        .binding_name_candidates()
+        .into_iter()
+        .map(|(name, _, _)| format!("{name:?}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn push_required_managed_field_binding(
+    source: &mut String,
+    class_local: &str,
+    field: &crate::ast::ManagedFieldDecl,
+) {
+    let candidates = managed_field_candidates(field);
+    let offset = managed_field_offset_name(field.id.index());
+    source.push_str(&format!(
+        "            let {offset} = (await {class_local}.fieldAny([{candidates}])).offset\n"
+    ));
+}
+
+fn push_managed_layout_binding(source: &mut String, class_local: &str, class: &ManagedClassDecl) {
+    let selected = format!("__class_{}_selected_layout", class.id.index());
+    for layout in &class.layouts {
+        for field in &layout.fields {
+            let offset = managed_field_offset_name(field.id.index());
+            source.push_str(&format!("            let {offset}: u32 = 0\n"));
+        }
+    }
+    source.push_str(&format!("            let {selected}: u32? = None\n"));
+    for (layout_index, layout) in class.layouts.iter().enumerate() {
+        let probes = layout
+            .fields
+            .iter()
+            .map(|field| {
+                let probe = format!("__field_{}_probe", field.id.index());
+                let candidates = managed_field_candidates(field);
+                source.push_str(&format!(
+                    "            let {probe} = await {class_local}.probeFieldAny([{candidates}])\n"
+                ));
+                probe
+            })
+            .collect::<Vec<_>>();
+        let condition = if probes.is_empty() {
+            "true".to_owned()
+        } else {
+            probes
+                .iter()
+                .map(|probe| format!("match {probe} {{ Some(_) => true, None => false }}"))
+                .collect::<Vec<_>>()
+                .join(" && ")
+        };
+        source.push_str(&format!("            if {condition} {{\n"));
+        source.push_str(&format!(
+            "                if match {selected} {{ Some(_) => true, None => false }} {{ await process.closed() }}\n"
+        ));
+        source.push_str(&format!("                {selected} = {layout_index}\n"));
+        for (field, probe) in layout.fields.iter().zip(probes) {
+            let value = format!("__field_{}_selected", field.id.index());
+            let offset = managed_field_offset_name(field.id.index());
+            source.push_str(&format!(
+                "                let {value} = {probe} else await process.closed()\n"
+            ));
+            source.push_str(&format!("                {offset} = {value}.offset\n"));
+        }
+        source.push_str("            }\n");
+    }
+    let layout = managed_layout_index_name(class.id.index());
+    source.push_str(&format!(
+        "            let {layout} = {selected} else await process.closed()\n"
+    ));
 }
 
 fn schema_classes(program: &Program) -> Vec<SchemaClass<'_>> {
@@ -335,6 +412,10 @@ pub(crate) fn managed_field_offset_name(field: usize) -> String {
 
 pub(crate) fn managed_static_table_name(class: usize) -> String {
     format!("__class_{class}_static_table")
+}
+
+pub(crate) fn managed_layout_index_name(class: usize) -> String {
+    format!("__class_{class}_layout")
 }
 
 fn selected_provider_preparation<'source>(

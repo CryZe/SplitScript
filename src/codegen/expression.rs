@@ -4458,6 +4458,7 @@ fn compile_expr_unconverted(
             | IntrinsicId::UnityImageClassAny
             | IntrinsicId::UnityClassField
             | IntrinsicId::UnityClassFieldAny
+            | IntrinsicId::UnityClassProbeFieldAny
             | IntrinsicId::UnityClassStaticTable
             | IntrinsicId::UnityClassStaticInstance => {
                 unreachable!("suspending receiver methods are lowered by await")

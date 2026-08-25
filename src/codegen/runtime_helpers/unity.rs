@@ -14,6 +14,11 @@ use super::super::unity_layout::{
 };
 
 use super::super::{GcLayout, Type, emit_array_get, memarg};
+
+const LOOKUP_RETRY: i32 = 0;
+const LOOKUP_MISSING: i32 = 1;
+const LOOKUP_FOUND: i32 = 2;
+
 pub(super) fn compile_c_string_eq(abi: &Abi, gc: &GcLayout, c_string: ScratchRegion) -> Function {
     let c_string_start = c_string.start();
     let mut function = Function::new([(1, ValType::I32)]);
@@ -51,7 +56,7 @@ pub(super) fn compile_c_string_eq(abi: &Abi, gc: &GcLayout, c_string: ScratchReg
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(-1))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::I32Const(c_string_start))
@@ -131,7 +136,7 @@ pub(super) fn compile_backing_field_eq(
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(-1))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::I32Const(c_string_start))
@@ -290,7 +295,8 @@ pub(super) fn compile_unity_get_image(
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::Call(c_string_eq))
-        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Ne)
         .instruction(&Instruction::BrIf(0))
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(assembly))
@@ -548,7 +554,8 @@ pub(super) fn compile_unity_get_class(
         .instruction(&Instruction::LocalGet(dot_plus_one))
         .instruction(&Instruction::I32Sub)
         .instruction(&Instruction::Call(c_string_eq))
-        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Ne)
         .instruction(&Instruction::BrIf(0))
         .instruction(&Instruction::LocalGet(dot_plus_one))
         .instruction(&Instruction::If(BlockType::Empty))
@@ -576,7 +583,8 @@ pub(super) fn compile_unity_get_class(
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::I32Sub)
         .instruction(&Instruction::Call(c_string_eq))
-        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Ne)
         .instruction(&Instruction::BrIf(1))
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(class))
@@ -613,8 +621,9 @@ fn emit_unity_class_failure(function: &mut Function, gc: &GcLayout) {
         .instruction(&Instruction::Return);
 }
 
-/// Returns `field_offset + 1`, reserving zero for "not found yet" so a real
-/// field at offset zero remains representable across an await retry.
+/// Returns a lookup status followed by `field_offset + 1`. A completed miss is
+/// distinct from a transient process-memory failure, while the encoded offset
+/// keeps a real field at offset zero representable.
 pub(super) fn compile_unity_get_field_offset(
     abi: &Abi,
     c_string_eq: u32,
@@ -622,7 +631,7 @@ pub(super) fn compile_unity_get_field_offset(
     gc: &GcLayout,
     abi_read: AbiReadScratch,
 ) -> Function {
-    let mut function = Function::new([(9, ValType::I64)]);
+    let mut function = Function::new([(9, ValType::I64), (1, ValType::I32)]);
     let process = 0;
     let class_value = 1;
     let expected_name = 2;
@@ -635,6 +644,7 @@ pub(super) fn compile_unity_get_field_offset(
     let parent = 9;
     let encoded = 10;
     let field_count_offset = 11;
+    let comparison = 12;
     function
         .instruction(&Instruction::LocalGet(class_value))
         .instruction(&Instruction::RefAsNonNull)
@@ -681,6 +691,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
@@ -710,6 +721,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
@@ -718,6 +730,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::LocalTee(fields))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
@@ -746,6 +759,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
@@ -754,6 +768,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::LocalTee(name_ptr))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
@@ -765,12 +780,30 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::Call(c_string_eq))
+        .instruction(&Instruction::LocalTee(comparison))
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(comparison))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(name_ptr))
         .instruction(&Instruction::LocalGet(expected_name))
         .instruction(&Instruction::Call(backing_field_eq))
+        .instruction(&Instruction::LocalTee(comparison))
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(comparison))
         .instruction(&Instruction::Else)
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::End)
@@ -790,6 +823,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
@@ -799,6 +833,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::I64Const(1))
         .instruction(&Instruction::I64Add)
         .instruction(&Instruction::LocalSet(encoded))
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
         .instruction(&Instruction::LocalGet(encoded))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
@@ -821,6 +856,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
@@ -832,6 +868,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::Br(0))
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(LOOKUP_MISSING))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::End);
     function
@@ -844,7 +881,7 @@ pub(super) fn compile_unity_get_field_any(
     gc: &GcLayout,
 ) -> Function {
     let mut function = Function::new([
-        (1, ValType::I32),
+        (2, ValType::I32),
         (1, ValType::I64),
         (
             1,
@@ -858,8 +895,9 @@ pub(super) fn compile_unity_get_field_any(
     let class_value = 1;
     let names = 2;
     let index = 3;
-    let encoded = 4;
-    let names_backing = 5;
+    let status = 4;
+    let encoded = 5;
+    let names_backing = 6;
     function
         .instruction(&Instruction::LocalGet(names))
         .instruction(&Instruction::RefAsNonNull)
@@ -892,10 +930,23 @@ pub(super) fn compile_unity_get_field_any(
     );
     function
         .instruction(&Instruction::Call(unity_get_field_offset))
-        .instruction(&Instruction::LocalTee(encoded))
-        .instruction(&Instruction::I64Eqz)
-        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::LocalSet(encoded))
+        .instruction(&Instruction::LocalSet(status))
+        .instruction(&Instruction::LocalGet(status))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
+        .instruction(&Instruction::I32Eq)
         .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.standard_index(StdlibTypeId::UnityField),
+        )))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(status))
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
         .instruction(&Instruction::LocalGet(encoded))
         .instruction(&Instruction::I64Const(1))
         .instruction(&Instruction::I64Sub)
@@ -913,6 +964,7 @@ pub(super) fn compile_unity_get_field_any(
         .instruction(&Instruction::Br(0))
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(LOOKUP_MISSING))
         .instruction(&Instruction::RefNull(HeapType::Concrete(
             gc.standard_index(StdlibTypeId::UnityField),
         )))
@@ -1014,19 +1066,24 @@ pub(super) fn compile_unity_get_static_instance(
     let mut function = Function::new([
         (1, gc.val_type(Type::Standard(StdlibTypeId::UnityField))),
         (1, ValType::I64),
+        (1, ValType::I32),
     ]);
     let process = 0;
     let class_value = 1;
     let names = 2;
     let field = 3;
     let static_table = 4;
+    let status = 5;
     function
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(class_value))
         .instruction(&Instruction::LocalGet(names))
         .instruction(&Instruction::Call(unity_get_field_any))
-        .instruction(&Instruction::LocalTee(field))
-        .instruction(&Instruction::RefIsNull)
+        .instruction(&Instruction::LocalSet(field))
+        .instruction(&Instruction::LocalSet(status))
+        .instruction(&Instruction::LocalGet(status))
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::I32Ne)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)

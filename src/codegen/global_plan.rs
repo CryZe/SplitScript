@@ -37,6 +37,12 @@ pub(super) struct RuntimeGlobals {
     pub provider_value: Option<u32>,
     /// Pending source-defined state-provider attachment future.
     pub provider_attachment_frame: Option<u32>,
+    /// Opaque provider-specific context produced before user attachment code.
+    pub provider_preparation_value: Option<u32>,
+    /// Pending source-defined state-provider preparation future.
+    pub provider_preparation_frame: Option<u32>,
+    /// Whether preparation completed for the current process attachment.
+    pub provider_prepared: Option<u32>,
     /// The typed enum value returned by `onAttach` for versioned state.
     pub selected_layout: Option<u32>,
     pub current: u32,
@@ -56,6 +62,7 @@ pub(super) fn encode(
     gc: &GcLayout,
     wasm_ir: &wasm_ir::Program,
     provider_attachment: Option<&FunctionInstance>,
+    provider_preparation: Option<&FunctionInstance>,
 ) -> GlobalPlan {
     let mut section = GlobalSection::new();
     let process = section.len();
@@ -126,6 +133,55 @@ pub(super) fn encode(
                 shared: false,
             },
             &ConstExpr::ref_null(HeapType::Concrete(frame_type)),
+        );
+        index
+    });
+    let provider_preparation_value = provider_preparation.map(|preparation| {
+        let completion = semantic_type(
+            semantics.specialize_type(
+                preparation,
+                semantics
+                    .function_completion(preparation.function)
+                    .expect("checked provider preparation has a completion type"),
+            ),
+            semantics,
+        );
+        let index = section.len();
+        section.global(
+            GlobalType {
+                val_type: gc.val_type(completion),
+                mutable: true,
+                shared: false,
+            },
+            &default_const_expr(gc.val_type(completion)),
+        );
+        index
+    });
+    let provider_preparation_frame = provider_preparation.map(|preparation| {
+        let index = section.len();
+        let frame_type = gc.function_frame_index(preparation);
+        section.global(
+            GlobalType {
+                val_type: ValType::Ref(RefType {
+                    nullable: true,
+                    heap_type: HeapType::Concrete(frame_type),
+                }),
+                mutable: true,
+                shared: false,
+            },
+            &ConstExpr::ref_null(HeapType::Concrete(frame_type)),
+        );
+        index
+    });
+    let provider_prepared = provider_preparation.map(|_| {
+        let index = section.len();
+        section.global(
+            GlobalType {
+                val_type: ValType::I32,
+                mutable: true,
+                shared: false,
+            },
+            &ConstExpr::i32_const(0),
         );
         index
     });
@@ -293,6 +349,9 @@ pub(super) fn encode(
             process_name,
             provider_value,
             provider_attachment_frame,
+            provider_preparation_value,
+            provider_preparation_frame,
+            provider_prepared,
             selected_layout,
             current,
             old,

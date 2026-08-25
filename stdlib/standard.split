@@ -36,6 +36,45 @@
 @directRead(ProcessRead)
 stateProvider Native as process {}
 
+/// Attaches to a Unity game and binds declared managed metadata schemas.
+///
+/// Automatic mode waits for either an IL2CPP `GameAssembly.dll` runtime or a
+/// modern `mono-2.0-bdwgc.dll` runtime. It derives the supported metadata
+/// layout from the loaded Unity player rather than guessing from schema names.
+/// Use an explicit selector when a known game needs to bypass detection.
+///
+/// The read-only process value remains a native [`Process`] handle. Managed
+/// images and classes declared with `image` are bound once before
+/// [`onAttach`] runs.
+///
+/// # Example
+///
+/// Detect the Unity backend automatically
+///
+/// ```splitscript
+/// state Unity ["game.exe"] {}
+/// ```
+@processType(Process)
+@processes(source)
+@attachment(identity)
+@prepare(UnityProviderAuto)
+@directRead(ProcessRead)
+stateProvider Unity as process {
+    /// Selects a known IL2CPP metadata layout.
+    ///
+    /// This bypasses Unity-version detection while retaining cooperative
+    /// GameAssembly and metadata discovery.
+    @prepare(UnityProviderIl2Cpp)
+    selector il2cpp(version: u32),
+
+    /// Selects a known modern Mono metadata layout.
+    ///
+    /// This bypasses Unity-version detection while retaining cooperative Mono
+    /// module and metadata discovery.
+    @prepare(UnityProviderMono)
+    selector mono(version: MonoVersion),
+}
+
 /// Attaches to a supported Game Boy Advance emulator.
 ///
 /// The provider discovers emulated EWRAM and IWRAM and exposes original GBA
@@ -1050,6 +1089,88 @@ namespace timer {
 /// let runtime = await Unity.il2cpp(2020)
 /// ```
 namespace Unity {
+    // Builds the provider's backend-independent context after auto-detection.
+    private fn providerAuto() -> async UnityRuntime {
+        loop {
+            let il2cppLoaded = match process.loadedModule("GameAssembly.dll") {
+                Some(_) => true,
+                None => false,
+            }
+            if il2cppLoaded {
+                let version = await Unity.detectIl2cppVersion()
+                return await Unity.providerIl2cpp(version)
+            }
+
+            let monoLoaded = match process.loadedModule("mono-2.0-bdwgc.dll") {
+                Some(_) => true,
+                None => false,
+            }
+            if monoLoaded {
+                let version = await Unity.detectMonoVersion()
+                return await Unity.providerMono(version)
+            }
+
+            await nextTick()
+        }
+    }
+
+    // Builds an IL2CPP provider context with an explicitly selected layout.
+    private fn providerIl2cpp(version: u32) -> async UnityRuntime {
+        let runtime = await Unity.il2cpp(version)
+        return UnityRuntime {
+            backend: UnityRuntimeBackend.Il2cpp,
+            il2cpp: Some(runtime),
+            mono: None,
+        }
+    }
+
+    // Builds a Mono provider context with an explicitly selected layout.
+    private fn providerMono(version: MonoVersion) -> async UnityRuntime {
+        let runtime = await Unity.mono(version)
+        return UnityRuntime {
+            backend: UnityRuntimeBackend.Mono,
+            il2cpp: None,
+            mono: Some(runtime),
+        }
+    }
+
+    // Mirrors ASR's supported Windows IL2CPP layout detection.
+    private fn detectIl2cppVersion() -> async u32 {
+        let player = await process.module("UnityPlayer.dll")
+        let pointerSize = retry player.pointerSize()
+        if pointerSize == PointerSize.Bit32 {
+            return 0
+        }
+
+        let version = retry player.fileVersion()
+        if version.major > 2022
+            || version.major == 2022 && version.minor >= 2
+        {
+            return 2022
+        }
+        if version.major == 2021
+            || version.major == 2020 && version.minor >= 2
+        {
+            return 2020
+        }
+        if version.major == 2019 || version.major == 2020 {
+            return 2019
+        }
+        return 0
+    }
+
+    // Mirrors ASR's modern Windows Mono V2/V3 layout detection.
+    private fn detectMonoVersion() -> async MonoVersion {
+        let player = await process.module("UnityPlayer.dll")
+        let version = retry player.fileVersion()
+        if version.major > 2021
+            || version.major == 2021 && version.minor >= 2
+        {
+            return MonoVersion.V3
+        }
+        return MonoVersion.V2
+    }
+
     /// Discovers an IL2CPP runtime.
     ///
     /// Suspends until GameAssembly and the IL2CPP metadata structures are available.
@@ -1191,6 +1312,79 @@ namespace Unity {
             pointerSize: pointerSize,
         }
     }
+}
+
+/// Internal backend tag retained by the provider preparation context.
+///
+/// Generated schema binders dispatch through this tag while the public schema
+/// surface remains independent from Mono and IL2CPP metadata representations.
+///
+/// # Example
+///
+/// Select a concrete managed backend through the public provider
+///
+/// ```splitscript
+/// state Unity.il2cpp(2020) ["game.exe"] {}
+/// ```
+@representation(enum, nullable)
+@valueUsage(recordField, localVariable)
+private enum UnityRuntimeBackend {
+    /// Selects the IL2CPP metadata adapter.
+    ///
+    /// The associated context contains a discovered [`UnityModule`].
+    ///
+    /// # Example
+    ///
+    /// Select the IL2CPP 2019 layout
+    ///
+    /// ```splitscript
+    /// state Unity.il2cpp(2019) ["game.exe"] {}
+    /// ```
+    Il2cpp,
+
+    /// Selects the Mono metadata adapter.
+    ///
+    /// The associated context contains a discovered [`MonoModule`].
+    ///
+    /// # Example
+    ///
+    /// Select the modern Mono V3 layout
+    ///
+    /// ```splitscript
+    /// state Unity.mono(MonoVersion.V3) ["game.exe"] {}
+    /// ```
+    Mono,
+}
+
+/// Internal backend-independent context consumed by generated schema binders.
+///
+/// Exactly one backend payload is present. Keeping both representations behind
+/// one private record lets schema lowering share one attachment lifecycle.
+///
+/// # Example
+///
+/// Create the context through automatic provider discovery
+///
+/// ```splitscript
+/// state Unity ["unity-game.exe"] {}
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(localVariable)
+private struct UnityRuntime {
+    /// Identifies the populated backend payload.
+    ///
+    /// Generated binders use this tag for exhaustive adapter dispatch.
+    private backend: UnityRuntimeBackend,
+
+    /// Contains the IL2CPP runtime when that backend was selected.
+    ///
+    /// Mono contexts leave this value absent.
+    private il2cpp: UnityModule?,
+
+    /// Contains the Mono runtime when that backend was selected.
+    ///
+    /// IL2CPP contexts leave this value absent.
+    private mono: MonoModule?,
 }
 
 /// Supports ordered numeric operations.
@@ -6532,8 +6726,11 @@ struct MonoModule {
         }
     }
 
-    // Owns the raw-address traversal exposed through MonoClass.field().
-    private fn fieldInClass(classAddress: address, name: String) -> async u32 {
+    // Finds the first candidate field while traversing one class hierarchy.
+    private fn fieldAnyInClass(
+        classAddress: address,
+        names: [String],
+    ) -> async UnityField {
         while true {
             let current = classAddress
             while current != 0 {
@@ -6554,10 +6751,19 @@ struct MonoModule {
                             field.add(self.layout.fieldName),
                         )
                         let candidate = retry process.readUtf8(namePointer, 256)
-                        if candidate == name || candidate == `<{name}>k__BackingField` {
-                            return retry process.read<u32>(
-                                field.add(self.layout.fieldValue),
-                            )
+                        let candidateIndex: u32 = 0
+                        while candidateIndex < names.length() {
+                            let name = names[candidateIndex]
+                            if candidate == name || candidate == `<{name}>k__BackingField` {
+                                let offset = retry process.read<u32>(
+                                    field.add(self.layout.fieldValue),
+                                )
+                                return UnityField {
+                                    offset: offset,
+                                    index: candidateIndex,
+                                }
+                            }
+                            candidateIndex += 1
                         }
                         index += 1
                     }
@@ -6569,7 +6775,16 @@ struct MonoModule {
             }
             await nextTick()
         }
-        return 0
+        return UnityField {
+            offset: 0,
+            index: 0,
+        }
+    }
+
+    // Owns the raw-address traversal exposed through MonoClass.field().
+    private fn fieldInClass(classAddress: address, name: String) -> async u32 {
+        let field = await self.fieldAnyInClass(classAddress, [name])
+        return field.offset
     }
 
     // Owns the raw-address traversal exposed through MonoClass.staticTable().
@@ -6731,6 +6946,11 @@ struct MonoClass {
         name: String,
     ) -> async u32 {
         return await self.module.fieldInClass(self.address, name)
+    }
+
+    // Finds the first field matching an ordered set of metadata names.
+    private fn fieldAny(names: [String]) -> async UnityField {
+        return await self.module.fieldAnyInClass(self.address, names)
     }
 
     /// Finds the class's static-field storage table.

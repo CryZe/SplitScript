@@ -287,6 +287,7 @@ fn provider_value_for_resolution(
     match root_value_for_resolution(analysis)? {
         crate::semantic::ResolvedValue::StandardLibraryConstant(_) => None,
         crate::semantic::ResolvedValue::ProviderValue(provider) => Some(provider),
+        crate::semantic::ResolvedValue::ManagedStatic { .. } => None,
         crate::semantic::ResolvedValue::Variable(_)
         | crate::semantic::ResolvedValue::CurrentSnapshot
         | crate::semantic::ResolvedValue::OldSnapshot

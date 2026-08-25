@@ -46,6 +46,7 @@ pub struct StateProviderSelectorDeclaration {
     pub name: String,
     pub parameters: Vec<Parameter>,
     pub documentation: Documentation,
+    pub attributes: Vec<Attribute>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

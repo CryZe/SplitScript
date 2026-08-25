@@ -10,10 +10,11 @@ use crate::catalog::{Documentation, Example};
 use super::{
     declarations::{
         CapabilityBehavior, CoreTypeId, FieldVisibility, RuntimeRepresentation,
-        StateProviderAttachment, StateProviderProcesses, StdlibAssociatedType,
-        StdlibAssociatedTypeDefinition, StdlibCapability, StdlibField, StdlibNamespace,
-        StdlibOwner, StdlibStateProvider, StdlibType, StdlibTypeConstructor, StdlibTypeKind,
-        StdlibVariant, TypeConstructorSyntax, TypeVisibility, ValueUsage,
+        StateProviderAttachment, StateProviderProcesses, StateProviderSelector,
+        StateProviderSelectorParameter, StdlibAssociatedType, StdlibAssociatedTypeDefinition,
+        StdlibCapability, StdlibField, StdlibNamespace, StdlibOwner, StdlibStateProvider,
+        StdlibType, StdlibTypeConstructor, StdlibTypeKind, StdlibVariant, TypeConstructorSyntax,
+        TypeVisibility, ValueUsage,
     },
     ids::{
         IntrinsicId, StdlibCapabilityId, StdlibFieldId, StdlibItemId, StdlibNamespaceId,

@@ -70,8 +70,13 @@ to inference or code generation.
     value types, exact aliases, and conventional C# automatic-property backing
     candidates. Snapshot code generation consumes this projection instead of
     maintaining a parallel Unity class registry.
-  - [ ] Resolve and lower static managed roots, fallible live-reference field
-    reads, and reachable transactional `.snapshot()` readers through that plan.
+  - [x] Resolve and lower common static managed roots and fallible
+    live-reference field reads through that plan. Every remote hop produces an
+    ordinary `T!`, so paths such as `GameManager.instance?.player?.score?`
+    expose each possible failure through the language's existing propagation
+    model. Cached metadata is shared while object pointers are re-read live.
+  - [ ] Generate reachable transactional `.snapshot()` readers through the
+    same binding plan.
 - [ ] Specify deterministic metadata-name resolution. A missing `from` uses the
   source member name, `from "name"` names one exact metadata member, and
   `from ["first", "second"]` names explicit alternatives. C# automatic-property
@@ -97,7 +102,7 @@ to inference or code generation.
   public split between `UnityModule`/`UnityClass` and
   `MonoModule`/`MonoClass` where it no longer expresses a real semantic
   difference; retain a deliberately low-level dynamic escape hatch.
-- [ ] Make Unity an attachment/state provider with an automatic form and
+- [x] Make Unity an attachment/state provider with an automatic form and
   explicit backend/version forms, including `state Unity [...]`,
   `state Unity.il2cpp(2020) [...]`, and `state Unity.mono(...) [...]`.
   Provider setup is cooperative and cancelled with the process. Ordinary state
@@ -115,15 +120,18 @@ to inference or code generation.
     derived from the same selector declarations. Distinguish source-process
     providers from the single catalog-declared default so Native remains the
     meaning of bare `state "..."` while Unity can also accept source candidates.
-  - [ ] Publish the Unity provider only when its schema binder is connected;
-    until then, do not accept a `state Unity` program that would silently behave
-    like an ordinary native attachment.
-- [ ] Cache image, class, static-table, field-offset, and remote-path metadata
-  for one attachment. Re-follow dynamic object pointers on each read so
-  replaceable singletons remain correct. Scalar/path reads must not allocate a
-  fresh GC object per tick; strings, arrays, and explicit snapshots may allocate
-  their returned values.
-- [ ] Preserve the existing transactional state-field failure boundary for
+  - [x] Publish the Unity provider with a compiler-owned preparation phase that
+    completes before user `onAttach`. Automatic mode detects Mono versus IL2CPP
+    from loaded runtime modules and Unity metadata; explicit selectors retain
+    typed version arguments.
+- [x] Cache common image, class, static-table, and field-offset metadata for one
+  attachment. Re-follow dynamic object pointers on each read so replaceable
+  singletons remain correct. Scalar live paths allocate no fresh GC object per
+  tick.
+- [ ] Extend that cache to selected class-layout variants once complete-layout
+  matching is implemented; strings, arrays, and explicit snapshots may then
+  allocate their returned values.
+- [x] Preserve the existing transactional state-field failure boundary for
   generated member reads. A failed pointer hop or memory read retains the last
   accepted field value; Unity declarations must not introduce a second failure
   model.

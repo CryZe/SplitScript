@@ -494,7 +494,10 @@ impl Checker {
         }
 
         if let Some((active_provider, _)) = self.provider_value
-            && !matches!(self.callable, CallableContext::LibraryFunction(_))
+            && !matches!(
+                self.callable,
+                CallableContext::LibraryFunction(_) | CallableContext::CompilerGenerated
+            )
             && let Some(native_provider) = self.standard_library.default_state_provider()
             && active_provider != native_provider.id
             && callee
@@ -1639,6 +1642,67 @@ impl Checker {
                 members: Some(Vec::new()),
             });
         }
+        if let [class_name, field_name] = path
+            && let Some(class) = self
+                .declarations
+                .managed_classes
+                .iter()
+                .find(|class| class.name == *class_name)
+                .cloned()
+            && let Some(field) = class
+                .fields
+                .iter()
+                .find(|field| field.is_static && field.name == *field_name)
+                .cloned()
+        {
+            if !self.managed_provider_available() {
+                self.errors.push(
+                    Diagnostic::type_error(
+                        "live managed fields require a Unity state provider",
+                        span,
+                    )
+                    .with_primary_label(
+                        "declare the state as `state Unity [\"game.exe\"] { ... }`",
+                    ),
+                );
+                return None;
+            }
+            let value = self.managed_read_value_type(field.ty);
+            return Some(PathResolution {
+                ty: Type::Result(self.inference.result_type(value)),
+                value: Some(ResolvedValue::ManagedStatic {
+                    class: class.id,
+                    field: field.id,
+                }),
+                members: Some(Vec::new()),
+            });
+        }
+        if let [class_name, field_name, next, ..] = path
+            && self
+                .declarations
+                .managed_classes
+                .iter()
+                .find(|class| class.name == *class_name)
+                .is_some_and(|class| {
+                    class
+                        .fields
+                        .iter()
+                        .any(|field| field.is_static && field.name == *field_name)
+                })
+        {
+            self.errors.push(
+                Diagnostic::type_error(
+                    format!(
+                        "managed field `{class_name}.{field_name}` is fallible; use `?` before accessing `{next}`"
+                    ),
+                    span,
+                )
+                .with_primary_label(format!(
+                    "write `{class_name}.{field_name}?.{next}` to propagate a failed remote read"
+                )),
+            );
+            return None;
+        }
         match path {
             [name, fields @ ..]
                 if matches!(
@@ -1728,12 +1792,14 @@ impl Checker {
                 })
             }
             [name, fields @ ..]
-                if matches!(self.callable, CallableContext::LibraryFunction(_))
-                    && self
-                        .standard_library
-                        .state_providers()
-                        .iter()
-                        .any(|provider| provider.value_name == name) =>
+                if matches!(
+                    self.callable,
+                    CallableContext::LibraryFunction(_) | CallableContext::CompilerGenerated
+                ) && self
+                    .standard_library
+                    .state_providers()
+                    .iter()
+                    .any(|provider| provider.value_name == name) =>
             {
                 let provider = self
                     .standard_library
@@ -1782,6 +1848,7 @@ impl Checker {
                             || matches!(
                                 self.callable,
                                 CallableContext::LibraryFunction(_)
+                                    | CallableContext::CompilerGenerated
                                     | CallableContext::Action(
                                         ActionKind::OnAttach
                                             | ActionKind::OnStateReady
@@ -1909,7 +1976,36 @@ impl Checker {
         span: Span,
     ) -> Option<(Type, Vec<ResolvedMember>)> {
         let mut members = Vec::with_capacity(fields.len());
-        for field in fields {
+        for (index, field) in fields.iter().enumerate() {
+            if index != 0
+                && matches!(self.shallow_type(ty), Type::Result(_) | Type::Known(_))
+                && members
+                    .last()
+                    .is_some_and(|member| matches!(member, ResolvedMember::ManagedField(_)))
+            {
+                let is_result = match self.shallow_type(ty) {
+                    Type::Result(_) => true,
+                    Type::Known(id) => matches!(
+                        self.inference.type_store().kind(id),
+                        TypeKind::Result { .. }
+                    ),
+                    _ => false,
+                };
+                if is_result {
+                    self.errors.push(
+                        Diagnostic::type_error(
+                            format!(
+                                "managed field access is fallible; use `?` before accessing `{field}`"
+                            ),
+                            span,
+                        )
+                        .with_primary_label(
+                            "propagate the preceding remote read before selecting another field",
+                        ),
+                    );
+                    return None;
+                }
+            }
             let shallow_type = self.shallow_type(ty);
             let (next, member) = self.resolve_member(shallow_type, field, span)?;
             ty = next;
@@ -1924,6 +2020,21 @@ impl Checker {
         field: &str,
         span: Span,
     ) -> Option<(Type, ResolvedMember)> {
+        if let Type::Known(id) = ty
+            && matches!(
+                self.inference.type_store().kind(id),
+                TypeKind::ManagedReference(_)
+            )
+            && !self.managed_provider_available()
+        {
+            self.errors.push(
+                Diagnostic::type_error("live managed fields require a Unity state provider", span)
+                    .with_primary_label(
+                        "declare the state as `state Unity [\"game.exe\"] { ... }`",
+                    ),
+            );
+            return None;
+        }
         if let Some(resolved) = self.lookup_member(ty, field) {
             return Some(resolved);
         }
@@ -2095,6 +2206,27 @@ impl Checker {
             };
             return Some((value, ResolvedMember::ManagedField(field.id)));
         }
+        if let Type::Known(id) = ty
+            && let TypeKind::ManagedReference(class_id) = self.inference.type_store().kind(id)
+            && let Some(field) = self
+                .declarations
+                .managed_classes
+                .iter()
+                .find(|class| class.id == *class_id)
+                .and_then(|class| {
+                    class
+                        .fields
+                        .iter()
+                        .find(|item| !item.is_static && item.name == field)
+                })
+                .cloned()
+        {
+            let value = self.managed_read_value_type(field.ty);
+            return Some((
+                Type::Result(self.inference.result_type(value)),
+                ResolvedMember::ManagedField(field.id),
+            ));
+        }
         match self.source_record_id(ty) {
             Some(record_id) => self
                 .declarations
@@ -2110,6 +2242,30 @@ impl Checker {
                 }),
             None => None,
         }
+    }
+
+    fn managed_read_value_type(&mut self, declared: crate::ast::TypeRef) -> Type {
+        let declared = self.syntax_type(declared);
+        match declared {
+            Type::Known(id)
+                if matches!(
+                    self.inference.type_store().kind(id),
+                    TypeKind::ManagedClass(_)
+                ) =>
+            {
+                let TypeKind::ManagedClass(class) = self.inference.type_store().kind(id) else {
+                    unreachable!()
+                };
+                Type::Known(self.inference.type_store().id_for_managed_reference(*class))
+            }
+            _ => declared,
+        }
+    }
+
+    fn managed_provider_available(&self) -> bool {
+        self.provider_value.is_some_and(|(provider, _)| {
+            self.standard_library.state_provider(provider).name == "Unity"
+        })
     }
 
     pub(super) fn visible_state_field(&self, name: &str) -> Option<(crate::ast::ValueId, Type)> {
@@ -2158,7 +2314,9 @@ impl Checker {
             // when the body belongs to a different catalog type. Ordinary user
             // functions never enter this callable context, so private fields
             // remain absent from user lookup, completion, and hover.
-            let CallableContext::LibraryFunction(_) = self.callable else {
+            let (CallableContext::LibraryFunction(_) | CallableContext::CompilerGenerated) =
+                self.callable
+            else {
                 return None;
             };
             self.standard_library
@@ -2175,7 +2333,9 @@ impl Checker {
         self.standard_library
             .public_constructor_field(owner, name)
             .or_else(|| {
-                let CallableContext::LibraryFunction(_) = self.callable else {
+                let (CallableContext::LibraryFunction(_) | CallableContext::CompilerGenerated) =
+                    self.callable
+                else {
                     return None;
                 };
                 self.standard_library

@@ -239,6 +239,7 @@ impl CompilerDatabase {
                         if let Ok(Some(augmented)) =
                             crate::stdlib::augment_program_with_library_bodies(
                                 recovered.source_document().source(),
+                                &syntax,
                                 &recovered.context().standard_library(),
                             )
                         {

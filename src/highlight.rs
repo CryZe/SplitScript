@@ -598,6 +598,12 @@ impl HighlightCollector<'_> {
                 ResolvedValue::ProviderValue(_) => {
                     self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
                 }
+                ResolvedValue::ManagedStatic { .. } => {
+                    self.insert(spans[0], SemanticTokenKind::Type, 0);
+                    if let Some(field) = spans.get(1) {
+                        self.insert(*field, SemanticTokenKind::Property, MODIFIER_READONLY);
+                    }
+                }
                 ResolvedValue::Variable(id) => {
                     let readonly = self.syntax.state.as_ref().is_some_and(|state| {
                         state.layout_value == Some(id)

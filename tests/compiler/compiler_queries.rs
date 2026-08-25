@@ -909,6 +909,60 @@ fn managed_class_types_use_the_source_symbol_graph() {
 }
 
 #[test]
+fn live_managed_paths_use_schema_definitions_and_documentation() {
+    use splitscript::tooling::database::{CompilerDatabase, SourceDefinitionId};
+
+    let source = r#"
+        image "Assembly-CSharp" {
+            class Player {
+                /// The current point total.
+                u32 score;
+            }
+            class GameManager {
+                /// The active manager singleton.
+                static GameManager instance;
+                /// The active player object.
+                Player player;
+            }
+        }
+        state Unity ["game.exe"] {
+            score: u32 = GameManager.instance?.player?.score?
+        }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    database
+        .check()
+        .expect("live managed path fixture should check");
+
+    let expression = source.rfind("GameManager.instance").unwrap();
+    assert!(matches!(
+        database.definition_at(expression).unwrap(),
+        Some(splitscript::tooling::database::DefinitionTarget::Source(definition))
+            if matches!(definition.id, SourceDefinitionId::ManagedClass(_))
+    ));
+    for (name, expected) in [
+        ("instance", "active manager singleton"),
+        ("player", "active player object"),
+        ("score", "current point total"),
+    ] {
+        let offset = source.rfind(name).unwrap();
+        assert!(matches!(
+            database.definition_at(offset).unwrap(),
+            Some(splitscript::tooling::database::DefinitionTarget::Source(definition))
+                if matches!(definition.id, SourceDefinitionId::ManagedField(_))
+        ));
+        assert!(
+            database
+                .hover(offset)
+                .unwrap()
+                .expect("managed field should have hover information")
+                .markdown
+                .contains(expected)
+        );
+    }
+}
+
+#[test]
 fn managed_schema_metadata_aliases_reject_ambiguous_field_bindings() {
     let source = r#"
         image "Assembly-CSharp" {

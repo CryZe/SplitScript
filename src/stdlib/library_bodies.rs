@@ -4,11 +4,19 @@
 //! expressions are parsed only after they have been appended to an ordinary
 //! compilation unit. This keeps one body grammar and one semantic pipeline.
 
-use crate::{Diagnostic, ast::Program, lexer, parser};
+use crate::{
+    Diagnostic,
+    ast::{ManagedClassDecl, ManagedItemDecl, Program},
+    lexer, parser,
+};
 
 use super::{Implementation, ItemKind, Signature, StandardLibrary, StdlibItem, TypeRef};
 
 pub(crate) const RESERVED_FUNCTION_PREFIX: &str = "__splitscript_stdlib_";
+pub(crate) const PROVIDER_PREPARATION_FUNCTION: &str =
+    "__splitscript_stdlib_selected_provider_preparation";
+pub(crate) const MANAGED_BINDINGS_TYPE: &str = "__splitscript_stdlib_managed_bindings";
+pub(crate) const MANAGED_POINTER_SIZE_FIELD: &str = "__pointer_size";
 
 fn body_source(
     item: &StdlibItem,
@@ -74,6 +82,7 @@ fn contains_type_parameter(ty: TypeRef) -> bool {
 
 pub(crate) fn augment_program_with_library_bodies(
     user_source: &str,
+    user_program: &Program,
     library: &StandardLibrary,
 ) -> Result<Option<Program>, Vec<Diagnostic>> {
     let mut combined = String::new();
@@ -102,6 +111,23 @@ pub(crate) fn augment_program_with_library_bodies(
             body_ranges.push((start..combined.len(), item.qualified_name));
             combined.push('\n');
         }
+    }
+    if let Some((function_name, arguments)) =
+        selected_provider_preparation(user_source, user_program, library)
+    {
+        if combined.is_empty() {
+            combined.reserve(user_source.len() + function_name.len() + 128);
+            combined.push_str(user_source);
+            combined.push('\n');
+        }
+        let source = managed_preparation_source(user_program, function_name, &arguments.join(", "));
+        let start = combined.len();
+        combined.push_str(&source);
+        body_ranges.push((
+            start..combined.len(),
+            "the selected state-provider preparation",
+        ));
+        combined.push('\n');
     }
     if combined.is_empty() {
         return Ok(None);
@@ -134,6 +160,221 @@ pub(crate) fn augment_program_with_library_bodies(
             })
             .collect())
     }
+}
+
+struct SchemaClass<'ast> {
+    image: &'ast str,
+    namespace: Vec<&'ast str>,
+    class: &'ast ManagedClassDecl,
+}
+
+fn managed_preparation_source(program: &Program, preparation: &str, arguments: &str) -> String {
+    let classes = schema_classes(program);
+    if classes.is_empty() {
+        return format!(
+            "fn {PROVIDER_PREPARATION_FUNCTION}() {{ return await {preparation}({arguments}) }}"
+        );
+    }
+
+    let mut source = format!("record {MANAGED_BINDINGS_TYPE} {{\n");
+    source.push_str(&format!("    {MANAGED_POINTER_SIZE_FIELD}: u32,\n"));
+    for class in &classes {
+        if class_fields(class.class).any(|field| field.is_static) {
+            source.push_str(&format!(
+                "    {}: address,\n",
+                managed_static_table_name(class.class.id.index())
+            ));
+        }
+        for field in class_fields(class.class) {
+            source.push_str(&format!(
+                "    {}: u32,\n",
+                managed_field_offset_name(field.id.index())
+            ));
+        }
+    }
+    source.push_str("}\n");
+    source.push_str(&format!(
+        "fn {PROVIDER_PREPARATION_FUNCTION}() {{\n    let __runtime = await {preparation}({arguments})\n    return match __runtime.backend {{\n"
+    ));
+    source.push_str("        UnityRuntimeBackend.Il2cpp => {\n");
+    source.push_str("            let __module = __runtime.il2cpp else await process.closed()\n");
+    source.push_str(&managed_backend_binding_source(
+        &classes,
+        "__module",
+        "__module.pointerSize",
+    ));
+    source.push_str("        },\n        UnityRuntimeBackend.Mono => {\n");
+    source.push_str("            let __module = __runtime.mono else await process.closed()\n");
+    source.push_str(&managed_backend_binding_source(
+        &classes,
+        "__module",
+        "match __module.pointerSize { PointerSize.Bit32 => 4, PointerSize.Bit64 => 8 }",
+    ));
+    source.push_str("        },\n    }\n}\n");
+    source
+}
+
+fn managed_backend_binding_source(
+    classes: &[SchemaClass<'_>],
+    module: &str,
+    pointer_size: &str,
+) -> String {
+    let mut source = String::new();
+    source.push_str(&format!(
+        "            let {MANAGED_POINTER_SIZE_FIELD}: u32 = {pointer_size}\n"
+    ));
+    let mut images = std::collections::HashMap::new();
+    for class in classes {
+        let image_index = if let Some(index) = images.get(class.image) {
+            *index
+        } else {
+            let index = images.len();
+            source.push_str(&format!(
+                "            let __image_{index} = await {module}.image({:?})\n",
+                class.image
+            ));
+            images.insert(class.image, index);
+            index
+        };
+        let class_name = class
+            .class
+            .metadata_name_candidates()
+            .next()
+            .map(|(name, _)| name)
+            .unwrap_or(class.class.name.as_str());
+        let qualified = class
+            .namespace
+            .iter()
+            .copied()
+            .chain(std::iter::once(class_name))
+            .collect::<Vec<_>>()
+            .join(".");
+        let class_local = format!("__class_{}", class.class.id.index());
+        source.push_str(&format!(
+            "            let {class_local} = await __image_{image_index}.class({qualified:?})\n"
+        ));
+        if class_fields(class.class).any(|field| field.is_static) {
+            source.push_str(&format!(
+                "            let {} = await {class_local}.staticTable()\n",
+                managed_static_table_name(class.class.id.index())
+            ));
+        }
+        for field in class_fields(class.class) {
+            let candidates = field
+                .binding_name_candidates()
+                .into_iter()
+                .map(|(name, _, _)| format!("{name:?}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let offset = managed_field_offset_name(field.id.index());
+            source.push_str(&format!(
+                "            let {offset} = (await {class_local}.fieldAny([{candidates}])).offset\n"
+            ));
+        }
+    }
+    source.push_str(&format!("            {MANAGED_BINDINGS_TYPE} {{\n"));
+    source.push_str(&format!(
+        "                {MANAGED_POINTER_SIZE_FIELD}: {MANAGED_POINTER_SIZE_FIELD},\n"
+    ));
+    for class in classes {
+        if class_fields(class.class).any(|field| field.is_static) {
+            let name = managed_static_table_name(class.class.id.index());
+            source.push_str(&format!("                {name}: {name},\n"));
+        }
+        for field in class_fields(class.class) {
+            let name = managed_field_offset_name(field.id.index());
+            source.push_str(&format!("                {name}: {name},\n"));
+        }
+    }
+    source.push_str("            }\n");
+    source
+}
+
+fn schema_classes(program: &Program) -> Vec<SchemaClass<'_>> {
+    let mut classes = Vec::new();
+    for image in &program.managed_images {
+        collect_schema_classes(&mut classes, &image.name, &[], &image.items);
+    }
+    classes
+}
+
+fn collect_schema_classes<'ast>(
+    output: &mut Vec<SchemaClass<'ast>>,
+    image: &'ast str,
+    namespace: &[&'ast str],
+    items: &'ast [ManagedItemDecl],
+) {
+    for item in items {
+        match item {
+            ManagedItemDecl::Namespace(item) => {
+                let mut nested = namespace.to_vec();
+                nested.push(&item.name);
+                collect_schema_classes(output, image, &nested, &item.items);
+            }
+            ManagedItemDecl::Class(class) => output.push(SchemaClass {
+                image,
+                namespace: namespace.to_vec(),
+                class,
+            }),
+        }
+    }
+}
+
+fn class_fields(class: &ManagedClassDecl) -> impl Iterator<Item = &crate::ast::ManagedFieldDecl> {
+    class
+        .fields
+        .iter()
+        .chain(class.layouts.iter().flat_map(|layout| &layout.fields))
+}
+
+pub(crate) fn managed_field_offset_name(field: usize) -> String {
+    format!("__field_{field}_offset")
+}
+
+pub(crate) fn managed_static_table_name(class: usize) -> String {
+    format!("__class_{class}_static_table")
+}
+
+fn selected_provider_preparation<'source>(
+    user_source: &'source str,
+    user_program: &Program,
+    library: &StandardLibrary,
+) -> Option<(&'static str, Vec<&'source str>)> {
+    let state = user_program.state.as_ref()?;
+    let provider = state
+        .provider
+        .as_ref()
+        .and_then(|reference| library.state_provider_by_name(&reference.name))
+        .or_else(|| {
+            state
+                .provider
+                .is_none()
+                .then(|| library.default_state_provider())
+                .flatten()
+        })?;
+    let (preparation, arguments) = if let Some(reference) = &state.provider
+        && let Some(selected) = &reference.selector
+    {
+        let selector = provider
+            .selectors
+            .iter()
+            .find(|candidate| candidate.name == selected.name)?;
+        (
+            selector.preparation,
+            selected
+                .arguments
+                .iter()
+                .map(|argument| &user_source[argument.span.start..argument.span.end])
+                .collect(),
+        )
+    } else {
+        (provider.preparation?, Vec::new())
+    };
+    let item = library.item(preparation);
+    let Implementation::LibraryBody { function_name, .. } = item.implementation else {
+        return None;
+    };
+    Some((function_name, arguments))
 }
 
 #[cfg(test)]
@@ -169,6 +410,9 @@ mod tests {
                     for iteration in 0..16 {
                         augment_program_with_library_bodies(
                             "state \"parallel-probe.exe\" {}",
+                            &crate::parse("state \"parallel-probe.exe\" {}")
+                                .unwrap()
+                                .into_syntax(),
                             &library,
                         )
                         .unwrap_or_else(|diagnostics| {

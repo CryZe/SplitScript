@@ -179,7 +179,10 @@ struct Checker {
 
 impl Checker {
     fn is_library_function(&self) -> bool {
-        matches!(self.callable, CallableContext::LibraryFunction(_))
+        matches!(
+            self.callable,
+            CallableContext::LibraryFunction(_) | CallableContext::CompilerGenerated
+        )
     }
 
     fn is_provider_value_name(&self, name: &str) -> bool {

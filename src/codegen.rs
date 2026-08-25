@@ -72,7 +72,7 @@ use self::script_functions::{
     compile_user_function, plan_wasm_locals,
 };
 use self::set_functions::SetFunctions;
-use self::update::{ProviderAttach, StatePollFunctions, compile_update};
+use self::update::{ProviderAttach, ProviderPreparation, StatePollFunctions, compile_update};
 use crate::intrinsic_registry::RuntimeHelperId;
 
 const STATE_TYPE: u32 = 0;
@@ -183,6 +183,29 @@ fn provider_attachment_function(
         .iter()
         .find(|function| function.name == function_name)
         .expect("source-defined provider attachments are injected into the program");
+    let signature = semantics
+        .function_parameter_types(function.id)
+        .iter()
+        .copied()
+        .chain(semantics.function_result(function.id))
+        .collect();
+    Some(semantics.function_instance(function.id, signature))
+}
+
+fn provider_preparation_function(
+    program: &Program,
+    semantics: &SemanticModel,
+    standard_library: &StandardLibrary,
+) -> Option<FunctionInstance> {
+    standard_library.state_provider_preparation(
+        semantics.state_provider()?,
+        semantics.state_provider_selector(),
+    )?;
+    let function = program
+        .functions
+        .iter()
+        .find(|function| function.name == crate::stdlib::PROVIDER_PREPARATION_FUNCTION)
+        .expect("selected provider preparation is injected into the program");
     let signature = semantics
         .function_parameter_types(function.id)
         .iter()
@@ -343,13 +366,17 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     });
     let provider_attachment =
         provider_attachment_function(provider, program, semantics, &standard_library);
+    let provider_preparation = provider_preparation_function(program, semantics, &standard_library);
     let mut reachability = reachability::Reachability::analyze(
         program,
         semantics,
         wasm_ir,
         &standard_library,
         capabilities,
-        provider_attachment.clone(),
+        provider_attachment
+            .clone()
+            .into_iter()
+            .chain(provider_preparation.clone()),
     );
     let async_frames =
         AsyncFrameLayouts::plan(on_attach, program, wasm_ir, semantics, &reachability);
@@ -408,6 +435,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         &gc,
         wasm_ir,
         provider_attachment.as_ref(),
+        provider_preparation.as_ref(),
     );
 
     let function_plan::FunctionPlan {
@@ -526,6 +554,31 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             completion_field,
         }
     });
+    let provider_preparation = provider_preparation.as_ref().map(|instance| {
+        let plan = user_functions[instance];
+        let layout = async_frames
+            .function(instance)
+            .expect("source provider preparations must suspend");
+        let (completion_field, completion_type) = layout
+            .completion
+            .expect("source provider preparations return a runtime context");
+        ProviderPreparation {
+            init: plan.call,
+            poll: plan.poll.expect("source provider preparations are async"),
+            frame_global: runtime_globals
+                .provider_preparation_frame
+                .expect("source provider preparations have frame storage"),
+            frame_type: gc.function_frame_index(instance),
+            completion_field,
+            value_global: runtime_globals
+                .provider_preparation_value
+                .expect("source provider preparations have result storage"),
+            value_type: completion_type,
+            ready_global: runtime_globals
+                .provider_prepared
+                .expect("source provider preparations have readiness storage"),
+        }
+    });
     let attachment_globals = wasm_ir.attachment_globals().collect::<Vec<_>>();
     let update_context = update::UpdateContext {
         standard_library: &standard_library,
@@ -538,6 +591,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         attachment_globals: &attachment_globals,
         process_names: &process_names,
         provider_attach,
+        provider_preparation,
     };
 
     let helper_inputs = runtime_helpers::RuntimeHelperInputs {

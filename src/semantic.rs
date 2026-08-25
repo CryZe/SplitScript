@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{
-        ArrayTypeId, AssignmentId, EnumVariantId, ExprId, FunctionId, ManagedFieldId, OptionTypeId,
-        PatternId, RecordFieldId, RecordId, ResultTypeId, SettingChoiceOptionId, TypeApplicationId,
-        ValueId,
+        ArrayTypeId, AssignmentId, EnumVariantId, ExprId, FunctionId, ManagedClassId,
+        ManagedFieldId, OptionTypeId, PatternId, RecordFieldId, RecordId, ResultTypeId,
+        SettingChoiceOptionId, TypeApplicationId, ValueId,
     },
     inference::Type,
     stdlib::{StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibTypeId, StdlibVariantId},
@@ -172,6 +172,13 @@ pub enum ResolvedValue {
     /// a source-level call.
     StandardLibraryConstant(StdlibItemId),
     ProviderValue(StdlibStateProviderId),
+    /// A live static managed field. Provider preparation caches its class
+    /// storage table and metadata offset; evaluation performs the fallible
+    /// process-memory read.
+    ManagedStatic {
+        class: ManagedClassId,
+        field: ManagedFieldId,
+    },
     Variable(ValueId),
     CurrentSnapshot,
     OldSnapshot,
@@ -190,6 +197,7 @@ impl ResolvedValue {
         match self {
             Self::StandardLibraryConstant(_)
             | Self::ProviderValue(_)
+            | Self::ManagedStatic { .. }
             | Self::CurrentSnapshot
             | Self::OldSnapshot
             | Self::SettingsView

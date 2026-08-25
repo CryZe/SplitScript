@@ -38,7 +38,11 @@ use catalog::{
 };
 use declarations::CORE_TYPES;
 pub(crate) use declarations::with_core_types;
-pub(crate) use library_bodies::{RESERVED_FUNCTION_PREFIX, augment_program_with_library_bodies};
+pub(crate) use library_bodies::{
+    MANAGED_BINDINGS_TYPE, MANAGED_POINTER_SIZE_FIELD, PROVIDER_PREPARATION_FUNCTION,
+    RESERVED_FUNCTION_PREFIX, augment_program_with_library_bodies, managed_field_offset_name,
+    managed_static_table_name,
+};
 
 use std::{collections::HashSet, sync::Arc};
 
@@ -208,6 +212,26 @@ impl StandardLibrary {
         self.state_providers()
             .iter()
             .find(|provider| provider.default)
+    }
+
+    /// Returns the compiler-owned preparation callable selected by one state
+    /// declaration. A configured selector replaces the provider's automatic
+    /// preparation; providers without either hook need no preparation phase.
+    pub(crate) fn state_provider_preparation(
+        &self,
+        provider: StdlibStateProviderId,
+        selector: Option<usize>,
+    ) -> Option<StdlibItemId> {
+        let provider = self.state_provider(provider);
+        selector
+            .map(|selector| {
+                provider
+                    .selectors
+                    .get(selector)
+                    .expect("resolved provider selector belongs to its provider")
+                    .preparation
+            })
+            .or(provider.preparation)
     }
 
     pub fn core_type(&self, id: CoreTypeId) -> &'static CoreType {
@@ -909,7 +933,6 @@ impl StandardLibrary {
             );
         }
         let mut provider_names = HashSet::new();
-        let mut provider_values = HashSet::new();
         let mut default_state_provider = None;
         for provider in STATE_PROVIDERS {
             if provider.name.trim().is_empty() {
@@ -921,11 +944,6 @@ impl StandardLibrary {
                 errors.push(format!(
                     "state provider `{}` has an empty value name",
                     provider.name
-                ));
-            } else if !provider_values.insert(provider.value_name) {
-                errors.push(format!(
-                    "state providers repeat value name `{}`",
-                    provider.value_name
                 ));
             }
             if !TYPES.iter().any(|ty| ty.id == provider.process_type) {
@@ -1063,46 +1081,117 @@ impl StandardLibrary {
                     ));
                 }
             }
-            let StateProviderAttachment::Callable(attachment_id) = provider.attachment else {
-                if !matches!(
-                    self.type_decl(provider.process_type).representation,
-                    RuntimeRepresentation::Scalar {
-                        storage: CoreTypeId::I64
+            match provider.attachment {
+                StateProviderAttachment::Identity => {
+                    if !matches!(
+                        self.type_decl(provider.process_type).representation,
+                        RuntimeRepresentation::Scalar {
+                            storage: CoreTypeId::I64
+                        }
+                    ) {
+                        errors.push(format!(
+                            "identity state provider `{}` must expose an i64 scalar handle",
+                            provider.name
+                        ));
                     }
-                ) {
-                    errors.push(format!(
-                        "identity state provider `{}` must expose an i64 scalar handle",
-                        provider.name
-                    ));
                 }
-                continue;
-            };
-            let attachment = self.item(attachment_id);
-            let direct_result =
-                attachment.signature.result == TypeRef::Standard(provider.process_type);
-            if attachment.kind != ItemKind::Function
-                || !attachment.signature.type_parameters.is_empty()
-                || !attachment.signature.parameters.is_empty()
-                || !direct_result
-                || !matches!(
-                    attachment.implementation,
-                    Implementation::LibraryBody { .. }
-                )
-            {
+                StateProviderAttachment::Callable(attachment_id) => {
+                    let attachment = self.item(attachment_id);
+                    let direct_result =
+                        attachment.signature.result == TypeRef::Standard(provider.process_type);
+                    if attachment.kind != ItemKind::Function
+                        || !attachment.signature.type_parameters.is_empty()
+                        || !attachment.signature.parameters.is_empty()
+                        || !direct_result
+                        || !matches!(
+                            attachment.implementation,
+                            Implementation::LibraryBody { .. }
+                        )
+                    {
+                        errors.push(format!(
+                            "state provider `{}` has incompatible attachment callable `{:?}`",
+                            provider.name, attachment_id
+                        ));
+                    }
+                    if self.source_body_operations_are_initialized() {
+                        let operation = self.operation_metadata(attachment_id);
+                        if !operation.effects.contains(&Effect::Suspends)
+                            || !operation.effects.contains(&Effect::RequiresAttachedProcess)
+                        {
+                            errors.push(format!(
+                                "state provider `{}` attachment `{}` must suspend and require an attached process",
+                                provider.name, attachment.qualified_name
+                            ));
+                        }
+                    }
+                }
+            }
+
+            let preparations = provider
+                .preparation
+                .map(|item| (format!("state provider `{}`", provider.name), item, &[][..]))
+                .into_iter()
+                .chain(provider.selectors.iter().map(|selector| {
+                    (
+                        format!(
+                            "state-provider selector `{}.{}`",
+                            provider.name, selector.name
+                        ),
+                        selector.preparation,
+                        selector.parameters,
+                    )
+                }))
+                .collect::<Vec<_>>();
+            if !provider.selectors.is_empty() && provider.preparation.is_none() {
                 errors.push(format!(
-                    "state provider `{}` has incompatible attachment callable `{:?}`",
-                    provider.name, attachment_id
+                    "configured state provider `{}` has no automatic preparation callable",
+                    provider.name
                 ));
             }
-            if self.source_body_operations_are_initialized() {
-                let operation = self.operation_metadata(attachment_id);
-                if !operation.effects.contains(&Effect::Suspends)
-                    || !operation.effects.contains(&Effect::RequiresAttachedProcess)
+            let mut preparation_result = None;
+            for (owner, preparation_id, expected_parameters) in preparations {
+                let preparation = self.item(preparation_id);
+                let parameters_match = preparation.signature.parameters.len()
+                    == expected_parameters.len()
+                    && preparation
+                        .signature
+                        .parameters
+                        .iter()
+                        .zip(expected_parameters)
+                        .all(|(actual, expected)| actual.ty == expected.ty);
+                if preparation.kind != ItemKind::Function
+                    || !preparation.signature.type_parameters.is_empty()
+                    || !parameters_match
+                    || !preparation.signature.result_is_async
+                    || !matches!(
+                        preparation.implementation,
+                        Implementation::LibraryBody { .. }
+                    )
                 {
                     errors.push(format!(
-                        "state provider `{}` attachment `{}` must suspend and require an attached process",
-                        provider.name, attachment.qualified_name
+                        "{owner} has incompatible preparation callable `{:?}`",
+                        preparation_id
                     ));
+                }
+                if let Some(expected) = preparation_result {
+                    if expected != preparation.signature.result {
+                        errors.push(format!(
+                            "{owner} preparation returns a different runtime context type"
+                        ));
+                    }
+                } else {
+                    preparation_result = Some(preparation.signature.result);
+                }
+                if self.source_body_operations_are_initialized() {
+                    let operation = self.operation_metadata(preparation_id);
+                    if !operation.effects.contains(&Effect::Suspends)
+                        || !operation.effects.contains(&Effect::RequiresAttachedProcess)
+                    {
+                        errors.push(format!(
+                            "{owner} preparation `{}` must suspend and require an attached process",
+                            preparation.qualified_name
+                        ));
+                    }
                 }
             }
         }

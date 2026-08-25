@@ -48,6 +48,9 @@ pub struct StdlibStateProvider {
     pub default: bool,
     pub process_type: StdlibTypeId,
     pub attachment: StateProviderAttachment,
+    /// Optional asynchronous work performed after the provider value becomes
+    /// available and before the user's `onAttach` action runs.
+    pub preparation: Option<StdlibItemId>,
     pub direct_read: StdlibItemId,
     pub selectors: &'static [StateProviderSelector],
     pub documentation: Documentation<StdlibSymbolId>,
@@ -57,6 +60,10 @@ pub struct StdlibStateProvider {
 pub struct StateProviderSelector {
     pub name: &'static str,
     pub parameters: &'static [StateProviderSelectorParameter],
+    /// Selector-specific preparation callable. Its parameters exactly match
+    /// this selector and its result matches the provider's default
+    /// preparation result.
+    pub preparation: StdlibItemId,
     pub documentation: Documentation<StdlibSymbolId>,
 }
 

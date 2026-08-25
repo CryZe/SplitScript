@@ -89,6 +89,9 @@ pub(super) enum CallableContext {
     Function,
     Closure,
     LibraryFunction(StdlibItemId),
+    /// A compiler-injected ordinary function that composes privileged library
+    /// operations without becoming a public catalog item.
+    CompilerGenerated,
     Action(ActionKind),
 }
 
@@ -96,7 +99,7 @@ impl CallableContext {
     pub(super) fn is_function(&self) -> bool {
         matches!(
             self,
-            Self::Function | Self::Closure | Self::LibraryFunction(_)
+            Self::Function | Self::Closure | Self::LibraryFunction(_) | Self::CompilerGenerated
         )
     }
 
@@ -106,6 +109,7 @@ impl CallableContext {
             Self::Function
                 | Self::Closure
                 | Self::LibraryFunction(_)
+                | Self::CompilerGenerated
                 | Self::Action(ActionKind::OnAttach)
         )
     }
@@ -113,7 +117,11 @@ impl CallableContext {
     pub(super) fn action(&self) -> Option<ActionKind> {
         match self {
             Self::Action(action) => Some(*action),
-            Self::TopLevel | Self::Function | Self::Closure | Self::LibraryFunction(_) => None,
+            Self::TopLevel
+            | Self::Function
+            | Self::Closure
+            | Self::LibraryFunction(_)
+            | Self::CompilerGenerated => None,
         }
     }
 }

@@ -948,6 +948,7 @@ impl<'a> Validator<'a> {
                 "processType",
                 "processes",
                 "attachment",
+                "prepare",
                 "directRead",
                 "default",
             ],
@@ -968,6 +969,15 @@ impl<'a> Validator<'a> {
         self.require_name_attribute(&value.name, &value.attributes, "attachment", |attachment| {
             attachment == "identity" || generated_items.contains(attachment)
         });
+        if let Some(preparation) =
+            self.optional_name_attribute(&value.name, &value.attributes, "prepare")
+            && !generated_items.contains(preparation)
+        {
+            self.error(format!(
+                "`{}` has invalid `@prepare({preparation})`",
+                value.name
+            ));
+        }
         let process_mode =
             self.optional_name_attribute(&value.name, &value.attributes, "processes");
         let source_processes = process_mode == Some("source");
@@ -1012,6 +1022,20 @@ impl<'a> Validator<'a> {
         let mut selector_names = HashSet::new();
         for selector in &value.selectors {
             let qualified = format!("{}.{}", value.name, selector.name);
+            self.validate_attributes(&qualified, &selector.attributes, &["prepare"]);
+            if let Some(preparation) =
+                self.optional_name_attribute(&qualified, &selector.attributes, "prepare")
+            {
+                if !self.generated_items.contains(preparation) {
+                    self.error(format!(
+                        "state-provider selector `{qualified}` has invalid `@prepare({preparation})`"
+                    ));
+                }
+            } else {
+                self.error(format!(
+                    "state-provider selector `{qualified}` is missing `@prepare(...)`"
+                ));
+            }
             if !selector_names.insert(selector.name.as_str()) {
                 self.error(format!(
                     "state provider `{}` repeats selector `{}`",

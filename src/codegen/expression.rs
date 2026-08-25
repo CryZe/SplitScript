@@ -14,8 +14,9 @@ use crate::{
         ResolvedRecordId, ResolvedValue, SemanticModel, ValueConversionKind,
     },
     stdlib::{
-        IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibOwner,
-        StdlibTypeConstructorId, StdlibTypeId,
+        IntrinsicId, MANAGED_BINDINGS_TYPE, MANAGED_POINTER_SIZE_FIELD, RuntimeRepresentation,
+        StandardLibrary, StdlibFieldId, StdlibOwner, StdlibTypeConstructorId, StdlibTypeId,
+        managed_field_offset_name, managed_static_table_name,
     },
     types::{EnumTypeId, ResolvedArrayType, TypeId},
     wasm_ir::{self, TemporaryId},
@@ -1346,6 +1347,19 @@ fn compile_resolved_path(
     members: &[ResolvedMember],
     context: &ExprContext<'_>,
 ) -> Type {
+    if let [ResolvedMember::ManagedField(field)] = members
+        && resolved_value_type_id(value, context).is_some_and(|ty| {
+            matches!(
+                context.semantics.types().kind(ty),
+                crate::types::TypeKind::ManagedReference(_)
+            )
+        })
+    {
+        function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+        let receiver = compile_resolved_path(function, value, &[], context);
+        debug_assert_eq!(receiver, Type::Address);
+        return emit_managed_field_read(function, *field, context);
+    }
     let value_type = match value {
         ResolvedValue::StandardLibraryConstant(item) => {
             let function_instance = context
@@ -1381,6 +1395,23 @@ fn compile_resolved_path(
                 ));
             }
             Type::Standard(declaration.process_type)
+        }
+        ResolvedValue::ManagedStatic { class, field } => {
+            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+            let binding = managed_field_binding(field, context);
+            emit_managed_binding_field(
+                function,
+                &managed_static_table_name(class.index()),
+                context,
+            );
+            emit_managed_binding_field(
+                function,
+                &managed_field_offset_name(field.index()),
+                context,
+            );
+            function.instruction(&Instruction::I64ExtendI32U);
+            function.instruction(&Instruction::I64Add);
+            emit_managed_read_at_address(function, binding, context)
         }
         ResolvedValue::CurrentSnapshot | ResolvedValue::OldSnapshot => {
             function
@@ -2269,6 +2300,201 @@ fn emit_path_fields(
     current_type
 }
 
+fn resolved_value_type_id(value: ResolvedValue, context: &ExprContext<'_>) -> Option<TypeId> {
+    match value {
+        ResolvedValue::Variable(value)
+        | ResolvedValue::CurrentState(value)
+        | ResolvedValue::OldState(value) => context.semantics.value_type(value)?,
+        ResolvedValue::Setting(value) | ResolvedValue::OldSetting(value) => {
+            context.semantics.value_type(value)?
+        }
+        ResolvedValue::StandardLibraryConstant(_)
+        | ResolvedValue::ProviderValue(_)
+        | ResolvedValue::ManagedStatic { .. }
+        | ResolvedValue::CurrentSnapshot
+        | ResolvedValue::OldSnapshot
+        | ResolvedValue::SettingsView
+        | ResolvedValue::OldSettingsView => return None,
+    }
+    .into()
+}
+
+fn managed_field_binding<'context>(
+    field: crate::ast::ManagedFieldId,
+    context: &'context ExprContext<'_>,
+) -> &'context crate::managed::ManagedFieldBinding {
+    context
+        .managed
+        .classes
+        .iter()
+        .flat_map(|class| {
+            class
+                .fields
+                .iter()
+                .chain(class.layouts.iter().flat_map(|layout| &layout.fields))
+        })
+        .find(|candidate| candidate.id == field)
+        .expect("resolved managed fields belong to the binding plan")
+}
+
+/// Reads an instance field from a `T.Ref` address already on the stack after
+/// the attached process handle. Metadata lookup is absent here: the offset is
+/// loaded from the attachment-scoped binding record.
+fn emit_managed_field_read(
+    function: &mut Function,
+    field: crate::ast::ManagedFieldId,
+    context: &ExprContext<'_>,
+) -> Type {
+    emit_managed_binding_field(function, &managed_field_offset_name(field.index()), context);
+    function
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::I64Add);
+    emit_managed_read_at_address(function, managed_field_binding(field, context), context)
+}
+
+/// Consumes `(process, address)` and produces the ordinary `T!` representation
+/// for one remote managed field. Managed references honor the detected target
+/// pointer width; terminal values use their normal `MemoryReadable` layout.
+fn emit_managed_read_at_address(
+    function: &mut Function,
+    field: &crate::managed::ManagedFieldBinding,
+    context: &ExprContext<'_>,
+) -> Type {
+    let result = context
+        .semantics
+        .types()
+        .iter()
+        .find_map(|(_, kind)| match kind {
+            crate::types::TypeKind::Result { layout, value } if *value == field.value_type => {
+                Some(*layout)
+            }
+            _ => None,
+        })
+        .expect("a checked managed field access has a concrete Result layout");
+    let value_type = semantic_type(field.value_type, context.semantics);
+
+    if matches!(
+        context.semantics.types().kind(field.value_type),
+        crate::types::TypeKind::ManagedReference(_)
+    ) {
+        function.instruction(&Instruction::I32Const(context.abi_read.destination(8)));
+        emit_managed_binding_field(function, MANAGED_POINTER_SIZE_FIELD, context);
+        function
+            .instruction(&Instruction::Call(
+                context.abi.function(AbiImportId::ProcessRead),
+            ))
+            .instruction(&Instruction::If(BlockType::Result(
+                context.gc.val_type(Type::Result(result)),
+            )));
+        emit_managed_pointer_from_scratch(function, context);
+        function
+            .instruction(&Instruction::I64Eqz)
+            .instruction(&Instruction::If(BlockType::Result(
+                context.gc.val_type(Type::Result(result)),
+            )));
+        emit_result_error(
+            function,
+            result,
+            value_type,
+            "managed field contained a null reference",
+            context.gc,
+        );
+        function.instruction(&Instruction::Else);
+        emit_managed_pointer_from_scratch(function, context);
+        emit_result_success(function, result, context.gc);
+        function.instruction(&Instruction::End);
+        function.instruction(&Instruction::Else);
+        emit_result_error(
+            function,
+            result,
+            value_type,
+            "managed field could not be read",
+            context.gc,
+        );
+        function.instruction(&Instruction::End);
+    } else {
+        let size = context
+            .memory
+            .layout(field.value_type, context.semantics)
+            .expect("checked managed value fields are MemoryReadable")
+            .size();
+        function
+            .instruction(&Instruction::I32Const(context.abi_read.destination(size)))
+            .instruction(&Instruction::I32Const(size as i32))
+            .instruction(&Instruction::Call(
+                context.abi.function(AbiImportId::ProcessRead),
+            ))
+            .instruction(&Instruction::If(BlockType::Result(
+                context.gc.val_type(Type::Result(result)),
+            )));
+        emit_memory_value(
+            function,
+            field.value_type,
+            context.abi_read,
+            0,
+            context.memory,
+            context.semantics,
+            context.gc,
+            MemoryByteOrder::Little,
+        );
+        emit_result_success(function, result, context.gc);
+        function.instruction(&Instruction::Else);
+        emit_result_error(
+            function,
+            result,
+            value_type,
+            "managed field could not be read",
+            context.gc,
+        );
+        function.instruction(&Instruction::End);
+    }
+    Type::Result(result)
+}
+
+fn emit_managed_pointer_from_scratch(function: &mut Function, context: &ExprContext<'_>) {
+    emit_managed_binding_field(function, MANAGED_POINTER_SIZE_FIELD, context);
+    function
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::I32Const(context.abi_read.start()))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(context.abi_read.start()))
+        .instruction(&Instruction::I64Load(memarg()))
+        .instruction(&Instruction::End);
+}
+
+fn emit_managed_binding_field(function: &mut Function, name: &str, context: &ExprContext<'_>) {
+    let record = context
+        .records
+        .iter()
+        .find(|record| record.name == MANAGED_BINDINGS_TYPE)
+        .expect("managed schemas generate an attachment binding record");
+    let (field_index, field) = record
+        .fields
+        .iter()
+        .enumerate()
+        .find(|(_, field)| field.name == name)
+        .expect("managed binding records contain every generated metadata field");
+    let field_type = record_field_type(field.id, context.semantics);
+    function
+        .instruction(&Instruction::GlobalGet(
+            context
+                .runtime_globals
+                .provider_preparation_value
+                .expect("managed schemas require provider preparation storage"),
+        ))
+        .instruction(&Instruction::RefAsNonNull);
+    emit_typed_struct_get(
+        function,
+        context.gc.index(Type::Record(record.id)),
+        field_index as u32,
+        field_type,
+    );
+}
+
 pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context: &ExprContext<'_>) {
     let expression_ir = context
         .wasm_ir
@@ -2605,9 +2831,22 @@ fn compile_expr_unconverted(
             debug_assert_eq!(lowered_type, ty);
         }
         wasm_ir::ExpressionKind::Member { receiver, members } => {
-            compile_expr(function, *receiver, context);
             let receiver_type = context.expression_type(*receiver);
-            let lowered_type = emit_path_fields(function, members, receiver_type, context);
+            let lowered_type = if let [ResolvedMember::ManagedField(field)] = members.as_slice()
+                && matches!(
+                    context
+                        .semantics
+                        .types()
+                        .kind(context.expression_type_id(*receiver)),
+                    crate::types::TypeKind::ManagedReference(_)
+                ) {
+                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+                compile_expr(function, *receiver, context);
+                emit_managed_field_read(function, *field, context)
+            } else {
+                compile_expr(function, *receiver, context);
+                emit_path_fields(function, members, receiver_type, context)
+            };
             debug_assert_eq!(lowered_type, ty);
         }
         wasm_ir::ExpressionKind::Index { receiver, index } => {

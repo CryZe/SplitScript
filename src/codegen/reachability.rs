@@ -53,10 +53,10 @@ impl Reachability {
         wasm_ir: &wasm_ir::Program,
         standard_library: &StandardLibrary,
         capabilities: &crate::capabilities::CapabilityAnalysis,
-        provider_attachment: Option<FunctionInstance>,
+        provider_functions: impl IntoIterator<Item = FunctionInstance>,
     ) -> Self {
         let mut pending = Vec::new();
-        let mut pending_functions = provider_attachment
+        let mut pending_functions = provider_functions
             .into_iter()
             .map(|function| (None, function))
             .collect::<Vec<_>>();

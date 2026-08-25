@@ -28,6 +28,7 @@ pub(super) struct UpdateContext<'a> {
     pub attachment_globals: &'a [ValueId],
     pub process_names: &'a [&'a str],
     pub provider_attach: Option<ProviderAttach>,
+    pub provider_preparation: Option<ProviderPreparation>,
 }
 
 #[derive(Clone, Copy)]
@@ -37,6 +38,18 @@ pub(super) struct ProviderAttach {
     pub frame_global: u32,
     pub frame_type: u32,
     pub completion_field: u32,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ProviderPreparation {
+    pub init: u32,
+    pub poll: u32,
+    pub frame_global: u32,
+    pub frame_type: u32,
+    pub completion_field: u32,
+    pub value_global: u32,
+    pub value_type: Type,
+    pub ready_global: u32,
 }
 
 pub(super) struct StatePollFunctions<'a> {
@@ -167,6 +180,18 @@ pub(super) fn compile_update(
             .instruction(&Instruction::RefNull(HeapType::Concrete(frame_type)))
             .instruction(&Instruction::GlobalSet(frame_global));
     }
+    if let Some(preparation) = lowering.provider_preparation {
+        function
+            .instruction(&Instruction::RefNull(HeapType::Concrete(
+                preparation.frame_type,
+            )))
+            .instruction(&Instruction::GlobalSet(preparation.frame_global));
+        emit_storage_default(&mut function, lowering.gc.val_type(preparation.value_type));
+        function
+            .instruction(&Instruction::GlobalSet(preparation.value_global))
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::GlobalSet(preparation.ready_global));
+    }
     if let (Some(selected), Some(enumeration)) =
         (globals.selected_layout, state.layout_enum.as_ref())
     {
@@ -248,6 +273,40 @@ pub(super) fn compile_update(
         function
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::Return)
+            .instruction(&Instruction::End);
+    }
+
+    if let Some(preparation) = lowering.provider_preparation {
+        function
+            .instruction(&Instruction::GlobalGet(preparation.ready_global))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::GlobalGet(preparation.frame_global))
+            .instruction(&Instruction::RefIsNull)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Call(preparation.init))
+            .instruction(&Instruction::GlobalSet(preparation.frame_global))
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::GlobalGet(preparation.frame_global))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::Call(preparation.poll))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::GlobalGet(preparation.frame_global))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::StructGet {
+                struct_type_index: preparation.frame_type,
+                field_index: preparation.completion_field,
+            })
+            .instruction(&Instruction::GlobalSet(preparation.value_global))
+            .instruction(&Instruction::RefNull(HeapType::Concrete(
+                preparation.frame_type,
+            )))
+            .instruction(&Instruction::GlobalSet(preparation.frame_global))
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::GlobalSet(preparation.ready_global))
             .instruction(&Instruction::End);
     }
 

@@ -649,6 +649,7 @@ pub(crate) fn lower_for_tooling(parsed: ParsedProgram) -> Result<LoweredProgram,
     if parsed.context.include_standard_library_bodies {
         if let Some(augmented) = stdlib::augment_program_with_library_bodies(
             parsed.document.source(),
+            &syntax,
             &parsed.context.standard_library(),
         )? {
             compilation_syntax = augmented;

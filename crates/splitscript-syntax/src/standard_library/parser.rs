@@ -163,6 +163,7 @@ impl Parser<'_> {
         let mut selectors = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             let documentation = self.documentation()?;
+            let attributes = self.attributes()?;
             if self.eat_ident("selector") {
                 let name = self.ident("expected a state-provider selector name")?;
                 self.expect(
@@ -192,11 +193,17 @@ impl Parser<'_> {
                     name,
                     parameters,
                     documentation,
+                    attributes,
                 });
             } else {
                 if !documentation.summary.is_empty() || !documentation.details.is_empty() {
                     return Err(self
                         .error("documentation inside a state provider must describe a selector"));
+                }
+                if !attributes.is_empty() {
+                    return Err(
+                        self.error("attributes inside a state provider must configure a selector")
+                    );
                 }
                 let TokenKind::String(process) = self.current().kind.clone() else {
                     return Err(self.error("expected a quoted process name or `selector`"));
@@ -1540,10 +1547,12 @@ stateProvider Unity as process {
     /// Selects IL2CPP metadata explicitly.
     ///
     /// Skips runtime-version auto-detection.
+    @prepare(Print)
     selector il2cpp(version: u32),
     /// Selects Mono metadata explicitly.
     ///
     /// Skips runtime-version auto-detection.
+    @prepare(Print)
     selector mono(version: MonoVersion),
 }
 "#;
@@ -1576,6 +1585,7 @@ stateProvider Unity as process {
         assert!(provider.processes.is_empty());
         assert_eq!(provider.selectors.len(), 2);
         assert_eq!(provider.selectors[0].name, "il2cpp");
+        assert_eq!(provider.selectors[0].attributes[0].name, "prepare");
         assert_eq!(provider.selectors[0].parameters[0].name, "version");
         assert_eq!(provider.selectors[0].parameters[0].ty.to_string(), "u32");
         assert_eq!(provider.selectors[1].name, "mono");

@@ -1104,6 +1104,75 @@ fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
 }
 
 #[test]
+fn unity_provider_preparation_is_selected_typed_and_lowered_before_attachment() {
+    let library = StandardLibrary::new();
+    let unity = library
+        .state_provider_by_name("Unity")
+        .expect("the bundled Unity provider should be discoverable");
+    assert_eq!(unity.id, StdlibStateProviderId::Unity);
+    assert_eq!(unity.value_name, "process");
+    assert_eq!(unity.process_type, StdlibTypeId::Process);
+    assert_eq!(unity.preparation, Some(StdlibItemId::UnityProviderAuto));
+    assert_eq!(unity.selectors.len(), 2);
+    assert_eq!(
+        unity.selectors[0].preparation,
+        StdlibItemId::UnityProviderIl2Cpp
+    );
+    assert_eq!(
+        unity.selectors[1].preparation,
+        StdlibItemId::UnityProviderMono
+    );
+
+    for (source, selector) in [
+        (r#"state Unity ["game.exe"] {}"#, None),
+        (r#"state Unity.il2cpp(2020) ["game.exe"] {}"#, Some(0)),
+        (
+            r#"state Unity.mono(MonoVersion.V3) ["game.exe"] {}"#,
+            Some(1),
+        ),
+    ] {
+        let checked = splitscript::check(splitscript::parse(source).unwrap())
+            .expect("each Unity provider configuration should type-check");
+        assert_eq!(
+            checked.semantics().state_provider(),
+            Some(StdlibStateProviderId::Unity)
+        );
+        assert_eq!(checked.semantics().state_provider_selector(), selector);
+        Validator::new_with_features(WasmFeatures::all())
+            .validate_all(&splitscript::codegen(&checked))
+            .expect("Unity provider preparation should emit valid Wasm");
+    }
+
+    let schema = r#"
+        image "Assembly-CSharp" {
+            class Player {
+                u32 score;
+            }
+
+            class GameManager {
+                static GameManager instance;
+                Player player;
+            }
+        }
+        state Unity ["game.exe"] {
+            score: u32 = GameManager.instance?.player?.score?
+        }
+    "#;
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::compile(schema).unwrap())
+        .expect("a Unity schema should be bound by the provider preparation phase");
+
+    let native = schema.replace("state Unity [\"game.exe\"]", "state \"game.exe\"");
+    let diagnostics = splitscript::compile(&native)
+        .expect_err("live managed reads need the Unity attachment provider");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("live managed fields require a Unity state provider")
+    }));
+}
+
+#[test]
 fn ps2_provider_is_source_defined_and_supports_direct_and_pointer_path_reads() {
     let library = StandardLibrary::new();
     let ps2 = library

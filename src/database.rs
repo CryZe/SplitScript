@@ -516,6 +516,13 @@ fn source_definition_for_value_path(
     segment: usize,
 ) -> Option<SourceDefinitionId> {
     let root = root?;
+    if let ResolvedValue::ManagedStatic { class, field } = root {
+        return match segment {
+            0 => Some(SourceDefinitionId::ManagedClass(class)),
+            1 => Some(SourceDefinitionId::ManagedField(field)),
+            _ => None,
+        };
+    }
     if matches!(root, ResolvedValue::StandardLibraryConstant(_)) {
         return None;
     }
@@ -541,6 +548,7 @@ fn source_definition_for_value_path(
         ResolvedValue::StandardLibraryConstant(_) => unreachable!(),
         ResolvedValue::ProviderValue(_) => 0,
         ResolvedValue::Variable(_) => 0,
+        ResolvedValue::ManagedStatic { .. } => unreachable!(),
         ResolvedValue::CurrentSnapshot
         | ResolvedValue::OldSnapshot
         | ResolvedValue::SettingsView
@@ -560,6 +568,7 @@ fn source_definition_for_value_path(
             }
             ResolvedValue::ProviderValue(_)
             | ResolvedValue::StandardLibraryConstant(_)
+            | ResolvedValue::ManagedStatic { .. }
             | ResolvedValue::Variable(_)
             | ResolvedValue::CurrentSnapshot
             | ResolvedValue::OldSnapshot
@@ -592,6 +601,17 @@ fn definition_for_value_path(
     standard_library: &StandardLibrary,
 ) -> Option<DefinitionTarget> {
     let root = root?;
+    if let ResolvedValue::ManagedStatic { class, field } = root {
+        let definition = match segment {
+            0 => SourceDefinitionId::ManagedClass(class),
+            1 => SourceDefinitionId::ManagedField(field),
+            _ => return None,
+        };
+        return definitions
+            .get(definition)
+            .cloned()
+            .map(DefinitionTarget::Source);
+    }
     if let ResolvedValue::StandardLibraryConstant(item) = root {
         let constant_segment = standard_library
             .item_path(standard_library.item(item))?
@@ -638,6 +658,7 @@ fn definition_for_value_path(
         ResolvedValue::StandardLibraryConstant(_) => unreachable!(),
         ResolvedValue::ProviderValue(_) => 0,
         ResolvedValue::Variable(_) => 0,
+        ResolvedValue::ManagedStatic { .. } => unreachable!(),
         ResolvedValue::CurrentSnapshot
         | ResolvedValue::OldSnapshot
         | ResolvedValue::SettingsView
@@ -657,6 +678,7 @@ fn definition_for_value_path(
             }
             ResolvedValue::ProviderValue(_)
             | ResolvedValue::StandardLibraryConstant(_)
+            | ResolvedValue::ManagedStatic { .. }
             | ResolvedValue::Variable(_)
             | ResolvedValue::CurrentSnapshot
             | ResolvedValue::OldSnapshot

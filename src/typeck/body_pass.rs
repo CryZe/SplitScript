@@ -466,7 +466,16 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
                     }
                     _ => None,
                 })
-                .unwrap_or(CallableContext::Function);
+                .unwrap_or_else(|| {
+                    if function
+                        .name
+                        .starts_with(crate::stdlib::RESERVED_FUNCTION_PREFIX)
+                    {
+                        CallableContext::CompilerGenerated
+                    } else {
+                        CallableContext::Function
+                    }
+                });
             let return_type_source = function.return_annotation_span.map(|span| {
                 let result = checker.type_name(signature.completion);
                 super::ExpectedTypeSource {

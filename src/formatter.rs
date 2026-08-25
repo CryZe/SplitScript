@@ -6,7 +6,8 @@ use std::collections::HashSet;
 use crate::{
     Diagnostic,
     ast::{
-        Action, EnumDecl, Expr, ExprKind, FunctionDecl, MatchArm, Program, RecordDecl, SettingDecl,
+        Action, EnumDecl, Expr, ExprKind, FunctionDecl, ManagedClassDecl, ManagedImageDecl,
+        ManagedLayoutDecl, ManagedNamespaceDecl, MatchArm, Program, RecordDecl, SettingDecl,
         SettingFamilyDecl, SettingKind, StateDecl, StateField, Stmt, TypeApplicationDecl,
         VariableDecl,
     },
@@ -88,6 +89,26 @@ impl<'ast> Visitor<'ast> for HeaderCollector {
     fn visit_action(&mut self, action: &'ast Action) {
         self.push(action.span.start, action.body.span.start);
         self.visit_block(&action.body);
+    }
+
+    fn visit_managed_image(&mut self, image: &'ast ManagedImageDecl) {
+        self.push(image.span.start, image.opening_span.start);
+        visit::walk_managed_image(self, image);
+    }
+
+    fn visit_managed_namespace(&mut self, namespace: &'ast ManagedNamespaceDecl) {
+        self.push(namespace.span.start, namespace.opening_span.start);
+        visit::walk_managed_namespace(self, namespace);
+    }
+
+    fn visit_managed_class(&mut self, class: &'ast ManagedClassDecl) {
+        self.push(class.span.start, class.opening_span.start);
+        visit::walk_managed_class(self, class);
+    }
+
+    fn visit_managed_layout(&mut self, layout: &'ast ManagedLayoutDecl) {
+        self.push(layout.span.start, layout.opening_span.start);
+        visit::walk_managed_layout(self, layout);
     }
 
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
@@ -265,6 +286,42 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             enumeration.variants.iter().map(|variant| variant.span.end),
         );
         visit::walk_enum(self, enumeration);
+    }
+
+    fn visit_managed_image(&mut self, image: &'ast ManagedImageDecl) {
+        self.mark_declaration_items_vertical(
+            image.span,
+            image.items.iter().map(|item| item.span().end),
+        );
+        visit::walk_managed_image(self, image);
+    }
+
+    fn visit_managed_namespace(&mut self, namespace: &'ast ManagedNamespaceDecl) {
+        self.mark_declaration_items_vertical(
+            namespace.span,
+            namespace.items.iter().map(|item| item.span().end),
+        );
+        visit::walk_managed_namespace(self, namespace);
+    }
+
+    fn visit_managed_class(&mut self, class: &'ast ManagedClassDecl) {
+        self.mark_declaration_items_vertical(
+            class.span,
+            class
+                .fields
+                .iter()
+                .map(|field| field.span.end)
+                .chain(class.layouts.iter().map(|layout| layout.span.end)),
+        );
+        visit::walk_managed_class(self, class);
+    }
+
+    fn visit_managed_layout(&mut self, layout: &'ast ManagedLayoutDecl) {
+        self.mark_declaration_items_vertical(
+            layout.span,
+            layout.fields.iter().map(|field| field.span.end),
+        );
+        visit::walk_managed_layout(self, layout);
     }
 
     fn visit_state(&mut self, state: &'ast StateDecl) {
@@ -1659,6 +1716,36 @@ state "game.exe" {}
 onAttach {
     module = await process.mainModule()
     base = module.address
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn formats_managed_schemas_as_vertical_semicolon_delimited_declarations() {
+        let source = r#"state"game.exe"{}
+image"Assembly-CSharp"{namespace Game{class Player from"RuntimePlayer"{f32 health;}}class GameManager{static GameManager instance from["Instance","_instance",];i32 points from"_points";layout Base{i32 gameState;i32 currentLevel;}layout DlcDemo{i32 gameState from"GameState";String currentScene from"_currentScene";}}}"#;
+        let expected = r#"state "game.exe" {}
+image "Assembly-CSharp" {
+    namespace Game {
+        class Player from "RuntimePlayer" {
+            f32 health;
+        }
+    }
+    class GameManager {
+        static GameManager instance from ["Instance", "_instance"];
+        i32 points from "_points";
+        layout Base {
+            i32 gameState;
+            i32 currentLevel;
+        }
+        layout DlcDemo {
+            i32 gameState from "GameState";
+            String currentScene from "_currentScene";
+        }
+    }
 }
 "#;
         let formatted = format_source(source).unwrap();

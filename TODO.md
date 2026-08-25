@@ -36,7 +36,110 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — make docs-first ASL porting semantically reliable
+## Now — make Unity schemas a first-class language facility
+
+Use the Rust Lunistice autosplitter and `examples/lunistice.split` as the first
+acceptance pair. The current SplitScript Unity API is not a compatibility
+boundary: replace its manual image/class/offset plumbing where the schema model
+provides a clearer typed facility. Keep the generated implementation
+demand-driven, allocation-conscious, backend-independent, and integrated with
+the ordinary compiler symbol graph rather than adding Unity-shaped exceptions
+to inference or code generation.
+
+### P0.1 — represent managed metadata in ordinary compiler architecture
+
+- [x] Add first-class `image`, `namespace`, `class`, field, static-field,
+  metadata-name (`from`), and class-layout declarations to syntax, AST/HIR,
+  recovery, formatting, and source traversal. Declarations use mandatory
+  semicolons and never depend on line breaks. Preserve documentation on every
+  declared image, namespace, class, layout, and field.
+- [ ] Resolve image schemas through the normal semantic symbol tables. Give
+  every generated class, layout, reference, field, and static member a stable
+  identity used by type inference, diagnostics, rename, go-to-definition,
+  completion, hover, semantic highlighting, selection ranges, documentation,
+  and unused analysis. Do not teach those consumers unrelated lists of Unity
+  names.
+- [ ] Define the backend-independent class model: `T.Ref` is a live remote
+  managed reference; `T` is an immutable local snapshot. Class-typed managed
+  fields produce references, terminal value fields produce fallible values,
+  and `.snapshot()` reads the declared value shape transactionally. Generate
+  snapshot readers only when reachable.
+- [ ] Specify deterministic metadata-name resolution. A missing `from` uses the
+  source member name, `from "name"` names one exact metadata member, and
+  `from ["first", "second"]` names explicit alternatives. C# automatic-property
+  backing fields participate in the same canonical lookup. Ambiguity is an
+  error rather than declaration-order selection.
+- [ ] Implement class `layout` variants for alternative field schemas. Select a
+  layout only when its complete required metadata shape binds, expose common
+  compatible members without refinement, and require matching the generated
+  layout enum for layout-specific members. Diagnose zero and multiple matches
+  with labels on the responsible declarations.
+
+### P0.2 — bind schemas once per attachment
+
+- [ ] Introduce a single internal Unity metadata adapter shared by Mono and
+  IL2CPP. Keep native metadata traversal and process scanning intrinsic, but
+  generate high-level bindings and reads from the source schema. Replace the
+  public split between `UnityModule`/`UnityClass` and
+  `MonoModule`/`MonoClass` where it no longer expresses a real semantic
+  difference; retain a deliberately low-level dynamic escape hatch.
+- [ ] Make Unity an attachment/state provider with an automatic form and
+  explicit backend/version forms, including `state Unity [...]`,
+  `state Unity.il2cpp(2020) [...]`, and `state Unity.mono(...) [...]`.
+  Provider setup is cooperative and cancelled with the process. Ordinary state
+  fields can read generated managed members without manually retaining classes,
+  static tables, instance addresses, or offsets.
+- [ ] Cache image, class, static-table, field-offset, and remote-path metadata
+  for one attachment. Re-follow dynamic object pointers on each read so
+  replaceable singletons remain correct. Scalar/path reads must not allocate a
+  fresh GC object per tick; strings, arrays, and explicit snapshots may allocate
+  their returned values.
+- [ ] Preserve the existing transactional state-field failure boundary for
+  generated member reads. A failed pointer hop or memory read retains the last
+  accepted field value; Unity declarations must not introduce a second failure
+  model.
+
+### P0.3 — prove the design by simplifying Lunistice
+
+- [ ] Declare the Lunistice `GameManager` and `Timer` schemas, including shared
+  fields, base-game and DLC-demo layouts, alternative singleton names,
+  `LevelTimeParts`, and the bounded DLC scene string.
+- [ ] Port `examples/lunistice.split` from manual class/instance/offset globals
+  and raw `process.read` calls to generated references or snapshots. Preserve
+  all existing autosplitter behavior and keep the user's current local example
+  edits out of intermediate mechanical rewrites.
+- [ ] Add synthetic runtime coverage for both base and DLC metadata layouts,
+  singleton replacement, backing-field lookup, inherited fields, failed reads,
+  and ambiguous layouts. Compare the resulting script structure and behavior
+  with `C:\Projekte\lunistice-auto-splitter`.
+- [ ] Treat the milestone as complete only when all generated Unity symbols are
+  navigable and documented in the editor and reference viewer, and the port no
+  longer contains manual Unity metadata offsets or attachment bookkeeping.
+
+### P1 — complete the Unity object model on the same foundation
+
+- [ ] Add cooperative `T.instances()` scanning by managed class/vtable. Bound
+  work per poll and preserve process cancellation; never hide an unbounded
+  synchronous process scan behind an ordinary-looking method.
+- [ ] Unify the existing scene snapshots under `unity.scenes`, including active,
+  loaded, and don't-destroy-on-load scenes. Add typed hierarchy lookup and
+  `.component<T>()`, with an explicitly dynamic escape hatch when no schema is
+  declared. Cache or cooperatively traverse hierarchy data so ticks remain
+  responsive.
+- [ ] Expose Unity global managers such as `unity.time.frameCount` and
+  `unity.time.timeScale` through reachable source-defined declarations rather
+  than bespoke compiler names.
+- [ ] Design bounded managed-string declarations and managed storage syntax
+  before implementing collections. Managed arrays and managed lists both
+  materialize as `[T]`; do not reintroduce a public `List<T>` value type.
+  Dictionaries and dynamic typed values need a separately approved language
+  design based on representative ports.
+- [ ] Generate complete Unity reference documentation and migration guidance,
+  including schema declarations, layout refinement, live references versus
+  snapshots, failure behavior, allocation behavior, Mono/IL2CPP selection, and
+  the low-level escape hatch.
+
+## P0 — make docs-first ASL porting semantically reliable
 
 The fresh docs-only campaign at compiler revision `87d3650` produced 75
 compiling `.split` files across 39 entries marked ported and 34 marked

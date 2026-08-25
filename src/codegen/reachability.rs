@@ -713,7 +713,9 @@ impl Reachability {
                 TypeKind::Error => {
                     unreachable!("failed inference reached code-generation reachability")
                 }
-                TypeKind::Builtin(_) | TypeKind::GenericParameter { .. } => {}
+                TypeKind::Builtin(_)
+                | TypeKind::ManagedClass(_)
+                | TypeKind::GenericParameter { .. } => {}
                 TypeKind::StateSnapshot => {
                     pending.extend(
                         program
@@ -858,6 +860,7 @@ impl Reachability {
                 TypeKind::Builtin(_)
                 | TypeKind::StateSnapshot
                 | TypeKind::SettingsView
+                | TypeKind::ManagedClass(_)
                 | TypeKind::GenericParameter { .. } => {}
                 TypeKind::Record(record) if self.equality_records.insert(*record) => {
                     pending.extend(capabilities.structural_dependency_types(ty));

@@ -211,6 +211,29 @@ impl RecordFieldId {
     }
 }
 
+macro_rules! managed_syntax_id {
+    ($name:ident) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub struct $name(u32);
+
+        impl $name {
+            pub fn index(self) -> usize {
+                self.0 as usize
+            }
+
+            pub(crate) fn from_index(index: u32) -> Self {
+                Self(index)
+            }
+        }
+    };
+}
+
+managed_syntax_id!(ManagedImageId);
+managed_syntax_id!(ManagedNamespaceId);
+managed_syntax_id!(ManagedClassId);
+managed_syntax_id!(ManagedLayoutId);
+managed_syntax_id!(ManagedFieldId);
+
 /// Stable identity for a variant declared by an enum in one parsed program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EnumVariantId(u32);
@@ -248,7 +271,12 @@ display_stable_id!(
     RangeTypeId,
     TypeApplicationId,
     RecordFieldId,
-    EnumVariantId
+    EnumVariantId,
+    ManagedImageId,
+    ManagedNamespaceId,
+    ManagedClassId,
+    ManagedLayoutId,
+    ManagedFieldId
 );
 
 /// Stable identity for a match pattern in one parsed program.
@@ -315,6 +343,8 @@ pub struct Program {
     pub globals: Vec<VariableDecl>,
     pub records: Vec<RecordDecl>,
     pub enums: Vec<EnumDecl>,
+    /// Declarative managed-code metadata schemas used by engine providers.
+    pub managed_images: Vec<ManagedImageDecl>,
     /// Interned source type-expression nodes. Their IDs are syntax identities,
     /// not inferred types or physical layouts; later stages translate them
     /// into their own semantic and backend type universes.
@@ -327,6 +357,108 @@ pub struct Program {
     pub type_applications: Vec<TypeApplicationDecl>,
     pub functions: Vec<FunctionDecl>,
     pub actions: Vec<Action>,
+}
+
+/// A managed image whose classes can be bound by an engine provider.
+#[derive(Debug, Clone)]
+pub struct ManagedImageDecl {
+    pub id: ManagedImageId,
+    pub keyword_span: Span,
+    pub name: String,
+    pub name_span: Span,
+    pub documentation: Option<String>,
+    pub opening_span: Span,
+    pub items: Vec<ManagedItemDecl>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum ManagedItemDecl {
+    Namespace(ManagedNamespaceDecl),
+    Class(ManagedClassDecl),
+}
+
+impl ManagedItemDecl {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Namespace(namespace) => namespace.span,
+            Self::Class(class) => class.span,
+        }
+    }
+}
+
+/// A source namespace used to qualify managed class metadata names.
+#[derive(Debug, Clone)]
+pub struct ManagedNamespaceDecl {
+    pub id: ManagedNamespaceId,
+    pub keyword_span: Span,
+    pub name: String,
+    pub name_span: Span,
+    pub documentation: Option<String>,
+    pub opening_span: Span,
+    pub items: Vec<ManagedItemDecl>,
+    pub span: Span,
+}
+
+/// A managed reference type declared inside an [`ManagedImageDecl`].
+#[derive(Debug, Clone)]
+pub struct ManagedClassDecl {
+    pub id: ManagedClassId,
+    pub keyword_span: Span,
+    pub name: String,
+    pub name_span: Span,
+    pub documentation: Option<String>,
+    pub metadata_names: ManagedMetadataNames,
+    pub opening_span: Span,
+    pub fields: Vec<ManagedFieldDecl>,
+    pub layouts: Vec<ManagedLayoutDecl>,
+    pub span: Span,
+}
+
+/// One alternative complete field shape for a managed class.
+#[derive(Debug, Clone)]
+pub struct ManagedLayoutDecl {
+    pub id: ManagedLayoutId,
+    pub keyword_span: Span,
+    pub name: String,
+    pub name_span: Span,
+    pub documentation: Option<String>,
+    pub opening_span: Span,
+    pub fields: Vec<ManagedFieldDecl>,
+    pub span: Span,
+}
+
+/// A static or instance member resolved from managed metadata.
+#[derive(Debug, Clone)]
+pub struct ManagedFieldDecl {
+    pub id: ManagedFieldId,
+    pub is_static: bool,
+    pub static_span: Option<Span>,
+    pub ty: TypeRef,
+    pub type_span: Span,
+    pub name: String,
+    pub name_span: Span,
+    pub documentation: Option<String>,
+    pub metadata_names: ManagedMetadataNames,
+    pub span: Span,
+}
+
+/// Explicit metadata spellings supplied by `from`.
+///
+/// An empty list means that the source declaration name is canonical. The
+/// individual spans are retained so diagnostics and navigation can point at
+/// the exact candidate that matched or conflicted.
+#[derive(Debug, Clone, Default)]
+pub struct ManagedMetadataNames {
+    pub keyword_span: Option<Span>,
+    pub values: Vec<ManagedMetadataName>,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ManagedMetadataName {
+    pub value: String,
+    pub span: Span,
 }
 
 /// Declarative polling rates applied by the generated attachment lifecycle.
@@ -376,6 +508,35 @@ impl Program {
     pub fn enum_declaration(&self, id: EnumId) -> Option<&EnumDecl> {
         self.enum_declarations()
             .find(|enumeration| enumeration.id == id)
+    }
+
+    /// Collects every managed class in source order, including classes nested
+    /// in metadata namespaces.
+    ///
+    /// This is declaration-time compiler work rather than a runtime path. The
+    /// returned references preserve the canonical nodes and stable IDs owned
+    /// by the syntax tree.
+    pub fn managed_class_declarations(&self) -> Vec<&ManagedClassDecl> {
+        fn collect<'ast>(items: &'ast [ManagedItemDecl], output: &mut Vec<&'ast ManagedClassDecl>) {
+            for item in items {
+                match item {
+                    ManagedItemDecl::Namespace(namespace) => collect(&namespace.items, output),
+                    ManagedItemDecl::Class(class) => output.push(class),
+                }
+            }
+        }
+
+        let mut classes = Vec::new();
+        for image in &self.managed_images {
+            collect(&image.items, &mut classes);
+        }
+        classes
+    }
+
+    pub fn managed_class(&self, id: ManagedClassId) -> Option<&ManagedClassDecl> {
+        self.managed_class_declarations()
+            .into_iter()
+            .find(|class| class.id == id)
     }
 
     /// Iterates nominal type names together with their stable syntax identity

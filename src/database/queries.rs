@@ -721,6 +721,11 @@ impl CompilerDatabase {
                 .get(super::SourceDefinitionId::Enum(enumeration))
                 .cloned()
                 .map(DefinitionTarget::Source),
+            TypeKind::ManagedClass(class) => self
+                .definition_index()?
+                .get(super::SourceDefinitionId::ManagedClass(class))
+                .cloned()
+                .map(DefinitionTarget::Source),
             TypeKind::Array { .. } => Some(DefinitionTarget::Language(LanguageItemId::ArrayType)),
             TypeKind::Option { .. } => Some(DefinitionTarget::Language(LanguageItemId::OptionType)),
             TypeKind::Result { .. } => Some(DefinitionTarget::Language(LanguageItemId::ResultType)),

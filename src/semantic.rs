@@ -4,8 +4,9 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{
-        ArrayTypeId, AssignmentId, EnumVariantId, ExprId, FunctionId, OptionTypeId, PatternId,
-        RecordFieldId, RecordId, ResultTypeId, SettingChoiceOptionId, TypeApplicationId, ValueId,
+        ArrayTypeId, AssignmentId, EnumVariantId, ExprId, FunctionId, ManagedFieldId, OptionTypeId,
+        PatternId, RecordFieldId, RecordId, ResultTypeId, SettingChoiceOptionId, TypeApplicationId,
+        ValueId,
     },
     inference::Type,
     stdlib::{StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibTypeId, StdlibVariantId},
@@ -332,6 +333,7 @@ pub struct SemanticModel {
     generic_parameter_constraints: HashMap<TypeId, Vec<crate::stdlib::StdlibCapabilityId>>,
     specialized_types: HashMap<(FunctionInstance, TypeId), TypeId>,
     record_field_types: HashMap<RecordFieldId, TypeId>,
+    managed_field_types: HashMap<ManagedFieldId, TypeId>,
     standard_field_types: HashMap<StdlibFieldId, TypeId>,
     enum_variant_payloads: HashMap<EnumVariantId, Option<TypeId>>,
     array_element_types: HashMap<ArrayTypeId, TypeId>,
@@ -554,6 +556,7 @@ impl SemanticModel {
             | TypeKind::StateSnapshot
             | TypeKind::SettingsView
             | TypeKind::Record(_)
+            | TypeKind::ManagedClass(_)
             | TypeKind::Enum(_)
             | TypeKind::GenericParameter { .. } => None,
         };
@@ -870,6 +873,7 @@ impl SemanticModel {
             | TypeKind::StateSnapshot
             | TypeKind::SettingsView
             | TypeKind::Record(_)
+            | TypeKind::ManagedClass(_)
             | TypeKind::Enum(_)
             | TypeKind::GenericParameter { .. } => ty,
         };
@@ -887,6 +891,7 @@ impl SemanticModel {
             TypeKind::SettingsView => crate::types::ResolvedTypeRef::SettingsView,
             TypeKind::Record(record) => crate::types::ResolvedTypeRef::Record(*record),
             TypeKind::Enum(enumeration) => crate::types::ResolvedTypeRef::Enum(*enumeration),
+            TypeKind::ManagedClass(class) => crate::types::ResolvedTypeRef::ManagedClass(*class),
             TypeKind::GenericParameter { .. } => {
                 crate::types::ResolvedTypeRef::GenericParameter(ty)
             }
@@ -1029,6 +1034,16 @@ impl SemanticModel {
 
     pub fn record_field_types(&self) -> impl Iterator<Item = (RecordFieldId, TypeId)> + '_ {
         self.record_field_types
+            .iter()
+            .map(|(field, ty)| (*field, *ty))
+    }
+
+    pub fn managed_field_type(&self, field: ManagedFieldId) -> Option<TypeId> {
+        self.managed_field_types.get(&field).copied()
+    }
+
+    pub fn managed_field_types(&self) -> impl Iterator<Item = (ManagedFieldId, TypeId)> + '_ {
+        self.managed_field_types
             .iter()
             .map(|(field, ty)| (*field, *ty))
     }
@@ -1202,6 +1217,7 @@ pub(crate) struct SemanticBuilder {
     function_results: HashMap<FunctionId, Type>,
     function_completions: HashMap<FunctionId, Type>,
     record_field_types: HashMap<RecordFieldId, Type>,
+    managed_field_types: HashMap<ManagedFieldId, Type>,
     standard_field_types: HashMap<StdlibFieldId, Type>,
     enum_variant_payloads: HashMap<EnumVariantId, Option<Type>>,
     array_element_types: HashMap<ArrayTypeId, Type>,
@@ -1368,6 +1384,11 @@ impl SemanticBuilder {
     pub(crate) fn resolve_record_field_type(&mut self, field: RecordFieldId, ty: Type) {
         let previous = self.record_field_types.insert(field, ty);
         debug_assert!(previous.is_none(), "record field IDs must be unique");
+    }
+
+    pub(crate) fn resolve_managed_field_type(&mut self, field: ManagedFieldId, ty: Type) {
+        let previous = self.managed_field_types.insert(field, ty);
+        debug_assert!(previous.is_none(), "managed field IDs must be unique");
     }
 
     pub(crate) fn resolve_standard_field_type(&mut self, field: StdlibFieldId, ty: Type) {
@@ -1552,6 +1573,7 @@ impl SemanticBuilder {
             function_results,
             function_completions,
             record_field_types,
+            managed_field_types,
             standard_field_types,
             enum_variant_payloads,
             array_element_types,
@@ -1724,6 +1746,10 @@ impl SemanticBuilder {
             .into_iter()
             .map(|(field, ty)| (field, types.intern_inferred(resolve(ty), constructed)))
             .collect();
+        let managed_field_types = managed_field_types
+            .into_iter()
+            .map(|(field, ty)| (field, types.intern_inferred(resolve(ty), constructed)))
+            .collect();
         let standard_field_types = standard_field_types
             .into_iter()
             .map(|(field, ty)| (field, types.intern_inferred(resolve(ty), constructed)))
@@ -1818,6 +1844,7 @@ impl SemanticBuilder {
             generic_parameter_constraints: HashMap::new(),
             specialized_types: HashMap::new(),
             record_field_types,
+            managed_field_types,
             standard_field_types,
             enum_variant_payloads,
             array_element_types,

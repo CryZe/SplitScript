@@ -617,6 +617,7 @@ fn validate_future_storage(
             | TypeKind::Standard(_)
             | TypeKind::StateSnapshot
             | TypeKind::SettingsView
+            | TypeKind::ManagedClass(_)
             | TypeKind::GenericParameter { .. } => false,
         }
     }
@@ -1684,7 +1685,10 @@ fn expand_fully_observed_types(
                 pending.extend(parameters.iter().copied());
                 pending.push_back(*result);
             }
-            TypeKind::Builtin(_) | TypeKind::Standard(_) | TypeKind::GenericParameter { .. } => {}
+            TypeKind::Builtin(_)
+            | TypeKind::Standard(_)
+            | TypeKind::ManagedClass(_)
+            | TypeKind::GenericParameter { .. } => {}
         }
     }
 }
@@ -1767,7 +1771,10 @@ fn expand_reachable_nominal_types(
                 pending.extend(parameters.iter().copied());
                 pending.push_back(*result);
             }
-            TypeKind::Builtin(_) | TypeKind::Standard(_) | TypeKind::GenericParameter { .. } => {}
+            TypeKind::Builtin(_)
+            | TypeKind::Standard(_)
+            | TypeKind::ManagedClass(_)
+            | TypeKind::GenericParameter { .. } => {}
         }
     }
 

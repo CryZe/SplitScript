@@ -179,6 +179,43 @@ impl<'ast> Visitor<'ast> for SpanCollector {
         visit::walk_enum(self, enumeration);
     }
 
+    fn visit_managed_image(&mut self, image: &'ast crate::ast::ManagedImageDecl) {
+        self.push(image.span);
+        self.push(image.name_span);
+        visit::walk_managed_image(self, image);
+    }
+
+    fn visit_managed_namespace(&mut self, namespace: &'ast crate::ast::ManagedNamespaceDecl) {
+        self.push(namespace.span);
+        self.push(namespace.name_span);
+        visit::walk_managed_namespace(self, namespace);
+    }
+
+    fn visit_managed_class(&mut self, class: &'ast crate::ast::ManagedClassDecl) {
+        self.push(class.span);
+        self.push(class.name_span);
+        if let Some(span) = class.metadata_names.span {
+            self.push(span);
+        }
+        visit::walk_managed_class(self, class);
+    }
+
+    fn visit_managed_layout(&mut self, layout: &'ast crate::ast::ManagedLayoutDecl) {
+        self.push(layout.span);
+        self.push(layout.name_span);
+        visit::walk_managed_layout(self, layout);
+    }
+
+    fn visit_managed_field(&mut self, field: &'ast crate::ast::ManagedFieldDecl) {
+        self.push(field.span);
+        self.push(field.type_span);
+        self.push(field.name_span);
+        if let Some(span) = field.metadata_names.span {
+            self.push(span);
+        }
+        self.visit_type_ref(&field.ty);
+    }
+
     fn visit_function(&mut self, function: &'ast FunctionDecl) {
         self.push(function.span);
         if let Some(annotation) = function.return_annotation_span {

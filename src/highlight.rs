@@ -938,6 +938,60 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
         visit::walk_enum(self, enumeration);
     }
 
+    fn visit_managed_image(&mut self, image: &'ast crate::ast::ManagedImageDecl) {
+        self.insert(image.keyword_span, SemanticTokenKind::Keyword, 0);
+        visit::walk_managed_image(self, image);
+    }
+
+    fn visit_managed_namespace(&mut self, namespace: &'ast crate::ast::ManagedNamespaceDecl) {
+        self.insert(namespace.keyword_span, SemanticTokenKind::Keyword, 0);
+        self.insert(
+            namespace.name_span,
+            SemanticTokenKind::Namespace,
+            MODIFIER_DECLARATION,
+        );
+        visit::walk_managed_namespace(self, namespace);
+    }
+
+    fn visit_managed_class(&mut self, class: &'ast crate::ast::ManagedClassDecl) {
+        self.insert(class.keyword_span, SemanticTokenKind::Keyword, 0);
+        self.insert(
+            class.name_span,
+            SemanticTokenKind::Struct,
+            MODIFIER_DECLARATION,
+        );
+        if let Some(from) = class.metadata_names.keyword_span {
+            self.insert(from, SemanticTokenKind::Keyword, 0);
+        }
+        visit::walk_managed_class(self, class);
+    }
+
+    fn visit_managed_layout(&mut self, layout: &'ast crate::ast::ManagedLayoutDecl) {
+        self.insert(layout.keyword_span, SemanticTokenKind::Keyword, 0);
+        self.insert(
+            layout.name_span,
+            SemanticTokenKind::EnumMember,
+            MODIFIER_DECLARATION | MODIFIER_READONLY,
+        );
+        visit::walk_managed_layout(self, layout);
+    }
+
+    fn visit_managed_field(&mut self, field: &'ast crate::ast::ManagedFieldDecl) {
+        if let Some(span) = field.static_span {
+            self.insert(span, SemanticTokenKind::Keyword, 0);
+        }
+        if let Some(span) = field.metadata_names.keyword_span {
+            self.insert(span, SemanticTokenKind::Keyword, 0);
+        }
+        self.insert(
+            field.name_span,
+            SemanticTokenKind::Property,
+            MODIFIER_DECLARATION | MODIFIER_READONLY,
+        );
+        self.mark_none_type(field.type_span, field.ty);
+        self.visit_type_ref(&field.ty);
+    }
+
     fn visit_function(&mut self, function: &'ast FunctionDecl) {
         self.mark_last_ident_before(
             function.span,
@@ -1444,6 +1498,7 @@ whileAttached {
     for item in [1] {
         print(item)
     }
+
     print(names(1, 2, 3, 4, 5, 6, 7, 8, 9))
 }
 "#;
@@ -1480,6 +1535,66 @@ whileAttached {
                 "ordinary `{name}` parameter was treated as contextual syntax"
             );
         }
+    }
+
+    #[test]
+    fn highlights_managed_schema_declarations_by_their_language_roles() {
+        let source = r#"
+state "game.exe" {}
+image "Assembly-CSharp" {
+    namespace Game {
+        class Player from "RuntimePlayer" {
+            static f32 health from "_health";
+            layout Alternate {
+                f32 armor;
+            }
+        }
+    }
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        database
+            .check()
+            .expect("managed schema highlighting fixture");
+        let highlights = database.semantic_highlights().unwrap();
+
+        for keyword in ["image", "namespace", "class", "from", "static", "layout"] {
+            assert!(contains(
+                source,
+                &highlights,
+                keyword,
+                SemanticTokenKind::Keyword,
+                0,
+            ));
+        }
+        assert!(contains(
+            source,
+            &highlights,
+            "Game",
+            SemanticTokenKind::Namespace,
+            MODIFIER_DECLARATION,
+        ));
+        assert!(contains(
+            source,
+            &highlights,
+            "Player",
+            SemanticTokenKind::Struct,
+            MODIFIER_DECLARATION,
+        ));
+        assert!(contains(
+            source,
+            &highlights,
+            "Alternate",
+            SemanticTokenKind::EnumMember,
+            MODIFIER_DECLARATION | MODIFIER_READONLY,
+        ));
+        assert!(contains(
+            source,
+            &highlights,
+            "health",
+            SemanticTokenKind::Property,
+            MODIFIER_DECLARATION | MODIFIER_READONLY,
+        ));
     }
 
     #[test]

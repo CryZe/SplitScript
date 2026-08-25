@@ -36,6 +36,26 @@ pub trait Visitor<'ast>: Sized {
         walk_enum(self, enumeration);
     }
 
+    fn visit_managed_image(&mut self, image: &'ast ManagedImageDecl) {
+        walk_managed_image(self, image);
+    }
+
+    fn visit_managed_namespace(&mut self, namespace: &'ast ManagedNamespaceDecl) {
+        walk_managed_namespace(self, namespace);
+    }
+
+    fn visit_managed_class(&mut self, class: &'ast ManagedClassDecl) {
+        walk_managed_class(self, class);
+    }
+
+    fn visit_managed_layout(&mut self, layout: &'ast ManagedLayoutDecl) {
+        walk_managed_layout(self, layout);
+    }
+
+    fn visit_managed_field(&mut self, field: &'ast ManagedFieldDecl) {
+        self.visit_type_ref(&field.ty);
+    }
+
     fn visit_array_type(&mut self, array: &'ast ArrayTypeDecl) {
         self.visit_type_ref(&array.element);
     }
@@ -133,6 +153,9 @@ pub fn walk_program<'ast, V: Visitor<'ast>>(visitor: &mut V, program: &'ast Prog
     for enumeration in &program.enums {
         visitor.visit_enum(enumeration);
     }
+    for image in &program.managed_images {
+        visitor.visit_managed_image(image);
+    }
     for array in &program.array_types {
         visitor.visit_array_type(array);
     }
@@ -201,6 +224,44 @@ pub fn walk_enum<'ast, V: Visitor<'ast>>(visitor: &mut V, enumeration: &'ast Enu
         if let Some(payload) = &variant.payload {
             visitor.visit_type_ref(payload);
         }
+    }
+}
+
+pub fn walk_managed_image<'ast, V: Visitor<'ast>>(visitor: &mut V, image: &'ast ManagedImageDecl) {
+    walk_managed_items(visitor, &image.items);
+}
+
+fn walk_managed_items<'ast, V: Visitor<'ast>>(visitor: &mut V, items: &'ast [ManagedItemDecl]) {
+    for item in items {
+        match item {
+            ManagedItemDecl::Namespace(namespace) => visitor.visit_managed_namespace(namespace),
+            ManagedItemDecl::Class(class) => visitor.visit_managed_class(class),
+        }
+    }
+}
+
+pub fn walk_managed_namespace<'ast, V: Visitor<'ast>>(
+    visitor: &mut V,
+    namespace: &'ast ManagedNamespaceDecl,
+) {
+    walk_managed_items(visitor, &namespace.items);
+}
+
+pub fn walk_managed_class<'ast, V: Visitor<'ast>>(visitor: &mut V, class: &'ast ManagedClassDecl) {
+    for field in &class.fields {
+        visitor.visit_managed_field(field);
+    }
+    for layout in &class.layouts {
+        visitor.visit_managed_layout(layout);
+    }
+}
+
+pub fn walk_managed_layout<'ast, V: Visitor<'ast>>(
+    visitor: &mut V,
+    layout: &'ast ManagedLayoutDecl,
+) {
+    for field in &layout.fields {
+        visitor.visit_managed_field(field);
     }
 }
 
@@ -443,6 +504,26 @@ pub trait Folder: Sized {
         walk_enum_mut(self, enumeration);
     }
 
+    fn fold_managed_image(&mut self, image: &mut ManagedImageDecl) {
+        walk_managed_image_mut(self, image);
+    }
+
+    fn fold_managed_namespace(&mut self, namespace: &mut ManagedNamespaceDecl) {
+        walk_managed_namespace_mut(self, namespace);
+    }
+
+    fn fold_managed_class(&mut self, class: &mut ManagedClassDecl) {
+        walk_managed_class_mut(self, class);
+    }
+
+    fn fold_managed_layout(&mut self, layout: &mut ManagedLayoutDecl) {
+        walk_managed_layout_mut(self, layout);
+    }
+
+    fn fold_managed_field(&mut self, field: &mut ManagedFieldDecl) {
+        self.fold_type_ref(&mut field.ty);
+    }
+
     fn fold_array_type(&mut self, array: &mut ArrayTypeDecl) {
         self.fold_type_ref(&mut array.element);
     }
@@ -527,6 +608,9 @@ pub fn walk_program_mut<F: Folder>(folder: &mut F, program: &mut Program) {
     for enumeration in &mut program.enums {
         folder.fold_enum(enumeration);
     }
+    for image in &mut program.managed_images {
+        folder.fold_managed_image(image);
+    }
     for array in &mut program.array_types {
         folder.fold_array_type(array);
     }
@@ -585,6 +669,38 @@ pub fn walk_enum_mut<F: Folder>(folder: &mut F, enumeration: &mut EnumDecl) {
         if let Some(payload) = &mut variant.payload {
             folder.fold_type_ref(payload);
         }
+    }
+}
+
+pub fn walk_managed_image_mut<F: Folder>(folder: &mut F, image: &mut ManagedImageDecl) {
+    walk_managed_items_mut(folder, &mut image.items);
+}
+
+fn walk_managed_items_mut<F: Folder>(folder: &mut F, items: &mut [ManagedItemDecl]) {
+    for item in items {
+        match item {
+            ManagedItemDecl::Namespace(namespace) => folder.fold_managed_namespace(namespace),
+            ManagedItemDecl::Class(class) => folder.fold_managed_class(class),
+        }
+    }
+}
+
+pub fn walk_managed_namespace_mut<F: Folder>(folder: &mut F, namespace: &mut ManagedNamespaceDecl) {
+    walk_managed_items_mut(folder, &mut namespace.items);
+}
+
+pub fn walk_managed_class_mut<F: Folder>(folder: &mut F, class: &mut ManagedClassDecl) {
+    for field in &mut class.fields {
+        folder.fold_managed_field(field);
+    }
+    for layout in &mut class.layouts {
+        folder.fold_managed_layout(layout);
+    }
+}
+
+pub fn walk_managed_layout_mut<F: Folder>(folder: &mut F, layout: &mut ManagedLayoutDecl) {
+    for field in &mut layout.fields {
+        folder.fold_managed_field(field);
     }
 }
 

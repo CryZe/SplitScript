@@ -42,6 +42,7 @@ impl Type {
                 TypeKind::SettingsView => ResolvedTypeRef::SettingsView,
                 TypeKind::Record(record) => ResolvedTypeRef::Record(*record),
                 TypeKind::Enum(enumeration) => ResolvedTypeRef::Enum(*enumeration),
+                TypeKind::ManagedClass(class) => ResolvedTypeRef::ManagedClass(*class),
                 TypeKind::GenericParameter { .. } => ResolvedTypeRef::GenericParameter(id),
                 TypeKind::Array { layout, .. } => ResolvedTypeRef::Array(*layout),
                 TypeKind::Option { layout, .. } => ResolvedTypeRef::Option(*layout),
@@ -443,6 +444,7 @@ impl InferenceContext {
             TypeKind::SettingsView => "SettingsView".into(),
             TypeKind::Record(record) => format!("record#{record}"),
             TypeKind::Enum(enumeration) => format!("enum#{enumeration}"),
+            TypeKind::ManagedClass(class) => format!("class#{class}"),
             TypeKind::GenericParameter { index, .. } => {
                 crate::types::generic_parameter_name(*index)
             }
@@ -2236,6 +2238,7 @@ pub(crate) fn type_may_have_capability(
                 behavior,
                 CapabilityBehavior::StructuralEquality | CapabilityBehavior::StructuralMethods
             ),
+            TypeKind::ManagedClass(_) => false,
             TypeKind::Option { .. } => {
                 behavior == CapabilityBehavior::StructuralEquality
                     || library.type_constructor_has_capability(

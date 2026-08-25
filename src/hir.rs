@@ -9,9 +9,10 @@ use std::collections::HashMap;
 use crate::{
     ast::{
         ActionKind, AssignmentId, BinaryOp, Block, EnumId, EnumVariantId, Expr, ExprId, ExprKind,
-        FunctionId, InterpolatedPart, MatchArm, MatchPattern, PatternBinding, PatternId,
-        Program as SyntaxProgram, RecordId, SettingChoiceOptionId, SettingKind, Span, Stmt,
-        SuspensionMode, TypeRef, UnaryOp, ValueId,
+        FunctionId, InterpolatedPart, ManagedClassId, ManagedFieldId, ManagedImageId,
+        ManagedItemDecl, ManagedLayoutId, ManagedNamespaceId, MatchArm, MatchPattern,
+        PatternBinding, PatternId, Program as SyntaxProgram, RecordId, SettingChoiceOptionId,
+        SettingKind, Span, Stmt, SuspensionMode, TypeRef, UnaryOp, ValueId,
     },
     semantic::{
         DynamicCallCallee, FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember,
@@ -30,6 +31,11 @@ pub enum DeclarationId {
     Global(ValueId),
     Record(RecordId),
     Enum(EnumId),
+    ManagedImage(ManagedImageId),
+    ManagedNamespace(ManagedNamespaceId),
+    ManagedClass(ManagedClassId),
+    ManagedLayout(ManagedLayoutId),
+    ManagedField(ManagedFieldId),
     Function(FunctionId),
     Action(ActionKind),
 }
@@ -85,6 +91,14 @@ impl DeclarationIndex {
                 enumeration.span,
             );
         }
+        for image in &syntax.managed_images {
+            program.push(
+                DeclarationId::ManagedImage(image.id),
+                &image.name,
+                image.span,
+            );
+            program.lower_managed_items(&image.items);
+        }
         for function in &syntax.functions {
             program.push(
                 DeclarationId::Function(function.id),
@@ -100,6 +114,49 @@ impl DeclarationIndex {
             );
         }
         program
+    }
+
+    fn lower_managed_items(&mut self, items: &[ManagedItemDecl]) {
+        for item in items {
+            match item {
+                ManagedItemDecl::Namespace(namespace) => {
+                    self.push(
+                        DeclarationId::ManagedNamespace(namespace.id),
+                        &namespace.name,
+                        namespace.span,
+                    );
+                    self.lower_managed_items(&namespace.items);
+                }
+                ManagedItemDecl::Class(class) => {
+                    self.push(
+                        DeclarationId::ManagedClass(class.id),
+                        &class.name,
+                        class.span,
+                    );
+                    for field in &class.fields {
+                        self.push(
+                            DeclarationId::ManagedField(field.id),
+                            &field.name,
+                            field.span,
+                        );
+                    }
+                    for layout in &class.layouts {
+                        self.push(
+                            DeclarationId::ManagedLayout(layout.id),
+                            &layout.name,
+                            layout.span,
+                        );
+                        for field in &layout.fields {
+                            self.push(
+                                DeclarationId::ManagedField(field.id),
+                                &field.name,
+                                field.span,
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn push(&mut self, id: DeclarationId, name: &str, span: Span) {

@@ -556,6 +556,11 @@ fn snapshot_type_name(
             .find(|enumeration| enumeration.id == *id)
             .map(|enumeration| enumeration.name.clone())
             .unwrap_or_else(|| format!("enum#{id}")),
+        TypeKind::ManagedClass(id) => checked
+            .syntax()
+            .managed_class(*id)
+            .map(|class| class.name.clone())
+            .unwrap_or_else(|| format!("class#{id}")),
         TypeKind::GenericParameter { index, .. } => match index {
             0..=25 => char::from_u32('T' as u32 + index).unwrap().to_string(),
             _ => format!("T{}", index + 1),

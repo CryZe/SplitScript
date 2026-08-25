@@ -353,6 +353,7 @@ impl BackendDependencies {
                 | TypeKind::Standard(_)
                 | TypeKind::StateSnapshot
                 | TypeKind::SettingsView
+                | TypeKind::ManagedClass(_)
                 | TypeKind::GenericParameter { .. } => {}
             }
         }

@@ -40,7 +40,13 @@ fn initialize_checker(
 ) -> Checker {
     let records = program.records.clone();
     let enums = program.enum_declarations().cloned().collect::<Vec<_>>();
-    let semantic_types = TypeStore::with_source_types(&standard_library, &records, &enums);
+    let managed_classes = program
+        .managed_class_declarations()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let semantic_types =
+        TypeStore::with_source_types(&standard_library, &records, &enums, &managed_classes);
     let array_types = program
         .array_types
         .iter()

@@ -781,6 +781,9 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
         TypeKind::SettingsView => Type::SettingsView,
         TypeKind::Record(record) => Type::Record(*record),
         TypeKind::Enum(enumeration) => Type::Enum(*enumeration),
+        TypeKind::ManagedClass(_) => {
+            unreachable!("managed class schemas do not yet reach backend value lowering")
+        }
         TypeKind::GenericParameter { .. } => {
             unreachable!("generic template types must be substituted before code generation")
         }

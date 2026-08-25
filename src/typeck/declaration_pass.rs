@@ -487,6 +487,30 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
         }
     }
 
+    for class in program.managed_class_declarations() {
+        let mut common_fields = HashSet::new();
+        for field in &class.fields {
+            collect_managed_field(checker, class.name.as_str(), field, &mut common_fields);
+        }
+
+        let mut layouts = HashSet::new();
+        for layout in &class.layouts {
+            if !layouts.insert(layout.name.clone()) {
+                checker.error(
+                    format!(
+                        "duplicate layout `{}` in class `{}`",
+                        layout.name, class.name
+                    ),
+                    layout.span,
+                );
+            }
+            let mut layout_fields = common_fields.clone();
+            for field in &layout.fields {
+                collect_managed_field(checker, class.name.as_str(), field, &mut layout_fields);
+            }
+        }
+    }
+
     let mut enum_names = HashSet::new();
     let enum_declarations = checker.declarations.enums.clone();
     for enumeration in &enum_declarations {
@@ -527,6 +551,37 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
         }
         if enumeration.variants.is_empty() {
             checker.error("an enum needs at least one variant", enumeration.span);
+        }
+    }
+}
+
+fn collect_managed_field(
+    checker: &mut Checker,
+    class_name: &str,
+    field: &crate::ast::ManagedFieldDecl,
+    fields: &mut HashSet<String>,
+) {
+    let field_ty = checker.syntax_type(field.ty);
+    checker
+        .semantics
+        .resolve_managed_field_type(field.id, field_ty);
+    if !fields.insert(field.name.clone()) {
+        checker.error(
+            format!("duplicate field `{}` in class `{class_name}`", field.name),
+            field.span,
+        );
+    }
+
+    let mut metadata_names = HashSet::new();
+    for metadata_name in &field.metadata_names.values {
+        if !metadata_names.insert(metadata_name.value.clone()) {
+            checker.error(
+                format!(
+                    "duplicate metadata name `{}` for field `{}`",
+                    metadata_name.value, field.name
+                ),
+                metadata_name.span,
+            );
         }
     }
 }

@@ -4,9 +4,12 @@
 
 use super::{
     Action, ActionKind, Diagnostic, EnumDecl, EnumId, EnumReference, EnumVariant, FunctionDecl,
-    FunctionId, Parameter, Parser, PointerPath, PointerPathBase, RecordDecl, RecordField, RecordId,
-    SettingChoiceOption, SettingDecl, SettingExternalKey, SettingFamilyDecl, SettingFileFilter,
-    SettingKind, SettingTextPart, SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl,
+    FunctionId, ManagedClassDecl, ManagedClassId, ManagedFieldDecl, ManagedFieldId,
+    ManagedImageDecl, ManagedImageId, ManagedItemDecl, ManagedLayoutDecl, ManagedLayoutId,
+    ManagedMetadataName, ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId, Parameter,
+    Parser, PointerPath, PointerPathBase, RecordDecl, RecordField, RecordId, SettingChoiceOption,
+    SettingDecl, SettingExternalKey, SettingFamilyDecl, SettingFileFilter, SettingKind,
+    SettingTextPart, SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl,
     StateMemoryDecoder, StateProviderRef, StateSource, StateTransform, TickRateDecl, TickRateValue,
     TokenKind, TypeRef,
 };
@@ -17,6 +20,262 @@ use crate::{
 };
 
 impl Parser<'_> {
+    pub(super) fn managed_image_decl(&mut self) -> Result<ManagedImageDecl, Diagnostic> {
+        let start = self.expect_ident("image")?;
+        let name_token = self.current().clone();
+        let name = self.expect_string("expected a quoted managed image name after `image`")?;
+        let id = ManagedImageId::from_index(self.next_managed_image_id);
+        self.next_managed_image_id += 1;
+        let opening_span = self.expect(
+            TokenKind::LBrace,
+            "expected `{` after the managed image name",
+        )?;
+        let items = self.managed_items("managed image");
+        let closing = self
+            .eat(&TokenKind::RBrace)
+            .unwrap_or_else(|| self.current().span);
+        Ok(ManagedImageDecl {
+            id,
+            keyword_span: start,
+            name,
+            name_span: name_token.span,
+            documentation: None,
+            opening_span,
+            items,
+            span: start.join(closing),
+        })
+    }
+
+    fn managed_items(&mut self, owner: &'static str) -> Vec<ManagedItemDecl> {
+        let mut items = Vec::new();
+        let body_depth = self.brace_depth_before(self.cursor.position());
+        while !self.at(&TokenKind::RBrace) {
+            if self.at(&TokenKind::Eof) {
+                self.record_missing_closing(match owner {
+                    "namespace" => "unterminated managed namespace declaration",
+                    _ => "unterminated managed image declaration",
+                });
+                break;
+            }
+            let item_start = self.cursor.position();
+            let documentation = self.take_source_documentation();
+            let parsed = if self.at_ident("namespace") {
+                self.managed_namespace_decl().map(|mut namespace| {
+                    namespace.documentation = documentation;
+                    ManagedItemDecl::Namespace(namespace)
+                })
+            } else if self.at_ident("class") {
+                self.managed_class_decl().map(|mut class| {
+                    class.documentation = documentation;
+                    ManagedItemDecl::Class(class)
+                })
+            } else {
+                Err(self.error("expected a `class` or `namespace` declaration"))
+            };
+            if let Some(item) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                items.push(item);
+            }
+        }
+        items
+    }
+
+    fn managed_namespace_decl(&mut self) -> Result<ManagedNamespaceDecl, Diagnostic> {
+        let start = self.expect_ident("namespace")?;
+        let (name, name_span) = self.expect_any_ident("expected a namespace name")?;
+        let id = ManagedNamespaceId::from_index(self.next_managed_namespace_id);
+        self.next_managed_namespace_id += 1;
+        let opening_span =
+            self.expect(TokenKind::LBrace, "expected `{` after the namespace name")?;
+        let items = self.managed_items("namespace");
+        let closing = self
+            .eat(&TokenKind::RBrace)
+            .unwrap_or_else(|| self.current().span);
+        Ok(ManagedNamespaceDecl {
+            id,
+            keyword_span: start,
+            name,
+            name_span,
+            documentation: None,
+            opening_span,
+            items,
+            span: start.join(closing),
+        })
+    }
+
+    fn managed_class_decl(&mut self) -> Result<ManagedClassDecl, Diagnostic> {
+        let start = self.expect_ident("class")?;
+        let (name, name_span) = self.expect_any_ident("expected a managed class name")?;
+        let id = ManagedClassId::from_index(self.next_managed_class_id);
+        self.next_managed_class_id += 1;
+        let metadata_names = self.managed_metadata_names()?;
+        let opening_span = self.expect(
+            TokenKind::LBrace,
+            "expected `{` after the managed class name",
+        )?;
+        let mut fields = Vec::new();
+        let mut layouts = Vec::new();
+        let body_depth = self.brace_depth_before(self.cursor.position());
+        while !self.at(&TokenKind::RBrace) {
+            if self.at(&TokenKind::Eof) {
+                self.record_missing_closing("unterminated managed class declaration");
+                break;
+            }
+            let item_start = self.cursor.position();
+            let documentation = self.take_source_documentation();
+            if self.at_ident("layout") {
+                let parsed = self.managed_layout_decl().map(|mut layout| {
+                    layout.documentation = documentation;
+                    layout
+                });
+                if let Some(layout) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                    layouts.push(layout);
+                }
+            } else {
+                let parsed = self.managed_field_decl().map(|mut field| {
+                    field.documentation = documentation;
+                    field
+                });
+                if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                    fields.push(field);
+                }
+            }
+        }
+        let closing = self
+            .eat(&TokenKind::RBrace)
+            .unwrap_or_else(|| self.current().span);
+        Ok(ManagedClassDecl {
+            id,
+            keyword_span: start,
+            name,
+            name_span,
+            documentation: None,
+            metadata_names,
+            opening_span,
+            fields,
+            layouts,
+            span: start.join(closing),
+        })
+    }
+
+    fn managed_layout_decl(&mut self) -> Result<ManagedLayoutDecl, Diagnostic> {
+        let start = self.expect_ident("layout")?;
+        let (name, name_span) = self.expect_any_ident("expected a managed class layout name")?;
+        let id = ManagedLayoutId::from_index(self.next_managed_layout_id);
+        self.next_managed_layout_id += 1;
+        let opening_span = self.expect(TokenKind::LBrace, "expected `{` after the layout name")?;
+        let mut fields = Vec::new();
+        let body_depth = self.brace_depth_before(self.cursor.position());
+        while !self.at(&TokenKind::RBrace) {
+            if self.at(&TokenKind::Eof) {
+                self.record_missing_closing("unterminated managed class layout");
+                break;
+            }
+            let item_start = self.cursor.position();
+            let documentation = self.take_source_documentation();
+            let parsed = if self.at_ident("layout") {
+                Err(self.error("managed class layouts cannot contain nested layouts"))
+            } else {
+                self.managed_field_decl().map(|mut field| {
+                    field.documentation = documentation;
+                    field
+                })
+            };
+            if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                fields.push(field);
+            }
+        }
+        let closing = self
+            .eat(&TokenKind::RBrace)
+            .unwrap_or_else(|| self.current().span);
+        Ok(ManagedLayoutDecl {
+            id,
+            keyword_span: start,
+            name,
+            name_span,
+            documentation: None,
+            opening_span,
+            fields,
+            span: start.join(closing),
+        })
+    }
+
+    fn managed_field_decl(&mut self) -> Result<ManagedFieldDecl, Diagnostic> {
+        let static_span = if self.at_ident("static") {
+            Some(self.bump().span)
+        } else {
+            None
+        };
+        let start = static_span.map_or(self.current().span.start, |span| span.start);
+        let (ty, type_span) = self.parse_type("expected a managed field type")?;
+        let (name, name_span) = self.expect_any_ident("expected a managed field name")?;
+        let metadata_names = self.managed_metadata_names()?;
+        let closing = self.expect(
+            TokenKind::Semicolon,
+            "expected `;` after the managed field declaration",
+        )?;
+        let id = ManagedFieldId::from_index(self.next_managed_field_id);
+        self.next_managed_field_id += 1;
+        Ok(ManagedFieldDecl {
+            id,
+            is_static: static_span.is_some(),
+            static_span,
+            ty,
+            type_span,
+            name,
+            name_span,
+            documentation: None,
+            metadata_names,
+            span: Span {
+                start,
+                end: closing.end,
+            },
+        })
+    }
+
+    fn managed_metadata_names(&mut self) -> Result<ManagedMetadataNames, Diagnostic> {
+        if !self.at_ident("from") {
+            return Ok(ManagedMetadataNames::default());
+        }
+        let keyword_span = self.bump().span;
+        let mut values = Vec::new();
+        let end = if self.eat(&TokenKind::LBracket).is_some() {
+            while !self.at(&TokenKind::RBracket) {
+                if self.at(&TokenKind::Eof) {
+                    return Err(self.error("unterminated metadata-name list"));
+                }
+                let token = self.current().clone();
+                let value = self.expect_string("expected a quoted metadata name")?;
+                values.push(ManagedMetadataName {
+                    value,
+                    span: token.span,
+                });
+                if self.eat(&TokenKind::Comma).is_none() {
+                    break;
+                }
+            }
+            self.expect(TokenKind::RBracket, "expected `]` after metadata names")?
+        } else {
+            let token = self.current().clone();
+            let value = self.expect_string("expected a quoted metadata name after `from`")?;
+            values.push(ManagedMetadataName {
+                value,
+                span: token.span,
+            });
+            token.span
+        };
+        if values.is_empty() {
+            return Err(Diagnostic::new(
+                "a metadata-name list cannot be empty",
+                keyword_span.join(end),
+            ));
+        }
+        Ok(ManagedMetadataNames {
+            keyword_span: Some(keyword_span),
+            values,
+            span: Some(keyword_span.join(end)),
+        })
+    }
+
     pub(super) fn tick_rate_decl(&mut self) -> Result<TickRateDecl, Diagnostic> {
         let keyword_span = self.expect_ident("tickRate")?;
         self.expect(TokenKind::LBrace, "expected `{` after `tickRate`")?;

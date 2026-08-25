@@ -278,7 +278,7 @@ impl Parser<'_> {
         matches!(
             &self.current().kind,
             TokenKind::Ident(name)
-                if matches!(name.as_str(), "state" | "tickRate" | "settings" | "let" | "const" | "var" | "debug" | "fn" | "func" | "function" | "record" | "enum")
+                if matches!(name.as_str(), "state" | "tickRate" | "settings" | "image" | "let" | "const" | "var" | "debug" | "fn" | "func" | "function" | "record" | "enum")
                     || ActionKind::parse(name).is_some()
                     || legacy_lifecycle_diagnostic(name).is_some()
         )

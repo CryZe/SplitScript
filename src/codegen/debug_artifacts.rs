@@ -246,6 +246,10 @@ fn type_name(
             .find(|enumeration| enumeration.id == *id)
             .map(|enumeration| enumeration.name.clone())
             .unwrap_or_else(|| format!("enum#{}", id.index())),
+        TypeKind::ManagedClass(id) => program
+            .managed_class(*id)
+            .map(|class| class.name.clone())
+            .unwrap_or_else(|| format!("class#{}", id.index())),
         TypeKind::GenericParameter { index, .. } => crate::types::generic_parameter_name(*index),
         TypeKind::Array {
             element, length, ..

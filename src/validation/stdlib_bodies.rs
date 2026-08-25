@@ -406,6 +406,7 @@ fn render_actual_type(
         TypeKind::SettingsView => "SettingsView".to_owned(),
         TypeKind::Record(record) => format!("record#{record}"),
         TypeKind::Enum(enumeration) => format!("enum#{enumeration}"),
+        TypeKind::ManagedClass(class) => format!("class#{class}"),
         TypeKind::GenericParameter { index, .. } => parameter_bindings
             .get(&ty)
             .map(|bound| render_declared_type(library, *bound))

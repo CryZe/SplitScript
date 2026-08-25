@@ -80,6 +80,7 @@ pub(crate) fn validate_declarations(
         .collect::<std::collections::HashSet<_>>();
     let mut declared = HashMap::<&str, Span>::new();
     let mut diagnostics = Vec::new();
+    let managed_classes = program.managed_class_declarations();
 
     for function in &program.functions {
         if function
@@ -102,6 +103,11 @@ pub(crate) fn validate_declarations(
                 .enums
                 .iter()
                 .map(|decl| ("enum", decl.name.as_str(), decl.name_span)),
+        )
+        .chain(
+            managed_classes
+                .iter()
+                .map(|decl| ("managed class", decl.name.as_str(), decl.name_span)),
         )
     {
         if let Some(first) = declared.insert(name, span) {
@@ -154,6 +160,7 @@ pub(crate) fn validate_declarations(
                 .enums
                 .iter()
                 .any(|enumeration| enumeration.name == *name)
+            && !managed_classes.iter().any(|class| class.name == *name)
         {
             if let Some(diagnostic) = legacy_type_migration_diagnostic(name, *span) {
                 diagnostics.push(diagnostic);
@@ -234,6 +241,12 @@ pub(crate) fn resolve_program(
                 program.enum_declarations().find(|item| item.name == *name)
             {
                 ResolvedTypeRef::Enum(enumeration.id)
+            } else if let Some(class) = program
+                .managed_class_declarations()
+                .into_iter()
+                .find(|item| item.name == *name)
+            {
+                ResolvedTypeRef::ManagedClass(class.id)
             } else {
                 ResolvedTypeRef::Standard(standard_library.type_by_name_including_private(name)?.id)
             };
@@ -289,7 +302,11 @@ pub(crate) fn resolve_program(
                 && !program
                     .enums
                     .iter()
-                    .any(|enumeration| enumeration.name == name);
+                    .any(|enumeration| enumeration.name == name)
+                && !program
+                    .managed_class_declarations()
+                    .iter()
+                    .any(|class| class.name == name);
             if !is_undeclared_legacy_type {
                 provider_diagnostics.push(Diagnostic::type_error(
                     format!("unknown generic type constructor `{name}`"),

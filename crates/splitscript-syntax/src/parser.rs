@@ -12,7 +12,10 @@ use crate::{
         Action, ActionKind, ArrayTypeDecl, ArrayTypeId, AssignmentId, AsyncTypeDecl, AsyncTypeId,
         BinaryOp, Block, CallableTypeDecl, CallableTypeId, ConstructedTypeIdAllocator, EnumDecl,
         EnumId, EnumReference, EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, ForBinding,
-        FunctionDecl, FunctionId, InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl,
+        FunctionDecl, FunctionId, InterpolatedPart, ManagedClassDecl, ManagedClassId,
+        ManagedFieldDecl, ManagedFieldId, ManagedImageDecl, ManagedImageId, ManagedItemDecl,
+        ManagedLayoutDecl, ManagedLayoutId, ManagedMetadataName, ManagedMetadataNames,
+        ManagedNamespaceDecl, ManagedNamespaceId, MatchArm, MatchPattern, OptionTypeDecl,
         OptionTypeId, Parameter, PatternBinding, PatternId, PointerPath, PointerPathBase, Program,
         RangeKind, RangeTypeDecl, RangeTypeId, RecordDecl, RecordField, RecordFieldId, RecordId,
         ResultTypeDecl, ResultTypeId, SettingChoiceOption, SettingChoiceOptionId, SettingDecl,
@@ -95,6 +98,11 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         next_assignment_id: 0,
         next_record_field_id: 0,
         next_enum_variant_id: 0,
+        next_managed_image_id: 0,
+        next_managed_namespace_id: 0,
+        next_managed_class_id: 0,
+        next_managed_layout_id: 0,
+        next_managed_field_id: 0,
         next_pattern_id: 0,
         next_setting_choice_option_id: 0,
         diagnostics: Vec::new(),
@@ -133,6 +141,11 @@ struct Parser<'a> {
     next_assignment_id: u32,
     next_record_field_id: u32,
     next_enum_variant_id: u32,
+    next_managed_image_id: u32,
+    next_managed_namespace_id: u32,
+    next_managed_class_id: u32,
+    next_managed_layout_id: u32,
+    next_managed_field_id: u32,
     next_pattern_id: u32,
     next_setting_choice_option_id: u32,
     diagnostics: Vec<Diagnostic>,
@@ -222,6 +235,7 @@ impl Parser<'_> {
                 || self.at_ident("function")
                 || self.at_ident("record")
                 || self.at_ident("enum")
+                || self.at_ident("image")
                 || (self.at_ident("debug")
                     && matches!(&self.peek(1).kind, TokenKind::Ident(name)
                         if matches!(name.as_str(), "let" | "const" | "var" | "fn" | "func" | "function")));
@@ -326,6 +340,11 @@ impl Parser<'_> {
                     enumeration.documentation = documentation.take();
                     program.enums.push(enumeration);
                 })
+            } else if self.at_ident("image") {
+                self.managed_image_decl().map(|mut image| {
+                    image.documentation = documentation.take();
+                    program.managed_images.push(image);
+                })
             } else if self.current_action_kind().is_some()
                 || self.current_legacy_lifecycle_diagnostic().is_some()
             {
@@ -333,7 +352,7 @@ impl Parser<'_> {
                     .map(|action| program.actions.push(action))
             } else {
                 Err(self.error(
-                    "expected `state`, `tickRate`, `settings`, `record`, `enum`, `fn`, a global `let`, or an action block",
+                    "expected `state`, `tickRate`, `settings`, `image`, `record`, `enum`, `fn`, a global `let`, or an action block",
                 ))
             };
 
@@ -491,6 +510,98 @@ mod tests {
         assert_eq!(
             parse_integer("0b1000u16"),
             Ok((8, Some(TypeRef::core(PrimitiveType::U16))))
+        );
+    }
+
+    #[test]
+    fn parses_documented_managed_image_schemas_with_stable_member_shapes() {
+        let source = r#"
+            state "Lunistice.exe" {}
+
+            /// Game-specific managed metadata.
+            image "Assembly-CSharp" {
+                namespace Game {
+                    class Player from "RuntimePlayer" {
+                        /// Current health value.
+                        f32 health;
+                    }
+                }
+
+                /// The active game session.
+                class GameManager {
+                    static GameManager instance from ["Instance", "_instance",];
+                    i32 points from "_points";
+
+                    /// Fields used by the base game.
+                    layout Base {
+                        i32 gameState;
+                        i32 currentLevel;
+                    }
+
+                    layout DlcDemo {
+                        i32 gameState from "GameState";
+                        String currentScene from "_currentScene";
+                    }
+                }
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let image = &program.managed_images[0];
+        assert_eq!(image.name, "Assembly-CSharp");
+        assert_eq!(
+            image.documentation.as_deref(),
+            Some("Game-specific managed metadata.")
+        );
+        assert_eq!(image.items.len(), 2);
+
+        let ManagedItemDecl::Namespace(namespace) = &image.items[0] else {
+            panic!("the first item should be the namespace");
+        };
+        assert_eq!(namespace.name, "Game");
+        let ManagedItemDecl::Class(player) = &namespace.items[0] else {
+            panic!("the namespace should contain Player");
+        };
+        assert_eq!(player.metadata_names.values[0].value, "RuntimePlayer");
+        assert_eq!(
+            player.fields[0].documentation.as_deref(),
+            Some("Current health value.")
+        );
+
+        let ManagedItemDecl::Class(manager) = &image.items[1] else {
+            panic!("the second item should be GameManager");
+        };
+        assert_eq!(manager.fields.len(), 2);
+        assert!(manager.fields[0].is_static);
+        assert_eq!(
+            manager.fields[0]
+                .metadata_names
+                .values
+                .iter()
+                .map(|name| name.value.as_str())
+                .collect::<Vec<_>>(),
+            ["Instance", "_instance"]
+        );
+        assert_eq!(manager.layouts.len(), 2);
+        assert_eq!(manager.layouts[0].name, "Base");
+        assert_eq!(manager.layouts[1].fields[1].name, "currentScene");
+    }
+
+    #[test]
+    fn managed_fields_require_semicolons_even_across_line_breaks() {
+        let source = r#"
+            state "game.exe" {}
+            image "Assembly-CSharp" {
+                class GameManager {
+                    i32 points
+                    i32 deaths;
+                }
+            }
+        "#;
+        let error = parse(source, lex(source, SyntaxMode::Program).unwrap())
+            .expect_err("a line break must not separate managed declarations");
+        assert_eq!(
+            error.message,
+            "expected `;` after the managed field declaration"
         );
     }
 

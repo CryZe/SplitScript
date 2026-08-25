@@ -1329,6 +1329,17 @@ fn add_inferred_fields(
                 }
             }
         }
+        TypeKind::ManagedClass(id) => {
+            if let Some(class) = syntax.managed_class(*id) {
+                for field in &class.fields {
+                    builder.add(simple_completion(
+                        &field.name,
+                        CompletionKind::Property,
+                        "managed class field",
+                    ));
+                }
+            }
+        }
         TypeKind::Standard(owner) => {
             for field in standard_library.public_fields(*owner) {
                 builder.add(CompletionItem {

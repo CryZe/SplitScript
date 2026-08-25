@@ -23,8 +23,9 @@ use position::{syntax_expression_resolution, syntax_expression_segments};
 use crate::{
     CheckedProgram, Diagnostic, RecoveredCheck,
     ast::{
-        EnumId, EnumVariantId, ExprKind, FunctionId, MatchPattern, RecordFieldId, RecordId, Span,
-        Stmt, TypeRef as SyntaxTypeRef, ValueId,
+        EnumId, EnumVariantId, ExprKind, FunctionId, ManagedClassId, ManagedFieldId,
+        ManagedImageId, ManagedLayoutId, ManagedNamespaceId, MatchPattern, RecordFieldId, RecordId,
+        Span, Stmt, TypeRef as SyntaxTypeRef, ValueId,
     },
     hir::ExpressionResolution,
     language::LanguageItemId,
@@ -54,6 +55,11 @@ pub enum SourceDefinitionId {
     RecordField(RecordFieldId),
     Enum(EnumId),
     EnumVariant(EnumVariantId),
+    ManagedImage(ManagedImageId),
+    ManagedNamespace(ManagedNamespaceId),
+    ManagedClass(ManagedClassId),
+    ManagedLayout(ManagedLayoutId),
+    ManagedField(ManagedFieldId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +88,11 @@ pub struct DefinitionIndex {
     record_fields: HashMap<RecordFieldId, SourceDefinition>,
     enums: HashMap<EnumId, SourceDefinition>,
     enum_variants: HashMap<EnumVariantId, SourceDefinition>,
+    managed_images: HashMap<ManagedImageId, SourceDefinition>,
+    managed_namespaces: HashMap<ManagedNamespaceId, SourceDefinition>,
+    managed_classes: HashMap<ManagedClassId, SourceDefinition>,
+    managed_layouts: HashMap<ManagedLayoutId, SourceDefinition>,
+    managed_fields: HashMap<ManagedFieldId, SourceDefinition>,
     syntax_references: Vec<SyntaxReference>,
 }
 
@@ -192,6 +203,46 @@ impl DefinitionIndex {
                 .copied()
                 .map(SourceDefinitionId::EnumVariant),
         );
+        defined.extend(
+            collector
+                .index
+                .managed_images
+                .keys()
+                .copied()
+                .map(SourceDefinitionId::ManagedImage),
+        );
+        defined.extend(
+            collector
+                .index
+                .managed_namespaces
+                .keys()
+                .copied()
+                .map(SourceDefinitionId::ManagedNamespace),
+        );
+        defined.extend(
+            collector
+                .index
+                .managed_classes
+                .keys()
+                .copied()
+                .map(SourceDefinitionId::ManagedClass),
+        );
+        defined.extend(
+            collector
+                .index
+                .managed_layouts
+                .keys()
+                .copied()
+                .map(SourceDefinitionId::ManagedLayout),
+        );
+        defined.extend(
+            collector
+                .index
+                .managed_fields
+                .keys()
+                .copied()
+                .map(SourceDefinitionId::ManagedField),
+        );
         collector
             .index
             .syntax_references
@@ -214,6 +265,11 @@ impl DefinitionIndex {
             SourceDefinitionId::RecordField(id) => self.record_fields.get(&id),
             SourceDefinitionId::Enum(id) => self.enums.get(&id),
             SourceDefinitionId::EnumVariant(id) => self.enum_variants.get(&id),
+            SourceDefinitionId::ManagedImage(id) => self.managed_images.get(&id),
+            SourceDefinitionId::ManagedNamespace(id) => self.managed_namespaces.get(&id),
+            SourceDefinitionId::ManagedClass(id) => self.managed_classes.get(&id),
+            SourceDefinitionId::ManagedLayout(id) => self.managed_layouts.get(&id),
+            SourceDefinitionId::ManagedField(id) => self.managed_fields.get(&id),
         }
     }
 
@@ -696,6 +752,21 @@ impl DefinitionCollector<'_> {
             SourceDefinitionId::EnumVariant(id) => {
                 self.index.enum_variants.insert(id, definition);
             }
+            SourceDefinitionId::ManagedImage(id) => {
+                self.index.managed_images.insert(id, definition);
+            }
+            SourceDefinitionId::ManagedNamespace(id) => {
+                self.index.managed_namespaces.insert(id, definition);
+            }
+            SourceDefinitionId::ManagedClass(id) => {
+                self.index.managed_classes.insert(id, definition);
+            }
+            SourceDefinitionId::ManagedLayout(id) => {
+                self.index.managed_layouts.insert(id, definition);
+            }
+            SourceDefinitionId::ManagedField(id) => {
+                self.index.managed_fields.insert(id, definition);
+            }
         }
     }
 
@@ -753,6 +824,19 @@ impl DefinitionCollector<'_> {
             name,
         ) {
             self.add_reference(target, span);
+        }
+    }
+
+    fn add_type_in_span(&mut self, ty: SyntaxTypeRef, span: Span) {
+        let Some((target, name)) = named_type(self.syntax, ty) else {
+            return;
+        };
+        if let Some(token) = self
+            .tokens_in(span)
+            .iter()
+            .find(|token| matches!(&token.kind, TokenKind::Ident(spelling) if spelling == name))
+        {
+            self.add_reference(target, token.span);
         }
     }
 
@@ -921,6 +1005,52 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             }
         }
         visit::walk_enum(self, enumeration);
+    }
+
+    fn visit_managed_image(&mut self, image: &'ast crate::ast::ManagedImageDecl) {
+        self.insert_definition(SourceDefinition {
+            id: SourceDefinitionId::ManagedImage(image.id),
+            name: image.name.clone(),
+            span: image.name_span,
+        });
+        visit::walk_managed_image(self, image);
+    }
+
+    fn visit_managed_namespace(&mut self, namespace: &'ast crate::ast::ManagedNamespaceDecl) {
+        self.insert_definition(SourceDefinition {
+            id: SourceDefinitionId::ManagedNamespace(namespace.id),
+            name: namespace.name.clone(),
+            span: namespace.name_span,
+        });
+        visit::walk_managed_namespace(self, namespace);
+    }
+
+    fn visit_managed_class(&mut self, class: &'ast crate::ast::ManagedClassDecl) {
+        self.insert_definition(SourceDefinition {
+            id: SourceDefinitionId::ManagedClass(class.id),
+            name: class.name.clone(),
+            span: class.name_span,
+        });
+        visit::walk_managed_class(self, class);
+    }
+
+    fn visit_managed_layout(&mut self, layout: &'ast crate::ast::ManagedLayoutDecl) {
+        self.insert_definition(SourceDefinition {
+            id: SourceDefinitionId::ManagedLayout(layout.id),
+            name: layout.name.clone(),
+            span: layout.name_span,
+        });
+        visit::walk_managed_layout(self, layout);
+    }
+
+    fn visit_managed_field(&mut self, field: &'ast crate::ast::ManagedFieldDecl) {
+        self.insert_definition(SourceDefinition {
+            id: SourceDefinitionId::ManagedField(field.id),
+            name: field.name.clone(),
+            span: field.name_span,
+        });
+        self.add_type_in_span(field.ty, field.type_span);
+        self.visit_type_ref(&field.ty);
     }
 
     fn visit_function(&mut self, function: &'ast crate::ast::FunctionDecl) {
@@ -1266,6 +1396,18 @@ fn named_type(
                             (
                                 SourceDefinitionId::Enum(enumeration.id),
                                 enumeration.name.as_str(),
+                            )
+                        })
+                })
+                .or_else(|| {
+                    syntax
+                        .managed_class_declarations()
+                        .into_iter()
+                        .find(|class| class.name == name)
+                        .map(|class| {
+                            (
+                                SourceDefinitionId::ManagedClass(class.id),
+                                class.name.as_str(),
                             )
                         })
                 })

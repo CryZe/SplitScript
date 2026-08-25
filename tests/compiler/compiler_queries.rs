@@ -852,6 +852,50 @@ fn source_reference_queries_cover_all_declaration_kinds() {
 }
 
 #[test]
+fn managed_class_types_use_the_source_symbol_graph() {
+    use splitscript::tooling::database::{CompilerDatabase, SourceDefinitionId};
+
+    let source = r#"
+        state "game.exe" {}
+        image "Assembly-CSharp" {
+            class Player {
+                f32 health;
+            }
+            class GameManager {
+                static Player player;
+            }
+        }
+        fn inspect(player: Player) {}
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    database.check().expect("managed type fixture should check");
+
+    let declaration = source.find("class Player").unwrap() + "class ".len();
+    let field_type = source.find("static Player").unwrap() + "static ".len();
+    let parameter_type = source.rfind("Player").unwrap();
+
+    for reference in [field_type, parameter_type] {
+        assert!(matches!(
+            database.definition_at(reference).unwrap(),
+            Some(splitscript::tooling::database::DefinitionTarget::Source(definition))
+                if matches!(definition.id, SourceDefinitionId::ManagedClass(_))
+                    && definition.span.start == declaration
+        ));
+    }
+
+    let references = database.references_at(declaration, true).unwrap();
+    assert_eq!(references.len(), 3);
+    assert!(
+        references
+            .iter()
+            .all(|span| &source[span.start..span.end] == "Player")
+    );
+
+    let edits = database.rename_at(parameter_type, "PlayerState").unwrap();
+    assert_eq!(edits.len(), 3);
+}
+
+#[test]
 fn rename_queries_validate_identifiers_reservations_and_binding_identity() {
     use splitscript::tooling::database::{CompilerDatabase, RenameError};
 

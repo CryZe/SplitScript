@@ -840,7 +840,122 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 &documented_description("Enum variant", variant_documentation),
             ))
         }
+        id @ (SourceDefinitionId::ManagedImage(_)
+        | SourceDefinitionId::ManagedNamespace(_)
+        | SourceDefinitionId::ManagedClass(_)
+        | SourceDefinitionId::ManagedLayout(_)
+        | SourceDefinitionId::ManagedField(_)) => match find_managed_declaration(syntax, id)? {
+            ManagedSourceDeclaration::Image(image) => Some(source_markdown(
+                &format!("image \"{}\"", image.name),
+                &documented_description("Managed image schema", image.documentation.as_deref()),
+            )),
+            ManagedSourceDeclaration::Namespace(namespace) => Some(source_markdown(
+                &format!("namespace {}", namespace.name),
+                &documented_description(
+                    "Managed metadata namespace",
+                    namespace.documentation.as_deref(),
+                ),
+            )),
+            ManagedSourceDeclaration::Class(class) => Some(source_markdown(
+                &format!("class {}", class.name),
+                &documented_description(
+                    "Managed reference and snapshot schema",
+                    class.documentation.as_deref(),
+                ),
+            )),
+            ManagedSourceDeclaration::Layout(layout) => Some(source_markdown(
+                &format!("layout {}", layout.name),
+                &documented_description(
+                    "Alternative managed class layout",
+                    layout.documentation.as_deref(),
+                ),
+            )),
+            ManagedSourceDeclaration::Field(field) => Some(source_markdown(
+                &format!(
+                    "{}{} {}",
+                    if field.is_static { "static " } else { "" },
+                    semantics
+                        .managed_field_type(field.id)
+                        .map(|ty| render_type(ty, context))
+                        .unwrap_or_else(|| "<unknown>".to_owned()),
+                    field.name
+                ),
+                &documented_description(
+                    if field.is_static {
+                        "Static managed field"
+                    } else {
+                        "Managed instance field"
+                    },
+                    field.documentation.as_deref(),
+                ),
+            )),
+        },
     }
+}
+
+enum ManagedSourceDeclaration<'ast> {
+    Image(&'ast crate::ast::ManagedImageDecl),
+    Namespace(&'ast crate::ast::ManagedNamespaceDecl),
+    Class(&'ast crate::ast::ManagedClassDecl),
+    Layout(&'ast crate::ast::ManagedLayoutDecl),
+    Field(&'ast crate::ast::ManagedFieldDecl),
+}
+
+fn find_managed_declaration(
+    syntax: &crate::ast::Program,
+    target: SourceDefinitionId,
+) -> Option<ManagedSourceDeclaration<'_>> {
+    struct Finder<'ast> {
+        target: SourceDefinitionId,
+        found: Option<ManagedSourceDeclaration<'ast>>,
+    }
+
+    impl<'ast> crate::visit::Visitor<'ast> for Finder<'ast> {
+        fn visit_managed_image(&mut self, image: &'ast crate::ast::ManagedImageDecl) {
+            if self.target == SourceDefinitionId::ManagedImage(image.id) {
+                self.found = Some(ManagedSourceDeclaration::Image(image));
+            } else {
+                crate::visit::walk_managed_image(self, image);
+            }
+        }
+
+        fn visit_managed_namespace(&mut self, namespace: &'ast crate::ast::ManagedNamespaceDecl) {
+            if self.target == SourceDefinitionId::ManagedNamespace(namespace.id) {
+                self.found = Some(ManagedSourceDeclaration::Namespace(namespace));
+            } else {
+                crate::visit::walk_managed_namespace(self, namespace);
+            }
+        }
+
+        fn visit_managed_class(&mut self, class: &'ast crate::ast::ManagedClassDecl) {
+            if self.target == SourceDefinitionId::ManagedClass(class.id) {
+                self.found = Some(ManagedSourceDeclaration::Class(class));
+            } else {
+                crate::visit::walk_managed_class(self, class);
+            }
+        }
+
+        fn visit_managed_layout(&mut self, layout: &'ast crate::ast::ManagedLayoutDecl) {
+            if self.target == SourceDefinitionId::ManagedLayout(layout.id) {
+                self.found = Some(ManagedSourceDeclaration::Layout(layout));
+            } else {
+                crate::visit::walk_managed_layout(self, layout);
+            }
+        }
+
+        fn visit_managed_field(&mut self, field: &'ast crate::ast::ManagedFieldDecl) {
+            if self.target == SourceDefinitionId::ManagedField(field.id) {
+                self.found = Some(ManagedSourceDeclaration::Field(field));
+            }
+        }
+    }
+
+    let mut finder = Finder {
+        target,
+        found: None,
+    };
+    crate::visit::Visitor::visit_program(&mut finder, syntax);
+    finder.found
 }
 
 fn append_parameter_effect_dependencies(
@@ -2052,6 +2167,7 @@ onAttach {
         steamBase = 0x1000 as address
         return StateLayout.Steam
     }
+
     gogBase = 0x2000 as address
     return StateLayout.GOG
 }
@@ -2090,6 +2206,53 @@ split {
                 .markdown
                 .contains("**Attachment layouts:** `StateLayout.Steam`")
         );
+    }
+
+    #[test]
+    fn managed_schema_declarations_have_source_hover_and_documentation() {
+        let source = r#"
+state "game.exe" {}
+/// Gameplay metadata.
+image "Assembly-CSharp" {
+    /// Runtime namespace.
+    namespace Game {
+        /// The player component.
+        class Player {
+            /// Current hit points.
+            static f32 health from "_health";
+
+            /// Alternate release layout.
+            layout Alternate {
+                f32 armor;
+            }
+        }
+    }
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        database.check().expect("managed schema hover fixture");
+        for (needle, signature, description) in [
+            (
+                "Assembly-CSharp",
+                "image \"Assembly-CSharp\"",
+                "Gameplay metadata.",
+            ),
+            ("Game {", "namespace Game", "Runtime namespace."),
+            ("Player {", "class Player", "The player component."),
+            ("health from", "static f32 health", "Current hit points."),
+            (
+                "Alternate {",
+                "layout Alternate",
+                "Alternate release layout.",
+            ),
+        ] {
+            let hover = database
+                .hover(source.find(needle).unwrap() + 1)
+                .unwrap()
+                .expect("managed source hover");
+            assert!(hover.markdown.contains(signature), "{}", hover.markdown);
+            assert!(hover.markdown.contains(description), "{}", hover.markdown);
+        }
     }
 
     #[test]

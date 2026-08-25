@@ -31,6 +31,11 @@ pub(crate) fn display_type(ty: TypeId, snapshot: &SemanticSnapshot) -> String {
             .find(|enumeration| enumeration.id == *id)
             .map(|enumeration| enumeration.name.clone())
             .unwrap_or_else(|| format!("enum#{}", id.index())),
+        TypeKind::ManagedClass(id) => snapshot
+            .syntax()
+            .managed_class(*id)
+            .map(|class| class.name.clone())
+            .unwrap_or_else(|| format!("class#{}", id.index())),
         TypeKind::GenericParameter { index, .. } => snapshot
             .semantics()
             .associated_projection_for_output(ty)

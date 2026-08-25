@@ -179,6 +179,12 @@ pub enum ResolvedValue {
         class: ManagedClassId,
         field: ManagedFieldId,
     },
+    /// The managed metadata layout selected while binding an attachment.
+    ManagedLayout {
+        class: ManagedClassId,
+        enumeration: crate::ast::EnumId,
+        value: ValueId,
+    },
     Variable(ValueId),
     CurrentSnapshot,
     OldSnapshot,
@@ -203,6 +209,7 @@ impl ResolvedValue {
             | Self::SettingsView
             | Self::OldSettingsView => None,
             Self::Variable(value)
+            | Self::ManagedLayout { value, .. }
             | Self::CurrentState(value)
             | Self::OldState(value)
             | Self::Setting(value)

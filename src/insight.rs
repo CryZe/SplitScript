@@ -288,6 +288,7 @@ fn provider_value_for_resolution(
         crate::semantic::ResolvedValue::StandardLibraryConstant(_) => None,
         crate::semantic::ResolvedValue::ProviderValue(provider) => Some(provider),
         crate::semantic::ResolvedValue::ManagedStatic { .. } => None,
+        crate::semantic::ResolvedValue::ManagedLayout { .. } => None,
         crate::semantic::ResolvedValue::Variable(_)
         | crate::semantic::ResolvedValue::CurrentSnapshot
         | crate::semantic::ResolvedValue::OldSnapshot
@@ -2310,7 +2311,7 @@ let player: Player.Ref? = None
             ("health from", "static f32 health", "Current hit points."),
             (
                 "Alternate {",
-                "layout Alternate",
+                "Player.Layout.Alternate",
                 "Alternate release layout.",
             ),
         ] {

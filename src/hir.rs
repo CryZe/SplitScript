@@ -1359,9 +1359,9 @@ fn lower_expression_kind(
     if let Some(resolved_variant) = semantics.enum_variant(expression.id) {
         let (variant, payload) = match &expression.kind {
             ExprKind::Path(path) => {
-                let [_, variant] = path.as_slice() else {
-                    unreachable!("resolved enum paths have two segments")
-                };
+                let variant = path
+                    .last()
+                    .expect("resolved enum paths retain a variant segment");
                 (variant.clone(), None)
             }
             ExprKind::Call {
@@ -1371,9 +1371,9 @@ fn lower_expression_kind(
                 ..
             } => {
                 debug_assert!(receiver.is_none());
-                let [_, variant] = callee.as_slice() else {
-                    unreachable!("resolved enum constructors have two segments")
-                };
+                let variant = callee
+                    .last()
+                    .expect("resolved enum constructors retain a variant segment");
                 (variant.clone(), args.first().map(|payload| payload.id))
             }
             _ => unreachable!("only enum-shaped syntax resolves an enum variant"),

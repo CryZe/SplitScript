@@ -1171,7 +1171,14 @@ impl Parser<'_> {
             TokenKind::Ident(enum_name) => {
                 self.bump();
                 if self.eat(&TokenKind::Dot).is_some() {
-                    let (variant, _) = self.expect_any_ident("expected a variant name")?;
+                    let (mut segment, _) = self.expect_any_ident("expected a variant name")?;
+                    let mut enumeration = enum_name;
+                    while self.eat(&TokenKind::Dot).is_some() {
+                        enumeration.push('.');
+                        enumeration.push_str(&segment);
+                        (segment, _) = self.expect_any_ident("expected a variant name")?;
+                    }
+                    let variant = segment;
                     let binding = if self.eat(&TokenKind::LParen).is_some() {
                         let (name, name_span) =
                             self.expect_any_ident("expected a payload binding")?;
@@ -1186,7 +1193,7 @@ impl Parser<'_> {
                     };
                     MatchPattern::Enum {
                         enumeration: EnumReference {
-                            name: enum_name,
+                            name: enumeration,
                             span: pattern_start,
                         },
                         variant,

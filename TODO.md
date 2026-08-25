@@ -104,8 +104,13 @@ to inference or code generation.
     attachment binding probes every complete layout, selects exactly one, and
     caches only the selected layout's offsets without adding a public lookup
     API or duplicating the metadata scanner.
-  - [ ] Expose the selected layout through an approved generated enum/value
-    shape and use match refinement to make only that layout's fields visible.
+  - [x] Expose the selected layout as the nested `T.Layout` enum and read-only
+    attachment value `T.layout`. Matching the value refines both live
+    references and static access to exactly that layout's fields; common fields
+    remain available without refinement. The attachment cache stores the enum
+    value once rather than reconstructing it during every access, and the
+    compiler, Wasm backend, completion, navigation, hover, and semantic
+    highlighting share its generated semantic identities.
   - [ ] Replace the temporary inert zero/multiple-match behavior with a focused
     attachment diagnostic carrying labels for the responsible layouts.
 
@@ -143,9 +148,9 @@ to inference or code generation.
   attachment. Re-follow dynamic object pointers on each read so replaceable
   singletons remain correct. Scalar live paths allocate no fresh GC object per
   tick.
-- [x] Extend the attachment cache with the selected class-layout index and that
-  layout's field offsets. Strings, arrays, and explicit snapshots may still
-  allocate their returned values.
+- [x] Extend the attachment cache with the selected class-layout enum value and
+  that layout's field offsets. Strings, arrays, and explicit snapshots may
+  still allocate their returned values.
 - [x] Preserve the existing transactional state-field failure boundary for
   generated member reads. A failed pointer hop or memory read retains the last
   accepted field value; Unity declarations must not introduce a second failure

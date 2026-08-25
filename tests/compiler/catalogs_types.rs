@@ -1147,28 +1147,72 @@ fn unity_provider_preparation_is_selected_typed_and_lowered_before_attachment() 
         image "Assembly-CSharp" {
             class Player {
                 u32 score;
+            }
+
+            class GameManager from ["Manager", "GameManager"] {
+                static GameManager instance;
+                Player player;
 
                 layout BaseGame {
                     u32 level;
                 }
 
                 layout Demo {
-                    String scene;
+                    u32 scene;
                 }
-            }
-
-            class GameManager from ["Manager", "GameManager"] {
-                static GameManager instance;
-                Player player;
             }
         }
         state Unity ["game.exe"] {
             score: u32 = GameManager.instance?.player?.score?
         }
+
+        whileAttached {
+            let selected: GameManager.Layout = GameManager.layout
+            let manager = GameManager.instance else return
+            match GameManager.layout {
+                GameManager.Layout.BaseGame => {
+                    print(manager.level else 0)
+                },
+                GameManager.Layout.Demo => {
+                    print(manager.scene else 0)
+                },
+            }
+        }
+
     "#;
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::compile(schema).unwrap())
         .expect("a Unity schema should be bound by the provider preparation phase");
+
+    let mut database = splitscript::tooling::database::CompilerDatabase::new(schema);
+    let layout_use = schema.rfind("GameManager.layout").unwrap() + "GameManager.".len();
+    let splitscript::tooling::database::DefinitionTarget::Source(layout_definition) =
+        database.definition_at(layout_use).unwrap().unwrap()
+    else {
+        panic!("the managed layout value should navigate to its generated enum");
+    };
+    assert!(matches!(
+        layout_definition.id,
+        splitscript::tooling::database::SourceDefinitionId::Enum(_)
+    ));
+    let hover = database.hover(layout_use).unwrap().unwrap();
+    assert!(
+        hover.markdown.contains("GameManager.Layout"),
+        "{}",
+        hover.markdown
+    );
+
+    let variant_use =
+        schema.rfind("GameManager.Layout.BaseGame").unwrap() + "GameManager.Layout.".len();
+    let splitscript::tooling::database::DefinitionTarget::Source(variant_definition) =
+        database.definition_at(variant_use).unwrap().unwrap()
+    else {
+        panic!("a managed layout variant should navigate to its layout declaration");
+    };
+    assert!(matches!(
+        variant_definition.id,
+        splitscript::tooling::database::SourceDefinitionId::EnumVariant(_)
+    ));
 
     let native = schema.replace("state Unity [\"game.exe\"]", "state \"game.exe\"");
     let diagnostics = splitscript::compile(&native)
@@ -1177,6 +1221,15 @@ fn unity_provider_preparation_is_selected_typed_and_lowered_before_attachment() 
         diagnostic
             .message
             .contains("live managed fields require a Unity state provider")
+    }));
+
+    let wrong_layout = schema.replace("print(manager.scene else 0)", "print(manager.level else 0)");
+    let diagnostics = splitscript::compile(&wrong_layout)
+        .expect_err("layout-only managed fields must remain narrowed to their own match arm");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "managed field `GameManager.level` is layout-specific; access it inside the corresponding `match GameManager.layout` arm",
+        )
     }));
 }
 

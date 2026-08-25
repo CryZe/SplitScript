@@ -3268,7 +3268,12 @@ fn lower_normalized_match_arms(
                 destination.map_or(
                     Statement::Evaluate {
                         expression: arm.value.value,
-                        discard_result: false,
+                        // With no destination the match itself is in statement
+                        // position. Its arm value must therefore be compiled in
+                        // the ordinary result-discarding context as well; in
+                        // particular, a `None` arm must not leave its erased
+                        // unit representation on an empty Wasm branch stack.
+                        discard_result: true,
                     },
                     |target| Statement::StoreTemporary {
                         target,

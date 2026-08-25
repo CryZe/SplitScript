@@ -164,8 +164,7 @@ pub(crate) fn validate_declarations(
                 && applied_constructor_occurrences.contains(span))
             && !program.records.iter().any(|record| record.name == *name)
             && !program
-                .enums
-                .iter()
+                .enum_declarations()
                 .any(|enumeration| enumeration.name == *name)
             && !managed_classes.iter().any(|class| class.name == *name)
         {
@@ -517,18 +516,18 @@ impl<'ast> Visitor<'ast> for EnumResolver<'_> {
     fn visit_expr(&mut self, expression: &'ast crate::ast::Expr) {
         let enumeration = match &expression.kind {
             ExprKind::Path(path) => {
-                let [enum_name, _] = path.as_slice() else {
+                let Some((_, prefix)) = path.split_last() else {
                     visit::walk_expr(self, expression);
                     return;
                 };
-                self.enums.get(enum_name).copied()
+                self.enums.get(&prefix.join(".")).copied()
             }
             ExprKind::Call { callee, args, .. } => {
-                let [enum_name, _] = callee.as_slice() else {
+                let Some((_, prefix)) = callee.split_last() else {
                     visit::walk_expr(self, expression);
                     return;
                 };
-                self.enums.get(enum_name).copied().inspect(|_| {
+                self.enums.get(&prefix.join(".")).copied().inspect(|_| {
                     if args.len() > 1 {
                         self.diagnostics.push(Diagnostic::type_error(
                             "enum constructors accept at most one payload",

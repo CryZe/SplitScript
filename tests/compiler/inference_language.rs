@@ -1194,6 +1194,35 @@ fn payload_enums_are_exhaustively_matched_and_survive_await() {
 }
 
 #[test]
+fn statement_position_matches_with_none_arms_emit_valid_wasm() {
+    let source = r#"
+        state "game.exe" {}
+
+        enum Choice {
+            First,
+            Second,
+        }
+
+        whileAttached {
+            match Choice.First {
+                Choice.First => {
+                    print("first")
+                },
+                Choice.Second => {
+                    print("second")
+                },
+            }
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("statement-position matches with None-valued arms should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("zero-sized match results must not leave phantom Wasm stack values");
+}
+
+#[test]
 fn match_requires_every_enum_variant() {
     let source = r#"
         state "game.exe" {}

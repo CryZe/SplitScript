@@ -168,6 +168,8 @@ pub(super) struct DeclarationEnvironment {
     pub(super) state_field_spans: HashMap<ValueId, crate::ast::Span>,
     /// Concrete fields available after refining `layout` to a variant.
     pub(super) layout_state_fields: HashMap<EnumVariantId, HashMap<String, (ValueId, Type)>>,
+    /// Read-only attachment values exposed as `<Class>.layout`.
+    pub(super) managed_layout_values: HashMap<crate::ast::ManagedClassId, (ValueId, Type)>,
     /// Concrete declarations mapped to their physical snapshot field. Common
     /// declarations from later layouts map to the first layout's identity.
     pub(super) state_storage_fields: HashMap<ValueId, ValueId>,
@@ -198,6 +200,7 @@ impl DeclarationEnvironment {
             state_fields_by_id: HashMap::new(),
             state_field_spans: HashMap::new(),
             layout_state_fields: HashMap::new(),
+            managed_layout_values: HashMap::new(),
             state_storage_fields: HashMap::new(),
             settings: HashMap::new(),
             settings_by_runtime_key: HashMap::new(),

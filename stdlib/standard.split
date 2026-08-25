@@ -44,7 +44,7 @@ stateProvider Native as process {}
 /// Use an explicit selector when a known game needs to bypass detection.
 ///
 /// The read-only process value remains a native [`Process`] handle. Managed
-/// images and classes declared with `image` are bound once before
+/// images and classes declared with [`image`] are bound once before
 /// [`onAttach`] runs.
 ///
 /// # Example

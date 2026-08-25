@@ -590,6 +590,19 @@ mod tests {
         assert_eq!(manager.layouts.len(), 2);
         assert_eq!(manager.layouts[0].name, "Base");
         assert_eq!(manager.layouts[1].fields[1].name, "currentScene");
+        let layout_enum = manager
+            .layout_enum
+            .as_ref()
+            .expect("named class layouts should expose a nested enum");
+        assert_eq!(layout_enum.name, "GameManager.Layout");
+        assert_eq!(layout_enum.variants[0].name, "Base");
+        assert_eq!(layout_enum.variants[0].id, manager.layouts[0].variant);
+        assert!(manager.layout_value.is_some());
+        assert!(
+            program
+                .enum_declarations()
+                .any(|enumeration| enumeration.id == layout_enum.id)
+        );
     }
 
     #[test]

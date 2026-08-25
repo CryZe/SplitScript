@@ -125,6 +125,41 @@ whileAttached {
     })
 }"#;
 
+const MANAGED_IMAGE_SOURCE: &str = r#"image "Assembly-CSharp" {
+    class Player {
+        u32 score;
+    }
+
+    class GameManager from ["Manager", "GameManager"] {
+        static GameManager instance;
+        Player player;
+
+        layout BaseGame {
+            u32 level;
+        }
+
+        layout Demo {
+            u32 scene;
+        }
+    }
+}
+
+state Unity ["game.exe"] {
+    score: u32 = GameManager.instance?.player?.score?
+}
+
+whileAttached {
+    let manager = GameManager.instance else return
+    match GameManager.layout {
+        GameManager.Layout.BaseGame => {
+            print(manager.level else 0)
+        },
+        GameManager.Layout.Demo => {
+            print(manager.scene else 0)
+        },
+    }
+}"#;
+
 const GBA_STATE_SOURCE: &str = r#"state GBA {
     room: u8 at 0x03000010;
 }"#;
@@ -184,8 +219,6 @@ const NATIVE_UTF16LE_STATE_SOURCE: &str = r#"state "game.exe" {
 whileAttached {
     print(current.chapterName)
 }"#;
-
-const STATE_LAYOUT_SOURCE: &str = include_str!("../examples/state_layouts.split");
 
 const SETTINGS_SOURCE: &str = include_str!("../examples/lso_desktop_settings.split");
 
@@ -645,11 +678,6 @@ const STATE_DECL_EXAMPLES: &[Example] = &[
         WII_STATE_SOURCE,
     ),
 ];
-const STATE_LAYOUT_EXAMPLE: &[Example] = &[Example::checked(
-    "Select and refine a supported build",
-    STATE_LAYOUT_SOURCE,
-    STATE_LAYOUT_SOURCE,
-)];
 focused_example!(
     STATE_POINTER_EXAMPLE,
     "Read a pointer-backed field",
@@ -1137,12 +1165,51 @@ define_language_catalog! {
         ENUM_EXAMPLE
     ),
     language_item!(
+        ManagedImage,
+        "image",
+        LanguageItemKind::Declaration,
+        "image \"Assembly-CSharp\" { class Name { ... } }",
+        "Declares the managed types exposed by one runtime image.",
+        "An [`image`] schema names the managed assembly image that owns its classes. The [`Unity`] state provider resolves the image and every declared class once per attachment before state polling begins. Schema declarations describe metadata; they do not read live game memory until a static or instance field path is evaluated.",
+        &[Example::checked(
+            "Describe a managed assembly image",
+            "image \"Assembly-CSharp\" {\n    class Player {\n        u32 score;\n    }\n\n    class GameManager from [\"Manager\", \"GameManager\"] {\n        static GameManager instance;\n        Player player;\n\n        layout BaseGame {\n            u32 level;\n        }\n\n        layout Demo {\n            u32 scene;\n        }\n    }\n}",
+            MANAGED_IMAGE_SOURCE,
+        )]
+    ),
+    language_item!(
+        ManagedClass,
+        "class",
+        LanguageItemKind::Declaration,
+        "class Name from [\"Alias\", ...] { Type field; static Type field; layout Name { ... } }",
+        "Declares a typed managed class binding.",
+        "Fields without [`static`](syntax@managed static field) are read from a live class reference; static fields are read through the class name. Each field hop is independently fallible and yields [`T!`], so postfix [`?`] can propagate an unsuccessful lookup to the surrounding state field, function, or [`retry`] boundary. The optional `from` list tries the written managed type names in order and binds the first complete schema. Fields declared directly in the class are available for every binding; fields inside a [`layout`] require a direct match on the generated read-only `Class.layout` value.",
+        &[Example::checked(
+            "Follow a typed managed field path",
+            "score: u32 = GameManager.instance?.player?.score?",
+            MANAGED_IMAGE_SOURCE,
+        )]
+    ),
+    language_item!(
+        ManagedStaticField,
+        "managed static field",
+        LanguageItemKind::Syntax,
+        "static Type field;",
+        "Declares a managed field read through its class rather than an instance.",
+        "Access the field as `Class.field`. Resolving the field offset and reading its live value are fallible, just like an instance-field hop. A static field may reference its own class, which is useful for singleton instances such as `GameManager.instance`.",
+        &[Example::checked(
+            "Read a managed singleton",
+            "let manager = GameManager.instance else return",
+            MANAGED_IMAGE_SOURCE,
+        )]
+    ),
+    language_item!(
         State,
         "state",
         LanguageItemKind::Declaration,
         "state \"game.exe\" { ... } | state [\"game.exe\", \"demo.exe\"] { ... } | state Provider { ... }",
         "Declares process attachment and persistent watched state.",
-        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. A named standard-library provider selects a typed emulator memory model: [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`], [`GCN`], and [`Wii`] are currently available. Each provider introduces its documented read root instead of native [`process`](provider@Native) access and accepts original console addresses in state fields. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
+        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. A named standard-library provider selects a typed memory model. [`Unity`] binds managed [`image`] schemas while [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`], [`GCN`], and [`Wii`] expose emulator-specific read roots and accept original console addresses in state fields. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
         STATE_DECL_EXAMPLES
     ),
     language_item!(
@@ -1162,10 +1229,21 @@ define_language_catalog! {
         StateLayout,
         "layout",
         LanguageItemKind::Declaration,
-        "layout Name { field at address }",
-        "Declares one named memory layout for a supported game build.",
-        "Declare all build layouts inside one [`state`] block. Fields with the same compatible type in every named layout form the common state snapshot interface. Missing fields and conflicting same-named types are available after a direct [`match`] on the generated read-only [`layout`] value refines the selected `StateLayout` variant. The implicitly suspending [`onAttach`] block uses module metadata, signatures, or other typed evidence and returns that variant before polling begins; [`await`] [`Process.closed`] represents an unsupported build without falling back or repeatedly reattaching.",
-        STATE_LAYOUT_EXAMPLE
+        "state { layout Name { field at address } } | class Name { layout Name { Type field; } }",
+        "Declares one named state or managed-class layout.",
+        "Inside [`state`], fields with the same compatible type in every named layout form the common snapshot interface. Other fields become available after a direct [`match`] on the generated read-only `layout: StateLayout` value. [`onAttach`] returns the selected variant before polling begins; [`await`] [`Process.closed`] represents an unsupported build without repeatedly reattaching. Inside a managed [`class`], fields declared outside every layout are common. The [`Unity`] provider selects exactly one complete managed layout during attachment and caches its generated `Class.Layout` enum value. Match the read-only `Class.layout` value directly to access layout-specific static and instance fields in the corresponding arm. Each managed field path remains independently fallible after refinement.",
+        &[
+            Example::checked(
+                "Select and refine a supported build",
+                "layout Steam {\n    level: u32 at 0x1000;\n    checkpoint: u8 at 0x1100;\n}",
+                MULTI_LAYOUT_STATE_SOURCE,
+            ),
+            Example::checked(
+                "Refine a managed class layout",
+                "match GameManager.layout {\n    GameManager.Layout.BaseGame => {\n        print(manager.level else 0)\n    },\n    GameManager.Layout.Demo => {\n        print(manager.scene else 0)\n    },\n}",
+                MANAGED_IMAGE_SOURCE,
+            ),
+        ]
     ),
     language_item!(
         StatePointerField,

@@ -1642,6 +1642,46 @@ impl Checker {
                 members: Some(Vec::new()),
             });
         }
+        if let [class_name, member] = path
+            && member == "layout"
+            && let Some(class) = self
+                .declarations
+                .managed_classes
+                .iter()
+                .find(|class| class.name == *class_name)
+                .cloned()
+            && let Some((value, ty)) = self
+                .declarations
+                .managed_layout_values
+                .get(&class.id)
+                .copied()
+        {
+            if !self.managed_provider_available() {
+                self.errors.push(
+                    Diagnostic::type_error(
+                        "managed layout selection requires a Unity state provider",
+                        span,
+                    )
+                    .with_primary_label(
+                        "declare the state as `state Unity [\"game.exe\"] { ... }`",
+                    ),
+                );
+                return None;
+            }
+            return Some(PathResolution {
+                ty,
+                value: Some(ResolvedValue::ManagedLayout {
+                    class: class.id,
+                    enumeration: class
+                        .layout_enum
+                        .as_ref()
+                        .expect("managed layout values retain their nested enum")
+                        .id,
+                    value,
+                }),
+                members: Some(Vec::new()),
+            });
+        }
         if let [class_name, field_name] = path
             && let Some(class) = self
                 .declarations
@@ -1652,6 +1692,18 @@ impl Checker {
             && let Some(field) = class
                 .fields
                 .iter()
+                .chain(
+                    self.active_managed_layouts
+                        .get(&class.id)
+                        .and_then(|variant| {
+                            class
+                                .layouts
+                                .iter()
+                                .find(|layout| layout.variant == *variant)
+                        })
+                        .into_iter()
+                        .flat_map(|layout| &layout.fields),
+                )
                 .find(|field| field.is_static && field.name == *field_name)
                 .cloned()
         {
@@ -1676,6 +1728,27 @@ impl Checker {
                 }),
                 members: Some(Vec::new()),
             });
+        }
+        if let [class_name, field_name] = path
+            && let Some(class) = self
+                .declarations
+                .managed_classes
+                .iter()
+                .find(|class| class.name == *class_name)
+            && class.layouts.iter().any(|layout| {
+                layout
+                    .fields
+                    .iter()
+                    .any(|field| field.is_static && field.name == *field_name)
+            })
+        {
+            self.error(
+                format!(
+                    "managed field `{class_name}.{field_name}` is layout-specific; access it inside the corresponding `match {class_name}.layout` arm"
+                ),
+                span,
+            );
+            return None;
         }
         if let [class_name, field_name, next, ..] = path
             && self
@@ -2087,6 +2160,35 @@ impl Checker {
                 self.error(format!("unknown record field `{field}`"), span)
             }
             Type::Known(id)
+                if let TypeKind::ManagedClass(class) | TypeKind::ManagedReference(class) =
+                    self.inference.type_store().kind(id)
+                    && self
+                        .declarations
+                        .managed_classes
+                        .iter()
+                        .find(|candidate| candidate.id == *class)
+                        .is_some_and(|class| {
+                            class
+                                .layouts
+                                .iter()
+                                .any(|layout| layout.fields.iter().any(|item| item.name == field))
+                        }) =>
+            {
+                let class = self
+                    .declarations
+                    .managed_classes
+                    .iter()
+                    .find(|candidate| candidate.id == *class)
+                    .expect("the layout-specific field belongs to a managed class");
+                self.error(
+                    format!(
+                        "managed field `{}.{field}` is layout-specific; access it inside the corresponding `match {}.layout` arm",
+                        class.name, class.name
+                    ),
+                    span,
+                )
+            }
+            Type::Known(id)
                 if matches!(
                     self.inference.type_store().kind(id),
                     TypeKind::ManagedClass(_)
@@ -2184,6 +2286,18 @@ impl Checker {
                     class
                         .fields
                         .iter()
+                        .chain(
+                            self.active_managed_layouts
+                                .get(class_id)
+                                .and_then(|variant| {
+                                    class
+                                        .layouts
+                                        .iter()
+                                        .find(|layout| layout.variant == *variant)
+                                })
+                                .into_iter()
+                                .flat_map(|layout| &layout.fields),
+                        )
                         .find(|item| !item.is_static && item.name == field)
                 })
         {
@@ -2217,6 +2331,18 @@ impl Checker {
                     class
                         .fields
                         .iter()
+                        .chain(
+                            self.active_managed_layouts
+                                .get(class_id)
+                                .and_then(|variant| {
+                                    class
+                                        .layouts
+                                        .iter()
+                                        .find(|layout| layout.variant == *variant)
+                                })
+                                .into_iter()
+                                .flat_map(|layout| &layout.fields),
+                        )
                         .find(|item| !item.is_static && item.name == field)
                 })
                 .cloned()

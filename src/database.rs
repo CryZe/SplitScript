@@ -379,17 +379,28 @@ fn definition_for_resolution(
                     ),
                 }
             } else {
-                definitions
-                    .enums
-                    .values()
-                    .find(|enumeration| {
-                        analysis
-                            .segments
-                            .get(segment)
-                            .is_some_and(|source| source.name == enumeration.name)
+                let enumeration = definitions.enums.values().find(|enumeration| {
+                    enumeration
+                        .name
+                        .split('.')
+                        .eq(analysis.segments[..analysis.segments.len() - 1]
+                            .iter()
+                            .map(|segment| segment.name.as_str()))
+                });
+                enumeration
+                    .and_then(|enumeration| {
+                        let owner_segments = enumeration.name.split('.').count();
+                        if segment + 1 == owner_segments {
+                            Some(DefinitionTarget::Source(enumeration.clone()))
+                        } else {
+                            definitions
+                                .managed_classes
+                                .values()
+                                .find(|class| class.name == analysis.segments[segment].name)
+                                .cloned()
+                                .map(DefinitionTarget::Source)
+                        }
                     })
-                    .cloned()
-                    .map(DefinitionTarget::Source)
                     .or_else(|| {
                         standard_library
                             .type_by_name(&analysis.segments[segment].name)
@@ -523,6 +534,16 @@ fn source_definition_for_value_path(
             _ => None,
         };
     }
+    if let ResolvedValue::ManagedLayout {
+        class, enumeration, ..
+    } = root
+    {
+        return match segment {
+            0 => Some(SourceDefinitionId::ManagedClass(class)),
+            1 => Some(SourceDefinitionId::Enum(enumeration)),
+            _ => None,
+        };
+    }
     if matches!(root, ResolvedValue::StandardLibraryConstant(_)) {
         return None;
     }
@@ -549,6 +570,7 @@ fn source_definition_for_value_path(
         ResolvedValue::ProviderValue(_) => 0,
         ResolvedValue::Variable(_) => 0,
         ResolvedValue::ManagedStatic { .. } => unreachable!(),
+        ResolvedValue::ManagedLayout { .. } => unreachable!(),
         ResolvedValue::CurrentSnapshot
         | ResolvedValue::OldSnapshot
         | ResolvedValue::SettingsView
@@ -569,6 +591,7 @@ fn source_definition_for_value_path(
             ResolvedValue::ProviderValue(_)
             | ResolvedValue::StandardLibraryConstant(_)
             | ResolvedValue::ManagedStatic { .. }
+            | ResolvedValue::ManagedLayout { .. }
             | ResolvedValue::Variable(_)
             | ResolvedValue::CurrentSnapshot
             | ResolvedValue::OldSnapshot
@@ -605,6 +628,20 @@ fn definition_for_value_path(
         let definition = match segment {
             0 => SourceDefinitionId::ManagedClass(class),
             1 => SourceDefinitionId::ManagedField(field),
+            _ => return None,
+        };
+        return definitions
+            .get(definition)
+            .cloned()
+            .map(DefinitionTarget::Source);
+    }
+    if let ResolvedValue::ManagedLayout {
+        class, enumeration, ..
+    } = root
+    {
+        let definition = match segment {
+            0 => SourceDefinitionId::ManagedClass(class),
+            1 => SourceDefinitionId::Enum(enumeration),
             _ => return None,
         };
         return definitions
@@ -659,6 +696,7 @@ fn definition_for_value_path(
         ResolvedValue::ProviderValue(_) => 0,
         ResolvedValue::Variable(_) => 0,
         ResolvedValue::ManagedStatic { .. } => unreachable!(),
+        ResolvedValue::ManagedLayout { .. } => unreachable!(),
         ResolvedValue::CurrentSnapshot
         | ResolvedValue::OldSnapshot
         | ResolvedValue::SettingsView
@@ -679,6 +717,7 @@ fn definition_for_value_path(
             ResolvedValue::ProviderValue(_)
             | ResolvedValue::StandardLibraryConstant(_)
             | ResolvedValue::ManagedStatic { .. }
+            | ResolvedValue::ManagedLayout { .. }
             | ResolvedValue::Variable(_)
             | ResolvedValue::CurrentSnapshot
             | ResolvedValue::OldSnapshot
@@ -1063,6 +1102,34 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             name: class.name.clone(),
             span: class.name_span,
         });
+        if let Some(enumeration) = &class.layout_enum {
+            // The nested type and read-only selector are synthesized from the
+            // class layout declarations. Their logical definition is the
+            // class schema; individual variants point at their written layout
+            // names below.
+            self.insert_definition(SourceDefinition {
+                id: SourceDefinitionId::Enum(enumeration.id),
+                name: enumeration.name.clone(),
+                span: class.name_span,
+            });
+            if let Some(value) = class.layout_value {
+                self.index.values.insert(
+                    value,
+                    SourceDefinition {
+                        id: SourceDefinitionId::Value(value),
+                        name: "layout".to_owned(),
+                        span: class.name_span,
+                    },
+                );
+            }
+            for (layout, variant) in class.layouts.iter().zip(&enumeration.variants) {
+                self.insert_definition(SourceDefinition {
+                    id: SourceDefinitionId::EnumVariant(variant.id),
+                    name: variant.name.clone(),
+                    span: layout.name_span,
+                });
+            }
+        }
         visit::walk_managed_class(self, class);
     }
 
@@ -1203,11 +1270,31 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                     .get(SourceDefinitionId::Enum(enumeration.id))
                     .cloned()
                 && let Some(span) = self.tokens_in(pattern_span).iter().find_map(|token| {
-                    matches!(&token.kind, TokenKind::Ident(spelling) if spelling == &enumeration_definition.name)
+                    let leaf = enumeration_definition
+                        .name
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or(&enumeration_definition.name);
+                    matches!(&token.kind, TokenKind::Ident(spelling) if spelling == leaf)
                         .then_some(token.span)
                 })
             {
                 self.add_reference(enumeration_definition.id, span);
+                if let Some(owner) = enumeration_definition.name.split('.').next()
+                    && owner != enumeration_definition.name
+                    && let Some(class) = self
+                        .syntax
+                        .managed_class_declarations()
+                        .into_iter()
+                        .find(|class| class.name == owner)
+                    && let Some(owner_span) =
+                        self.tokens_in(pattern_span).iter().find_map(|token| {
+                            matches!(&token.kind, TokenKind::Ident(spelling) if spelling == owner)
+                                .then_some(token.span)
+                        })
+                {
+                    self.add_reference(SourceDefinitionId::ManagedClass(class.id), owner_span);
+                }
             }
             let Some(variant_id) = self.semantics.pattern_variant(arm.pattern_id) else {
                 visit::walk_match_arm(self, arm);
@@ -1303,7 +1390,6 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                     if let ExpressionResolution::EnumConstructor {
                         variant: ResolvedEnumVariantId::Source(variant),
                     } = resolution
-                        && let Some(identifier) = segments.first()
                         && let Some(enumeration) =
                             self.syntax.enum_declarations().find(|enumeration| {
                                 enumeration
@@ -1312,10 +1398,26 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                                     .any(|candidate| candidate.id == variant)
                             })
                     {
-                        self.add_reference(
-                            SourceDefinitionId::Enum(enumeration.id),
-                            identifier.span,
-                        );
+                        let owner_segments = enumeration.name.split('.').collect::<Vec<_>>();
+                        if owner_segments.len() > 1
+                            && let Some(class) = self
+                                .syntax
+                                .managed_class_declarations()
+                                .into_iter()
+                                .find(|class| class.name == owner_segments[0])
+                            && let Some(identifier) = segments.first()
+                        {
+                            self.add_reference(
+                                SourceDefinitionId::ManagedClass(class.id),
+                                identifier.span,
+                            );
+                        }
+                        if let Some(identifier) = segments.get(owner_segments.len() - 1) {
+                            self.add_reference(
+                                SourceDefinitionId::Enum(enumeration.id),
+                                identifier.span,
+                            );
+                        }
                     }
                     for (segment, identifier) in segments.iter().enumerate() {
                         if let Some(target) =

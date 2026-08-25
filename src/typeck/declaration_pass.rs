@@ -523,6 +523,15 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
                 );
             }
         }
+
+        if let (Some(layout_enum), Some(layout_value)) = (&class.layout_enum, class.layout_value) {
+            let ty = checker.enum_type(EnumTypeId::Source(layout_enum.id));
+            checker.semantics.resolve_value_type(layout_value, ty);
+            checker
+                .declarations
+                .managed_layout_values
+                .insert(class.id, (layout_value, ty));
+        }
     }
 
     let mut enum_names = HashSet::new();

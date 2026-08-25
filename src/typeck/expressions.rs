@@ -505,6 +505,15 @@ impl Checker {
                     ExprKind::Path(path)
                         if path.as_slice() == ["layout"] && self.layout_value.is_some()
                 );
+                let managed_layout_class = match &value.kind {
+                    ExprKind::Path(path) if path.len() == 2 && path[1] == "layout" => self
+                        .declarations
+                        .managed_classes
+                        .iter()
+                        .find(|class| class.name == path[0] && class.layout_enum.is_some())
+                        .map(|class| class.id),
+                    _ => None,
+                };
                 let mut unguarded_patterns = HashSet::new();
                 let mut has_unguarded_wildcard = false;
                 let mut result_type = expected;
@@ -515,6 +524,7 @@ impl Checker {
                     }
                     self.scopes.push(HashMap::new());
                     let mut state_layout = None;
+                    let mut managed_layout = None;
                     let pattern_key = match &arm.pattern {
                         MatchPattern::Enum {
                             variant, binding, ..
@@ -549,6 +559,25 @@ impl Checker {
                                             unreachable!()
                                         };
                                         state_layout = Some(variant);
+                                    }
+                                    if let Some(class) = managed_layout_class
+                                        && self
+                                            .declarations
+                                            .managed_classes
+                                            .iter()
+                                            .find(|candidate| candidate.id == class)
+                                            .and_then(|candidate| candidate.layout_enum.as_ref())
+                                            .is_some_and(|layout_enum| {
+                                                matches!(
+                                                    enumeration,
+                                                    crate::types::EnumTypeId::Source(id)
+                                                        if id == layout_enum.id
+                                                )
+                                            })
+                                        && let ResolvedEnumVariantId::Source(variant) =
+                                            declared_variant.id
+                                    {
+                                        managed_layout = Some(variant);
                                     }
                                     match (declared_variant.payload, binding) {
                                         (Some(payload_type), Some(binding)) => {
@@ -758,13 +787,19 @@ impl Checker {
                     };
                     let state_layout = state_layout.or(self.active_state_layout);
                     let arm_type = self.with_state_layout(state_layout, |checker| {
-                        if let Some(guard) = &arm.guard {
-                            checker.expr(
-                                guard,
-                                Some(checker.core_type(crate::stdlib::CoreTypeId::Bool)),
-                            );
-                        }
-                        checker.expr(&arm.value, result_type)
+                        checker.with_managed_layout(
+                            managed_layout_class,
+                            managed_layout,
+                            |checker| {
+                                if let Some(guard) = &arm.guard {
+                                    checker.expr(
+                                        guard,
+                                        Some(checker.core_type(crate::stdlib::CoreTypeId::Bool)),
+                                    );
+                                }
+                                checker.expr(&arm.value, result_type)
+                            },
+                        )
                     });
                     self.scopes.pop();
                     if expected.is_none()
@@ -1162,9 +1197,9 @@ impl Checker {
             }
             ExprKind::Path(path) => {
                 if let Some(enumeration) = self.resolutions.expression_enum(expr.id) {
-                    let [_, variant] = path.as_slice() else {
-                        unreachable!("resolved enum paths have two segments")
-                    };
+                    let variant = path
+                        .last()
+                        .expect("resolved enum paths retain a variant segment");
                     self.enum_constructor(expr.id, enumeration, variant, &[], expected, expr.span)?
                 } else if let [name] = path.as_slice()
                     && self.binding(name).is_none()
@@ -1346,9 +1381,9 @@ impl Checker {
                         self.error("enum variants do not accept type arguments", expr.span);
                         return None;
                     }
-                    let [_, variant] = callee.as_slice() else {
-                        unreachable!("resolved enum constructors have two segments")
-                    };
+                    let variant = callee
+                        .last()
+                        .expect("resolved enum constructors retain a variant segment");
                     self.enum_constructor(expr.id, enumeration, variant, args, expected, expr.span)?
                 } else {
                     self.call(

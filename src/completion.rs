@@ -654,6 +654,7 @@ fn complete_member(
                     syntax,
                     &TypeKind::Standard(provider.process_type),
                     &standard_library,
+                    None,
                 );
                 add_inferred_methods(
                     &mut builder,
@@ -663,8 +664,64 @@ fn complete_member(
                     &standard_library,
                 );
             }
+            if let Some(class) = syntax
+                .managed_class_declarations()
+                .into_iter()
+                .find(|class| class.name == *name)
+            {
+                if class.layout_value.is_some() {
+                    builder.add(simple_completion(
+                        "layout",
+                        CompletionKind::Property,
+                        "selected managed class layout",
+                    ));
+                    builder.add(simple_completion(
+                        "Layout",
+                        CompletionKind::Enum,
+                        "managed class layout type",
+                    ));
+                }
+                for field in class.fields.iter().filter(|field| field.is_static) {
+                    let mut completion = simple_completion(
+                        &field.name,
+                        CompletionKind::Property,
+                        "managed static field",
+                    );
+                    completion.documentation = field.documentation.clone();
+                    builder.add(completion);
+                }
+                if let Some(layout) = active_managed_layout(syntax, source, context.dot, class.id) {
+                    for field in layout.fields.iter().filter(|field| field.is_static) {
+                        let mut completion = simple_completion(
+                            &field.name,
+                            CompletionKind::Property,
+                            "layout-specific managed static field",
+                        );
+                        completion.documentation = field.documentation.clone();
+                        builder.add(completion);
+                    }
+                }
+            }
         }
         _ => {}
+    }
+
+    let enum_name = path.join(".");
+    if let Some(enumeration) = syntax
+        .enum_declarations()
+        .find(|item| item.name == enum_name)
+    {
+        for variant in &enumeration.variants {
+            builder.add(CompletionItem {
+                label: variant.name.clone(),
+                kind: CompletionKind::EnumMember,
+                detail: Some(format!("{}.{}", enumeration.name, variant.name)),
+                documentation: variant.documentation.clone(),
+                documentation_uri: None,
+                insert_text: variant.name.clone(),
+                is_snippet: false,
+            });
+        }
     }
 
     if !path.is_empty() {
@@ -674,7 +731,20 @@ fn complete_member(
     if let Some((receiver, constraints, probe_syntax)) =
         infer_receiver(source, &context, compiler_context)
     {
-        add_inferred_fields(&mut builder, &probe_syntax, &receiver, &standard_library);
+        let active_managed_layout = match receiver {
+            TypeKind::ManagedClass(class) | TypeKind::ManagedReference(class) => {
+                active_managed_layout(syntax, source, context.dot, class)
+                    .map(|layout| layout.variant)
+            }
+            _ => None,
+        };
+        add_inferred_fields(
+            &mut builder,
+            &probe_syntax,
+            &receiver,
+            &standard_library,
+            active_managed_layout,
+        );
         add_inferred_methods(
             &mut builder,
             &probe_syntax,
@@ -1291,6 +1361,7 @@ fn add_inferred_fields(
     syntax: &Program,
     receiver: &TypeKind,
     standard_library: &StandardLibrary,
+    active_managed_layout: Option<crate::ast::EnumVariantId>,
 ) {
     match receiver {
         TypeKind::Error => {}
@@ -1329,9 +1400,23 @@ fn add_inferred_fields(
                 }
             }
         }
-        TypeKind::ManagedClass(id) => {
+        TypeKind::ManagedClass(id) | TypeKind::ManagedReference(id) => {
             if let Some(class) = syntax.managed_class(*id) {
-                for field in class.fields.iter().filter(|field| !field.is_static) {
+                let layout_fields = active_managed_layout
+                    .and_then(|variant| {
+                        class
+                            .layouts
+                            .iter()
+                            .find(|layout| layout.variant == variant)
+                    })
+                    .into_iter()
+                    .flat_map(|layout| &layout.fields);
+                for field in class
+                    .fields
+                    .iter()
+                    .chain(layout_fields)
+                    .filter(|field| !field.is_static)
+                {
                     let mut completion = simple_completion(
                         &field.name,
                         CompletionKind::Property,
@@ -1342,7 +1427,6 @@ fn add_inferred_fields(
                 }
             }
         }
-        TypeKind::ManagedReference(_) => {}
         TypeKind::Standard(owner) => {
             for field in standard_library.public_fields(*owner) {
                 builder.add(CompletionItem {
@@ -1513,6 +1597,86 @@ fn active_state_layout<'a>(
     syntax
         .state
         .as_ref()?
+        .layouts
+        .iter()
+        .find(|layout| layout.variant == variant)
+}
+
+fn active_managed_layout<'ast>(
+    syntax: &'ast Program,
+    source: &str,
+    offset: usize,
+    class_id: crate::ast::ManagedClassId,
+) -> Option<&'ast crate::ast::ManagedLayoutDecl> {
+    struct Finder<'a> {
+        syntax: &'a Program,
+        offset: usize,
+        class_id: crate::ast::ManagedClassId,
+        variant: Option<crate::ast::EnumVariantId>,
+    }
+
+    impl<'ast> Visitor<'ast> for Finder<'ast> {
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if self.variant.is_none()
+                && let ExprKind::Match { value, arms } = &expression.kind
+                && contains_offset(expression.span, self.offset)
+                && let Some(class) = self.syntax.managed_class(self.class_id)
+                && matches!(
+                    &value.kind,
+                    ExprKind::Path(path)
+                        if path.as_slice() == [class.name.as_str(), "layout"]
+                )
+                && let Some(arm) = arms.iter().rev().find(|arm| arm.span.start <= self.offset)
+                && let MatchPattern::Enum {
+                    enumeration,
+                    variant,
+                    ..
+                } = &arm.pattern
+                && enumeration.name == format!("{}.Layout", class.name)
+                && let Some(layout) = class.layouts.iter().find(|layout| {
+                    layout.name == *variant
+                        && class.layout_enum.as_ref().is_some_and(|enumeration| {
+                            enumeration
+                                .variants
+                                .iter()
+                                .any(|candidate| candidate.id == layout.variant)
+                        })
+                })
+            {
+                self.variant = Some(layout.variant);
+            }
+            visit::walk_expr(self, expression);
+        }
+    }
+
+    let mut finder = Finder {
+        syntax,
+        offset,
+        class_id,
+        variant: None,
+    };
+    finder.visit_program(syntax);
+    let class = syntax.managed_class(class_id)?;
+    let variant = finder.variant.or_else(|| {
+        let before = source.get(..offset)?;
+        let marker = format!("match {}.layout", class.name);
+        let match_start = before.rfind(&marker)?;
+        if !cursor_is_inside_braces(source, match_start, offset) {
+            return None;
+        }
+        class
+            .layouts
+            .iter()
+            .filter_map(|layout| {
+                let marker = format!("{}.Layout.{}", class.name, layout.name);
+                let position = before.rfind(&marker)?;
+                (match_start < position && before[position + marker.len()..].contains("=>"))
+                    .then_some((position, layout.variant))
+            })
+            .max_by_key(|(position, _)| *position)
+            .map(|(_, variant)| variant)
+    })?;
+    class
         .layouts
         .iter()
         .find(|layout| layout.variant == variant)
@@ -2878,6 +3042,43 @@ onAttach {
                 |item| item.label == "parameter" && item.detail.as_deref() == Some("parameter")
             )
         );
+    }
+
+    #[test]
+    fn managed_layout_api_completes_nested_types_values_and_refined_fields() {
+        let schema = r#"
+image "Assembly-CSharp" {
+    class GameManager {
+        static GameManager instance;
+        u32 common;
+        layout BaseGame { u32 level; }
+        layout Demo { u32 scene; }
+    }
+}
+state Unity ["game.exe"] {}
+"#;
+
+        let source = format!("{schema}\nwhileAttached {{ GameManager. }}");
+        let mut database = CompilerDatabase::new(source);
+        let class = labels(&mut database, "GameManager.");
+        assert!(class.contains(&"instance".to_owned()), "{class:#?}");
+        assert!(class.contains(&"layout".to_owned()), "{class:#?}");
+        assert!(class.contains(&"Layout".to_owned()), "{class:#?}");
+
+        let source = format!("{schema}\nwhileAttached {{ GameManager.Layout. }}");
+        let mut database = CompilerDatabase::new(source);
+        let variants = labels(&mut database, "GameManager.Layout.");
+        assert!(variants.contains(&"BaseGame".to_owned()), "{variants:#?}");
+        assert!(variants.contains(&"Demo".to_owned()), "{variants:#?}");
+
+        let source = format!(
+            "{schema}\nwhileAttached {{\n    let manager = GameManager.instance else return\n    match GameManager.layout {{\n        GameManager.Layout.BaseGame => manager.,\n        GameManager.Layout.Demo => 0,\n    }}\n}}"
+        );
+        let mut database = CompilerDatabase::new(source);
+        let fields = labels(&mut database, "BaseGame => manager.");
+        assert!(fields.contains(&"common".to_owned()), "{fields:#?}");
+        assert!(fields.contains(&"level".to_owned()), "{fields:#?}");
+        assert!(!fields.contains(&"scene".to_owned()), "{fields:#?}");
     }
 
     #[test]

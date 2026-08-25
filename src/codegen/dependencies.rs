@@ -325,7 +325,9 @@ impl BackendDependencies {
                     );
                 }
                 TypeKind::Enum(enumeration) => {
-                    let declaration = &program.enums[enumeration.index()];
+                    let declaration = program
+                        .enum_declaration(*enumeration)
+                        .expect("reachable source enums retain their declaration");
                     pending.extend(
                         declaration
                             .variants

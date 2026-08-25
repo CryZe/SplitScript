@@ -114,6 +114,7 @@ impl Parser<'_> {
         )?;
         let mut fields = Vec::new();
         let mut layouts = Vec::new();
+        let mut layout_variants = Vec::new();
         let body_depth = self.brace_depth_before(self.cursor.position());
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
@@ -125,10 +126,21 @@ impl Parser<'_> {
             if self.at_ident("layout") {
                 let parsed = self.managed_layout_decl().map(|mut layout| {
                     layout.documentation = documentation;
-                    layout
+                    let variant = EnumVariant {
+                        id: layout.variant,
+                        name: layout.name.clone(),
+                        name_span: layout.name_span,
+                        documentation: layout.documentation.clone(),
+                        payload: None,
+                        span: layout.name_span,
+                    };
+                    (layout, variant)
                 });
-                if let Some(layout) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                if let Some((layout, variant)) =
+                    self.recover_delimited_item(parsed, item_start, body_depth)
+                {
                     layouts.push(layout);
+                    layout_variants.push(variant);
                 }
             } else {
                 let parsed = self.managed_field_decl().map(|mut field| {
@@ -143,6 +155,25 @@ impl Parser<'_> {
         let closing = self
             .eat(&TokenKind::RBrace)
             .unwrap_or_else(|| self.current().span);
+        let (layout_enum, layout_value) = if layouts.is_empty() {
+            (None, None)
+        } else {
+            let enum_id = EnumId::from_index(self.next_enum_id);
+            self.next_enum_id += 1;
+            (
+                Some(EnumDecl {
+                    id: enum_id,
+                    name: format!("{name}.Layout"),
+                    documentation: Some(format!(
+                        "The managed metadata layout selected for `{name}`."
+                    )),
+                    name_span,
+                    variants: layout_variants,
+                    span: start.join(closing),
+                }),
+                Some(self.new_value_id()),
+            )
+        };
         Ok(ManagedClassDecl {
             id,
             keyword_span: start,
@@ -153,6 +184,8 @@ impl Parser<'_> {
             opening_span,
             fields,
             layouts,
+            layout_enum,
+            layout_value,
             span: start.join(closing),
         })
     }
@@ -162,6 +195,7 @@ impl Parser<'_> {
         let (name, name_span) = self.expect_any_ident("expected a managed class layout name")?;
         let id = ManagedLayoutId::from_index(self.next_managed_layout_id);
         self.next_managed_layout_id += 1;
+        let variant = self.new_enum_variant_id();
         let opening_span = self.expect(TokenKind::LBrace, "expected `{` after the layout name")?;
         let mut fields = Vec::new();
         let body_depth = self.brace_depth_before(self.cursor.position());
@@ -189,6 +223,7 @@ impl Parser<'_> {
             .unwrap_or_else(|| self.current().span);
         Ok(ManagedLayoutDecl {
             id,
+            variant,
             keyword_span: start,
             name,
             name_span,

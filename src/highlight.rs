@@ -549,7 +549,14 @@ impl HighlightCollector<'_> {
             .is_some()
             && spans.len() >= 2
         {
-            self.insert(spans[0], SemanticTokenKind::Enum, 0);
+            if spans.len() > 2 {
+                self.insert(spans[0], SemanticTokenKind::Type, 0);
+                for span in &spans[1..spans.len() - 1] {
+                    self.insert(*span, SemanticTokenKind::Enum, 0);
+                }
+            } else {
+                self.insert(spans[0], SemanticTokenKind::Enum, 0);
+            }
             self.insert(*spans.last().unwrap(), SemanticTokenKind::EnumMember, 0);
             return;
         }
@@ -602,6 +609,12 @@ impl HighlightCollector<'_> {
                     self.insert(spans[0], SemanticTokenKind::Type, 0);
                     if let Some(field) = spans.get(1) {
                         self.insert(*field, SemanticTokenKind::Property, MODIFIER_READONLY);
+                    }
+                }
+                ResolvedValue::ManagedLayout { .. } => {
+                    self.insert(spans[0], SemanticTokenKind::Type, 0);
+                    if let Some(layout) = spans.get(1) {
+                        self.insert(*layout, SemanticTokenKind::Property, MODIFIER_READONLY);
                     }
                 }
                 ResolvedValue::Variable(id) => {
@@ -1145,7 +1158,19 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 variant,
                 binding,
             } => {
-                self.mark_ident(arm.span, &enumeration.name, SemanticTokenKind::Enum, 0);
+                let mut segments = enumeration.name.split('.').peekable();
+                while let Some(segment) = segments.next() {
+                    self.mark_ident(
+                        arm.span,
+                        segment,
+                        if segments.peek().is_some() {
+                            SemanticTokenKind::Type
+                        } else {
+                            SemanticTokenKind::Enum
+                        },
+                        0,
+                    );
+                }
                 self.mark_ident(arm.span, variant, SemanticTokenKind::EnumMember, 0);
                 if let Some(binding) = binding {
                     self.mark_ident(

@@ -16,7 +16,7 @@ use crate::{
     stdlib::{
         IntrinsicId, MANAGED_BINDINGS_TYPE, MANAGED_POINTER_SIZE_FIELD, RuntimeRepresentation,
         StandardLibrary, StdlibFieldId, StdlibOwner, StdlibTypeConstructorId, StdlibTypeId,
-        managed_field_offset_name, managed_static_table_name,
+        managed_field_offset_name, managed_layout_index_name, managed_static_table_name,
     },
     types::{EnumTypeId, ResolvedArrayType, TypeId},
     wasm_ir::{self, TemporaryId},
@@ -1165,7 +1165,12 @@ pub(super) fn compile_temporary_set(
         } if frame_temporaries.contains_key(&target) => {
             let (field, ty) = frame_temporaries[&target];
             if !ty.has_runtime_value() {
-                compile_expr(function, value, context);
+                if ty == Type::None {
+                    let erased = context.erasing_none();
+                    compile_expr(function, value, &erased);
+                } else {
+                    compile_expr(function, value, context);
+                }
                 return;
             }
             let frame = context.locals.frame();
@@ -1179,8 +1184,14 @@ pub(super) fn compile_temporary_set(
         LocalStorage::Hybrid {
             wasm_temporaries, ..
         } if wasm_temporaries.contains_key(&target) => {
-            if !wasm_temporaries[&target].1.has_runtime_value() {
-                compile_expr(function, value, context);
+            let ty = wasm_temporaries[&target].1;
+            if !ty.has_runtime_value() {
+                if ty == Type::None {
+                    let erased = context.erasing_none();
+                    compile_expr(function, value, &erased);
+                } else {
+                    compile_expr(function, value, context);
+                }
                 return;
             }
             compile_expr(function, value, context);
@@ -1188,8 +1199,14 @@ pub(super) fn compile_temporary_set(
             function.instruction(&Instruction::LocalSet(wasm_temporaries[&target].0));
         }
         LocalStorage::Wasm { temporaries, .. } => {
-            if !temporaries[&target].1.has_runtime_value() {
-                compile_expr(function, value, context);
+            let ty = temporaries[&target].1;
+            if !ty.has_runtime_value() {
+                if ty == Type::None {
+                    let erased = context.erasing_none();
+                    compile_expr(function, value, &erased);
+                } else {
+                    compile_expr(function, value, context);
+                }
                 return;
             }
             compile_expr(function, value, context);
@@ -1211,6 +1228,12 @@ fn compile_temporary_get(
             frame_temporaries, ..
         } if frame_temporaries.contains_key(&temporary) => {
             let (field, ty) = frame_temporaries[&temporary];
+            if !ty.has_runtime_value() {
+                if ty == Type::None && context.materialize_none {
+                    emit_default(function, Type::None, context.gc);
+                }
+                return;
+            }
             let frame = context.locals.frame();
             frame.emit(function);
             emit_typed_struct_get(function, frame.struct_type, field, ty);
@@ -1218,10 +1241,20 @@ fn compile_temporary_get(
         LocalStorage::Hybrid {
             wasm_temporaries, ..
         } => {
-            function.instruction(&Instruction::LocalGet(wasm_temporaries[&temporary].0));
+            let (local, ty) = wasm_temporaries[&temporary];
+            if ty.has_runtime_value() {
+                function.instruction(&Instruction::LocalGet(local));
+            } else if ty == Type::None && context.materialize_none {
+                emit_default(function, Type::None, context.gc);
+            }
         }
         LocalStorage::Wasm { temporaries, .. } => {
-            function.instruction(&Instruction::LocalGet(temporaries[&temporary].0));
+            let (local, ty) = temporaries[&temporary];
+            if ty.has_runtime_value() {
+                function.instruction(&Instruction::LocalGet(local));
+            } else if ty == Type::None && context.materialize_none {
+                emit_default(function, Type::None, context.gc);
+            }
         }
     };
 }
@@ -1412,6 +1445,16 @@ fn compile_resolved_path(
             function.instruction(&Instruction::I64ExtendI32U);
             function.instruction(&Instruction::I64Add);
             emit_managed_read_at_address(function, binding, context)
+        }
+        ResolvedValue::ManagedLayout { class, .. } => {
+            emit_managed_binding_field(
+                function,
+                &managed_layout_index_name(class.index()),
+                context,
+            );
+            resolved_value_type_id(value, context)
+                .map(|ty| semantic_type(ty, context.semantics))
+                .expect("checked managed layout values retain their enum type")
         }
         ResolvedValue::CurrentSnapshot | ResolvedValue::OldSnapshot => {
             function
@@ -2304,7 +2347,8 @@ fn resolved_value_type_id(value: ResolvedValue, context: &ExprContext<'_>) -> Op
     match value {
         ResolvedValue::Variable(value)
         | ResolvedValue::CurrentState(value)
-        | ResolvedValue::OldState(value) => context.semantics.value_type(value)?,
+        | ResolvedValue::OldState(value)
+        | ResolvedValue::ManagedLayout { value, .. } => context.semantics.value_type(value)?,
         ResolvedValue::Setting(value) | ResolvedValue::OldSetting(value) => {
             context.semantics.value_type(value)?
         }

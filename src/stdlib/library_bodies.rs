@@ -187,8 +187,9 @@ fn managed_preparation_source(program: &Program, preparation: &str, arguments: &
         }
         if !class.class.layouts.is_empty() {
             source.push_str(&format!(
-                "    {}: u32,\n",
-                managed_layout_index_name(class.class.id.index())
+                "    {}: {}.Layout,\n",
+                managed_layout_index_name(class.class.id.index()),
+                class.class.name,
             ));
         }
         for field in class_fields(class.class) {
@@ -325,8 +326,11 @@ fn push_managed_layout_binding(source: &mut String, class_local: &str, class: &M
             source.push_str(&format!("            let {offset}: u32 = 0\n"));
         }
     }
-    source.push_str(&format!("            let {selected}: u32? = None\n"));
-    for (layout_index, layout) in class.layouts.iter().enumerate() {
+    source.push_str(&format!(
+        "            let {selected}: {}.Layout? = None\n",
+        class.name
+    ));
+    for layout in &class.layouts {
         let probes = layout
             .fields
             .iter()
@@ -352,7 +356,10 @@ fn push_managed_layout_binding(source: &mut String, class_local: &str, class: &M
         source.push_str(&format!(
             "                if match {selected} {{ Some(_) => true, None => false }} {{ await process.closed() }}\n"
         ));
-        source.push_str(&format!("                {selected} = {layout_index}\n"));
+        source.push_str(&format!(
+            "                {selected} = {}.Layout.{}\n",
+            class.name, layout.name
+        ));
         for (field, probe) in layout.fields.iter().zip(probes) {
             let value = format!("__field_{}_selected", field.id.index());
             let offset = managed_field_offset_name(field.id.index());

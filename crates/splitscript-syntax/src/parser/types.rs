@@ -229,9 +229,22 @@ impl Parser<'_> {
             {
                 name = replacement.to_owned();
             }
-            let named = self.resolve_type(&name, start)?;
             if let Some(dot) = self.eat(&TokenKind::Dot) {
-                let reference = self.expect_ident("Ref")?;
+                let (member, member_span) =
+                    self.expect_any_ident("expected `Ref` or `Layout` after `.`")?;
+                if member == "Layout" {
+                    let qualified = format!("{name}.Layout");
+                    let ty = self.resolve_type(&qualified, start.join(member_span))?;
+                    return Ok((ty, start, member_span));
+                }
+                if member != "Ref" {
+                    return Err(Diagnostic::new(
+                        "a managed class type can only be followed by `.Ref` or `.Layout`",
+                        start.join(member_span),
+                    ));
+                }
+                let named = self.resolve_type(&name, start)?;
+                let reference = member_span;
                 let TypeRef::Named(class) = named else {
                     return Err(Diagnostic::new(
                         "only a managed class name can be followed by `.Ref`",
@@ -263,54 +276,58 @@ impl Parser<'_> {
                     id
                 };
                 Ok((TypeRef::ManagedReference(id), start, reference))
-            } else if let Some(opening) = self.eat(&TokenKind::Lt) {
-                let TypeRef::Named(constructor) = named else {
-                    return Err(Diagnostic::new(
-                        "core types cannot be used as generic type constructors",
-                        start,
-                    ));
-                };
-                let mut arguments = Vec::new();
-                loop {
-                    let (argument, _) = self.parse_type("expected a generic type argument")?;
-                    arguments.push(argument);
-                    if self.eat(&TokenKind::Comma).is_none() {
-                        break;
-                    }
-                    if self.at_generic_close() {
-                        break;
-                    }
-                }
-                let end = self.expect_generic_close("expected `>` after generic type arguments")?;
-                let occurrence = TypeApplicationOccurrence {
-                    span: start.join(end),
-                    constructor: start,
-                    opening,
-                    closing: end,
-                };
-                let key = (constructor, arguments.clone());
-                let id = if let Some(&id) = self.type_application_ids.get(&key) {
-                    self.type_applications
-                        .iter_mut()
-                        .find(|application| application.id == id)
-                        .expect("interned type applications retain their declaration")
-                        .occurrences
-                        .push(occurrence);
-                    id
-                } else {
-                    let id = self.constructed_type_ids.application();
-                    self.type_applications.push(TypeApplicationDecl {
-                        id,
-                        constructor,
-                        arguments,
-                        occurrences: vec![occurrence],
-                    });
-                    self.type_application_ids.insert(key, id);
-                    id
-                };
-                Ok((TypeRef::Application(id), start, end))
             } else {
-                Ok((named, start, start))
+                let named = self.resolve_type(&name, start)?;
+                if let Some(opening) = self.eat(&TokenKind::Lt) {
+                    let TypeRef::Named(constructor) = named else {
+                        return Err(Diagnostic::new(
+                            "core types cannot be used as generic type constructors",
+                            start,
+                        ));
+                    };
+                    let mut arguments = Vec::new();
+                    loop {
+                        let (argument, _) = self.parse_type("expected a generic type argument")?;
+                        arguments.push(argument);
+                        if self.eat(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                        if self.at_generic_close() {
+                            break;
+                        }
+                    }
+                    let end =
+                        self.expect_generic_close("expected `>` after generic type arguments")?;
+                    let occurrence = TypeApplicationOccurrence {
+                        span: start.join(end),
+                        constructor: start,
+                        opening,
+                        closing: end,
+                    };
+                    let key = (constructor, arguments.clone());
+                    let id = if let Some(&id) = self.type_application_ids.get(&key) {
+                        self.type_applications
+                            .iter_mut()
+                            .find(|application| application.id == id)
+                            .expect("interned type applications retain their declaration")
+                            .occurrences
+                            .push(occurrence);
+                        id
+                    } else {
+                        let id = self.constructed_type_ids.application();
+                        self.type_applications.push(TypeApplicationDecl {
+                            id,
+                            constructor,
+                            arguments,
+                            occurrences: vec![occurrence],
+                        });
+                        self.type_application_ids.insert(key, id);
+                        id
+                    };
+                    Ok((TypeRef::Application(id), start, end))
+                } else {
+                    Ok((named, start, start))
+                }
             }
         }
     }

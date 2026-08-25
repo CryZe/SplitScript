@@ -557,6 +557,7 @@ impl SemanticModel {
             | TypeKind::SettingsView
             | TypeKind::Record(_)
             | TypeKind::ManagedClass(_)
+            | TypeKind::ManagedReference(_)
             | TypeKind::Enum(_)
             | TypeKind::GenericParameter { .. } => None,
         };
@@ -874,6 +875,7 @@ impl SemanticModel {
             | TypeKind::SettingsView
             | TypeKind::Record(_)
             | TypeKind::ManagedClass(_)
+            | TypeKind::ManagedReference(_)
             | TypeKind::Enum(_)
             | TypeKind::GenericParameter { .. } => ty,
         };
@@ -892,6 +894,9 @@ impl SemanticModel {
             TypeKind::Record(record) => crate::types::ResolvedTypeRef::Record(*record),
             TypeKind::Enum(enumeration) => crate::types::ResolvedTypeRef::Enum(*enumeration),
             TypeKind::ManagedClass(class) => crate::types::ResolvedTypeRef::ManagedClass(*class),
+            TypeKind::ManagedReference(class) => {
+                crate::types::ResolvedTypeRef::ManagedReference(*class)
+            }
             TypeKind::GenericParameter { .. } => {
                 crate::types::ResolvedTypeRef::GenericParameter(ty)
             }

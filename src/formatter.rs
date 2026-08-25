@@ -1726,7 +1726,8 @@ onAttach {
     #[test]
     fn formats_managed_schemas_as_vertical_semicolon_delimited_declarations() {
         let source = r#"state"game.exe"{}
-image"Assembly-CSharp"{namespace Game{class Player from"RuntimePlayer"{f32 health;}}class GameManager{static GameManager instance from["Instance","_instance",];i32 points from"_points";layout Base{i32 gameState;i32 currentLevel;}layout DlcDemo{i32 gameState from"GameState";String currentScene from"_currentScene";}}}"#;
+image"Assembly-CSharp"{namespace Game{class Player from"RuntimePlayer"{f32 health;}}class GameManager{static GameManager instance from["Instance","_instance",];i32 points from"_points";layout Base{i32 gameState;i32 currentLevel;}layout DlcDemo{i32 gameState from"GameState";String currentScene from"_currentScene";}}}
+fn identity(value:GameManager.Ref)->GameManager.Ref{return value}"#;
         let expected = r#"state "game.exe" {}
 image "Assembly-CSharp" {
     namespace Game {
@@ -1746,6 +1747,9 @@ image "Assembly-CSharp" {
             String currentScene from "_currentScene";
         }
     }
+}
+fn identity(value: GameManager.Ref) -> GameManager.Ref {
+    return value
 }
 "#;
         let formatted = format_source(source).unwrap();

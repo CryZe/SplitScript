@@ -15,15 +15,16 @@ use crate::{
         FunctionDecl, FunctionId, InterpolatedPart, ManagedClassDecl, ManagedClassId,
         ManagedFieldDecl, ManagedFieldId, ManagedImageDecl, ManagedImageId, ManagedItemDecl,
         ManagedLayoutDecl, ManagedLayoutId, ManagedMetadataName, ManagedMetadataNames,
-        ManagedNamespaceDecl, ManagedNamespaceId, MatchArm, MatchPattern, OptionTypeDecl,
-        OptionTypeId, Parameter, PatternBinding, PatternId, PointerPath, PointerPathBase, Program,
-        RangeKind, RangeTypeDecl, RangeTypeId, RecordDecl, RecordField, RecordFieldId, RecordId,
-        ResultTypeDecl, ResultTypeId, SettingChoiceOption, SettingChoiceOptionId, SettingDecl,
-        SettingExternalKey, SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart,
-        SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder,
-        StateProviderRef, StateSource, StateTransform, Stmt, SuspensionMode, TickRateDecl,
-        TickRateValue, TypeApplicationDecl, TypeApplicationId, TypeApplicationOccurrence,
-        TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
+        ManagedNamespaceDecl, ManagedNamespaceId, ManagedReferenceTypeDecl, ManagedReferenceTypeId,
+        MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter, PatternBinding, PatternId,
+        PointerPath, PointerPathBase, Program, RangeKind, RangeTypeDecl, RangeTypeId, RecordDecl,
+        RecordField, RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
+        SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFamilyDecl,
+        SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span, StateDecl,
+        StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource,
+        StateTransform, Stmt, SuspensionMode, TickRateDecl, TickRateValue, TypeApplicationDecl,
+        TypeApplicationId, TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId,
+        VariableDecl,
     },
     diagnostic::{Diagnostic, DiagnosticFix, FixApplicability, TextEdit},
     migration::{ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
@@ -85,6 +86,8 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         range_type_ids: HashMap::new(),
         type_applications: Vec::new(),
         type_application_ids: HashMap::new(),
+        managed_reference_types: Vec::new(),
+        managed_reference_type_ids: HashMap::new(),
         type_names: Vec::new(),
         type_name_spans: Vec::new(),
         type_name_occurrences: Vec::new(),
@@ -128,6 +131,8 @@ struct Parser<'a> {
     range_type_ids: HashMap<(TypeRef, TypeRef, RangeKind), RangeTypeId>,
     type_applications: Vec<TypeApplicationDecl>,
     type_application_ids: HashMap<(TypeNameId, Vec<TypeRef>), TypeApplicationId>,
+    managed_reference_types: Vec<ManagedReferenceTypeDecl>,
+    managed_reference_type_ids: HashMap<TypeNameId, ManagedReferenceTypeId>,
     type_names: Vec<String>,
     type_name_spans: Vec<Span>,
     type_name_occurrences: Vec<Vec<Span>>,
@@ -408,6 +413,7 @@ impl Parser<'_> {
         program.callable_types = self.callable_types;
         program.range_types = self.range_types;
         program.type_applications = self.type_applications;
+        program.managed_reference_types = self.managed_reference_types;
         program.type_names = self.type_names;
         program.type_name_spans = self.type_name_spans;
         program.type_name_occurrences = self.type_name_occurrences;
@@ -584,6 +590,35 @@ mod tests {
         assert_eq!(manager.layouts.len(), 2);
         assert_eq!(manager.layouts[0].name, "Base");
         assert_eq!(manager.layouts[1].fields[1].name, "currentScene");
+    }
+
+    #[test]
+    fn parses_managed_reference_types_as_nominal_postfix_types() {
+        let source = r#"
+            state "game.exe" {}
+            image "Assembly-CSharp" {
+                class GameManager {
+                    static GameManager instance;
+                }
+            }
+            let manager: GameManager.Ref? = None
+            fn preserve(manager: GameManager.Ref) -> GameManager.Ref {
+                return manager
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        assert_eq!(program.managed_reference_types.len(), 1);
+        let reference = &program.managed_reference_types[0];
+        assert_eq!(program.type_name(reference.class), "GameManager");
+        assert_eq!(reference.occurrences.len(), 3);
+        assert!(matches!(
+            program.functions[0].params[0].annotation,
+            Some(TypeRef::ManagedReference(id)) if id == reference.id
+        ));
+        assert!(matches!(
+            program.functions[0].return_annotation,
+            Some(TypeRef::ManagedReference(id)) if id == reference.id
+        ));
     }
 
     #[test]

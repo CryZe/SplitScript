@@ -5,7 +5,9 @@ use super::{
     RangeTypeDecl, ResultTypeDecl, Span, TokenKind, TypeApplicationDecl, TypeApplicationOccurrence,
     TypeNameId, TypeRef, ambiguous_range_diagnostic,
 };
-use crate::ast::CallableTypeOccurrence;
+use crate::ast::{
+    CallableTypeOccurrence, ManagedReferenceTypeDecl, ManagedReferenceTypeOccurrence,
+};
 use crate::migration::ForeignSpellingContext;
 
 impl Parser<'_> {
@@ -228,7 +230,40 @@ impl Parser<'_> {
                 name = replacement.to_owned();
             }
             let named = self.resolve_type(&name, start)?;
-            if let Some(opening) = self.eat(&TokenKind::Lt) {
+            if let Some(dot) = self.eat(&TokenKind::Dot) {
+                let reference = self.expect_ident("Ref")?;
+                let TypeRef::Named(class) = named else {
+                    return Err(Diagnostic::new(
+                        "only a managed class name can be followed by `.Ref`",
+                        start.join(reference),
+                    ));
+                };
+                let occurrence = ManagedReferenceTypeOccurrence {
+                    span: start.join(reference),
+                    class: start,
+                    dot,
+                    reference,
+                };
+                let id = if let Some(&id) = self.managed_reference_type_ids.get(&class) {
+                    self.managed_reference_types
+                        .iter_mut()
+                        .find(|declaration| declaration.id == id)
+                        .expect("interned managed reference types retain their declaration")
+                        .occurrences
+                        .push(occurrence);
+                    id
+                } else {
+                    let id = self.constructed_type_ids.managed_reference();
+                    self.managed_reference_types.push(ManagedReferenceTypeDecl {
+                        id,
+                        class,
+                        occurrences: vec![occurrence],
+                    });
+                    self.managed_reference_type_ids.insert(class, id);
+                    id
+                };
+                Ok((TypeRef::ManagedReference(id), start, reference))
+            } else if let Some(opening) = self.eat(&TokenKind::Lt) {
                 let TypeRef::Named(constructor) = named else {
                     return Err(Diagnostic::new(
                         "core types cannot be used as generic type constructors",

@@ -197,6 +197,21 @@ impl TypeApplicationId {
     }
 }
 
+/// Stable identity for a managed-reference type expression such as
+/// `GameManager.Ref`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ManagedReferenceTypeId(u32);
+
+impl ManagedReferenceTypeId {
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    pub(crate) fn from_index(index: u32) -> Self {
+        Self(index)
+    }
+}
+
 /// Stable identity for a field declared by a record in one parsed program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RecordFieldId(u32);
@@ -270,6 +285,7 @@ display_stable_id!(
     CallableTypeId,
     RangeTypeId,
     TypeApplicationId,
+    ManagedReferenceTypeId,
     RecordFieldId,
     EnumVariantId,
     ManagedImageId,
@@ -355,6 +371,7 @@ pub struct Program {
     pub callable_types: Vec<CallableTypeDecl>,
     pub range_types: Vec<RangeTypeDecl>,
     pub type_applications: Vec<TypeApplicationDecl>,
+    pub managed_reference_types: Vec<ManagedReferenceTypeDecl>,
     pub functions: Vec<FunctionDecl>,
     pub actions: Vec<Action>,
 }
@@ -608,6 +625,10 @@ impl ConstructedTypeIdAllocator {
         TypeApplicationId::from_index(self.take())
     }
 
+    pub fn managed_reference(&mut self) -> ManagedReferenceTypeId {
+        ManagedReferenceTypeId::from_index(self.take())
+    }
+
     pub fn next_index(&self) -> u32 {
         self.next
     }
@@ -679,6 +700,21 @@ pub struct TypeApplicationOccurrence {
     pub constructor: Span,
     pub opening: Span,
     pub closing: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ManagedReferenceTypeDecl {
+    pub id: ManagedReferenceTypeId,
+    pub class: TypeNameId,
+    pub occurrences: Vec<ManagedReferenceTypeOccurrence>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ManagedReferenceTypeOccurrence {
+    pub span: Span,
+    pub class: Span,
+    pub dot: Span,
+    pub reference: Span,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1459,6 +1495,7 @@ pub enum TypeRef {
     Callable(CallableTypeId),
     Range(RangeTypeId),
     Application(TypeApplicationId),
+    ManagedReference(ManagedReferenceTypeId),
 }
 
 impl TypeRef {
@@ -1494,6 +1531,7 @@ impl fmt::Display for TypeRef {
             Self::Callable(id) => write!(f, "Callable#{id}"),
             Self::Range(id) => write!(f, "Range#{id}"),
             Self::Application(id) => write!(f, "Application#{id}"),
+            Self::ManagedReference(id) => write!(f, "ManagedReference#{id}"),
         }
     }
 }

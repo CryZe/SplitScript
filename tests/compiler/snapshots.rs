@@ -561,6 +561,11 @@ fn snapshot_type_name(
             .managed_class(*id)
             .map(|class| class.name.clone())
             .unwrap_or_else(|| format!("class#{id}")),
+        TypeKind::ManagedReference(id) => checked
+            .syntax()
+            .managed_class(*id)
+            .map(|class| format!("{}.Ref", class.name))
+            .unwrap_or_else(|| format!("class#{id}.Ref")),
         TypeKind::GenericParameter { index, .. } => match index {
             0..=25 => char::from_u32('T' as u32 + index).unwrap().to_string(),
             _ => format!("T{}", index + 1),

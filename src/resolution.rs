@@ -28,6 +28,7 @@ pub(crate) struct ProgramResolutions {
     state_provider: Option<StdlibStateProviderId>,
     type_names: HashMap<TypeNameId, ResolvedTypeRef>,
     type_applications: HashMap<TypeApplicationId, ResolvedTypeRef>,
+    managed_references: HashMap<crate::ast::ManagedReferenceTypeId, ResolvedTypeRef>,
     expression_enums: HashMap<ExprId, EnumTypeId>,
     pattern_enums: HashMap<PatternId, EnumTypeId>,
     setting_enums: HashMap<ValueId, EnumTypeId>,
@@ -49,6 +50,7 @@ impl ProgramResolutions {
             TypeRef::Callable(id) => Some(ResolvedTypeRef::Callable(id)),
             TypeRef::Range(id) => Some(ResolvedTypeRef::Range(id)),
             TypeRef::Application(id) => self.type_applications.get(&id).copied(),
+            TypeRef::ManagedReference(id) => self.managed_references.get(&id).copied(),
         }
     }
 
@@ -254,6 +256,26 @@ pub(crate) fn resolve_program(
         })
         .collect::<HashMap<_, _>>();
     resolutions.type_names = type_names;
+
+    for reference in &program.managed_reference_types {
+        let class_name = program.type_name(reference.class);
+        let Some(ResolvedTypeRef::ManagedClass(class)) =
+            resolutions.type_names.get(&reference.class).copied()
+        else {
+            provider_diagnostics.push(
+                Diagnostic::type_error(
+                    format!("`{class_name}.Ref` requires a managed class schema"),
+                    program.type_name_span(reference.class),
+                )
+                .with_primary_label("this name does not resolve to a class declared in an `image`")
+                .with_note("declare the class in a managed image schema before using its live reference type"),
+            );
+            continue;
+        };
+        resolutions
+            .managed_references
+            .insert(reference.id, ResolvedTypeRef::ManagedReference(class));
+    }
 
     for application in &program.type_applications {
         let name = program.type_name(application.constructor);

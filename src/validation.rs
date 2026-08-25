@@ -618,6 +618,7 @@ fn validate_future_storage(
             | TypeKind::StateSnapshot
             | TypeKind::SettingsView
             | TypeKind::ManagedClass(_)
+            | TypeKind::ManagedReference(_)
             | TypeKind::GenericParameter { .. } => false,
         }
     }
@@ -1688,6 +1689,7 @@ fn expand_fully_observed_types(
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
             | TypeKind::ManagedClass(_)
+            | TypeKind::ManagedReference(_)
             | TypeKind::GenericParameter { .. } => {}
         }
     }
@@ -1774,6 +1776,7 @@ fn expand_reachable_nominal_types(
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
             | TypeKind::ManagedClass(_)
+            | TypeKind::ManagedReference(_)
             | TypeKind::GenericParameter { .. } => {}
         }
     }

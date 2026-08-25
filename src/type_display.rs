@@ -36,6 +36,11 @@ pub(crate) fn display_type(ty: TypeId, snapshot: &SemanticSnapshot) -> String {
             .managed_class(*id)
             .map(|class| class.name.clone())
             .unwrap_or_else(|| format!("class#{}", id.index())),
+        TypeKind::ManagedReference(id) => snapshot
+            .syntax()
+            .managed_class(*id)
+            .map(|class| format!("{}.Ref", class.name))
+            .unwrap_or_else(|| format!("class#{}.Ref", id.index())),
         TypeKind::GenericParameter { index, .. } => snapshot
             .semantics()
             .associated_projection_for_output(ty)

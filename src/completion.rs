@@ -1329,7 +1329,7 @@ fn add_inferred_fields(
                 }
             }
         }
-        TypeKind::ManagedClass(id) => {
+        TypeKind::ManagedClass(id) | TypeKind::ManagedReference(id) => {
             if let Some(class) = syntax.managed_class(*id) {
                 for field in &class.fields {
                     builder.add(simple_completion(

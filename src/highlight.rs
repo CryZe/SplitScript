@@ -146,6 +146,12 @@ impl SemanticHighlightIndex {
             .records
             .iter()
             .map(|record| record.name.as_str())
+            .chain(
+                syntax
+                    .managed_class_declarations()
+                    .into_iter()
+                    .map(|class| class.name.as_str()),
+            )
             .collect::<HashSet<_>>();
         let enum_names = syntax
             .enums
@@ -167,6 +173,7 @@ impl SemanticHighlightIndex {
             debug_ranges: value_kinds.debug_ranges,
         };
         collector.base_tokens(&record_names, &enum_names, &function_names);
+        collector.mark_managed_reference_types();
         collector.visit_program(syntax);
         collector.apply_debug_modifiers();
         Self {
@@ -275,6 +282,16 @@ struct HighlightCollector<'a> {
 }
 
 impl HighlightCollector<'_> {
+    fn mark_managed_reference_types(&mut self) {
+        for declaration in &self.syntax.managed_reference_types {
+            for occurrence in &declaration.occurrences {
+                self.insert(occurrence.class, SemanticTokenKind::Struct, 0);
+                self.insert(occurrence.dot, SemanticTokenKind::Operator, 0);
+                self.insert(occurrence.reference, SemanticTokenKind::Type, 0);
+            }
+        }
+    }
+
     fn base_tokens(
         &mut self,
         record_names: &HashSet<&str>,
@@ -412,7 +429,7 @@ impl HighlightCollector<'_> {
     fn type_contains_none(&self, ty: TypeRef) -> bool {
         match ty {
             TypeRef::Core(crate::ast::PrimitiveType::None) => true,
-            TypeRef::Core(_) | TypeRef::Named(_) => false,
+            TypeRef::Core(_) | TypeRef::Named(_) | TypeRef::ManagedReference(_) => false,
             TypeRef::Array(id) => self
                 .syntax
                 .array_types
@@ -1551,6 +1568,7 @@ image "Assembly-CSharp" {
         }
     }
 }
+let player: Player.Ref? = None
 "#;
         let mut database = CompilerDatabase::new(source);
         database
@@ -1587,6 +1605,13 @@ image "Assembly-CSharp" {
             "Alternate",
             SemanticTokenKind::EnumMember,
             MODIFIER_DECLARATION | MODIFIER_READONLY,
+        ));
+        assert!(contains(
+            source,
+            &highlights,
+            "Ref",
+            SemanticTokenKind::Type,
+            0,
         ));
         assert!(contains(
             source,

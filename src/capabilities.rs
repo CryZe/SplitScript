@@ -410,6 +410,7 @@ impl CapabilityAnalysis {
             | TypeKind::Record(_)
             | TypeKind::Enum(_)
             | TypeKind::ManagedClass(_)
+            | TypeKind::ManagedReference(_)
             | TypeKind::GenericParameter { .. }
             | TypeKind::Async { .. }
             | TypeKind::Callable { .. } => return None,

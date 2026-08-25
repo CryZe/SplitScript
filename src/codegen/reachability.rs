@@ -715,6 +715,7 @@ impl Reachability {
                 }
                 TypeKind::Builtin(_)
                 | TypeKind::ManagedClass(_)
+                | TypeKind::ManagedReference(_)
                 | TypeKind::GenericParameter { .. } => {}
                 TypeKind::StateSnapshot => {
                     pending.extend(
@@ -861,6 +862,7 @@ impl Reachability {
                 | TypeKind::StateSnapshot
                 | TypeKind::SettingsView
                 | TypeKind::ManagedClass(_)
+                | TypeKind::ManagedReference(_)
                 | TypeKind::GenericParameter { .. } => {}
                 TypeKind::Record(record) if self.equality_records.insert(*record) => {
                     pending.extend(capabilities.structural_dependency_types(ty));

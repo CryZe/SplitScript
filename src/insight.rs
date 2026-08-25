@@ -2228,6 +2228,7 @@ image "Assembly-CSharp" {
         }
     }
 }
+let player: Player.Ref? = None
 "#;
         let mut database = CompilerDatabase::new(source);
         database.check().expect("managed schema hover fixture");
@@ -2253,6 +2254,11 @@ image "Assembly-CSharp" {
             assert!(hover.markdown.contains(signature), "{}", hover.markdown);
             assert!(hover.markdown.contains(description), "{}", hover.markdown);
         }
+        let reference = database
+            .hover(source.rfind("player:").unwrap() + 1)
+            .unwrap()
+            .expect("managed reference hover");
+        assert!(reference.markdown.contains("let player: Player.Ref?"));
     }
 
     #[test]

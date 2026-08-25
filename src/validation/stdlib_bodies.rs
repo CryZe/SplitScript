@@ -407,6 +407,7 @@ fn render_actual_type(
         TypeKind::Record(record) => format!("record#{record}"),
         TypeKind::Enum(enumeration) => format!("enum#{enumeration}"),
         TypeKind::ManagedClass(class) => format!("class#{class}"),
+        TypeKind::ManagedReference(class) => format!("class#{class}.Ref"),
         TypeKind::GenericParameter { index, .. } => parameter_bindings
             .get(&ty)
             .map(|bound| render_declared_type(library, *bound))

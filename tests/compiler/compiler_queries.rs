@@ -865,7 +865,7 @@ fn managed_class_types_use_the_source_symbol_graph() {
                 static Player player;
             }
         }
-        fn inspect(player: Player) {}
+        fn inspect(player: Player.Ref) {}
     "#;
     let mut database = CompilerDatabase::new(source);
     database.check().expect("managed type fixture should check");

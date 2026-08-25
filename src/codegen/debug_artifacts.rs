@@ -250,6 +250,10 @@ fn type_name(
             .managed_class(*id)
             .map(|class| class.name.clone())
             .unwrap_or_else(|| format!("class#{}", id.index())),
+        TypeKind::ManagedReference(id) => program
+            .managed_class(*id)
+            .map(|class| format!("{}.Ref", class.name))
+            .unwrap_or_else(|| format!("class#{}.Ref", id.index())),
         TypeKind::GenericParameter { index, .. } => crate::types::generic_parameter_name(*index),
         TypeKind::Array {
             element, length, ..

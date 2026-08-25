@@ -726,6 +726,9 @@ fn resolved_type_ref(ty: ResolvedTypeRef, types: &TypeStore) -> Type {
         ResolvedTypeRef::Record(record) => Type::Known(types.id_for_record(record)),
         ResolvedTypeRef::Enum(enumeration) => Type::Known(types.id_for_enum(enumeration)),
         ResolvedTypeRef::ManagedClass(class) => Type::Known(types.id_for_managed_class(class)),
+        ResolvedTypeRef::ManagedReference(class) => {
+            Type::Known(types.id_for_managed_reference(class))
+        }
         ResolvedTypeRef::GenericParameter(parameter) => Type::Known(parameter),
         ResolvedTypeRef::Array(id) => Type::Array(id),
         ResolvedTypeRef::Option(id) => Type::Option(id),

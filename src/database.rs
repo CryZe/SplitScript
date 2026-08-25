@@ -1380,6 +1380,11 @@ fn named_type(
             .iter()
             .find(|range| range.id == id)
             .and_then(|range| named_type(syntax, range.lower)),
+        SyntaxTypeRef::ManagedReference(id) => syntax
+            .managed_reference_types
+            .iter()
+            .find(|reference| reference.id == id)
+            .and_then(|reference| named_type(syntax, SyntaxTypeRef::Named(reference.class))),
         SyntaxTypeRef::Named(id) => {
             let name = syntax.type_name(id);
             syntax

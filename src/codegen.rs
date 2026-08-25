@@ -784,6 +784,7 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
         TypeKind::ManagedClass(_) => {
             unreachable!("managed class schemas do not yet reach backend value lowering")
         }
+        TypeKind::ManagedReference(_) => Type::Address,
         TypeKind::GenericParameter { .. } => {
             unreachable!("generic template types must be substituted before code generation")
         }

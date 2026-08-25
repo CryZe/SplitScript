@@ -190,6 +190,7 @@ fn semantic_type_may_have_capability(
             CapabilityBehavior::StructuralEquality | CapabilityBehavior::StructuralMethods
         ),
         TypeKind::ManagedClass(_) => false,
+        TypeKind::ManagedReference(_) => false,
         TypeKind::Option { .. } | TypeKind::Result { .. } => {
             behavior == CapabilityBehavior::StructuralEquality
         }

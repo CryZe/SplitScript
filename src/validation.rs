@@ -1363,6 +1363,32 @@ fn validate_unused_declarations(
                 .all_fields()
                 .filter_map(|field| semantics.value_type(field.id)),
         );
+        // The attachment runtime constructs and consumes the generated Layout
+        // value even when user code never names the record directly. Its
+        // dimensions and every possible enum value participate in automatic
+        // metadata selection, so none of those declarations are dead source.
+        if let Some(layout) = &state.layout {
+            reachable_types.insert(semantics.types().id_for_record(layout.record));
+            if let Some(record) = syntax.records.get(layout.record.index()) {
+                observed_record_fields.extend(record.fields.iter().map(|field| field.id));
+                for field in &record.fields {
+                    let Some(ty) = semantics.record_field_type(field.id) else {
+                        continue;
+                    };
+                    let TypeKind::Enum(enumeration) = semantics.types().kind(ty) else {
+                        continue;
+                    };
+                    if let Some(enumeration) = syntax
+                        .enums
+                        .iter()
+                        .find(|candidate| candidate.id == *enumeration)
+                    {
+                        observed_enum_variants
+                            .extend(enumeration.variants.iter().map(|variant| variant.id));
+                    }
+                }
+            }
+        }
     }
     reachable_types.extend(
         syntax

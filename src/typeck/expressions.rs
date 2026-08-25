@@ -900,6 +900,7 @@ impl Checker {
                     Some(self.core_type(crate::stdlib::CoreTypeId::Bool)),
                 );
                 let layout_constraints = self.layout_constraints(condition);
+                let inverse_layout_constraints = self.inverse_layout_constraints(condition);
                 let result_type =
                     expected.unwrap_or_else(|| self.fresh_inference(Requirements::none(), None));
                 // `None` can either remain the zero-sized unit value or lift into
@@ -911,7 +912,10 @@ impl Checker {
                     && expression_is_bare_none(then_expr)
                     && !expression_is_bare_none(else_expr)
                 {
-                    let else_type = self.expr(else_expr, Some(result_type));
+                    let else_type = self.with_layout_constraints(
+                        inverse_layout_constraints.as_deref(),
+                        |checker| checker.expr(else_expr, Some(result_type)),
+                    );
                     let then_type = self
                         .with_layout_constraints(layout_constraints.as_deref(), |checker| {
                             checker.expr(then_expr, Some(result_type))
@@ -922,7 +926,10 @@ impl Checker {
                         .with_layout_constraints(layout_constraints.as_deref(), |checker| {
                             checker.expr(then_expr, Some(result_type))
                         });
-                    let else_type = self.expr(else_expr, Some(result_type));
+                    let else_type = self.with_layout_constraints(
+                        inverse_layout_constraints.as_deref(),
+                        |checker| checker.expr(else_expr, Some(result_type)),
+                    );
                     (then_type, else_type)
                 };
                 if expected.is_none()

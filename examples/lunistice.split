@@ -1,6 +1,11 @@
-// Lunistice's IL2CPP layout is discovered once per process lifetime. The
-// resulting roots and field offsets feed the expression-backed state block,
-// which rotates `current` and `old` snapshots automatically.
+/// The attached Lunistice edition selected from its managed metadata shape.
+enum Edition {
+    /// The original game, whose level is stored as a numeric index.
+    BaseGame,
+    /// The DLC demo, whose current scene is stored as a managed string.
+    DlcDemo,
+}
+
 enum LevelOrScene {
     Level(i32),
     Scene(String),
@@ -12,38 +17,61 @@ record LevelTimeParts {
     hundredths: f32,
 }
 
-state ["Lunistice.exe", "Lunistice-Demo.exe"] {
-    gameState: i32 = process.read(gameManagerInstance.offset(gameStateOffset));
-    points: u32 = process.read(gameManagerInstance.offset(pointsOffset));
-    deaths: u32 = process.read(gameManagerInstance.offset(deathsOffset));
-    levelOrScene = if isDlcDemo {
-        LevelOrScene.Scene(process.readManagedString(
-            process.read(gameManagerInstance.offset(levelOrSceneOffset))?,
-            16,
-        )?)
-    } else {
-        LevelOrScene.Level(process.read(
-            gameManagerInstance.offset(levelOrSceneOffset)
-        )?)
-    };
-    levelTime: f32 = process.read(timerInstance.offset(levelTimeOffset));
-    levelTimeParts = process.read(timerInstance.offset(levelTimeVectorOffset));
-    timerStopped = process.read(timerInstance.offset(timerStoppedOffset));
-    character: u32 = process.read(timerInstance.offset(characterOffset));
+/// Managed gameplay state shared by the original game and DLC demo.
+image "Assembly-CSharp" {
+    class GameManager {
+        /// The live game-manager singleton.
+        static GameManager instance from "Instance";
+        /// The current high-level game state.
+        i32 gameState from ["gameState", "GameState"];
+        /// Points collected in this run.
+        u32 points from "_points";
+        /// Deaths accumulated in this run.
+        u32 deaths from "_deaths";
+
+        if layout.edition == Edition.BaseGame {
+            /// The original game's numeric level index.
+            i32 level from "currentLevel";
+        }
+
+        if layout.edition == Edition.DlcDemo {
+            /// Address of the DLC demo's current managed scene string.
+            address scene from "_currentScene";
+        }
+    }
+
+    class Timer {
+        /// The live timer singleton across known game versions.
+        static Timer instance from ["Instance", "_instance"];
+        /// Elapsed time in the current level.
+        f32 levelTime from "currentLevelTime";
+        /// Display digits maintained by the game's timer UI.
+        LevelTimeParts levelTimeParts from "currentLevelTimeVector";
+        /// Whether the in-game timer is stopped.
+        bool stopped from "timerStopped";
+        /// The currently selected playable character.
+        u32 character;
+    }
 }
 
-let gameManagerInstance = 0
-let timerInstance = 0
-let isDlcDemo = false
+state Unity.il2cpp(2020) ["Lunistice.exe", "Lunistice-Demo.exe"] {
+    layout {
+        edition: Edition,
+    }
 
-let gameStateOffset = 0
-let pointsOffset = 0
-let deathsOffset = 0
-let levelOrSceneOffset = 0
-let levelTimeOffset = 0
-let levelTimeVectorOffset = 0
-let timerStoppedOffset = 0
-let characterOffset = 0
+    gameState: i32 = GameManager.instance?.gameState?;
+    points: u32 = GameManager.instance?.points?;
+    deaths: u32 = GameManager.instance?.deaths?;
+    levelOrScene = if layout.edition == Edition.BaseGame {
+        LevelOrScene.Level(GameManager.instance?.level?)
+    } else {
+        LevelOrScene.Scene(process.readManagedString(GameManager.instance?.scene?, 16)?)
+    };
+    levelTime: f32 = Timer.instance?.levelTime?;
+    levelTimeParts: LevelTimeParts = Timer.instance?.levelTimeParts?;
+    timerStopped: bool = Timer.instance?.stopped?;
+    character: u32 = Timer.instance?.character?;
+}
 
 let runTimeSeconds = 0.0
 let beyondFirstLevel = false
@@ -77,8 +105,8 @@ fn twoDigits(value) {
     return value as String
 }
 
-fn levelTimeText(parts) {
-    return `{parts.minutes as u32}:{twoDigits(parts.seconds as u32)}.{twoDigits(parts.hundredths as u32)}`
+fn LevelTimeParts.toString() {
+    return `{self.minutes as u32}:{twoDigits(self.seconds as u32)}.{twoDigits(self.hundredths as u32)}`
 }
 
 fn levelText(level) {
@@ -124,49 +152,6 @@ fn characterName(character, dlcDemo) {
     }
 }
 
-onAttach {
-    let unity = await Unity.il2cpp(2020)
-    debug print("Found IL2CPP")
-
-    let image = await unity.image("Assembly-CSharp")
-    debug print("Found Assembly-CSharp")
-
-    let gameManagerClass = await image.class("GameManager")
-    let foundGameManager = await gameManagerClass.staticInstance(["Instance"])
-    let gameStateField = await gameManagerClass.fieldAny(["gameState", "GameState"])
-    let foundPointsOffset = await gameManagerClass.field("_points")
-    let foundDeathsOffset = await gameManagerClass.field("_deaths")
-    let levelOrSceneField = await gameManagerClass.fieldAny(["currentLevel", "_currentScene"])
-
-    gameManagerInstance = foundGameManager
-    gameStateOffset = gameStateField.offset
-    pointsOffset = foundPointsOffset
-    deathsOffset = foundDeathsOffset
-    levelOrSceneOffset = levelOrSceneField.offset
-    isDlcDemo = levelOrSceneField.index == 1
-
-    debug if isDlcDemo {
-        print("Found GameManager (DLC Demo)")
-    } else {
-        print("Found GameManager (Base Game)")
-    }
-
-    let timerClass = await image.class("Timer")
-    let foundTimer = await timerClass.staticInstance(["Instance", "_instance"])
-    let foundLevelTimeOffset = await timerClass.field("currentLevelTime")
-    let foundLevelTimeVectorOffset = await timerClass.field("currentLevelTimeVector")
-    let foundTimerStoppedOffset = await timerClass.field("timerStopped")
-    let foundCharacterOffset = await timerClass.field("character")
-
-    timerInstance = foundTimer
-    levelTimeOffset = foundLevelTimeOffset
-    levelTimeVectorOffset = foundLevelTimeVectorOffset
-    timerStoppedOffset = foundTimerStoppedOffset
-    characterOffset = foundCharacterOffset
-
-    debug print("Found Timer")
-}
-
 whileAttached {
     let timerState = timer.state()
     let timerStarted = lastTimerState == TimerState.NotRunning
@@ -179,9 +164,12 @@ whileAttached {
 
     setVariable("Points", current.points)
     setVariable("Resets", current.deaths)
-    setVariable("Level Time", levelTimeText(current.levelTimeParts))
+    setVariable("Level Time", current.levelTimeParts)
     setVariable(levelOrSceneVariable(current.levelOrScene), levelOrSceneText(current.levelOrScene))
-    setVariable("Character", characterName(current.character, isDlcDemo))
+    setVariable(
+        "Character",
+        characterName(current.character, layout.edition == Edition.DlcDemo),
+    )
 
     if current.levelTime < old.levelTime && beyondFirstLevel {
         runTimeSeconds += old.levelTime
@@ -209,7 +197,7 @@ reset {
 
 split {
     let enteredResults = old.gameState != 6 && current.gameState == 6
-    let creditsTransition = !isDlcDemo
+    let creditsTransition = layout.edition == Edition.BaseGame
         && isFinalBaseLevel(old.levelOrScene)
         && isBaseCredits(current.levelOrScene)
 

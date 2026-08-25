@@ -183,7 +183,8 @@ onAttach {
 
 The generated `layout: Layout` value is read-only and stable for the whole
 attachment. The same equality predicate refines every declaration guarded by
-it, including managed fields:
+it, including managed fields. For a dimension with exactly two variants, the
+corresponding `else` branch refines to the other variant:
 
 ```splitscript
 image "Assembly-CSharp" {
@@ -204,6 +205,9 @@ whileAttached {
     if layout.edition == Edition.BaseGame {
         let manager = GameManager.instance else return
         print(manager.level else 0)
+    } else {
+        let manager = GameManager.instance else return
+        print(manager.scene else 0)
     }
 }
 ```

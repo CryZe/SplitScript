@@ -36,6 +36,49 @@ impl Checker {
         Some(constraints)
     }
 
+    /// Derives the facts established by the false branch when that complement
+    /// is itself one exact layout assignment. At present this is possible for
+    /// a single equality over a two-variant enum. Broader predicates would
+    /// require a disjunction rather than the canonical conjunction represented
+    /// by [`LayoutConstraint`].
+    pub(super) fn inverse_layout_constraints(
+        &self,
+        expression: &Expr,
+    ) -> Option<Vec<LayoutConstraint>> {
+        let constraints = self.layout_constraints(expression)?;
+        let [constraint] = constraints.as_slice() else {
+            return None;
+        };
+        let layout = self
+            .declarations
+            .records
+            .iter()
+            .find(|record| record.name == "Layout")?;
+        let field = layout
+            .fields
+            .iter()
+            .find(|field| field.id == constraint.dimension)?;
+        let ResolvedTypeRef::Enum(enum_id) = self.resolutions.type_ref(field.ty)? else {
+            return None;
+        };
+        let enumeration = self
+            .declarations
+            .enums
+            .iter()
+            .find(|enumeration| enumeration.id == enum_id)?;
+        if enumeration.variants.len() != 2 {
+            return None;
+        }
+        let variant = enumeration
+            .variants
+            .iter()
+            .find(|variant| variant.id != constraint.variant)?;
+        Some(vec![LayoutConstraint {
+            dimension: constraint.dimension,
+            variant: variant.id,
+        }])
+    }
+
     /// Requires a declaration predicate to be statically understandable.
     pub(super) fn require_layout_constraints(
         &mut self,

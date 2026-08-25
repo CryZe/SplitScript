@@ -277,6 +277,8 @@ fn managed_fields_share_the_attachment_layout_refinement_model() {
             let manager = GameManager.instance else return
             if layout.edition == Edition.BaseGame {
                 print(manager.level else 0)
+            } else {
+                print(manager.scene else 0)
             }
         }
     "#;
@@ -301,6 +303,93 @@ fn managed_fields_share_the_attachment_layout_refinement_model() {
         }),
         "{diagnostics:#?}"
     );
+}
+
+#[test]
+fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
+    let source = r#"
+        enum Edition {
+            BaseGame,
+            DlcDemo,
+        }
+
+        enum LevelOrScene {
+            Level(i32),
+            Scene(String),
+        }
+
+        record LevelTimeParts {
+            minutes: f32,
+            seconds: f32,
+            hundredths: f32,
+        }
+
+        image "Assembly-CSharp" {
+            class GameManager {
+                static GameManager instance from "Instance";
+                i32 gameState from ["gameState", "GameState"];
+                u32 points from "_points";
+                u32 deaths from "_deaths";
+
+                if layout.edition == Edition.BaseGame {
+                    i32 level from "currentLevel";
+                }
+
+                if layout.edition == Edition.DlcDemo {
+                    address scene from "_currentScene";
+                }
+            }
+
+            class Timer {
+                static Timer instance from ["Instance", "_instance"];
+                f32 levelTime from "currentLevelTime";
+                LevelTimeParts levelTimeParts from "currentLevelTimeVector";
+                bool stopped from "timerStopped";
+                u32 character;
+            }
+        }
+
+        state Unity.il2cpp(2020) ["Lunistice.exe", "Lunistice-Demo.exe"] {
+            layout { edition: Edition }
+
+            gameState: i32 = GameManager.instance?.gameState?;
+            points: u32 = GameManager.instance?.points?;
+            deaths: u32 = GameManager.instance?.deaths?;
+            levelOrScene = if layout.edition == Edition.BaseGame {
+                LevelOrScene.Level(GameManager.instance?.level?)
+            } else {
+                LevelOrScene.Scene(process.readManagedString(GameManager.instance?.scene?, 16)?)
+            };
+            levelTime: f32 = Timer.instance?.levelTime?;
+            levelTimeParts: LevelTimeParts = Timer.instance?.levelTimeParts?;
+            timerStopped: bool = Timer.instance?.stopped?;
+            character: u32 = Timer.instance?.character?;
+        }
+
+        whileAttached {
+            print(current.levelOrScene)
+            print(current.levelTimeParts)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("the Lunistice Unity schema should type check");
+    let unused = checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.message.starts_with("unused record")
+                || diagnostic.message.starts_with("unused enum")
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        unused.is_empty(),
+        "generated layout declarations are used: {unused:#?}"
+    );
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("the Lunistice-shaped schema should produce valid Wasm GC");
 }
 
 #[test]

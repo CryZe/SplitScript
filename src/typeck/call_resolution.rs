@@ -499,7 +499,11 @@ impl Checker {
                 CallableContext::LibraryFunction(_) | CallableContext::CompilerGenerated
             )
             && let Some(native_provider) = self.standard_library.default_state_provider()
-            && active_provider != native_provider.id
+            && self
+                .standard_library
+                .state_provider(active_provider)
+                .value_name
+                != native_provider.value_name
             && callee
                 .first()
                 .is_some_and(|root| root == native_provider.value_name)

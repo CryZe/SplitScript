@@ -179,10 +179,10 @@ to inference or code generation.
 
 ### P0.3 — prove the design by simplifying Lunistice
 
-- [ ] Declare the Lunistice `GameManager` and `Timer` schemas, including shared
+- [x] Declare the Lunistice `GameManager` and `Timer` schemas, including shared
   fields, base-game and DLC-demo layouts, alternative singleton names,
   `LevelTimeParts`, and the bounded DLC scene string.
-- [ ] Port `examples/lunistice.split` from manual class/instance/offset globals
+- [x] Port `examples/lunistice.split` from manual class/instance/offset globals
   and raw `process.read` calls to generated references or snapshots. Preserve
   all existing autosplitter behavior and keep the user's current local example
   edits out of intermediate mechanical rewrites.

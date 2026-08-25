@@ -2521,7 +2521,7 @@ settings {
         assert!(
             format_source(include_str!("../examples/lunistice.split"))
                 .unwrap()
-                .contains("state [\"Lunistice.exe\"")
+                .contains("state Unity.il2cpp(2020) [\"Lunistice.exe\"")
         );
     }
 

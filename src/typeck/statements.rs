@@ -212,11 +212,14 @@ impl Checker {
                     Some(self.core_type(crate::stdlib::CoreTypeId::Bool)),
                 );
                 let constraints = self.layout_constraints(condition);
+                let inverse_constraints = self.inverse_layout_constraints(condition);
                 self.with_layout_constraints(constraints.as_deref(), |checker| {
                     checker.block(then_block, true);
                 });
                 if let Some(else_block) = else_block {
-                    self.block(else_block, true);
+                    self.with_layout_constraints(inverse_constraints.as_deref(), |checker| {
+                        checker.block(else_block, true);
+                    });
                 }
             }
             Stmt::While {

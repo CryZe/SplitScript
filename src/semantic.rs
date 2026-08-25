@@ -320,6 +320,7 @@ pub enum DynamicCallCallee {
 pub struct SemanticModel {
     types: TypeStore,
     state_provider: Option<StdlibStateProviderId>,
+    state_provider_selector: Option<usize>,
     expression_types: HashMap<ExprId, TypeId>,
     calls: HashMap<ExprId, ResolvedCall>,
     dynamic_calls: HashMap<ExprId, DynamicCallCallee>,
@@ -366,6 +367,10 @@ impl SemanticModel {
     /// The catalog provider selected by `state ProviderName`, if present.
     pub fn state_provider(&self) -> Option<StdlibStateProviderId> {
         self.state_provider
+    }
+
+    pub fn state_provider_selector(&self) -> Option<usize> {
+        self.state_provider_selector
     }
 
     pub fn expression_type(&self, expression: ExprId) -> Option<TypeId> {
@@ -1227,6 +1232,7 @@ struct PendingValueConversion {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SemanticBuilder {
     state_provider: Option<StdlibStateProviderId>,
+    state_provider_selector: Option<usize>,
     expression_types: HashMap<ExprId, Type>,
     calls: HashMap<ExprId, PendingResolvedCall>,
     dynamic_calls: HashMap<ExprId, DynamicCallCallee>,
@@ -1319,9 +1325,13 @@ impl SemanticBuilder {
             }
         }
     }
-    pub(crate) fn with_state_provider(state_provider: Option<StdlibStateProviderId>) -> Self {
+    pub(crate) fn with_state_provider(
+        state_provider: Option<StdlibStateProviderId>,
+        state_provider_selector: Option<usize>,
+    ) -> Self {
         Self {
             state_provider,
+            state_provider_selector,
             ..Self::default()
         }
     }
@@ -1583,6 +1593,7 @@ impl SemanticBuilder {
         };
         let Self {
             state_provider,
+            state_provider_selector,
             expression_types,
             calls,
             dynamic_calls,
@@ -1849,6 +1860,7 @@ impl SemanticBuilder {
         SemanticModel {
             types,
             state_provider,
+            state_provider_selector,
             expression_types,
             calls,
             dynamic_calls,

@@ -198,7 +198,10 @@ fn initialize_checker(
         inferred_empty_collections: Vec::new(),
         deferred_member_paths: Vec::new(),
         none_policy: NonePolicy::OptionalOnly,
-        semantics: SemanticBuilder::with_state_provider(resolutions.state_provider()),
+        semantics: SemanticBuilder::with_state_provider(
+            resolutions.state_provider(),
+            resolutions.state_provider_selector(),
+        ),
         standard_field_types: std::collections::HashMap::new(),
         active_function_component: std::collections::HashSet::new(),
         expected_type_source: None,

@@ -5,12 +5,10 @@
 //! semantic field types established by type checking. Mono and IL2CPP adapters
 //! therefore consume one model without becoming additional symbol registries.
 
-use std::collections::HashSet;
-
 use crate::{
     ast::{
-        ManagedClassDecl, ManagedClassId, ManagedFieldDecl, ManagedFieldId, ManagedImageId,
-        ManagedItemDecl, ManagedLayoutId, Program, Span,
+        ManagedBindingNameKind, ManagedClassDecl, ManagedClassId, ManagedFieldDecl, ManagedFieldId,
+        ManagedImageId, ManagedItemDecl, ManagedLayoutId, Program, Span,
     },
     semantic::SemanticModel,
     types::TypeId,
@@ -189,29 +187,19 @@ fn field_binding(field: &ManagedFieldDecl, semantics: &SemanticModel) -> Managed
 }
 
 fn field_metadata_candidates(field: &ManagedFieldDecl) -> Vec<ManagedMetadataCandidate> {
-    let mut candidates = Vec::new();
-    let mut seen = HashSet::new();
-    for (name, span) in field.metadata_name_candidates() {
-        if seen.insert(name.to_owned()) {
-            candidates.push(ManagedMetadataCandidate {
-                name: name.to_owned(),
-                origin: ManagedMetadataOrigin::Declared(span),
-            });
-        }
-        // An omitted `from` names the source member and its conventional C#
-        // automatic-property storage. Explicit `from` spellings remain exact;
-        // silently expanding those would contradict their source contract.
-        if field.metadata_names.values.is_empty() {
-            let backing = format!("<{name}>k__BackingField");
-            if seen.insert(backing.clone()) {
-                candidates.push(ManagedMetadataCandidate {
-                    name: backing,
-                    origin: ManagedMetadataOrigin::AutomaticPropertyBackingField(span),
-                });
-            }
-        }
-    }
-    candidates
+    field
+        .binding_name_candidates()
+        .into_iter()
+        .map(|(name, span, kind)| ManagedMetadataCandidate {
+            name,
+            origin: match kind {
+                ManagedBindingNameKind::Declared => ManagedMetadataOrigin::Declared(span),
+                ManagedBindingNameKind::AutomaticPropertyBackingField => {
+                    ManagedMetadataOrigin::AutomaticPropertyBackingField(span)
+                }
+            },
+        })
+        .collect()
 }
 
 #[cfg(test)]

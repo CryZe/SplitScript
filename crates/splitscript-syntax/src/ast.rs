@@ -496,6 +496,34 @@ impl ManagedFieldDecl {
                     .map(|name| (name.value.as_str(), name.span)),
             )
     }
+
+    /// Runtime metadata spellings probed for this field in deterministic
+    /// order.
+    ///
+    /// An omitted `from` accepts both the source name and the conventional C#
+    /// automatic-property backing field. Explicit `from` spellings are exact
+    /// alternatives and are never expanded implicitly.
+    pub fn binding_name_candidates(&self) -> Vec<(String, Span, ManagedBindingNameKind)> {
+        let mut candidates = Vec::new();
+        for (name, span) in self.metadata_name_candidates() {
+            candidates.push((name.to_owned(), span, ManagedBindingNameKind::Declared));
+            if self.metadata_names.values.is_empty() {
+                candidates.push((
+                    format!("<{name}>k__BackingField"),
+                    span,
+                    ManagedBindingNameKind::AutomaticPropertyBackingField,
+                ));
+            }
+        }
+        candidates
+    }
+}
+
+/// Origin of one deterministic managed-field metadata spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedBindingNameKind {
+    Declared,
+    AutomaticPropertyBackingField,
 }
 
 /// Explicit metadata spellings supplied by `from`.

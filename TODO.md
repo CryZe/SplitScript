@@ -77,6 +77,12 @@ to inference or code generation.
   `from ["first", "second"]` names explicit alternatives. C# automatic-property
   backing fields participate in the same canonical lookup. Ambiguity is an
   error rather than declaration-order selection.
+  - [x] Centralize canonical binding-name expansion on managed field
+    declarations. Type checking and backend planning now share exact `from`
+    alternatives and implicit source-name/backing-field candidates, and reject
+    collisions between either form before runtime binding.
+  - [ ] Apply that ordered candidate model in the Mono/IL2CPP adapter and report
+    zero or multiple runtime matches against the responsible source aliases.
 - [ ] Implement class `layout` variants for alternative field schemas. Select a
   layout only when its complete required metadata shape binds, expose common
   compatible members without refinement, and require matching the generated

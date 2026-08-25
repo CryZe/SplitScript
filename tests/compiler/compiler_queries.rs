@@ -942,6 +942,24 @@ fn managed_schema_metadata_aliases_reject_ambiguous_field_bindings() {
             .iter()
             .any(|label| matches!(label.style, splitscript::DiagnosticLabelStyle::Secondary))
     );
+
+    let backing_collision = r#"
+        image "Assembly-CSharp" {
+            class GameManager {
+                i32 points;
+                i32 pointsStorage from "<points>k__BackingField";
+            }
+        }
+        state "game.exe" {}
+    "#;
+    let diagnostics = splitscript::compile(backing_collision)
+        .expect_err("implicit backing-field lookup must participate in ambiguity checking");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("claimed by both `points` and `pointsStorage`")
+            && diagnostic.message.contains("<points>k__BackingField")
+    }));
 }
 
 #[test]

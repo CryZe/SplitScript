@@ -600,8 +600,8 @@ fn collect_managed_field(
         }
     }
 
-    for (candidate, span) in field.metadata_name_candidates() {
-        match metadata_names.entry(candidate.to_owned()) {
+    for (candidate, span, _) in field.binding_name_candidates() {
+        match metadata_names.entry(candidate.clone()) {
             std::collections::hash_map::Entry::Vacant(entry) => {
                 entry.insert((field.name.clone(), span));
             }

@@ -776,6 +776,21 @@ mod tests {
     }
 
     #[test]
+    fn named_state_providers_can_take_source_process_candidates() {
+        let source = r#"state Unity ["game.exe", "game-demo.exe"] {}"#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let state = program.state.unwrap();
+        assert_eq!(state.provider.unwrap().name, "Unity");
+        assert_eq!(state.processes, ["game.exe", "game-demo.exe"]);
+
+        let source = r#"state Unity "game.exe" {}"#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let state = program.state.unwrap();
+        assert_eq!(state.provider.unwrap().name, "Unity");
+        assert_eq!(state.processes, ["game.exe"]);
+    }
+
+    #[test]
     fn parses_on_state_ready_as_a_lifecycle_block() {
         let source = r#"
             state "game.exe" { level: u32 at 0x100 }

@@ -13,7 +13,7 @@ use crate::{
         TypeApplicationId, TypeNameId, TypeRef, ValueId,
     },
     migration::{legacy_type_diagnostic, migration_diagnostic},
-    stdlib::{StandardLibrary, StdlibStateProviderId, StdlibTypeKind},
+    stdlib::{StandardLibrary, StateProviderProcesses, StdlibStateProviderId, StdlibTypeKind},
     types::{EnumTypeId, ResolvedTypeRef},
     visit::{self, Visitor},
 };
@@ -207,6 +207,35 @@ pub(crate) fn resolve_program(
         if let Some(reference) = &state.provider {
             if let Some(provider) = standard_library.state_provider_by_name(&reference.name) {
                 resolutions.state_provider = Some(provider.id);
+                match provider.processes {
+                    StateProviderProcesses::SourceState if state.processes.is_empty() => {
+                        provider_diagnostics.push(
+                            Diagnostic::type_error(
+                                format!(
+                                    "state provider `{}` needs at least one process name",
+                                    reference.name
+                                ),
+                                reference.span,
+                            )
+                            .with_primary_label(
+                                "add an exact process name after the provider, such as `[\"game.exe\"]`",
+                            ),
+                        );
+                    }
+                    StateProviderProcesses::Declared(_) if !state.processes.is_empty() => {
+                        provider_diagnostics.push(
+                            Diagnostic::type_error(
+                                format!(
+                                    "state provider `{}` declares its supported processes",
+                                    reference.name
+                                ),
+                                reference.span,
+                            )
+                            .with_primary_label("remove the process name list after this provider"),
+                        );
+                    }
+                    StateProviderProcesses::SourceState | StateProviderProcesses::Declared(_) => {}
+                }
             } else {
                 provider_diagnostics.push(Diagnostic::type_error(
                     format!("unknown state provider `{}`", reference.name),

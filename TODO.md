@@ -103,6 +103,14 @@ to inference or code generation.
   Provider setup is cooperative and cancelled with the process. Ordinary state
   fields can read generated managed members without manually retaining classes,
   static tables, instance addresses, or offsets.
+  - [x] Generalize state syntax so a named provider can own source-declared
+    process candidates (`state Provider ["game.exe", ...]`), with catalog-mode
+    validation for providers whose process list is instead fixed. Keep provider
+    names in their contextual namespace so the future `state Unity` provider
+    can coexist with the existing `Unity.*` API namespace.
+  - [ ] Publish the Unity provider only when its schema binder is connected;
+    until then, do not accept a `state Unity` program that would silently behave
+    like an ordinary native attachment.
 - [ ] Cache image, class, static-table, field-offset, and remote-path metadata
   for one attachment. Re-follow dynamic object pointers on each read so
   replaceable singletons remain correct. Scalar/path reads must not allocate a

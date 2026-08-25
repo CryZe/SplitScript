@@ -595,11 +595,14 @@ impl Parser<'_> {
 
     pub(super) fn state_block_decl(&mut self) -> Result<StateDecl, Diagnostic> {
         let start = self.expect_ident("state")?.start;
-        let (provider, processes) = if matches!(self.current().kind, TokenKind::Ident(_))
-            && matches!(self.peek(1).kind, TokenKind::LBrace)
-        {
+        let (provider, processes) = if matches!(self.current().kind, TokenKind::Ident(_)) {
             let (name, span) = self.expect_any_ident("expected a state provider name")?;
-            (Some(StateProviderRef { name, span }), Vec::new())
+            let processes = if self.at(&TokenKind::LBrace) {
+                Vec::new()
+            } else {
+                self.process_names()?
+            };
+            (Some(StateProviderRef { name, span }), processes)
         } else {
             (None, self.process_names()?)
         };

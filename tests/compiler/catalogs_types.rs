@@ -1001,6 +1001,16 @@ fn compiler_owned_library_function_names_are_reserved() {
 #[test]
 fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
     let library = StandardLibrary::new();
+    let declared_process_override = splitscript::check(splitscript::lower(
+        splitscript::parse(r#"state GBA ["mGBA.exe"] {}"#).unwrap(),
+    ))
+    .expect_err("providers with catalog-owned process lists reject source overrides");
+    assert!(declared_process_override.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("state provider `GBA` declares its supported processes")
+    }));
+
     let gba = library
         .state_provider_by_name("GBA")
         .expect("the bundled GBA provider should be discoverable by source name");

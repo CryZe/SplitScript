@@ -91,9 +91,20 @@ impl<'a> Validator<'a> {
     }
 
     fn validate(&mut self) {
-        let mut names = HashSet::new();
+        // State-provider names are resolved only after the `state` keyword;
+        // ordinary declarations live in the value/type/namespace grammar.
+        // Keep their uniqueness domains separate so `state Unity ...` can
+        // coexist with the `Unity.*` API namespace without weakening either
+        // domain's duplicate checking.
+        let mut declaration_names = HashSet::new();
+        let mut provider_names = HashSet::new();
         for declaration in &self.library.declarations {
             let name = declaration_name(declaration);
+            let names = if matches!(declaration, Declaration::StateProvider(_)) {
+                &mut provider_names
+            } else {
+                &mut declaration_names
+            };
             if !names.insert(name) {
                 self.error(format!("standard-library declaration `{name}` is repeated"));
             }

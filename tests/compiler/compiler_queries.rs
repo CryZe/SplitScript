@@ -909,6 +909,83 @@ fn managed_class_types_use_the_source_symbol_graph() {
 }
 
 #[test]
+fn managed_schema_owners_share_source_identity_hover_and_rename() {
+    use splitscript::tooling::database::{CompilerDatabase, SourceDefinitionId};
+
+    let source = r#"
+        state Unity ["game.exe"] {}
+        /// The game's primary managed image.
+        image "Assembly-CSharp" {
+            /// Gameplay-owned metadata.
+            namespace Game {
+                /// A live player and its immutable snapshot shape.
+                class Player {
+                    /// The player's current health.
+                    u32 health;
+                }
+            }
+        }
+        fn inspect(player: Player) -> u32 { return player.health }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    database
+        .check()
+        .expect("managed schema fixture should check");
+
+    for (needle, expected_id, documentation) in [
+        ("Assembly-CSharp", "image", "game's primary managed image"),
+        ("Game {", "namespace", "Gameplay-owned metadata"),
+        ("Player {", "class", "live player"),
+        ("health;", "field", "current health"),
+    ] {
+        let offset = source.find(needle).expect("fixture spelling exists");
+        let definition = database
+            .definition_at(offset)
+            .unwrap()
+            .expect("schema declaration has source identity");
+        let splitscript::tooling::database::DefinitionTarget::Source(definition) = definition
+        else {
+            panic!("managed declarations navigate to source")
+        };
+        assert!(
+            matches!(
+                (expected_id, definition.id),
+                ("image", SourceDefinitionId::ManagedImage(_))
+                    | ("namespace", SourceDefinitionId::ManagedNamespace(_))
+                    | ("class", SourceDefinitionId::ManagedClass(_))
+                    | ("field", SourceDefinitionId::ManagedField(_))
+            ),
+            "unexpected identity for {expected_id}: {:?}",
+            definition.id
+        );
+        assert!(
+            database
+                .hover(offset)
+                .unwrap()
+                .expect("schema declaration has hover")
+                .markdown
+                .contains(documentation)
+        );
+    }
+
+    let class_use = source.rfind("Player").expect("parameter uses the class");
+    let class_edits = database.rename_at(class_use, "PlayerState").unwrap();
+    assert_eq!(
+        class_edits.len(),
+        2,
+        "class declaration and use are renamed"
+    );
+
+    let field_use = source.rfind("health").expect("return reads the field");
+    let field_edits = database.rename_at(field_use, "hitPoints").unwrap();
+    assert_eq!(
+        field_edits.len(),
+        2,
+        "field declaration and use are renamed"
+    );
+}
+
+#[test]
 fn live_managed_paths_use_schema_definitions_and_documentation() {
     use splitscript::tooling::database::{CompilerDatabase, SourceDefinitionId};
 

@@ -53,7 +53,7 @@ to inference or code generation.
   AST/HIR, recovery, formatting, and source traversal. Declarations use
   mandatory semicolons and never depend on line breaks. Preserve documentation
   on every declared image, namespace, class, and field.
-- [ ] Resolve image schemas through the normal semantic symbol tables. Give
+- [x] Resolve image schemas through the normal semantic symbol tables. Give
   every generated class, reference, field, and static member a stable
   identity used by type inference, diagnostics, rename, go-to-definition,
   completion, hover, semantic highlighting, selection ranges, documentation,

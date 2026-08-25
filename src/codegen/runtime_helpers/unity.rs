@@ -920,6 +920,91 @@ pub(super) fn compile_unity_get_field_any(
     function
 }
 
+/// Selects the first class matching an ordered schema alias without making
+/// each alias a separate suspension point. The underlying class scan is still
+/// the single canonical IL2CPP metadata implementation.
+pub(super) fn compile_unity_get_class_any(
+    unity_get_class: u32,
+    names_array: u32,
+    names_storage: u32,
+    gc: &GcLayout,
+) -> Function {
+    let mut function = Function::new([
+        (1, ValType::I32),
+        (
+            1,
+            ValType::Ref(RefType {
+                nullable: true,
+                heap_type: HeapType::Concrete(names_storage),
+            }),
+        ),
+        (
+            1,
+            ValType::Ref(RefType {
+                nullable: true,
+                heap_type: HeapType::Concrete(gc.standard_index(StdlibTypeId::UnityClass)),
+            }),
+        ),
+    ]);
+    let process = 0;
+    let image = 1;
+    let names = 2;
+    let index = 3;
+    let names_backing = 4;
+    let class = 5;
+    function
+        .instruction(&Instruction::LocalGet(names))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: names_array,
+            field_index: super::super::array_value::BACKING_FIELD,
+        })
+        .instruction(&Instruction::LocalSet(names_backing))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(names))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: names_array,
+            field_index: super::super::array_value::LENGTH_FIELD,
+        })
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(image))
+        .instruction(&Instruction::LocalGet(names_backing))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index));
+    emit_array_get(
+        &mut function,
+        names_storage,
+        Type::Standard(StdlibTypeId::String),
+        gc,
+    );
+    function
+        .instruction(&Instruction::Call(unity_get_class))
+        .instruction(&Instruction::LocalTee(class))
+        .instruction(&Instruction::RefIsNull)
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(class))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.standard_index(StdlibTypeId::UnityClass),
+        )))
+        .instruction(&Instruction::End);
+    function
+}
+
 pub(super) fn compile_unity_get_static_instance(
     abi: &Abi,
     unity_get_field_any: u32,

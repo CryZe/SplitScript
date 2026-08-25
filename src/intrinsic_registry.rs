@@ -80,6 +80,7 @@ pub(crate) enum RuntimeHelperId {
     BackingFieldEquality,
     UnityGetImage,
     UnityGetClass,
+    UnityGetClassAny,
     UnityGetFieldOffset,
     UnityGetFieldAny,
     UnityGetStaticInstance,
@@ -383,6 +384,7 @@ const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::UnityClassStaticTable => scratch(ScratchType::Core(CoreTypeId::U64), 1),
         IntrinsicId::UnityModuleImage
         | IntrinsicId::UnityImageClass
+        | IntrinsicId::UnityImageClassAny
         | IntrinsicId::UnityClassFieldAny => scratch(ScratchType::Expression, 1),
         _ => None,
     }
@@ -506,6 +508,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::RuntimeArchitecture => &[Helper(Runtime::RuntimeArchitecture)],
         IntrinsicId::UnityModuleImage => &[Helper(Runtime::UnityGetImage)],
         IntrinsicId::UnityImageClass => &[Helper(Runtime::UnityGetClass)],
+        IntrinsicId::UnityImageClassAny => &[Helper(Runtime::UnityGetClassAny)],
         IntrinsicId::UnityClassField => &[Helper(Runtime::UnityGetFieldOffset)],
         IntrinsicId::UnityClassFieldAny => &[Helper(Runtime::UnityGetFieldAny)],
         IntrinsicId::UnityClassStaticInstance => &[Helper(Runtime::UnityGetStaticInstance)],
@@ -1880,6 +1883,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 NO_TYPE_PARAMETERS,
                 Some(UNITY_IMAGE),
                 params![value(STRING)],
+                UNITY_CLASS,
+            ),
+            PROCESS_SUSPEND,
+            OnAttach,
+            Suspension
+        ),
+        IntrinsicId::UnityImageClassAny => contract!(
+            UnityImageClassAny,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(UNITY_IMAGE),
+                params![value(STRING_ARRAY)],
                 UNITY_CLASS,
             ),
             PROCESS_SUSPEND,

@@ -6188,6 +6188,13 @@ struct UnityImage {
         /// The managed class name.
         name: String,
     ) -> async UnityClass;
+
+    // Finds the first class matching the schema's ordered metadata aliases.
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
+    @intrinsic(UnityImageClassAny)
+    private fn classAny(names: [String]) -> async UnityClass;
 }
 
 /// Describes a Unity runtime class.
@@ -6660,18 +6667,10 @@ struct MonoModule {
     }
 
     // Owns the raw-address traversal exposed through MonoImage.class().
-    private fn classInImage(image: address, name: String) -> async MonoClass {
-        let separator = name.lastIndexOf(".")
-        let expectedName = match separator {
-            Some(index) => name.slice(index + 1, name.byteLength()) else name,
-            None => name,
-        }
-        let expectedNamespace: String? = match separator {
-            Some(index) => name.slice(0, index) else "",
-            None => None,
-        }
-
+    private fn classAnyInImage(image: address, names: [String]) -> async MonoClass {
         while true {
+            let selectedIndex: u32? = None
+            let selectedClass: address = 0
             let cache = image.add(self.layout.imageClassCache)
             let bucketCount = match process.read<i32>(cache.add(self.layout.hashSize)) {
                 Ok(count) => count,
@@ -6692,21 +6691,41 @@ struct MonoModule {
                             classAddress.add(self.layout.className),
                         )
                         let candidateName = retry process.readUtf8(namePointer, 256)
-                        if candidateName == expectedName {
-                            let namespacePointer = retry self.readPointer(
-                                classAddress.add(self.layout.classNamespace),
-                            )
-                            let candidateNamespace = retry process.readUtf8(namespacePointer, 256)
-                            let namespaceMatches = match expectedNamespace {
-                                Some(namespace) => candidateNamespace == namespace,
-                                None => true,
+                        let candidateIndex: u32 = 0
+                        while candidateIndex < names.length() {
+                            let name = names[candidateIndex]
+                            let separator = name.lastIndexOf(".")
+                            let expectedName = match separator {
+                                Some(index) => name.slice(index + 1, name.byteLength()) else name,
+                                None => name,
                             }
-                            if namespaceMatches {
-                                return MonoClass {
-                                    address: classAddress,
-                                    module: self,
+                            if candidateName == expectedName {
+                                let namespacePointer = retry self.readPointer(
+                                    classAddress.add(self.layout.classNamespace),
+                                )
+                                let candidateNamespace = retry process.readUtf8(
+                                    namespacePointer,
+                                    256,
+                                )
+                                let namespaceMatches = match separator {
+                                    Some(index) => {
+                                        let expectedNamespace = name.slice(0, index) else continue
+                                        candidateNamespace == expectedNamespace
+                                    },
+                                    None => true,
+                                }
+                                if namespaceMatches {
+                                    let isHigherPriority = match selectedIndex {
+                                        Some(index) => candidateIndex < index,
+                                        None => true,
+                                    }
+                                    if isHigherPriority {
+                                        selectedIndex = candidateIndex
+                                        selectedClass = classAddress
+                                    }
                                 }
                             }
+                            candidateIndex += 1
                         }
                         classAddress = match self.readPointer(
                             classAddress.add(self.layout.classNextCache),
@@ -6716,6 +6735,12 @@ struct MonoModule {
                         }
                     }
                     bucket += 1
+                }
+                if selectedClass != 0 {
+                    return MonoClass {
+                        address: selectedClass,
+                        module: self,
+                    }
                 }
             }
             await nextTick()
@@ -6875,7 +6900,12 @@ struct MonoImage {
         /// Simple class name or namespace-qualified managed class name.
         name: String,
     ) -> async MonoClass {
-        return await self.module.classInImage(self.address, name)
+        return await self.module.classAnyInImage(self.address, [name])
+    }
+
+    // Finds the first class matching the schema's ordered metadata aliases.
+    private fn classAny(names: [String]) -> async MonoClass {
+        return await self.module.classAnyInImage(self.address, names)
     }
 }
 

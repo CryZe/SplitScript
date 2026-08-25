@@ -365,6 +365,16 @@ pub(super) fn build_unity_get_class(inputs: &RuntimeHelperInputs<'_>) -> Functio
     )
 }
 
+pub(super) fn build_unity_get_class_any(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    let (array, storage) = array_layouts(inputs, Type::Standard(StdlibTypeId::String));
+    unity::compile_unity_get_class_any(
+        inputs.plan.function(RuntimeHelperId::UnityGetClass),
+        array,
+        storage,
+        inputs.gc,
+    )
+}
+
 pub(super) fn build_unity_get_field_offset(inputs: &RuntimeHelperInputs<'_>) -> Function {
     unity::compile_unity_get_field_offset(
         inputs.abi,

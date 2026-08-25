@@ -236,22 +236,24 @@ fn managed_backend_binding_source(
             images.insert(class.image, index);
             index
         };
-        let class_name = class
+        let candidates = class
             .class
             .metadata_name_candidates()
-            .next()
-            .map(|(name, _)| name)
-            .unwrap_or(class.class.name.as_str());
-        let qualified = class
-            .namespace
-            .iter()
-            .copied()
-            .chain(std::iter::once(class_name))
+            .map(|(name, _)| {
+                class
+                    .namespace
+                    .iter()
+                    .copied()
+                    .chain(std::iter::once(name))
+                    .collect::<Vec<_>>()
+                    .join(".")
+            })
+            .map(|name| format!("{name:?}"))
             .collect::<Vec<_>>()
-            .join(".");
+            .join(", ");
         let class_local = format!("__class_{}", class.class.id.index());
         source.push_str(&format!(
-            "            let {class_local} = await __image_{image_index}.class({qualified:?})\n"
+            "            let {class_local} = await __image_{image_index}.classAny([{candidates}])\n"
         ));
         if class_fields(class.class).any(|field| field.is_static) {
             source.push_str(&format!(

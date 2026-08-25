@@ -1865,16 +1865,17 @@ fn compile_suspension_poll(
                     });
             }
         }
-        Some(IntrinsicId::UnityImageClass) => {
+        Some(IntrinsicId::UnityImageClass | IntrinsicId::UnityImageClassAny) => {
+            let helper = match resolved_intrinsic(target) {
+                Some(IntrinsicId::UnityImageClass) => RuntimeHelperId::UnityGetClass,
+                Some(IntrinsicId::UnityImageClassAny) => RuntimeHelperId::UnityGetClassAny,
+                _ => unreachable!(),
+            };
             function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
             function
-                .instruction(&Instruction::Call(
-                    context
-                        .runtime_helpers
-                        .function(RuntimeHelperId::UnityGetClass),
-                ))
+                .instruction(&Instruction::Call(context.runtime_helpers.function(helper)))
                 .instruction(&Instruction::LocalTee(unity_class_local))
                 .instruction(&Instruction::RefIsNull)
                 .instruction(&Instruction::If(BlockType::Empty))

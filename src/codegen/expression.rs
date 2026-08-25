@@ -4455,6 +4455,7 @@ fn compile_expr_unconverted(
             | IntrinsicId::ModuleScanAny
             | IntrinsicId::UnityModuleImage
             | IntrinsicId::UnityImageClass
+            | IntrinsicId::UnityImageClassAny
             | IntrinsicId::UnityClassField
             | IntrinsicId::UnityClassFieldAny
             | IntrinsicId::UnityClassStaticTable

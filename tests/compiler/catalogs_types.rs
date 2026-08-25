@@ -159,8 +159,8 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
         (StdlibItemId::WiiEmulatorDiscover, "WiiEmulator.discover"),
         (StdlibItemId::MonoModuleDiscover, "MonoModule.discover"),
         (
-            StdlibItemId::MonoModuleClassInImage,
-            "MonoModule.classInImage",
+            StdlibItemId::MonoModuleClassAnyInImage,
+            "MonoModule.classAnyInImage",
         ),
         (
             StdlibItemId::MonoModuleFieldInClass,
@@ -192,7 +192,7 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
             .into_iter()
             .all(|item| !matches!(
                 item.id,
-                StdlibItemId::MonoModuleClassInImage
+                StdlibItemId::MonoModuleClassAnyInImage
                     | StdlibItemId::MonoModuleFieldInClass
                     | StdlibItemId::MonoModuleStaticTableForClass
             ))
@@ -1149,7 +1149,7 @@ fn unity_provider_preparation_is_selected_typed_and_lowered_before_attachment() 
                 u32 score;
             }
 
-            class GameManager {
+            class GameManager from ["Manager", "GameManager"] {
                 static GameManager instance;
                 Player player;
             }

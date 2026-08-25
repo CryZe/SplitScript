@@ -131,6 +131,7 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(BackingFieldEquality, (I64, I64, StringValue) -> (I32), deps [], imports [ProcessRead], build_backing_field_equality),
     helper!(UnityGetImage, (I64, Standard(StdlibTypeId::UnityModule), StringValue) -> (Standard(StdlibTypeId::UnityImage)), deps [CStringEquality], imports [ProcessRead], build_unity_get_image),
     helper!(UnityGetClass, (I64, Standard(StdlibTypeId::UnityImage), StringValue) -> (Standard(StdlibTypeId::UnityClass)), deps [CStringEquality], imports [ProcessRead], build_unity_get_class),
+    helper!(UnityGetClassAny, (I64, Standard(StdlibTypeId::UnityImage), StringArray) -> (Standard(StdlibTypeId::UnityClass)), deps [UnityGetClass], imports [], build_unity_get_class_any),
     helper!(UnityGetFieldOffset, (I64, Standard(StdlibTypeId::UnityClass), StringValue) -> (I64), deps [CStringEquality, BackingFieldEquality], imports [ProcessRead], build_unity_get_field_offset),
     helper!(UnityGetFieldAny, (I64, Standard(StdlibTypeId::UnityClass), StringArray) -> (Standard(StdlibTypeId::UnityField)), deps [UnityGetFieldOffset], imports [], build_unity_get_field_any),
     helper!(UnityGetStaticInstance, (I64, Standard(StdlibTypeId::UnityClass), StringArray) -> (I64), deps [UnityGetFieldAny], imports [ProcessRead], build_unity_get_static_instance),

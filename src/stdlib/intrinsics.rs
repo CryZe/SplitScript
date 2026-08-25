@@ -115,6 +115,7 @@ macro_rules! trusted_intrinsics {
             ModulePath,
             UnityModuleImage,
             UnityImageClass,
+            UnityImageClassAny,
             UnityClassField,
             UnityClassFieldAny,
             UnityClassStaticTable,

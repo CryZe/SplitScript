@@ -86,8 +86,14 @@ to inference or code generation.
     declarations. Type checking and backend planning now share exact `from`
     alternatives and implicit source-name/backing-field candidates, and reject
     collisions between either form before runtime binding.
-  - [ ] Apply that ordered candidate model in the Mono/IL2CPP adapter and report
-    zero or multiple runtime matches against the responsible source aliases.
+  - [x] Feed ordered, namespace-qualified class aliases into both Mono and
+    IL2CPP attachment binders. The generated binder performs alias discovery
+    once per attachment and retains the selected class metadata for later
+    field binding.
+  - [ ] Replace first-match alias selection with a complete binding probe and
+    report zero or multiple runtime matches against the responsible source
+    aliases. A missing candidate must be distinguishable from a transient
+    process-memory failure so layout discovery cannot retry forever.
 - [ ] Implement class `layout` variants for alternative field schemas. Select a
   layout only when its complete required metadata shape binds, expose common
   compatible members without refinement, and require matching the generated

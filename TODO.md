@@ -64,6 +64,14 @@ to inference or code generation.
   fields produce references, terminal value fields produce fallible values,
   and `.snapshot()` reads the declared value shape transactionally. Generate
   snapshot readers only when reachable.
+  - [x] Derive one backend-independent binding plan from checked schema and
+    semantic identities. It preserves image and namespace ownership, class and
+    layout alternatives, static versus instance fields, declared versus read
+    value types, exact aliases, and conventional C# automatic-property backing
+    candidates. Snapshot code generation consumes this projection instead of
+    maintaining a parallel Unity class registry.
+  - [ ] Resolve and lower static managed roots, fallible live-reference field
+    reads, and reachable transactional `.snapshot()` readers through that plan.
 - [ ] Specify deterministic metadata-name resolution. A missing `from` uses the
   source member name, `from "name"` names one exact metadata member, and
   `from ["first", "second"]` names explicit alternatives. C# automatic-property

@@ -30,6 +30,7 @@ mod intrinsic_registry;
 mod language;
 mod lexer;
 mod lsp;
+mod managed;
 mod memory;
 pub mod migration;
 use splitscript_syntax::parser;

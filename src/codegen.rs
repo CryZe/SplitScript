@@ -458,11 +458,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         function_debug_names.len(),
         debug_recorder.as_ref(),
     );
-    let managed_classes = program
-        .managed_class_declarations()
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let managed = crate::managed::ManagedBindingPlan::build(program, semantics);
     let lowering = EmissionContext {
         standard_library: &standard_library,
         reachability: &reachability,
@@ -484,7 +480,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         array_functions: &array_functions,
         set_functions: &set_functions,
         records: &program.records,
-        managed_classes: &managed_classes,
+        managed: &managed,
         enums,
         arrays: array_types,
         memory: memory_layouts,

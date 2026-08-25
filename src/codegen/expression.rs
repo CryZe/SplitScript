@@ -6,10 +6,7 @@ use wasm_encoder::{AbstractHeapType, BlockType, Function, HeapType, Instruction,
 
 use crate::{
     abi::AbiImportId,
-    ast::{
-        ActionKind, BinaryOp, EnumDecl, ExprId, ManagedClassDecl, RangeKind, RecordDecl,
-        ResultTypeId, ValueId,
-    },
+    ast::{ActionKind, BinaryOp, EnumDecl, ExprId, RangeKind, RecordDecl, ResultTypeId, ValueId},
     intrinsic_registry::RuntimeHelperId,
     memory::MemoryLayouts,
     semantic::{
@@ -33,7 +30,7 @@ use super::{
     emit_typed_struct_get, enum_variant_payload,
     global_plan::RuntimeGlobals,
     imports::Abi,
-    managed_snapshot_field_type, memarg,
+    memarg,
     memory_plan::AbiReadScratch,
     range_bound_type, record_field_type, resolved_intrinsic, result_value_type,
     runtime_helpers::emit_value_equality,
@@ -115,7 +112,7 @@ pub(super) struct ExprContext<'a> {
     pub array_functions: &'a super::ArrayFunctions,
     pub set_functions: &'a SetFunctions,
     pub records: &'a [RecordDecl],
-    pub managed_classes: &'a [ManagedClassDecl],
+    pub managed: &'a crate::managed::ManagedBindingPlan,
     pub enums: &'a [EnumDecl],
     pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,
@@ -2238,13 +2235,16 @@ fn emit_path_fields(
             }
             ResolvedMember::ManagedField(field) => {
                 let (class, field_index, field) = context
-                    .managed_classes
+                    .managed
+                    .classes
                     .iter()
                     .find_map(|class| {
                         class
                             .fields
                             .iter()
-                            .filter(|candidate| !candidate.is_static)
+                            .filter(|candidate| {
+                                candidate.kind == crate::managed::ManagedFieldKind::Instance
+                            })
                             .enumerate()
                             .find(|(_, candidate)| candidate.id == *field)
                             .map(|(index, field)| (class, index as u32, field))
@@ -2254,7 +2254,7 @@ fn emit_path_fields(
                 (
                     context.gc.index(Type::ManagedClass(class.id)),
                     field_index,
-                    managed_snapshot_field_type(field.id, context.semantics),
+                    semantic_type(field.value_type, context.semantics),
                 )
             }
         };

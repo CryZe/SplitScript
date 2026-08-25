@@ -3,7 +3,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{EnumDecl, ManagedClassDecl, RecordDecl, ValueId},
+    ast::{EnumDecl, RecordDecl, ValueId},
+    managed::ManagedBindingPlan,
     memory::MemoryLayouts,
     semantic::{FunctionInstance, SemanticModel},
     stdlib::StandardLibrary,
@@ -47,7 +48,7 @@ pub(super) struct EmissionContext<'a> {
     pub array_functions: &'a ArrayFunctions,
     pub set_functions: &'a SetFunctions,
     pub records: &'a [RecordDecl],
-    pub managed_classes: &'a [ManagedClassDecl],
+    pub managed: &'a ManagedBindingPlan,
     pub enums: &'a [EnumDecl],
     pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,

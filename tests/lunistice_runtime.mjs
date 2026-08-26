@@ -27,6 +27,9 @@ let bulkScanReads = 0;
 let attachedRateScanReads = undefined;
 const levelOrSceneReadWidths = new Set();
 const levelTimeVectorReads = new Set();
+let countSnapshotRoots = false;
+let gameManagerRootReads = 0;
+let timerRootReads = 0;
 let instance;
 
 const absolute = (relative) => 0x1000n + BigInt(relative);
@@ -183,6 +186,8 @@ const env = {
         if (length > 8) scanReads += 1;
         if (length > 0x100) bulkScanReads += 1;
         if (address === absolute(gameManager + 0x3c)) levelOrSceneReadWidths.add(length);
+        if (countSnapshotRoots && address === absolute(0x6020)) gameManagerRootReads += 1;
+        if (countSnapshotRoots && address === absolute(0x6220)) timerRootReads += 1;
         if (address >= absolute(timer + 0x34) && address < absolute(timer + 0x40)) {
             levelTimeVectorReads.add(`${address - absolute(timer + 0x34)}:${length}`);
         }
@@ -223,6 +228,32 @@ const bulkScanReadsAfterAttachment = bulkScanReads;
 if (attachedRateScanReads !== 0) {
     throw new Error(`attached tick rate was applied after scanning began: ${attachedRateScanReads}`);
 }
+
+// Every state field is emitted as its own fallible reader, but managed static
+// roots belong to the snapshot transaction rather than to an individual
+// field. Reading each singleton once avoids multiplying host calls while
+// still observing replacement singleton objects on the next tick.
+countSnapshotRoots = true;
+const replacementGameManager = 0x9200;
+const replacementTimer = 0x9300;
+memoryImage.copyWithin(replacementGameManager, gameManager, gameManager + 0x100);
+memoryImage.copyWithin(replacementTimer, timer, timer + 0x100);
+view.setUint32(replacementGameManager + 0x34, 99, true);
+pointer(0x6020, absolute(replacementGameManager));
+pointer(0x6220, absolute(replacementTimer));
+instance.exports.update();
+countSnapshotRoots = false;
+if (gameManagerRootReads !== 1 || timerRootReads !== 1) {
+    throw new Error(
+        `managed snapshot roots were not shared: GameManager=${gameManagerRootReads}, Timer=${timerRootReads}`,
+    );
+}
+if (variables.get("Points") !== "99") {
+    throw new Error(`replacement singleton was not observed: Points=${variables.get("Points")}`);
+}
+pointer(0x6020, absolute(gameManager));
+pointer(0x6220, absolute(timer));
+instance.exports.update();
 
 // Prime snapshots, transition timerStopped to false, enter results, then roll
 // the level clock over. The accumulated game time must become 10 + 1 seconds.

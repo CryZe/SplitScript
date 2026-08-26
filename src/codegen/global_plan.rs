@@ -4,6 +4,7 @@ use wasm_encoder::{ConstExpr, GlobalSection, GlobalType, HeapType, RefType, ValT
 
 use crate::{
     ast::{Program, ValueId},
+    managed::ManagedBindingPlan,
     semantic::{FunctionInstance, SemanticModel},
     stdlib::{
         CoreTypeId, RuntimeRepresentation, StandardLibrary, StateProviderAttachment, StdlibTypeId,
@@ -11,7 +12,11 @@ use crate::{
     wasm_ir,
 };
 
-use super::{GcLayout, STATE_TYPE, Type, constant, semantic_type, value_type};
+use super::{
+    GcLayout, STATE_TYPE, Type, constant,
+    managed_state_reads::{self, ManagedStateReadCache},
+    semantic_type, value_type,
+};
 
 pub(super) struct GlobalPlan {
     pub section: GlobalSection,
@@ -19,6 +24,7 @@ pub(super) struct GlobalPlan {
     pub variables: HashMap<ValueId, u32>,
     pub variable_types: HashMap<ValueId, Type>,
     pub settings: HashMap<ValueId, SettingStorage>,
+    pub managed_state_reads: ManagedStateReadCache,
 }
 
 #[derive(Clone, Copy)]
@@ -61,6 +67,7 @@ pub(super) fn encode(
     semantics: &SemanticModel,
     gc: &GcLayout,
     wasm_ir: &wasm_ir::Program,
+    managed: &ManagedBindingPlan,
     provider_attachment: Option<&FunctionInstance>,
     provider_preparation: Option<&FunctionInstance>,
 ) -> GlobalPlan {
@@ -185,6 +192,9 @@ pub(super) fn encode(
         );
         index
     });
+
+    let managed_state_reads =
+        managed_state_reads::encode(&mut section, semantics, gc, wasm_ir, managed);
     let selected_layout_type = program
         .state
         .as_ref()
@@ -365,6 +375,7 @@ pub(super) fn encode(
         variables,
         variable_types,
         settings,
+        managed_state_reads,
     }
 }
 

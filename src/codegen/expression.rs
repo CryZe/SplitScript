@@ -31,6 +31,7 @@ use super::{
     emit_typed_struct_get, enum_variant_payload,
     global_plan::RuntimeGlobals,
     imports::Abi,
+    managed_state_reads::ManagedStateReadCache,
     memarg,
     memory_plan::AbiReadScratch,
     range_bound_type, record_field_type, resolved_intrinsic, result_value_type,
@@ -114,6 +115,10 @@ pub(super) struct ExprContext<'a> {
     pub set_functions: &'a SetFunctions,
     pub records: &'a [RecordDecl],
     pub managed: &'a crate::managed::ManagedBindingPlan,
+    /// Snapshot-transaction cache. The generated runtime activates it only
+    /// while assembling a candidate state, allowing transitively called
+    /// helpers to share roots without affecting ordinary lifecycle calls.
+    pub managed_state_reads: &'a ManagedStateReadCache,
     pub enums: &'a [EnumDecl],
     pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,
@@ -1430,21 +1435,7 @@ fn compile_resolved_path(
             Type::Standard(declaration.process_type)
         }
         ResolvedValue::ManagedStatic { class, field } => {
-            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
-            let binding = managed_field_binding(field, context);
-            emit_managed_binding_field(
-                function,
-                &managed_static_table_name(class.index()),
-                context,
-            );
-            emit_managed_binding_field(
-                function,
-                &managed_field_offset_name(field.index()),
-                context,
-            );
-            function.instruction(&Instruction::I64ExtendI32U);
-            function.instruction(&Instruction::I64Add);
-            emit_managed_read_at_address(function, binding, context)
+            emit_managed_static_read(function, class, field, context)
         }
         ResolvedValue::CurrentSnapshot | ResolvedValue::OldSnapshot => {
             function
@@ -2370,6 +2361,66 @@ fn managed_field_binding<'context>(
         })
         .find(|candidate| candidate.id == field)
         .expect("resolved managed fields belong to the binding plan")
+}
+
+/// Reads a managed static field, sharing the fallible result when this body is
+/// part of one state-snapshot transaction. The cache contains the complete
+/// `T!`, so both successful singleton addresses and failures are consistent
+/// across sibling fields in the same candidate snapshot.
+fn emit_managed_static_read(
+    function: &mut Function,
+    class: crate::ast::ManagedClassId,
+    field: crate::ast::ManagedFieldId,
+    context: &ExprContext<'_>,
+) -> Type {
+    if let Some(storage) = context.managed_state_reads.get(field) {
+        let result_type = Type::Result(storage.result);
+        let active = context
+            .managed_state_reads
+            .active()
+            .expect("managed cache entries have an activity flag");
+        function
+            .instruction(&Instruction::GlobalGet(active))
+            .instruction(&Instruction::GlobalGet(storage.global))
+            .instruction(&Instruction::RefIsNull)
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::I32And)
+            .instruction(&Instruction::If(BlockType::Result(
+                context.gc.val_type(result_type),
+            )))
+            .instruction(&Instruction::GlobalGet(storage.global))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::Else);
+        emit_uncached_managed_static_read(function, class, field, context);
+        function
+            // Outside a snapshot transaction this slot is deliberately
+            // overwritten but never selected. Doing so keeps one canonical
+            // read body instead of duplicating it in both branches; the next
+            // transaction clears all slots before enabling cache hits.
+            .instruction(&Instruction::GlobalSet(storage.global))
+            .instruction(&Instruction::GlobalGet(storage.global))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::End);
+        result_type
+    } else {
+        emit_uncached_managed_static_read(function, class, field, context)
+    }
+}
+
+fn emit_uncached_managed_static_read(
+    function: &mut Function,
+    class: crate::ast::ManagedClassId,
+    field: crate::ast::ManagedFieldId,
+    context: &ExprContext<'_>,
+) -> Type {
+    function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+    let binding = managed_field_binding(field, context);
+    emit_managed_binding_field(function, &managed_static_table_name(class.index()), context);
+    emit_managed_binding_field(function, &managed_field_offset_name(field.index()), context);
+    function
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::I64Add);
+    emit_managed_read_at_address(function, binding, context)
 }
 
 /// Reads an instance field from a `T.Ref` address already on the stack after

@@ -37,6 +37,7 @@ mod gc_layout;
 mod gc_types;
 mod global_plan;
 mod imports;
+mod managed_state_reads;
 mod memory_plan;
 mod module_assembly;
 mod module_start;
@@ -423,17 +424,20 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         next_type_index,
     } = imports::encode(&mut types, first_import_type, &dependencies);
 
+    let managed = crate::managed::ManagedBindingPlan::build(program, semantics);
     let global_plan::GlobalPlan {
         section: globals,
         runtime: runtime_globals,
         variables: global_indices,
         variable_types: global_types,
         settings: setting_indices,
+        managed_state_reads,
     } = global_plan::encode(
         program,
         semantics,
         &gc,
         wasm_ir,
+        &managed,
         provider_attachment.as_ref(),
         provider_preparation.as_ref(),
     );
@@ -486,7 +490,6 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         function_debug_names.len(),
         debug_recorder.as_ref(),
     );
-    let managed = crate::managed::ManagedBindingPlan::build(program, semantics);
     let explicit_layout_selection = crate::layout_selection::has_explicit_layout_return(program);
     let lowering = EmissionContext {
         standard_library: &standard_library,
@@ -510,6 +513,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         set_functions: &set_functions,
         records: &program.records,
         managed: &managed,
+        managed_state_reads: &managed_state_reads,
         enums,
         arrays: array_types,
         memory: memory_layouts,
@@ -589,6 +593,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         runtime_globals,
         semantics,
         managed: &managed,
+        managed_state_reads: &managed_state_reads,
         explicit_layout_selection,
         globals: &global_indices,
         global_types: &global_types,

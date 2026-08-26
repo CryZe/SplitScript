@@ -169,6 +169,12 @@ to inference or code generation.
   attachment. Re-follow dynamic object pointers on each read so replaceable
   singletons remain correct. Scalar live paths allocate no fresh GC object per
   tick.
+- [x] Share each fallible managed static-root read across one candidate-state
+  transaction, including reads made by transitively called helpers. Clear the
+  cache before every poll so singleton replacement is observed on the next
+  tick, and keep lifecycle calls outside the transaction. The Lunistice
+  harness requires exactly one `GameManager` and one `Timer` singleton read per
+  snapshot instead of one root read per field.
 - [x] Extend the attachment cache with managed field offsets and presence
   evidence used to validate the attachment-wide layout. Strings, arrays, and
   explicit snapshots may still allocate their returned values.

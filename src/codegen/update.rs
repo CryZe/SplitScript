@@ -13,8 +13,8 @@ use crate::{
 
 use super::{
     GcLayout, STATE_TYPE, Type, data_plan::StringPool, emit_typed_struct_get,
-    global_plan::RuntimeGlobals, imports::Abi, record_field_type, semantic_type,
-    state_storage_index, value_type,
+    global_plan::RuntimeGlobals, imports::Abi, managed_state_reads::ManagedStateReadCache,
+    record_field_type, semantic_type, state_storage_index, value_type,
 };
 
 const ATTACH_READY: i32 = 1;
@@ -29,6 +29,7 @@ pub(super) struct UpdateContext<'a> {
     pub runtime_globals: RuntimeGlobals,
     pub semantics: &'a crate::semantic::SemanticModel,
     pub managed: &'a crate::managed::ManagedBindingPlan,
+    pub managed_state_reads: &'a ManagedStateReadCache,
     pub explicit_layout_selection: bool,
     pub globals: &'a HashMap<ValueId, u32>,
     pub global_types: &'a HashMap<ValueId, Type>,
@@ -394,6 +395,23 @@ pub(super) fn compile_update(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
 
+    // Managed static fields are attachment metadata roots, but their values
+    // (notably Unity singleton instances) may be replaced while the process
+    // remains alive. Share each read only within this snapshot attempt and
+    // clear the transaction before any field is polled.
+    if let Some(active) = lowering.managed_state_reads.active() {
+        function
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::GlobalSet(active));
+    }
+    for storage in lowering.managed_state_reads.entries() {
+        function
+            .instruction(&Instruction::RefNull(HeapType::Concrete(
+                lowering.gc.index(Type::Result(storage.result)),
+            )))
+            .instruction(&Instruction::GlobalSet(storage.global));
+    }
+
     function
         .instruction(&Instruction::StructNewDefault(STATE_TYPE))
         .instruction(&Instruction::LocalSet(candidate_state));
@@ -453,6 +471,11 @@ pub(super) fn compile_update(
             }
             function.instruction(&Instruction::End);
         }
+    }
+    if let Some(active) = lowering.managed_state_reads.active() {
+        function
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::GlobalSet(active));
     }
     function
         .instruction(&Instruction::GlobalGet(globals.state_ready))
@@ -881,7 +904,13 @@ fn emit_state_field_poll(
             lowering.runtime_globals.state_ready,
         ))
         .instruction(&Instruction::I32Eqz)
-        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::If(BlockType::Empty));
+    if let Some(active) = lowering.managed_state_reads.active() {
+        function
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::GlobalSet(active));
+    }
+    function
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(candidate_state))

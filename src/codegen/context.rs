@@ -19,6 +19,7 @@ use super::{
     debug_artifacts::DebugRecorder,
     global_plan::RuntimeGlobals,
     imports::Abi,
+    managed_state_reads::ManagedStateReadCache,
     memory_plan::AbiReadScratch,
 };
 
@@ -49,6 +50,7 @@ pub(super) struct EmissionContext<'a> {
     pub set_functions: &'a SetFunctions,
     pub records: &'a [RecordDecl],
     pub managed: &'a ManagedBindingPlan,
+    pub managed_state_reads: &'a ManagedStateReadCache,
     pub enums: &'a [EnumDecl],
     pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,

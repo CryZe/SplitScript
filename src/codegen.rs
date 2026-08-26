@@ -454,6 +454,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         closure_polls,
         intrinsic_futures,
         displays: display_functions,
+        managed_state_reads: managed_state_read_functions,
         reads: read_functions,
         transforms: transform_functions,
         actions: action_functions,
@@ -481,6 +482,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             gc: &gc,
             wasm_ir,
             async_frames: &async_frames,
+            managed_state_reads: &managed_state_reads,
         },
     );
     let debug_recorder = (wasm_ir.profile() == crate::BuildProfile::Debug)
@@ -514,6 +516,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         records: &program.records,
         managed: &managed,
         managed_state_reads: &managed_state_reads,
+        managed_state_read_functions: &managed_state_read_functions,
         enums,
         arrays: array_types,
         memory: memory_layouts,
@@ -661,6 +664,10 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         codes.push(&body);
     }
     for body in set_bodies {
+        codes.push(&body);
+    }
+    for storage in managed_state_reads.entries() {
+        let body = expression::compile_managed_static_read(storage, &lowering);
         codes.push(&body);
     }
     for instance in reachability.functions() {

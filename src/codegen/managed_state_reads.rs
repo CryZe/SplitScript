@@ -28,6 +28,7 @@ pub(super) struct ManagedStateReadCache {
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ManagedStateReadStorage {
+    pub class: crate::ast::ManagedClassId,
     pub field: ManagedFieldId,
     pub global: u32,
     pub result: crate::ast::ResultTypeId,
@@ -68,15 +69,19 @@ pub(super) fn encode(
         .classes
         .iter()
         .flat_map(|class| {
-            class.fields.iter().chain(
-                class
-                    .conditional_fields
-                    .iter()
-                    .flat_map(|group| &group.fields),
-            )
+            class
+                .fields
+                .iter()
+                .chain(
+                    class
+                        .conditional_fields
+                        .iter()
+                        .flat_map(|group| &group.fields),
+                )
+                .map(|field| (class.id, field))
         })
-        .filter(|field| field.kind == ManagedFieldKind::Static)
-        .map(|field| (field.id, field.value_type))
+        .filter(|(_, field)| field.kind == ManagedFieldKind::Static)
+        .map(|(class, field)| (field.id, (class, field.value_type)))
         .collect::<HashMap<_, _>>();
 
     let mut fields = collector.fields.into_iter().collect::<Vec<_>>();
@@ -96,7 +101,7 @@ pub(super) fn encode(
     let entries = fields
         .into_iter()
         .filter_map(|field| {
-            let value = static_fields.get(&field).copied()?;
+            let (class, value) = static_fields.get(&field).copied()?;
             let result = semantics.types().iter().find_map(|(_, kind)| match kind {
                 crate::types::TypeKind::Result {
                     layout,
@@ -120,6 +125,7 @@ pub(super) fn encode(
                 &ConstExpr::ref_null(reference.heap_type),
             );
             Some(ManagedStateReadStorage {
+                class,
                 field,
                 global,
                 result,

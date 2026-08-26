@@ -119,6 +119,7 @@ pub(super) struct ExprContext<'a> {
     /// while assembling a candidate state, allowing transitively called
     /// helpers to share roots without affecting ordinary lifecycle calls.
     pub managed_state_reads: &'a ManagedStateReadCache,
+    pub managed_state_read_functions: &'a HashMap<crate::ast::ManagedFieldId, u32>,
     pub enums: &'a [EnumDecl],
     pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,
@@ -2373,38 +2374,109 @@ fn emit_managed_static_read(
     field: crate::ast::ManagedFieldId,
     context: &ExprContext<'_>,
 ) -> Type {
-    if let Some(storage) = context.managed_state_reads.get(field) {
-        let result_type = Type::Result(storage.result);
-        let active = context
+    if let Some(function_index) = context.managed_state_read_functions.get(&field) {
+        let storage = context
             .managed_state_reads
-            .active()
-            .expect("managed cache entries have an activity flag");
-        function
-            .instruction(&Instruction::GlobalGet(active))
-            .instruction(&Instruction::GlobalGet(storage.global))
-            .instruction(&Instruction::RefIsNull)
-            .instruction(&Instruction::I32Eqz)
-            .instruction(&Instruction::I32And)
-            .instruction(&Instruction::If(BlockType::Result(
-                context.gc.val_type(result_type),
-            )))
-            .instruction(&Instruction::GlobalGet(storage.global))
-            .instruction(&Instruction::RefAsNonNull)
-            .instruction(&Instruction::Else);
-        emit_uncached_managed_static_read(function, class, field, context);
-        function
-            // Outside a snapshot transaction this slot is deliberately
-            // overwritten but never selected. Doing so keeps one canonical
-            // read body instead of duplicating it in both branches; the next
-            // transaction clears all slots before enabling cache hits.
-            .instruction(&Instruction::GlobalSet(storage.global))
-            .instruction(&Instruction::GlobalGet(storage.global))
-            .instruction(&Instruction::RefAsNonNull)
-            .instruction(&Instruction::End);
-        result_type
+            .get(field)
+            .expect("planned managed read functions have cache storage");
+        function.instruction(&Instruction::Call(*function_index));
+        Type::Result(storage.result)
     } else {
         emit_uncached_managed_static_read(function, class, field, context)
     }
+}
+
+pub(super) fn compile_managed_static_read(
+    storage: super::managed_state_reads::ManagedStateReadStorage,
+    lowering: &super::context::EmissionContext<'_>,
+) -> Function {
+    let values = HashMap::new();
+    let temporaries = HashMap::new();
+    let matches = MatchLayout::default();
+    let context = ExprContext {
+        standard_library: lowering.standard_library,
+        reachability: lowering.reachability,
+        abi: lowering.abi,
+        state: lowering.state,
+        locals: LocalStorage::Wasm {
+            values: &values,
+            temporaries: &temporaries,
+        },
+        globals: lowering.globals,
+        global_types: lowering.global_types,
+        settings: lowering.settings,
+        runtime_globals: lowering.runtime_globals,
+        runtime_helpers: lowering.runtime_helpers,
+        functions: lowering.functions,
+        closures: lowering.closures,
+        function_values: lowering.function_values,
+        closure_polls: lowering.closure_polls,
+        closure_environment: None,
+        intrinsic_futures: lowering.intrinsic_futures,
+        display_functions: lowering.display_functions,
+        equality_functions: lowering.equality_functions,
+        array_functions: lowering.array_functions,
+        set_functions: lowering.set_functions,
+        records: lowering.records,
+        managed: lowering.managed,
+        managed_state_reads: lowering.managed_state_reads,
+        managed_state_read_functions: lowering.managed_state_read_functions,
+        enums: lowering.enums,
+        arrays: lowering.arrays,
+        memory: lowering.memory,
+        abi_read: lowering.abi_read,
+        signatures: lowering.signatures,
+        matches: &matches,
+        semantics: lowering.semantics,
+        wasm_ir: lowering.wasm_ir,
+        gc: lowering.gc,
+        async_frames: lowering.async_frames,
+        intrinsic_capture: None,
+        debug: None,
+        function_instance: None,
+        loop_control: None,
+        bare_return: BareReturn::None,
+        materialize_none: true,
+    };
+    let mut function = Function::new([]);
+    emit_cached_managed_static_read(&mut function, storage, &context);
+    function.instruction(&Instruction::End);
+    function
+}
+
+fn emit_cached_managed_static_read(
+    function: &mut Function,
+    storage: super::managed_state_reads::ManagedStateReadStorage,
+    context: &ExprContext<'_>,
+) -> Type {
+    let result_type = Type::Result(storage.result);
+    let active = context
+        .managed_state_reads
+        .active()
+        .expect("managed cache entries have an activity flag");
+    function
+        .instruction(&Instruction::GlobalGet(active))
+        .instruction(&Instruction::GlobalGet(storage.global))
+        .instruction(&Instruction::RefIsNull)
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Result(
+            context.gc.val_type(result_type),
+        )))
+        .instruction(&Instruction::GlobalGet(storage.global))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::Else);
+    emit_uncached_managed_static_read(function, storage.class, storage.field, context);
+    function
+        // Outside a snapshot transaction this slot is deliberately
+        // overwritten but never selected. Doing so keeps one canonical
+        // read body instead of duplicating it in both branches; the next
+        // transaction clears all slots before enabling cache hits.
+        .instruction(&Instruction::GlobalSet(storage.global))
+        .instruction(&Instruction::GlobalGet(storage.global))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::End);
+    result_type
 }
 
 fn emit_uncached_managed_static_read(

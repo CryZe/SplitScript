@@ -174,7 +174,9 @@ to inference or code generation.
   cache before every poll so singleton replacement is observed on the next
   tick, and keep lifecycle calls outside the transaction. The Lunistice
   harness requires exactly one `GameManager` and one `Timer` singleton read per
-  snapshot instead of one root read per field.
+  snapshot instead of one root read per field. Emit one generated reader per
+  static field rather than inlining its cache and host-read branches at every
+  use; the optimized Lunistice module is 28,529 bytes.
 - [x] Extend the attachment cache with managed field offsets and presence
   evidence used to validate the attachment-wide layout. Strings, arrays, and
   explicit snapshots may still allocate their returned values.

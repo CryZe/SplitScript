@@ -184,6 +184,7 @@ fn emit_aggregate_global_initializers(
         records: lowering.records,
         managed: lowering.managed,
         managed_state_reads: lowering.managed_state_reads,
+        managed_state_read_functions: lowering.managed_state_read_functions,
         enums: lowering.enums,
         arrays: lowering.arrays,
         memory: lowering.memory,

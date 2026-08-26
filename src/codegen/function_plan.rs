@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use wasm_encoder::{FunctionSection, HeapType, RefType, TypeSection, ValType};
 
 use crate::{
-    ast::{ActionKind, EnumDecl, Program},
+    ast::{ActionKind, EnumDecl, ManagedFieldId, Program},
     equality::EqualityCapabilities,
     semantic::{ClosureInstance, FunctionInstance, FunctionValueInstance, SemanticModel},
     stdlib::{RuntimeRepresentation, StandardLibrary},
@@ -35,6 +35,7 @@ pub(super) struct FunctionPlan<'a> {
     pub closure_polls: HashMap<ClosureInstance, u32>,
     pub intrinsic_futures: HashMap<IntrinsicFutureInstance, u32>,
     pub displays: DisplayFunctions,
+    pub managed_state_reads: HashMap<ManagedFieldId, u32>,
     pub reads: Vec<u32>,
     pub transforms: Vec<Option<u32>>,
     pub actions: HashMap<ActionKind, u32>,
@@ -68,6 +69,7 @@ pub(super) struct Inputs<'a> {
     pub gc: &'a GcLayout,
     pub wasm_ir: &'a crate::wasm_ir::Program,
     pub async_frames: &'a super::async_frame::AsyncFrameLayouts,
+    pub managed_state_reads: &'a super::managed_state_reads::ManagedStateReadCache,
 }
 
 pub(super) fn encode<'a>(
@@ -92,6 +94,7 @@ pub(super) fn encode<'a>(
         gc,
         wasm_ir,
         async_frames,
+        managed_state_reads,
     } = inputs;
     let mut section = FunctionSection::new();
     let mut next_function = imported_functions;
@@ -314,6 +317,22 @@ pub(super) fn encode<'a>(
                     vec![],
                 ),
             },
+        );
+    }
+
+    let mut managed_state_read_functions = HashMap::new();
+    for storage in managed_state_reads.entries() {
+        managed_state_read_functions.insert(
+            storage.field,
+            declare(
+                format!(
+                    "__splitscript::managed::class#{}::field#{}::read",
+                    storage.class.index(),
+                    storage.field.index(),
+                ),
+                vec![],
+                vec![gc.val_type(Type::Result(storage.result))],
+            ),
         );
     }
 
@@ -545,6 +564,7 @@ pub(super) fn encode<'a>(
         closure_polls,
         intrinsic_futures,
         displays,
+        managed_state_reads: managed_state_read_functions,
         reads,
         transforms,
         actions,

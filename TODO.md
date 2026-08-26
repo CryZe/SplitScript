@@ -177,6 +177,19 @@ to inference or code generation.
   snapshot instead of one root read per field. Emit one generated reader per
   static field rather than inlining its cache and host-read branches at every
   use; the optimized Lunistice module is 28,529 bytes.
+- [x] Apply common-subexpression planning to ordinary native state pointer
+  paths. Resolve a shared module lookup or raw pointer dereference once into an
+  `update` local and reuse it across sibling fields, including the case where
+  fields add different offsets after the same dereference. Resolution remains
+  lazy inside the active layout branch, failures retain the existing per-field
+  boundary, and locals reset naturally for the next candidate snapshot. The
+  release Neon White fixture shrank from 6,707 to 6,515 bytes while removing
+  the duplicate host calls.
+- [ ] If more snapshot-scoped duplication appears outside state paths, model a
+  compiler-internal "snapshot-stable" operation contract and an effect-aware
+  common-subexpression pass over Wasm IR. Do not describe arbitrary process
+  reads as pure: the host process can mutate concurrently, so sharing is valid
+  only where a compiler-created snapshot transaction promises it.
 - [x] Extend the attachment cache with managed field offsets and presence
   evidence used to validate the attachment-wide layout. Strings, arrays, and
   explicit snapshots may still allocate their returned values.

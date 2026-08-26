@@ -41,6 +41,7 @@ mod managed_state_reads;
 mod memory_plan;
 mod module_assembly;
 mod module_start;
+mod pointer_prefixes;
 mod reachability;
 mod runtime_helper_registry;
 mod runtime_helpers;
@@ -425,6 +426,8 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     } = imports::encode(&mut types, first_import_type, &dependencies);
 
     let managed = crate::managed::ManagedBindingPlan::build(program, semantics);
+    let pointer_prefixes =
+        pointer_prefixes::PointerPrefixPlan::build(program, semantics, &standard_library);
     let global_plan::GlobalPlan {
         section: globals,
         runtime: runtime_globals,
@@ -483,6 +486,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             wasm_ir,
             async_frames: &async_frames,
             managed_state_reads: &managed_state_reads,
+            pointer_prefixes: &pointer_prefixes,
         },
     );
     let debug_recorder = (wasm_ir.profile() == crate::BuildProfile::Debug)
@@ -597,6 +601,8 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         semantics,
         managed: &managed,
         managed_state_reads: &managed_state_reads,
+        pointer_prefixes: &pointer_prefixes,
+        abi_read: static_data.layout().scratch().abi_read,
         explicit_layout_selection,
         globals: &global_indices,
         global_types: &global_types,
@@ -701,7 +707,14 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         codes.push(&body);
     }
     for (field_index, field) in state.all_fields().enumerate() {
-        let body = compile_read(field, read_functions[field_index], &abi, strings, &lowering);
+        let body = compile_read(
+            field,
+            read_functions[field_index],
+            pointer_prefixes.field(field.id),
+            &abi,
+            strings,
+            &lowering,
+        );
         codes.push(&body);
         if field.transform.is_some() {
             let function_index = transform_functions[field_index]

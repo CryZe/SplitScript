@@ -3,6 +3,7 @@
 pub(super) fn compile_read(
     field: &StateField,
     function_index: u32,
+    shared_prefix: Option<super::pointer_prefixes::FieldPrefix>,
     abi: &Abi,
     strings: &StringPool,
     lowering: &EmissionContext<'_>,
@@ -138,6 +139,7 @@ pub(super) fn compile_read(
         debug_assert_eq!(direct_read, IntrinsicId::ProcessRead);
     }
     let decoded_string = path.decoder.is_some();
+    let parameter_count = if shared_prefix.is_some() { 3 } else { 1 };
     let mut locals = vec![(1, ValType::I64)];
     if decoded_string {
         locals.push((
@@ -146,9 +148,50 @@ pub(super) fn compile_read(
         ));
     }
     let mut function = Function::new(locals);
-    let address_local = 1;
+    let address_local = parameter_count;
     let offsets = &path.offsets;
-    if let crate::ast::PointerPathBase::Module { name, offset } = &path.base {
+    if let Some(prefix) = shared_prefix {
+        function
+            .instruction(&Instruction::LocalGet(2))
+            .instruction(&Instruction::I32Const(
+                super::pointer_prefixes::PREFIX_RESOLVED,
+            ))
+            .instruction(&Instruction::I32Ne)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::LocalGet(2))
+            .instruction(&Instruction::I32Const(
+                super::pointer_prefixes::PREFIX_MODULE_MISSING,
+            ))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::If(BlockType::Result(
+                lowering.gc.val_type(Type::Result(result_type)),
+            )));
+        emit_pointer_read_failure(
+            &mut function,
+            result_type,
+            field_type,
+            optional,
+            "process module was not found",
+            lowering.gc,
+        );
+        function.instruction(&Instruction::Else);
+        emit_pointer_read_failure(
+            &mut function,
+            result_type,
+            field_type,
+            optional,
+            "process read failed",
+            lowering.gc,
+        );
+        function
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::LocalGet(1))
+            .instruction(&Instruction::I64Const(prefix.initial_offset))
+            .instruction(&Instruction::I64Add)
+            .instruction(&Instruction::LocalSet(address_local));
+    } else if let crate::ast::PointerPathBase::Module { name, offset } = &path.base {
         let (ptr, len) = strings.get(name);
         function
             .instruction(&Instruction::LocalGet(0))
@@ -194,7 +237,8 @@ pub(super) fn compile_read(
         abi_read: lowering.abi_read,
         read_failure: "process read failed",
     };
-    for offset in offsets {
+    let offset_start = shared_prefix.map_or(0, |prefix| prefix.offset_start);
+    for offset in &offsets[offset_start..] {
         emit_process_read(&mut function, &process_read, 8);
         function
             .instruction(&Instruction::I32Const(lowering.abi_read.start()))
@@ -217,7 +261,7 @@ pub(super) fn compile_read(
                 "UTF-16LE string could not be read",
             ),
         };
-        let string_local = 2;
+        let string_local = address_local + 1;
         function
             .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
             .instruction(&Instruction::LocalGet(address_local))

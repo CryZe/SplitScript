@@ -122,6 +122,8 @@ struct AsyncTestHost {
     process_open: bool,
     messages: Vec<String>,
     memory_regions: Vec<(u64, Vec<u8>)>,
+    module_lookups: usize,
+    process_reads: Vec<u64>,
     raw_scene: i32,
     raw_entities: i32,
     fail_scene_read: bool,
@@ -166,10 +168,14 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
                         "process_is_open" => {
                             results[0] = Val::I32(i32::from(caller.data().process_open));
                         }
-                        "process_get_module_address" => results[0] = Val::I64(0x1000),
+                        "process_get_module_address" => {
+                            caller.data_mut().module_lookups += 1;
+                            results[0] = Val::I64(0x1000);
+                        }
                         "process_get_module_size" => results[0] = Val::I64(0x200),
                         "process_read" => {
                             let address = parameters[1].unwrap_i64();
+                            caller.data_mut().process_reads.push(address as u64);
                             if address == 0x7fff_0000 && caller.data().fail_scene_read
                                 || address == 0x7fff_0004 && caller.data().fail_entities_read
                             {
@@ -245,6 +251,8 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
             process_open: true,
             messages: Vec::new(),
             memory_regions: Vec::new(),
+            module_lookups: 0,
+            process_reads: Vec::new(),
             raw_scene: 1,
             raw_entities: 7,
             fail_scene_read: false,
@@ -260,6 +268,97 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
         .call(&mut store, ())
         .unwrap();
     (store, instance)
+}
+
+#[test]
+fn state_snapshot_reuses_shared_module_and_pointer_prefixes() {
+    let source = r#"
+        state "game.exe" {
+            health: u32 at "game.dll", 0x20, 0x8, 0x4;
+            flags: u16 at "game.dll", 0x20, 0x8, 0x6;
+            mode: u8 at "game.dll", 0x30, 0x8;
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    store.data_mut().memory_regions = vec![
+        (0x1020, 0x2000u64.to_le_bytes().to_vec()),
+        (0x1030, 0x4000u64.to_le_bytes().to_vec()),
+        (0x2008, 0x3000u64.to_le_bytes().to_vec()),
+        (0x3004, vec![42, 0, 7, 0]),
+        (0x4008, vec![3]),
+    ];
+
+    instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap()
+        .call(&mut store, ())
+        .unwrap();
+
+    assert_eq!(store.data().module_lookups, 1);
+    let mut reads = store.data().process_reads.clone();
+    reads.sort_unstable();
+    assert_eq!(reads, [0x1020, 0x1030, 0x2008, 0x3004, 0x3006, 0x4008]);
+
+    // Locals belong to one update invocation, not to the attachment. A later
+    // snapshot must follow replaced pointers while still sharing that tick's
+    // common work.
+    store.data_mut().module_lookups = 0;
+    store.data_mut().process_reads.clear();
+    store.data_mut().memory_regions = vec![
+        (0x1020, 0x5000u64.to_le_bytes().to_vec()),
+        (0x1030, 0x4000u64.to_le_bytes().to_vec()),
+        (0x5008, 0x6000u64.to_le_bytes().to_vec()),
+        (0x6004, vec![99, 0, 11, 0]),
+        (0x4008, vec![4]),
+    ];
+    instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap()
+        .call(&mut store, ())
+        .unwrap();
+
+    assert_eq!(store.data().module_lookups, 1);
+    let mut reads = store.data().process_reads.clone();
+    reads.sort_unstable();
+    assert_eq!(reads, [0x1020, 0x1030, 0x4008, 0x5008, 0x6004, 0x6006]);
+}
+
+#[test]
+fn shared_pointer_prefixes_remain_lazy_for_inactive_layout_fields() {
+    let source = r#"
+        enum Edition {
+            Active,
+            Inactive,
+        }
+
+        state "game.exe" {
+            layout {
+                edition: Edition,
+            }
+
+            active: u8 at 0x9000;
+            if layout.edition == Edition.Inactive {
+                dormantA: u8 at "unused.dll", 0x20, 0x4;
+                dormantB: u8 at "unused.dll", 0x20, 0x8;
+            }
+        }
+
+        onAttach {
+            return Layout { edition: Edition.Active }
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    store.data_mut().memory_regions = vec![(0x9000, vec![1])];
+    instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap()
+        .call(&mut store, ())
+        .unwrap();
+
+    assert_eq!(store.data().module_lookups, 0);
+    assert_eq!(store.data().process_reads, [0x9000]);
 }
 
 #[test]

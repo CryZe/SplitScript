@@ -70,6 +70,7 @@ pub(super) struct Inputs<'a> {
     pub wasm_ir: &'a crate::wasm_ir::Program,
     pub async_frames: &'a super::async_frame::AsyncFrameLayouts,
     pub managed_state_reads: &'a super::managed_state_reads::ManagedStateReadCache,
+    pub pointer_prefixes: &'a super::pointer_prefixes::PointerPrefixPlan,
 }
 
 pub(super) fn encode<'a>(
@@ -95,6 +96,7 @@ pub(super) fn encode<'a>(
         wasm_ir,
         async_frames,
         managed_state_reads,
+        pointer_prefixes,
     } = inputs;
     let mut section = FunctionSection::new();
     let mut next_function = imported_functions;
@@ -443,9 +445,13 @@ pub(super) fn encode<'a>(
                     .expect("checked state fields have poll-result types"),
                 semantics,
             );
+            let mut parameters = vec![ValType::I64];
+            if pointer_prefixes.field(field.id).is_some() {
+                parameters.extend([ValType::I64, ValType::I32]);
+            }
             reads.push(declare(
                 format!("state::{}::read", field.name),
-                vec![ValType::I64],
+                parameters,
                 vec![gc.val_type(poll_result)],
             ));
             transforms.push(field.transform.as_ref().map(|_| {

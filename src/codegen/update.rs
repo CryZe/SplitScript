@@ -12,8 +12,16 @@ use crate::{
 };
 
 use super::{
-    GcLayout, STATE_TYPE, Type, data_plan::StringPool, emit_typed_struct_get,
-    global_plan::RuntimeGlobals, imports::Abi, managed_state_reads::ManagedStateReadCache,
+    GcLayout, STATE_TYPE, Type,
+    data_plan::StringPool,
+    emit_typed_struct_get,
+    global_plan::RuntimeGlobals,
+    imports::Abi,
+    managed_state_reads::ManagedStateReadCache,
+    memory_plan::AbiReadScratch,
+    pointer_prefixes::{
+        PointerPrefixPlan, PrefixEmissionContext, PrefixEmissionState, PrefixLocals,
+    },
     record_field_type, semantic_type, state_storage_index, value_type,
 };
 
@@ -30,6 +38,8 @@ pub(super) struct UpdateContext<'a> {
     pub semantics: &'a crate::semantic::SemanticModel,
     pub managed: &'a crate::managed::ManagedBindingPlan,
     pub managed_state_reads: &'a ManagedStateReadCache,
+    pub pointer_prefixes: &'a PointerPrefixPlan,
+    pub abi_read: AbiReadScratch,
     pub explicit_layout_selection: bool,
     pub globals: &'a HashMap<ValueId, u32>,
     pub global_types: &'a HashMap<ValueId, Type>,
@@ -65,6 +75,21 @@ pub(super) struct StatePollFunctions<'a> {
     pub transforms: &'a [Option<u32>],
 }
 
+#[derive(Clone, Copy)]
+struct StateFieldPoll {
+    field: ValueId,
+    read_function: u32,
+    transform_function: Option<u32>,
+    poll_result_local: u32,
+}
+
+struct SnapshotPollContext<'a> {
+    candidate_state: u32,
+    pointer_prefix_locals: &'a PrefixLocals,
+    pointer_emission: PrefixEmissionContext<'a>,
+    lowering: &'a UpdateContext<'a>,
+}
+
 pub(super) fn compile_update(
     program: &Program,
     strings: &StringPool,
@@ -78,6 +103,12 @@ pub(super) fn compile_update(
     let globals = lowering.runtime_globals;
     let semantics = lowering.semantics;
     let has_game_time = actions.contains_key(&ActionKind::GameTime);
+    let timer_state = 0;
+    let nullable_bool = 1;
+    let newly_attached = 2;
+    let duration_local = 3;
+    let candidate_state = if has_game_time { 4 } else { 3 };
+    let first_poll_result = candidate_state + 1;
     let mut locals = vec![(3, ValType::I32)];
     if has_game_time {
         locals.push((
@@ -106,13 +137,24 @@ pub(super) fn compile_update(
         );
         locals.push((1, lowering.gc.val_type(poll_result)));
     }
+    let first_prefix_local = first_poll_result + all_fields.len() as u32;
+    let (prefix_local_declarations, pointer_prefix_locals) = lowering
+        .pointer_prefixes
+        .allocate_locals(first_prefix_local);
+    locals.extend(prefix_local_declarations);
     let mut function = Function::new(locals);
-    let timer_state = 0;
-    let nullable_bool = 1;
-    let newly_attached = 2;
-    let duration_local = 3;
-    let candidate_state = if has_game_time { 4 } else { 3 };
-    let first_poll_result = candidate_state + 1;
+    let snapshot_poll = SnapshotPollContext {
+        candidate_state,
+        pointer_prefix_locals: &pointer_prefix_locals,
+        pointer_emission: PrefixEmissionContext {
+            plan: lowering.pointer_prefixes,
+            strings,
+            abi: lowering.abi,
+            process_global: lowering.runtime_globals.process,
+            abi_read: lowering.abi_read,
+        },
+        lowering,
+    };
 
     if let Some(refresh_settings) = refresh_settings {
         function.instruction(&Instruction::Call(refresh_settings));
@@ -416,6 +458,7 @@ pub(super) fn compile_update(
         .instruction(&Instruction::StructNewDefault(STATE_TYPE))
         .instruction(&Instruction::LocalSet(candidate_state));
     if state.layouts.is_empty() {
+        let mut prefix_emission = PrefixEmissionState::default();
         for (read_index, field) in all_fields.iter().enumerate() {
             let constraints = semantics.state_field_layout_constraints(field.id);
             if !constraints.is_empty() {
@@ -424,12 +467,15 @@ pub(super) fn compile_update(
             }
             emit_state_field_poll(
                 &mut function,
-                field.id,
-                state_functions.reads[read_index],
-                state_functions.transforms[read_index],
-                first_poll_result + read_index as u32,
-                candidate_state,
-                lowering,
+                StateFieldPoll {
+                    field: field.id,
+                    read_function: state_functions.reads[read_index],
+                    transform_function: state_functions.transforms[read_index],
+                    poll_result_local: first_poll_result + read_index as u32,
+                },
+                &mut prefix_emission,
+                !constraints.is_empty(),
+                &snapshot_poll,
             );
             if !constraints.is_empty() {
                 function.instruction(&Instruction::End);
@@ -444,6 +490,7 @@ pub(super) fn compile_update(
             .as_ref()
             .expect("named layouts generate a typed enum");
         for (layout_index, layout) in state.layouts.iter().enumerate() {
+            let mut prefix_emission = PrefixEmissionState::default();
             function
                 .instruction(&Instruction::GlobalGet(selected))
                 .instruction(&Instruction::RefAsNonNull)
@@ -461,12 +508,15 @@ pub(super) fn compile_update(
                     .expect("layout fields belong to the read-function plan");
                 emit_state_field_poll(
                     &mut function,
-                    field.id,
-                    state_functions.reads[read_index],
-                    state_functions.transforms[read_index],
-                    first_poll_result + read_index as u32,
-                    candidate_state,
-                    lowering,
+                    StateFieldPoll {
+                        field: field.id,
+                        read_function: state_functions.reads[read_index],
+                        transform_function: state_functions.transforms[read_index],
+                        poll_result_local: first_poll_result + read_index as u32,
+                    },
+                    &mut prefix_emission,
+                    false,
+                    &snapshot_poll,
                 );
             }
             function.instruction(&Instruction::End);
@@ -841,13 +891,18 @@ fn emit_storage_default(function: &mut Function, ty: ValType) {
 
 fn emit_state_field_poll(
     function: &mut Function,
-    field: crate::ast::ValueId,
-    read_function: u32,
-    transform_function: Option<u32>,
-    poll_result_local: u32,
-    candidate_state: u32,
-    lowering: &UpdateContext<'_>,
+    poll: StateFieldPoll,
+    prefix_emission: &mut PrefixEmissionState,
+    conditional: bool,
+    context: &SnapshotPollContext<'_>,
 ) {
+    let StateFieldPoll {
+        field,
+        read_function,
+        transform_function,
+        poll_result_local,
+    } = poll;
+    let lowering = context.lowering;
     let semantics = lowering.semantics;
     let Type::Result(result_type) = semantic_type(
         semantics
@@ -859,8 +914,17 @@ fn emit_state_field_poll(
     };
     let (field_index, _) = state_storage_index(field, semantics);
     let field_type = value_type(field, semantics);
+    function.instruction(&Instruction::GlobalGet(lowering.runtime_globals.process));
+    if let Some(prefix) = lowering.pointer_prefixes.field(field) {
+        context.pointer_prefix_locals.emit_field_prefix(
+            function,
+            prefix,
+            &context.pointer_emission,
+            prefix_emission,
+            conditional,
+        );
+    }
     function
-        .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
         .instruction(&Instruction::Call(read_function))
         .instruction(&Instruction::LocalSet(poll_result_local));
 
@@ -913,7 +977,7 @@ fn emit_state_field_poll(
     function
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
-        .instruction(&Instruction::LocalGet(candidate_state))
+        .instruction(&Instruction::LocalGet(context.candidate_state))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::GlobalGet(lowering.runtime_globals.current))
         .instruction(&Instruction::RefAsNonNull);
@@ -924,7 +988,7 @@ fn emit_state_field_poll(
             field_index,
         })
         .instruction(&Instruction::Else)
-        .instruction(&Instruction::LocalGet(candidate_state))
+        .instruction(&Instruction::LocalGet(context.candidate_state))
         .instruction(&Instruction::RefAsNonNull);
     emit_poll_value(
         function,

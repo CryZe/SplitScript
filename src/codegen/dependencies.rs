@@ -117,6 +117,7 @@ impl BackendDependencies {
                         specialize(*receiver_type),
                         program,
                         semantics,
+                        reachability,
                     );
                 }
                 wasm_ir::ExpressionKind::Call {
@@ -148,7 +149,12 @@ impl BackendDependencies {
                             .expression(*displayed)
                             .expect("intrinsic arguments belong to Wasm IR")
                             .ty;
-                        dependencies.require_display_helpers(specialize(ty), program, semantics);
+                        dependencies.require_display_helpers(
+                            specialize(ty),
+                            program,
+                            semantics,
+                            reachability,
+                        );
                     }
                 }
                 wasm_ir::ExpressionKind::InterpolatedString(parts) => {
@@ -164,6 +170,7 @@ impl BackendDependencies {
                             specialize(source),
                             program,
                             semantics,
+                            reachability,
                         );
                     }
                 }
@@ -178,7 +185,7 @@ impl BackendDependencies {
                         .expect("cast operand belongs to Wasm IR")
                         .ty;
                     let source = specialize(source);
-                    dependencies.require_display_helpers(source, program, semantics);
+                    dependencies.require_display_helpers(source, program, semantics, reachability);
                 }
                 _ => {}
             }
@@ -195,7 +202,7 @@ impl BackendDependencies {
             dependencies.require(RuntimeHelperId::WrapDebugVariant);
             dependencies.require(RuntimeHelperId::QuoteDebugString);
             for ty in reachability.derived_debugs() {
-                dependencies.require_display_helpers(ty, program, semantics);
+                dependencies.require_display_helpers(ty, program, semantics, reachability);
             }
         }
 
@@ -293,11 +300,19 @@ impl BackendDependencies {
         ty: TypeId,
         program: &Program,
         semantics: &SemanticModel,
+        reachability: &super::reachability::Reachability,
     ) {
         let mut pending = vec![ty];
         let mut visited = BTreeSet::new();
         while let Some(ty) = pending.pop() {
             if !visited.insert(ty) {
+                continue;
+            }
+            // A custom Display/Debug implementation is an opaque formatting
+            // boundary. Its own reachable body contributes any helpers it
+            // actually uses; deriving through the source type here would keep
+            // an additional formatter that can never be called.
+            if reachability.has_custom_formatting(ty) {
                 continue;
             }
             match semantics.types().kind(ty) {

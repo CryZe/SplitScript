@@ -3135,10 +3135,8 @@ fn compile_async_flow(
         }
         wasm_ir::Terminator::Suspend {
             mode,
-            destination,
             value,
             poll_state,
-            resume_state,
             cancellation,
             source,
             ..
@@ -3165,22 +3163,14 @@ fn compile_async_flow(
                     .instruction(&Instruction::I32Const(0))
                     .instruction(&Instruction::Return);
             } else {
-                compile_suspension_poll(
-                    function,
-                    *mode,
-                    *destination,
-                    *value,
-                    runtime.abi,
-                    runtime.strings,
-                    layout,
-                    context,
-                );
+                // The dispatcher owns the one canonical copy of every poll.
+                // Redispatch immediately for a first poll in this tick rather
+                // than inlining the same operation here and again in its poll
+                // state for later ticks.
+                function.instruction(&Instruction::Br(loop_depth));
             }
-            set_async_state(function, *resume_state, context.locals.frame());
-            function.instruction(&Instruction::Br(loop_depth));
         }
         wasm_ir::Terminator::Retry {
-            attempt,
             poll_state,
             cancellation,
             source,
@@ -3195,17 +3185,10 @@ fn compile_async_flow(
                 debug.mark_suspend(function, *source);
             }
             set_async_state(function, *poll_state, context.locals.frame());
-            compile_async_flow(
-                function,
-                attempt,
-                loop_depth,
-                loop_control,
-                result_global,
-                cancellation_region,
-                runtime,
-                layout,
-                context,
-            );
+            // Retry attempts are ordinary dispatcher states. Enter that state
+            // in the current tick instead of duplicating its complete block at
+            // every syntactic retry boundary.
+            function.instruction(&Instruction::Br(loop_depth));
         }
         wasm_ir::Terminator::RetryComplete {
             value,

@@ -1848,19 +1848,30 @@ fn creating_and_dropping_a_future_does_not_suspend_the_creator() {
     let source = r#"
         state "game.exe" {}
 
+        fn deferred() -> async None {
+            print("polled")
+            await nextTick()
+        }
+
         fn prepare() {
-            let _pending = nextTick()
+            let _pending = deferred()
             print("prepared")
         }
 
         onAttach {
             prepare()
+            await process.closed()
         }
     "#;
 
     let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
         .expect("future creation alone should be synchronous");
-    let prepare = &checked.syntax().functions[0];
+    let prepare = checked
+        .syntax()
+        .functions
+        .iter()
+        .find(|function| function.name == "prepare")
+        .expect("the synchronous creator should be present");
     assert_eq!(
         checked.effects().function(prepare.id).suspension,
         splitscript::compiler::stdlib::SuspensionKind::None
@@ -1868,6 +1879,17 @@ fn creating_and_dropping_a_future_does_not_suspend_the_creator() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
         .expect("a synchronous future-producing expression should validate");
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        ["prepared"],
+        "constructing a source-defined future must not execute any part of its body"
+    );
 }
 
 #[test]

@@ -597,6 +597,16 @@ impl Reachability {
         self.derived_debugs.iter().copied()
     }
 
+    /// Whether formatting this type dispatches to a source-defined body.
+    ///
+    /// Backend dependency discovery uses this to stop structural helper
+    /// traversal at the same boundary as actual formatting emission. The
+    /// custom body's reachable expressions own their dependencies; walking
+    /// through the type as well would retain the unused derived formatter.
+    pub(super) fn has_custom_formatting(&self, ty: TypeId) -> bool {
+        self.display_functions.contains_key(&ty) || self.debug_functions.contains_key(&ty)
+    }
+
     pub fn contains_expression(&self, expression: ExprId) -> bool {
         self.expressions.contains(&expression)
     }

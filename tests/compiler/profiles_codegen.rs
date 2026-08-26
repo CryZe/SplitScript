@@ -321,6 +321,33 @@ fn float_format_helpers_and_tables_are_materialized_by_reachable_width() {
     for suffix in ["::FormatF64", "::ZmijDecimalF64", "::ZmijMul192Hi128"] {
         assert!(f64_names.iter().any(|name| name.ends_with(suffix)));
     }
+
+    let custom = splitscript::compile_with_options(
+        r#"
+            record Measurement { value: f32 }
+
+            fn Measurement.toString() -> String {
+                return "measurement"
+            }
+
+            state "game.exe" {}
+            setup { print(Measurement { value: 1.25 as f32 }) }
+        "#,
+        CompilerOptions {
+            profile: BuildProfile::Debug,
+            ..CompilerOptions::default()
+        },
+    )
+    .expect("a custom Display implementation should compile");
+    let custom = names(&custom);
+    assert!(
+        custom.iter().all(|name| !name.contains("FormatF")),
+        "a custom formatter must not retain an unreachable structural float formatter"
+    );
+    assert!(
+        custom.iter().all(|name| !name.contains("Zmij")),
+        "a custom formatter must not retain unreachable decimal-conversion helpers"
+    );
 }
 
 #[test]

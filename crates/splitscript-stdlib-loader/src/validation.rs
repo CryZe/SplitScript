@@ -1022,7 +1022,11 @@ impl<'a> Validator<'a> {
         let mut selector_names = HashSet::new();
         for selector in &value.selectors {
             let qualified = format!("{}.{}", value.name, selector.name);
-            self.validate_attributes(&qualified, &selector.attributes, &["prepare"]);
+            self.validate_attributes(
+                &qualified,
+                &selector.attributes,
+                &["prepare", "managedBackend"],
+            );
             if let Some(preparation) =
                 self.optional_name_attribute(&qualified, &selector.attributes, "prepare")
             {
@@ -1034,6 +1038,14 @@ impl<'a> Validator<'a> {
             } else {
                 self.error(format!(
                     "state-provider selector `{qualified}` is missing `@prepare(...)`"
+                ));
+            }
+            if let Some(backend) =
+                self.optional_name_attribute(&qualified, &selector.attributes, "managedBackend")
+                && !matches!(backend, "il2cpp" | "mono")
+            {
+                self.error(format!(
+                    "state-provider selector `{qualified}` has invalid managed backend `{backend}`; expected `il2cpp` or `mono`"
                 ));
             }
             if !selector_names.insert(selector.name.as_str()) {

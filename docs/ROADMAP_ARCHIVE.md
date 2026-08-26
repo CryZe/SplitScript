@@ -1,5 +1,22 @@
 # SplitScript roadmap
 
+## 2026-08-26: demand-driven generated code
+
+- Kept source-defined async functions fully lazy: construction only captures
+  their inputs, while the body advances exclusively when its state machine is
+  polled. First and subsequent polls now share one canonical dispatcher body
+  instead of duplicating every suspension and retry attempt.
+- Stopped structural formatting dependency discovery at source-defined
+  `Display` and `Debug` implementations, preventing unused derived float
+  formatters and decimal tables from leaking into an artifact.
+- Added privileged managed-backend metadata to configured state-provider
+  selectors. An explicit `Unity.il2cpp(...)` or `Unity.mono(...)` build now
+  emits only its reachable schema binder; automatic Unity detection continues
+  to retain both backends.
+- Reduced the release Lunistice artifact from 90,413 bytes to 30,638 bytes,
+  while preserving both base-game and DLC runtime behavior. The result is
+  smaller than the 34,437-byte Rust ASR comparison build.
+
 ## 2026-08-23: Structural user implementations for catalog capabilities
 
 - Added catalog-authored structural method requirements and used them for

@@ -64,7 +64,19 @@ pub struct StateProviderSelector {
     /// this selector and its result matches the provider's default
     /// preparation result.
     pub preparation: StdlibItemId,
+    /// Optional managed-runtime specialization known from this selector.
+    ///
+    /// This is privileged catalog metadata rather than public language syntax.
+    /// Managed-schema generation uses it to omit backend branches that cannot
+    /// be reached for an explicitly configured provider.
+    pub managed_backend: Option<ManagedRuntimeBackend>,
     pub documentation: Documentation<StdlibSymbolId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedRuntimeBackend {
+    Il2Cpp,
+    Mono,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -10,7 +10,10 @@ use crate::{
     lexer, parser,
 };
 
-use super::{Implementation, ItemKind, Signature, StandardLibrary, StdlibItem, TypeRef};
+use super::{
+    Implementation, ItemKind, ManagedRuntimeBackend, Signature, StandardLibrary, StdlibItem,
+    TypeRef,
+};
 
 pub(crate) const RESERVED_FUNCTION_PREFIX: &str = "__splitscript_stdlib_";
 pub(crate) const PROVIDER_PREPARATION_FUNCTION: &str =
@@ -112,15 +115,18 @@ pub(crate) fn augment_program_with_library_bodies(
             combined.push('\n');
         }
     }
-    if let Some((function_name, arguments)) =
-        selected_provider_preparation(user_source, user_program, library)
-    {
+    if let Some(selected) = selected_provider_preparation(user_source, user_program, library) {
         if combined.is_empty() {
-            combined.reserve(user_source.len() + function_name.len() + 128);
+            combined.reserve(user_source.len() + selected.function_name.len() + 128);
             combined.push_str(user_source);
             combined.push('\n');
         }
-        let source = managed_preparation_source(user_program, function_name, &arguments.join(", "));
+        let source = managed_preparation_source(
+            user_program,
+            selected.function_name,
+            &selected.arguments.join(", "),
+            selected.managed_backend,
+        );
         let start = combined.len();
         combined.push_str(&source);
         body_ranges.push((
@@ -168,7 +174,12 @@ struct SchemaClass<'ast> {
     class: &'ast ManagedClassDecl,
 }
 
-fn managed_preparation_source(program: &Program, preparation: &str, arguments: &str) -> String {
+fn managed_preparation_source(
+    program: &Program,
+    preparation: &str,
+    arguments: &str,
+    managed_backend: Option<ManagedRuntimeBackend>,
+) -> String {
     let classes = schema_classes(program);
     if classes.is_empty() {
         return format!(
@@ -205,23 +216,53 @@ fn managed_preparation_source(program: &Program, preparation: &str, arguments: &
     }
     source.push_str("}\n");
     source.push_str(&format!(
-        "fn {PROVIDER_PREPARATION_FUNCTION}() {{\n    let __runtime = await {preparation}({arguments})\n    return match __runtime.backend {{\n"
+        "fn {PROVIDER_PREPARATION_FUNCTION}() {{\n    let __runtime = await {preparation}({arguments})\n"
     ));
-    source.push_str("        UnityRuntimeBackend.Il2cpp => {\n");
-    source.push_str("            let __module = __runtime.il2cpp else await process.closed()\n");
-    source.push_str(&managed_backend_binding_source(
-        &classes,
-        "__module",
-        "__module.pointerSize",
-    ));
-    source.push_str("        },\n        UnityRuntimeBackend.Mono => {\n");
-    source.push_str("            let __module = __runtime.mono else await process.closed()\n");
-    source.push_str(&managed_backend_binding_source(
-        &classes,
-        "__module",
-        "match __module.pointerSize { PointerSize.Bit32 => 4, PointerSize.Bit64 => 8 }",
-    ));
-    source.push_str("        },\n    }\n}\n");
+    match managed_backend {
+        Some(ManagedRuntimeBackend::Il2Cpp) => {
+            source.push_str("    let __module = __runtime.il2cpp else await process.closed()\n");
+            source.push_str("    return {\n");
+            source.push_str(&managed_backend_binding_source(
+                &classes,
+                "__module",
+                "__module.pointerSize",
+            ));
+            source.push_str("    }\n");
+        }
+        Some(ManagedRuntimeBackend::Mono) => {
+            source.push_str("    let __module = __runtime.mono else await process.closed()\n");
+            source.push_str("    return {\n");
+            source.push_str(&managed_backend_binding_source(
+                &classes,
+                "__module",
+                "match __module.pointerSize { PointerSize.Bit32 => 4, PointerSize.Bit64 => 8 }",
+            ));
+            source.push_str("    }\n");
+        }
+        None => {
+            source.push_str("    return match __runtime.backend {\n");
+            source.push_str("        UnityRuntimeBackend.Il2cpp => {\n");
+            source.push_str(
+                "            let __module = __runtime.il2cpp else await process.closed()\n",
+            );
+            source.push_str(&managed_backend_binding_source(
+                &classes,
+                "__module",
+                "__module.pointerSize",
+            ));
+            source.push_str("        },\n        UnityRuntimeBackend.Mono => {\n");
+            source.push_str(
+                "            let __module = __runtime.mono else await process.closed()\n",
+            );
+            source.push_str(&managed_backend_binding_source(
+                &classes,
+                "__module",
+                "match __module.pointerSize { PointerSize.Bit32 => 4, PointerSize.Bit64 => 8 }",
+            ));
+            source.push_str("        },\n    }\n");
+        }
+    }
+    source.push_str("}\n");
     source
 }
 
@@ -400,11 +441,17 @@ pub(crate) fn managed_static_table_name(class: usize) -> String {
     format!("__class_{class}_static_table")
 }
 
+struct SelectedProviderPreparation<'source> {
+    function_name: &'static str,
+    arguments: Vec<&'source str>,
+    managed_backend: Option<ManagedRuntimeBackend>,
+}
+
 fn selected_provider_preparation<'source>(
     user_source: &'source str,
     user_program: &Program,
     library: &StandardLibrary,
-) -> Option<(&'static str, Vec<&'source str>)> {
+) -> Option<SelectedProviderPreparation<'source>> {
     let state = user_program.state.as_ref()?;
     let provider = state
         .provider
@@ -417,7 +464,7 @@ fn selected_provider_preparation<'source>(
                 .then(|| library.default_state_provider())
                 .flatten()
         })?;
-    let (preparation, arguments) = if let Some(reference) = &state.provider
+    let (preparation, arguments, managed_backend) = if let Some(reference) = &state.provider
         && let Some(selected) = &reference.selector
     {
         let selector = provider
@@ -431,15 +478,20 @@ fn selected_provider_preparation<'source>(
                 .iter()
                 .map(|argument| &user_source[argument.span.start..argument.span.end])
                 .collect(),
+            selector.managed_backend,
         )
     } else {
-        (provider.preparation?, Vec::new())
+        (provider.preparation?, Vec::new(), None)
     };
     let item = library.item(preparation);
     let Implementation::LibraryBody { function_name, .. } = item.implementation else {
         return None;
     };
-    Some((function_name, arguments))
+    Some(SelectedProviderPreparation {
+        function_name,
+        arguments,
+        managed_backend,
+    })
 }
 
 #[cfg(test)]

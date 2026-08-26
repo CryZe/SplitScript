@@ -92,6 +92,21 @@ impl<'a> CatalogGenerator<'a> {
                     .iter()
                     .map(|selector| {
                         let preparation = attribute_name(&selector.attributes, "prepare");
+                        let managed_backend = optional_attribute_name(
+                            &selector.attributes,
+                            "managedBackend",
+                        )
+                        .map_or_else(
+                            || "None".to_owned(),
+                            |backend| {
+                                let variant = match backend {
+                                    "il2cpp" => "Il2Cpp",
+                                    "mono" => "Mono",
+                                    _ => unreachable!("managed backends are validated"),
+                                };
+                                format!("Some(ManagedRuntimeBackend::{variant})")
+                            },
+                        );
                         let parameters = selector
                             .parameters
                             .iter()
@@ -105,7 +120,7 @@ impl<'a> CatalogGenerator<'a> {
                             .collect::<Vec<_>>()
                             .join(",");
                         format!(
-                            "StateProviderSelector {{ name: {}, parameters: &[{parameters}], preparation: StdlibItemId::{preparation}, documentation: {} }}",
+                            "StateProviderSelector {{ name: {}, parameters: &[{parameters}], preparation: StdlibItemId::{preparation}, managed_backend: {managed_backend}, documentation: {} }}",
                             quote(&selector.name),
                             self.documentation(&selector.documentation),
                         )
@@ -1768,7 +1783,7 @@ capability Integer<T: Numeric + Display> {}
         );
         let generated = generate_catalog(&parse(&source).unwrap()).unwrap();
         assert!(generated.contains(
-            "StateProviderSelector { name: \"runtime\", parameters: &[StateProviderSelectorParameter { name: \"version\", ty: TypeRef::Core(CoreTypeId::U32) },StateProviderSelectorParameter { name: \"mono\", ty: TypeRef::Standard(StdlibTypeId::MonoVersion) }], preparation: StdlibItemId::Print"
+            "StateProviderSelector { name: \"runtime\", parameters: &[StateProviderSelectorParameter { name: \"version\", ty: TypeRef::Core(CoreTypeId::U32) },StateProviderSelectorParameter { name: \"mono\", ty: TypeRef::Standard(StdlibTypeId::MonoVersion) }], preparation: StdlibItemId::Print, managed_backend: None"
         ));
     }
 }

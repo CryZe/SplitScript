@@ -182,6 +182,56 @@ fn reachable_managed_snapshot_types_have_gc_layouts() {
 }
 
 #[test]
+fn explicit_unity_backends_prune_the_unreachable_schema_binder() {
+    use splitscript::{BuildProfile, CompilerOptions};
+
+    let compile_names = |state: &str| {
+        let source = format!(
+            r#"
+                image "Assembly-CSharp" {{
+                    class GameManager {{
+                        static GameManager instance;
+                        i32 state;
+                    }}
+                }}
+
+                {state} {{
+                    state: i32 = GameManager.instance?.state?;
+                }}
+            "#
+        );
+        let wasm = splitscript::compile_with_options(
+            &source,
+            CompilerOptions {
+                profile: BuildProfile::Debug,
+                ..CompilerOptions::default()
+            },
+        )
+        .expect("the managed provider should compile");
+        debug_function_names(&wasm)
+            .expect("debug names should exist")
+            .1
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<Vec<_>>()
+    };
+
+    let explicit = compile_names(r#"state Unity.il2cpp(2020) ["game.exe"]"#);
+    assert!(explicit.iter().any(|name| name.contains("Il2Cpp")));
+    assert!(
+        explicit.iter().all(|name| !name.contains("Mono")),
+        "an explicit IL2CPP provider must not retain the unreachable Mono binder"
+    );
+
+    let automatic = compile_names(r#"state Unity ["game.exe"]"#);
+    assert!(automatic.iter().any(|name| name.contains("Il2Cpp")));
+    assert!(
+        automatic.iter().any(|name| name.contains("Mono")),
+        "automatic Unity discovery still needs both schema binders"
+    );
+}
+
+#[test]
 fn managed_schema_declarations_retain_their_logical_hierarchy() {
     use splitscript::compiler::hir::DeclarationId;
 

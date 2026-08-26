@@ -26,9 +26,9 @@ pub use schema::{
 
 pub use declarations::{
     CapabilityBehavior, CoreType, CoreTypeId, DeclaredTypeRef, FieldVisibility,
-    RuntimeRepresentation, ScalarMemoryLayout, StateProviderAttachment, StateProviderProcesses,
-    StdlibAssociatedType, StdlibAssociatedTypeDefinition, StdlibCapability, StdlibField,
-    StdlibNamespace, StdlibOwner, StdlibStateProvider, StdlibSymbolId, StdlibType,
+    ManagedRuntimeBackend, RuntimeRepresentation, ScalarMemoryLayout, StateProviderAttachment,
+    StateProviderProcesses, StdlibAssociatedType, StdlibAssociatedTypeDefinition, StdlibCapability,
+    StdlibField, StdlibNamespace, StdlibOwner, StdlibStateProvider, StdlibSymbolId, StdlibType,
     StdlibTypeConstructor, StdlibTypeKind, StdlibVariant, TypeConstructorSyntax, TypeVisibility,
     ValueUsage,
 };

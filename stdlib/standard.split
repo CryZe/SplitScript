@@ -65,6 +65,7 @@ stateProvider Unity as process {
     /// This bypasses Unity-version detection while retaining cooperative
     /// GameAssembly and metadata discovery.
     @prepare(UnityProviderIl2Cpp)
+    @managedBackend(il2cpp)
     selector il2cpp(version: u32),
 
     /// Selects a known modern Mono metadata layout.
@@ -72,6 +73,7 @@ stateProvider Unity as process {
     /// This bypasses Unity-version detection while retaining cooperative Mono
     /// module and metadata discovery.
     @prepare(UnityProviderMono)
+    @managedBackend(mono)
     selector mono(version: MonoVersion),
 }
 

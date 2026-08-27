@@ -143,7 +143,7 @@ image "Assembly-CSharp" {
             u32 level;
         }
 
-        if layout.edition == Edition.Demo {
+        else {
             u32 scene;
         }
     }
@@ -167,7 +167,7 @@ whileAttached {
     if layout.edition == Edition.BaseGame {
         print(manager.level else 0)
     }
-    if layout.edition == Edition.Demo {
+    else {
         print(manager.scene else 0)
     }
 }"#;
@@ -1185,7 +1185,7 @@ define_language_catalog! {
         "An [`image`] schema names the managed assembly image that owns its classes. The [`Unity`] state provider resolves the image and every declared class once per attachment before state polling begins. Schema declarations describe metadata; they do not read live game memory until a static or instance field path is evaluated.",
         &[Example::checked(
             "Describe a managed assembly image",
-            "image \"Assembly-CSharp\" {\n    class Player {\n        u32 score;\n    }\n\n    class GameManager from [\"Manager\", \"GameManager\"] {\n        static GameManager instance;\n        Player player;\n\n        if layout.edition == Edition.BaseGame {\n            u32 level;\n        }\n\n        if layout.edition == Edition.Demo {\n            u32 scene;\n        }\n    }\n}",
+            "image \"Assembly-CSharp\" {\n    class Player {\n        u32 score;\n    }\n\n    class GameManager from [\"Manager\", \"GameManager\"] {\n        static GameManager instance;\n        Player player;\n\n        if layout.edition == Edition.BaseGame {\n            u32 level;\n        } else {\n            u32 scene;\n        }\n    }\n}",
             MANAGED_IMAGE_SOURCE,
         )]
     ),
@@ -1195,7 +1195,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "class Name from [\"Alias\", ...] { Type field; static Type field; if layout.dimension == Variant { ... } }",
         "Declares a typed managed class binding.",
-        "Fields without [`static`](syntax@managed static field) are read from a live class reference; static fields are read through the class name. Each field hop is independently fallible and yields [`T!`], so postfix [`?`] can propagate an unsuccessful lookup to the surrounding state field, function, or [`retry`] boundary. The optional `from` list tries the written managed type names in order and binds the first complete schema. Fields declared directly in the class are always available. Put build-specific fields in an [`if`] group over the attachment-wide [`layout`] value; the same predicate then refines those fields in ordinary code.",
+        "Fields without [`static`](syntax@managed static field) are read from a live class reference; static fields are read through the class name. Each field hop is independently fallible and yields [`T!`], so postfix [`?`] can propagate an unsuccessful lookup to the surrounding state field, function, or [`retry`] boundary. The optional `from` list tries the written managed type names in order and binds the first complete schema. Fields declared directly in the class are always available. Put build-specific fields in an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain over the attachment-wide [`layout`] value. Each later branch describes exactly the layouts left unmatched by earlier branches, and the same branch predicate refines those fields in ordinary code.",
         &[Example::checked(
             "Follow a typed managed field path",
             "score: u32 = GameManager.instance?.player?.score?",
@@ -1221,7 +1221,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "state \"game.exe\" { ... } | state [\"game.exe\", \"demo.exe\"] { ... } | state Provider { ... }",
         "Declares process attachment and persistent watched state.",
-        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. A named standard-library provider selects a typed memory model. [`Unity`] binds managed [`image`] schemas while [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`], [`GCN`], and [`Wii`] expose emulator-specific read roots and accept original console addresses in state fields. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
+        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. A named standard-library provider selects a typed memory model. [`Unity`] binds managed [`image`] schemas while [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`], [`GCN`], and [`Wii`] expose emulator-specific read roots and accept original console addresses in state fields. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. With attachment-wide layout dimensions, conditional state fields may use an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain; later branches cover the exact layout combinations left unmatched by earlier branches. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
         STATE_DECL_EXAMPLES
     ),
     language_item!(
@@ -1252,7 +1252,7 @@ define_language_catalog! {
             ),
             Example::checked(
                 "Refine managed fields with the shared layout",
-                "if layout.edition == Edition.BaseGame {\n    print(manager.level else 0)\n}\nif layout.edition == Edition.Demo {\n    print(manager.scene else 0)\n}",
+                "if layout.edition == Edition.BaseGame {\n    print(manager.level else 0)\n} else {\n    print(manager.scene else 0)\n}",
                 MANAGED_IMAGE_SOURCE,
             ),
         ]

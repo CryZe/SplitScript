@@ -113,6 +113,11 @@ to inference or code generation.
     those predicates once, reject runtime-dependent conditions, and use the
     same predicate representation for member availability, control-flow
     refinement, binding, diagnostics, and code generation.
+  - [x] Support `else if` and `else` chains for conditional state and managed
+    fields. Represent every branch as the exact bounded set of layout
+    assignments left after preceding branches, so complements across several
+    dimensions remain correct in tooling, availability checks, binding, and
+    generated polling code.
   - [x] Make managed schema probes contribute constraints to the global layout
     dimensions. Probe results preserve both offsets and presence. When the
     complete set of conditional fields gives every bounded layout combination

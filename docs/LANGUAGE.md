@@ -182,9 +182,11 @@ onAttach {
 ```
 
 The generated `layout: Layout` value is read-only and stable for the whole
-attachment. The same equality predicate refines every declaration guarded by
-it, including managed fields. For a dimension with exactly two variants, the
-corresponding `else` branch refines to the other variant:
+attachment. The same predicate refines every declaration guarded by it,
+including managed fields. Conditional declarations support `else if` and
+`else`. Each later branch covers exactly the layout combinations not selected
+by an earlier branch, including conditions over several independent
+dimensions:
 
 ```splitscript
 image "Assembly-CSharp" {
@@ -193,9 +195,7 @@ image "Assembly-CSharp" {
 
         if layout.edition == Edition.BaseGame {
             u32 level;
-        }
-
-        if layout.edition == Edition.Demo {
+        } else {
             u32 scene;
         }
     }

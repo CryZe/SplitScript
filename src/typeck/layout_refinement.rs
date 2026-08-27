@@ -9,11 +9,14 @@ use std::collections::HashMap;
 
 use crate::{
     Diagnostic,
-    ast::{BinaryOp, Expr, ExprKind},
+    ast::{BinaryOp, ConditionalFieldsDecl, Expr, ExprKind, UnaryOp},
     types::ResolvedTypeRef,
 };
 
-use super::{Checker, declarations::LayoutConstraint};
+use super::{
+    Checker,
+    declarations::{LayoutConstraint, LayoutPredicate},
+};
 
 impl Checker {
     /// Extracts a conjunction of enum-variant facts from an arbitrary
@@ -98,28 +101,67 @@ impl Checker {
         canonical_constraints(candidates)
     }
 
-    /// Requires a declaration predicate to be statically understandable.
-    pub(super) fn require_layout_constraints(
+    /// Resolves flat parser branches into exact, mutually exclusive layout
+    /// alternatives. A branch introduced by `else` starts with the layouts
+    /// left unmatched by the preceding branches in the same chain.
+    pub(super) fn layout_branch_predicates<Field>(
         &mut self,
-        expression: &Expr,
-    ) -> Option<Vec<LayoutConstraint>> {
-        let constraints = self.layout_constraints(expression);
-        if constraints.as_ref().is_none_or(Vec::is_empty) {
+        groups: &[ConditionalFieldsDecl<Field>],
+    ) -> Vec<LayoutPredicate> {
+        let universe = self.layout_assignments();
+        if universe.is_empty() && !groups.is_empty() {
             self.errors.push(
                 Diagnostic::type_error(
-                    "conditional fields need a statically decidable layout predicate",
-                    expression.span,
+                    "conditional fields require a bounded attachment layout",
+                    groups[0].keyword_span,
                 )
-                .with_primary_label(
-                    "compare `layout.<dimension>` with an enum variant using `==`",
-                )
-                .with_note(
-                    "multiple independent dimensions may be combined with `&&`; broader boolean layout predicates will be added on top of this canonical constraint model",
-                ),
+                .with_primary_label("this conditional declaration needs exact layout branches")
+                .with_note(format!(
+                    "conditional layout declarations support at most {} layout combinations",
+                    crate::layout_selection::MAX_ENUMERATED_LAYOUT_COMBINATIONS,
+                )),
             );
-            return None;
         }
-        constraints
+        let mut remaining = universe.clone();
+        let mut predicates = Vec::with_capacity(groups.len());
+        for group in groups {
+            if group.else_span.is_none() {
+                remaining = universe.clone();
+            }
+            let selected = if let Some(condition) = &group.condition {
+                let mut understood = true;
+                let selected = remaining
+                    .iter()
+                    .filter(|assignment| {
+                        self.evaluate_layout_condition(condition, assignment)
+                            .unwrap_or_else(|| {
+                                understood = false;
+                                false
+                            })
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !understood {
+                    self.errors.push(
+                        Diagnostic::type_error(
+                            "conditional fields need a statically decidable layout predicate",
+                            condition.span,
+                        )
+                        .with_primary_label(
+                            "compare layout dimensions with enum variants using `==` or `!=` and combine them with `&&`, `||`, or `!`",
+                        ),
+                    );
+                }
+                selected
+            } else {
+                remaining.clone()
+            };
+            remaining.retain(|assignment| !selected.contains(assignment));
+            predicates.push(LayoutPredicate {
+                alternatives: selected,
+            });
+        }
+        predicates
     }
 
     pub(super) fn with_layout_constraints<T>(
@@ -127,23 +169,43 @@ impl Checker {
         constraints: Option<&[LayoutConstraint]>,
         operation: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        let previous = self.active_layout_constraints.clone();
-        if let Some(constraints) = constraints {
-            self.active_layout_constraints.extend(
-                constraints
-                    .iter()
-                    .map(|constraint| (constraint.dimension, constraint.variant)),
+        let predicate = constraints.map(|constraints| LayoutPredicate {
+            alternatives: self
+                .layout_assignments()
+                .into_iter()
+                .filter(|assignment| assignment_satisfies_constraints(assignment, constraints))
+                .collect(),
+        });
+        self.with_layout_predicate(predicate.as_ref(), operation)
+    }
+
+    pub(super) fn with_layout_predicate<T>(
+        &mut self,
+        predicate: Option<&LayoutPredicate>,
+        operation: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let previous = self.active_layouts.clone();
+        if let Some(predicate) = predicate {
+            let active = self.active_layouts.as_ref().map_or_else(
+                || self.layout_assignments(),
+                |active| active.alternatives.clone(),
             );
+            self.active_layouts = Some(LayoutPredicate {
+                alternatives: active
+                    .into_iter()
+                    .filter(|assignment| predicate.alternatives.contains(assignment))
+                    .collect(),
+            });
         }
         let output = operation(self);
-        self.active_layout_constraints = previous;
+        self.active_layouts = previous;
         output
     }
 
-    pub(super) fn layout_constraints_satisfied(&self, required: &[LayoutConstraint]) -> bool {
-        required.iter().all(|constraint| {
-            self.active_layout_constraints.get(&constraint.dimension) == Some(&constraint.variant)
-        })
+    pub(super) fn layout_predicate_satisfied(&self, required: &LayoutPredicate) -> bool {
+        self.active_layout_assignments()
+            .iter()
+            .all(|assignment| required.alternatives.contains(assignment))
     }
 
     fn collect_layout_constraints(
@@ -259,6 +321,94 @@ impl Checker {
             variant: variant.id,
         })
     }
+
+    fn layout_assignments(&self) -> Vec<Vec<LayoutConstraint>> {
+        let Some(layout) = self
+            .declarations
+            .records
+            .iter()
+            .find(|record| record.name == "Layout")
+        else {
+            return vec![Vec::new()];
+        };
+        let mut assignments = vec![Vec::new()];
+        for field in &layout.fields {
+            let Some(ResolvedTypeRef::Enum(enum_id)) = self.resolutions.type_ref(field.ty) else {
+                return Vec::new();
+            };
+            let Some(enumeration) = self
+                .declarations
+                .enums
+                .iter()
+                .find(|enumeration| enumeration.id == enum_id)
+            else {
+                return Vec::new();
+            };
+            if assignments
+                .len()
+                .checked_mul(enumeration.variants.len())
+                .is_none_or(|count| {
+                    count > crate::layout_selection::MAX_ENUMERATED_LAYOUT_COMBINATIONS
+                })
+            {
+                return Vec::new();
+            }
+            assignments = assignments
+                .into_iter()
+                .flat_map(|assignment| {
+                    enumeration.variants.iter().map(move |variant| {
+                        let mut assignment = assignment.clone();
+                        assignment.push(LayoutConstraint {
+                            dimension: field.id,
+                            variant: variant.id,
+                        });
+                        assignment
+                    })
+                })
+                .collect();
+        }
+        assignments
+    }
+
+    fn active_layout_assignments(&self) -> Vec<Vec<LayoutConstraint>> {
+        self.active_layouts.as_ref().map_or_else(
+            || self.layout_assignments(),
+            |active| active.alternatives.clone(),
+        )
+    }
+
+    fn evaluate_layout_condition(
+        &self,
+        expression: &Expr,
+        assignment: &[LayoutConstraint],
+    ) -> Option<bool> {
+        match &expression.kind {
+            ExprKind::Bool(value) => Some(*value),
+            ExprKind::Unary {
+                op: UnaryOp::Not,
+                expr,
+            } => Some(!self.evaluate_layout_condition(expr, assignment)?),
+            ExprKind::Binary { op, left, right } => match op {
+                BinaryOp::And => Some(
+                    self.evaluate_layout_condition(left, assignment)?
+                        && self.evaluate_layout_condition(right, assignment)?,
+                ),
+                BinaryOp::Or => Some(
+                    self.evaluate_layout_condition(left, assignment)?
+                        || self.evaluate_layout_condition(right, assignment)?,
+                ),
+                BinaryOp::Eq | BinaryOp::Ne => {
+                    let constraint = self
+                        .layout_constraint_atom(left, right)
+                        .or_else(|| self.layout_constraint_atom(right, left))?;
+                    let equal = assignment.contains(&constraint);
+                    Some(if *op == BinaryOp::Eq { equal } else { !equal })
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 fn canonical_constraints(candidates: Vec<LayoutConstraint>) -> Vec<LayoutConstraint> {
@@ -281,6 +431,15 @@ fn canonical_constraints(candidates: Vec<LayoutConstraint>) -> Vec<LayoutConstra
         .collect::<Vec<_>>();
     constraints.sort_by_key(|constraint| constraint.dimension.index());
     constraints
+}
+
+fn assignment_satisfies_constraints(
+    assignment: &[LayoutConstraint],
+    constraints: &[LayoutConstraint],
+) -> bool {
+    constraints
+        .iter()
+        .all(|constraint| assignment.contains(constraint))
 }
 
 fn expression_path(expression: &Expr) -> Option<Vec<&str>> {

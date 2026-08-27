@@ -331,6 +331,13 @@ pub struct ResolvedLayoutConstraint {
     pub variant: EnumVariantId,
 }
 
+/// Exact attachment-layout alternatives under which a conditional declaration
+/// exists. Every alternative contains one variant for each layout dimension.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ResolvedLayoutPredicate {
+    pub alternatives: Vec<Vec<ResolvedLayoutConstraint>>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SemanticModel {
     types: TypeStore,
@@ -357,8 +364,8 @@ pub struct SemanticModel {
     state_storage_fields: Vec<ValueId>,
     state_storage_field_by_declaration: HashMap<ValueId, ValueId>,
     state_layout_fields: HashMap<EnumVariantId, Vec<ValueId>>,
-    conditional_state_fields: HashMap<ValueId, Vec<ResolvedLayoutConstraint>>,
-    conditional_managed_fields: HashMap<ManagedFieldId, Vec<ResolvedLayoutConstraint>>,
+    conditional_state_fields: HashMap<ValueId, ResolvedLayoutPredicate>,
+    conditional_managed_fields: HashMap<ManagedFieldId, ResolvedLayoutPredicate>,
     state_poll_results: HashMap<ValueId, TypeId>,
     propagation_targets: HashMap<ExprId, TypeId>,
     propagation_retry_boundaries: HashMap<ExprId, ExprId>,
@@ -443,19 +450,15 @@ impl SemanticModel {
         &self.state_storage_fields
     }
 
-    pub fn state_field_layout_constraints(&self, field: ValueId) -> &[ResolvedLayoutConstraint] {
-        self.conditional_state_fields
-            .get(&field)
-            .map_or(&[], Vec::as_slice)
+    pub fn state_field_layout_predicate(&self, field: ValueId) -> Option<&ResolvedLayoutPredicate> {
+        self.conditional_state_fields.get(&field)
     }
 
-    pub fn managed_field_layout_constraints(
+    pub fn managed_field_layout_predicate(
         &self,
         field: ManagedFieldId,
-    ) -> &[ResolvedLayoutConstraint] {
-        self.conditional_managed_fields
-            .get(&field)
-            .map_or(&[], Vec::as_slice)
+    ) -> Option<&ResolvedLayoutPredicate> {
+        self.conditional_managed_fields.get(&field)
     }
 
     /// Maps a concrete layout declaration to the physical snapshot field that
@@ -1281,8 +1284,8 @@ pub(crate) struct SemanticBuilder {
     state_storage_fields: Vec<ValueId>,
     state_storage_field_by_declaration: HashMap<ValueId, ValueId>,
     state_layout_fields: HashMap<EnumVariantId, Vec<ValueId>>,
-    conditional_state_fields: HashMap<ValueId, Vec<ResolvedLayoutConstraint>>,
-    conditional_managed_fields: HashMap<ManagedFieldId, Vec<ResolvedLayoutConstraint>>,
+    conditional_state_fields: HashMap<ValueId, ResolvedLayoutPredicate>,
+    conditional_managed_fields: HashMap<ManagedFieldId, ResolvedLayoutPredicate>,
     state_poll_results: HashMap<ValueId, Type>,
     propagation_targets: HashMap<ExprId, Type>,
     propagation_retry_boundaries: HashMap<ExprId, ExprId>,
@@ -1437,18 +1440,18 @@ impl SemanticBuilder {
     pub(crate) fn resolve_conditional_state_field(
         &mut self,
         field: ValueId,
-        constraints: Vec<ResolvedLayoutConstraint>,
+        predicate: ResolvedLayoutPredicate,
     ) {
-        let previous = self.conditional_state_fields.insert(field, constraints);
+        let previous = self.conditional_state_fields.insert(field, predicate);
         debug_assert!(previous.is_none(), "conditional state fields are unique");
     }
 
     pub(crate) fn resolve_conditional_managed_field(
         &mut self,
         field: ManagedFieldId,
-        constraints: Vec<ResolvedLayoutConstraint>,
+        predicate: ResolvedLayoutPredicate,
     ) {
-        let previous = self.conditional_managed_fields.insert(field, constraints);
+        let previous = self.conditional_managed_fields.insert(field, predicate);
         debug_assert!(previous.is_none(), "conditional managed fields are unique");
     }
 

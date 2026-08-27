@@ -161,7 +161,7 @@ struct Checker {
     layout_value: Option<ValueId>,
     layout_available_in_on_attach: bool,
     active_state_layout: Option<crate::ast::EnumVariantId>,
-    active_layout_constraints: HashMap<crate::ast::RecordFieldId, crate::ast::EnumVariantId>,
+    active_layouts: Option<declarations::LayoutPredicate>,
     scopes: Vec<HashMap<String, Binding>>,
     return_ty: Type,
     callable: CallableContext,

@@ -189,7 +189,9 @@ pub fn walk_state<'ast, V: Visitor<'ast>>(visitor: &mut V, state: &'ast StateDec
         visitor.visit_state_field(field);
     }
     for group in &state.conditional_fields {
-        visitor.visit_expr(&group.condition);
+        if let Some(condition) = &group.condition {
+            visitor.visit_expr(condition);
+        }
         for field in &group.fields {
             visitor.visit_state_field(field);
         }
@@ -263,7 +265,9 @@ pub fn walk_managed_class<'ast, V: Visitor<'ast>>(visitor: &mut V, class: &'ast 
         visitor.visit_managed_field(field);
     }
     for group in &class.conditional_fields {
-        visitor.visit_expr(&group.condition);
+        if let Some(condition) = &group.condition {
+            visitor.visit_expr(condition);
+        }
         for field in &group.fields {
             visitor.visit_managed_field(field);
         }
@@ -634,7 +638,9 @@ pub fn walk_state_mut<F: Folder>(folder: &mut F, state: &mut StateDecl) {
         folder.fold_state_field(field);
     }
     for group in &mut state.conditional_fields {
-        folder.fold_expr(&mut group.condition);
+        if let Some(condition) = &mut group.condition {
+            folder.fold_expr(condition);
+        }
         for field in &mut group.fields {
             folder.fold_state_field(field);
         }
@@ -701,7 +707,9 @@ pub fn walk_managed_class_mut<F: Folder>(folder: &mut F, class: &mut ManagedClas
         folder.fold_managed_field(field);
     }
     for group in &mut class.conditional_fields {
-        folder.fold_expr(&mut group.condition);
+        if let Some(condition) = &mut group.condition {
+            folder.fold_expr(condition);
+        }
         for field in &mut group.fields {
             folder.fold_managed_field(field);
         }

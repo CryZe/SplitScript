@@ -19,7 +19,7 @@ use crate::{
 /// Layout products above this size require an explicit selector. This is a
 /// compiler-complexity bound, not a runtime language limit: explicit
 /// `onAttach` code can still select any declared combination.
-const MAX_AUTOMATIC_CANDIDATES: usize = 256;
+pub(crate) const MAX_ENUMERATED_LAYOUT_COMBINATIONS: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AutomaticLayoutSelection {
@@ -42,7 +42,7 @@ impl ExplicitSelectionReason {
             Self::PayloadVariants => "automatic layout selection currently requires unit-only dimension enums; return `Layout { ... }` explicitly when a dimension carries payloads".to_owned(),
             Self::CandidateLimit { combinations } => combinations.map_or_else(
                 || "the layout product is too large to derive a bounded metadata selector; return `Layout { ... }` explicitly".to_owned(),
-                |count| format!("the layout has {count} possible combinations, above the automatic-selection limit of {MAX_AUTOMATIC_CANDIDATES}; return `Layout {{ ... }}` explicitly"),
+                |count| format!("the layout has {count} possible combinations, above the automatic-selection limit of {MAX_ENUMERATED_LAYOUT_COMBINATIONS}; return `Layout {{ ... }}` explicitly"),
             ),
             Self::IndistinguishableEvidence => "the declared managed fields do not distinguish every layout combination; return `Layout { ... }` explicitly after checking the remaining build facts".to_owned(),
             Self::EvidenceUnavailable => "this state provider cannot probe the conditional managed fields used as layout evidence; return `Layout { ... }` explicitly".to_owned(),
@@ -75,7 +75,7 @@ pub(crate) struct LayoutSelectionCandidate {
 }
 
 struct ManagedEvidenceGroup {
-    constraints: Vec<(RecordFieldId, EnumVariantId)>,
+    alternatives: Vec<Vec<(RecordFieldId, EnumVariantId)>>,
     fields: Vec<ManagedFieldId>,
 }
 
@@ -94,10 +94,20 @@ pub(crate) fn automatic_layout_selection(
         },
         |field| {
             semantics
-                .managed_field_layout_constraints(field)
-                .iter()
-                .map(|constraint| (constraint.dimension, constraint.variant))
-                .collect()
+                .managed_field_layout_predicate(field)
+                .map(|predicate| {
+                    predicate
+                        .alternatives
+                        .iter()
+                        .map(|alternative| {
+                            alternative
+                                .iter()
+                                .map(|constraint| (constraint.dimension, constraint.variant))
+                                .collect()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
         },
     )
 }
@@ -105,7 +115,7 @@ pub(crate) fn automatic_layout_selection(
 pub(crate) fn automatic_layout_selection_with(
     program: &Program,
     enum_for_dimension: impl Fn(RecordFieldId) -> Option<EnumId>,
-    constraints_for_field: impl Fn(ManagedFieldId) -> Vec<(RecordFieldId, EnumVariantId)>,
+    predicates_for_field: impl Fn(ManagedFieldId) -> Vec<Vec<(RecordFieldId, EnumVariantId)>>,
 ) -> AutomaticLayoutSelection {
     let Some(layout) = program
         .state
@@ -136,7 +146,7 @@ pub(crate) fn automatic_layout_selection_with(
             );
         }
         combination_count = match combination_count.checked_mul(declaration.variants.len()) {
-            Some(count) if count <= MAX_AUTOMATIC_CANDIDATES => count,
+            Some(count) if count <= MAX_ENUMERATED_LAYOUT_COMBINATIONS => count,
             count => {
                 return AutomaticLayoutSelection::RequiresExplicit(
                     ExplicitSelectionReason::CandidateLimit {
@@ -163,7 +173,7 @@ pub(crate) fn automatic_layout_selection_with(
         .filter_map(|group| {
             let field = group.fields.first()?;
             Some(ManagedEvidenceGroup {
-                constraints: constraints_for_field(field.id),
+                alternatives: predicates_for_field(field.id),
                 fields: group
                     .fields
                     .iter()
@@ -231,10 +241,11 @@ fn enumerate_candidates(
     let mut present_fields = groups
         .iter()
         .filter(|group| {
-            group
-                .constraints
-                .iter()
-                .all(|(dimension, variant)| assignment.get(dimension) == Some(variant))
+            group.alternatives.iter().any(|alternative| {
+                alternative
+                    .iter()
+                    .all(|(dimension, variant)| assignment.get(dimension) == Some(variant))
+            })
         })
         .flat_map(|group| group.fields.iter().copied())
         .collect::<Vec<_>>();

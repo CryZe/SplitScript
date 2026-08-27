@@ -4,7 +4,7 @@
 
 use super::{
     Action, ActionKind, AttachmentLayoutDecl, ConditionalFieldsDecl, Diagnostic, EnumDecl, EnumId,
-    EnumReference, EnumVariant, FunctionDecl, FunctionId, ManagedClassDecl, ManagedClassId,
+    EnumReference, EnumVariant, Expr, FunctionDecl, FunctionId, ManagedClassDecl, ManagedClassId,
     ManagedFieldDecl, ManagedFieldId, ManagedImageDecl, ManagedImageId, ManagedItemDecl,
     ManagedMetadataName, ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId, Parameter,
     Parser, PointerPath, PointerPathBase, RecordDecl, RecordField, RecordId, SettingChoiceOption,
@@ -124,8 +124,8 @@ impl Parser<'_> {
             let documentation = self.take_source_documentation();
             if self.at_ident("if") {
                 let parsed = self.managed_conditional_fields_decl(documentation);
-                if let Some(group) = self.recover_delimited_item(parsed, item_start, body_depth) {
-                    conditional_fields.push(group);
+                if let Some(groups) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                    conditional_fields.extend(groups);
                 }
             } else if self.at_ident("layout") {
                 let diagnostic = Diagnostic::new(
@@ -169,16 +169,51 @@ impl Parser<'_> {
 
     fn managed_conditional_fields_decl(
         &mut self,
+        mut documentation: Option<String>,
+    ) -> Result<Vec<ConditionalFieldsDecl<ManagedFieldDecl>>, Diagnostic> {
+        let mut groups = Vec::new();
+        let mut else_span = None;
+        loop {
+            let keyword_span = self.expect_ident("if")?;
+            let condition = Some(self.root_expression());
+            groups.push(self.managed_conditional_fields_branch(
+                documentation.take(),
+                else_span,
+                keyword_span,
+                condition,
+            )?);
+            if !self.at_ident("else") {
+                break;
+            }
+            let found_else = self.expect_ident("else")?;
+            if self.at_ident("if") {
+                else_span = Some(found_else);
+                continue;
+            }
+            groups.push(self.managed_conditional_fields_branch(
+                None,
+                Some(found_else),
+                found_else,
+                None,
+            )?);
+            break;
+        }
+        Ok(groups)
+    }
+
+    fn managed_conditional_fields_branch(
+        &mut self,
         documentation: Option<String>,
+        else_span: Option<Span>,
+        keyword_span: Span,
+        condition: Option<Expr>,
     ) -> Result<ConditionalFieldsDecl<ManagedFieldDecl>, Diagnostic> {
-        let keyword_span = self.expect_ident("if")?;
         if documentation.is_some() {
             self.diagnostics.push(Diagnostic::new(
                 "document the fields inside a conditional managed group",
                 keyword_span,
             ));
         }
-        let condition = self.root_expression();
         let opening_span = self.expect(
             TokenKind::LBrace,
             "expected `{` after the managed-field layout condition",
@@ -204,11 +239,12 @@ impl Parser<'_> {
             .eat(&TokenKind::RBrace)
             .unwrap_or_else(|| self.current().span);
         Ok(ConditionalFieldsDecl {
+            else_span,
             keyword_span,
             condition,
             opening_span,
             fields,
-            span: keyword_span.join(closing),
+            span: else_span.unwrap_or(keyword_span).join(closing),
         })
     }
 
@@ -684,8 +720,8 @@ impl Parser<'_> {
             }
             if self.at_ident("if") {
                 let parsed = self.state_conditional_fields_decl(documentation);
-                if let Some(group) = self.recover_delimited_item(parsed, item_start, body_depth) {
-                    conditional_fields.push(group);
+                if let Some(groups) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                    conditional_fields.extend(groups);
                 }
             } else if self.at_ident("layout") && self.peek(1).kind == TokenKind::LBrace {
                 let parsed = self.attachment_layout_decl(documentation);
@@ -781,16 +817,51 @@ impl Parser<'_> {
 
     fn state_conditional_fields_decl(
         &mut self,
+        mut documentation: Option<String>,
+    ) -> Result<Vec<ConditionalFieldsDecl<StateField>>, Diagnostic> {
+        let mut groups = Vec::new();
+        let mut else_span = None;
+        loop {
+            let keyword_span = self.expect_ident("if")?;
+            let condition = Some(self.root_expression());
+            groups.push(self.state_conditional_fields_branch(
+                documentation.take(),
+                else_span,
+                keyword_span,
+                condition,
+            )?);
+            if !self.at_ident("else") {
+                break;
+            }
+            let found_else = self.expect_ident("else")?;
+            if self.at_ident("if") {
+                else_span = Some(found_else);
+                continue;
+            }
+            groups.push(self.state_conditional_fields_branch(
+                None,
+                Some(found_else),
+                found_else,
+                None,
+            )?);
+            break;
+        }
+        Ok(groups)
+    }
+
+    fn state_conditional_fields_branch(
+        &mut self,
         documentation: Option<String>,
+        else_span: Option<Span>,
+        keyword_span: Span,
+        condition: Option<Expr>,
     ) -> Result<ConditionalFieldsDecl<StateField>, Diagnostic> {
-        let keyword_span = self.expect_ident("if")?;
         if documentation.is_some() {
             self.diagnostics.push(Diagnostic::new(
                 "document the fields inside a conditional state group",
                 keyword_span,
             ));
         }
-        let condition = self.root_expression();
         let opening_span = self.expect(
             TokenKind::LBrace,
             "expected `{` after the state-field layout condition",
@@ -814,11 +885,12 @@ impl Parser<'_> {
             .eat(&TokenKind::RBrace)
             .unwrap_or_else(|| self.current().span);
         Ok(ConditionalFieldsDecl {
+            else_span,
             keyword_span,
             condition,
             opening_span,
             fields,
-            span: keyword_span.join(closing),
+            span: else_span.unwrap_or(keyword_span).join(closing),
         })
     }
 

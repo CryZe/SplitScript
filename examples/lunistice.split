@@ -27,9 +27,7 @@ image "Assembly-CSharp" {
         if layout.edition == Edition.BaseGame {
             /// The original game's numeric level index.
             i32 level from "currentLevel";
-        }
-
-        if layout.edition == Edition.DlcDemo {
+        } else {
             /// Address of the DLC demo's current managed scene string.
             address scene from "_currentScene";
         }
@@ -59,8 +57,7 @@ state Unity.il2cpp(2020) ["Lunistice.exe", "Lunistice-Demo.exe"] {
     deaths: u32 = GameManager.instance?.deaths?;
     if layout.edition == Edition.BaseGame {
         level: i32 = GameManager.instance?.level?;
-    }
-    if layout.edition == Edition.DlcDemo {
+    } else {
         scene: String = process.readManagedString(GameManager.instance?.scene?, 16)?;
     }
     levelTime: f32 = Timer.instance?.levelTime?;

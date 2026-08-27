@@ -978,8 +978,12 @@ impl StateDecl {
 /// into constraints, but does not alter its source-level meaning.
 #[derive(Debug, Clone)]
 pub struct ConditionalFieldsDecl<Field> {
+    /// The `else` keyword when this branch continues the immediately
+    /// preceding conditional declaration chain.
+    pub else_span: Option<Span>,
     pub keyword_span: Span,
-    pub condition: Expr,
+    /// The branch condition. `None` denotes the final `else` branch.
+    pub condition: Option<Expr>,
     pub opening_span: Span,
     pub fields: Vec<Field>,
     pub span: Span,

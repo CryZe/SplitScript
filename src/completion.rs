@@ -613,8 +613,13 @@ fn complete_member(
                         }
                     }
                 }
-                for group in &state.conditional_fields {
-                    if layout_facts_satisfy(syntax, &active_layout_facts, &group.condition) {
+                for (index, group) in state.conditional_fields.iter().enumerate() {
+                    if layout_group_is_active(
+                        syntax,
+                        &state.conditional_fields,
+                        index,
+                        &active_layout_facts,
+                    ) {
                         for field in &group.fields {
                             builder.add(simple_completion(
                                 &field.name,
@@ -690,8 +695,13 @@ fn complete_member(
                     completion.documentation = field.documentation.clone();
                     builder.add(completion);
                 }
-                for group in &class.conditional_fields {
-                    if layout_facts_satisfy(syntax, &active_layout_facts, &group.condition) {
+                for (index, group) in class.conditional_fields.iter().enumerate() {
+                    if layout_group_is_active(
+                        syntax,
+                        &class.conditional_fields,
+                        index,
+                        &active_layout_facts,
+                    ) {
                         for field in group.fields.iter().filter(|field| field.is_static) {
                             let mut completion = simple_completion(
                                 &field.name,
@@ -1369,8 +1379,13 @@ fn add_inferred_fields(
                         "state field",
                     ));
                 }
-                for group in &state.conditional_fields {
-                    if layout_facts_satisfy(syntax, active_layout_facts, &group.condition) {
+                for (index, group) in state.conditional_fields.iter().enumerate() {
+                    if layout_group_is_active(
+                        syntax,
+                        &state.conditional_fields,
+                        index,
+                        active_layout_facts,
+                    ) {
                         for field in &group.fields {
                             builder.add(simple_completion(
                                 &field.name,
@@ -1408,18 +1423,23 @@ fn add_inferred_fields(
         }
         TypeKind::ManagedClass(id) | TypeKind::ManagedReference(id) => {
             if let Some(class) = syntax.managed_class(*id) {
+                let conditional_fields = class
+                    .conditional_fields
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| {
+                        layout_group_is_active(
+                            syntax,
+                            &class.conditional_fields,
+                            *index,
+                            active_layout_facts,
+                        )
+                    })
+                    .flat_map(|(_, group)| &group.fields);
                 for field in class
                     .fields
                     .iter()
-                    .chain(
-                        class
-                            .conditional_fields
-                            .iter()
-                            .filter(|group| {
-                                layout_facts_satisfy(syntax, active_layout_facts, &group.condition)
-                            })
-                            .flat_map(|group| &group.fields),
-                    )
+                    .chain(conditional_fields)
                     .filter(|field| !field.is_static)
                 {
                     let mut completion = simple_completion(
@@ -1622,11 +1642,18 @@ fn active_attachment_layout_facts(
             if let Stmt::If {
                 condition,
                 then_block,
+                else_block,
                 ..
             } = statement
-                && contains_offset(then_block.span, self.offset)
             {
-                collect_attachment_layout_facts(self.syntax, condition, &mut self.facts);
+                if contains_offset(then_block.span, self.offset) {
+                    collect_attachment_layout_facts(self.syntax, condition, &mut self.facts);
+                } else if else_block
+                    .as_ref()
+                    .is_some_and(|block| contains_offset(block.span, self.offset))
+                {
+                    collect_attachment_layout_falsy_facts(self.syntax, condition, &mut self.facts);
+                }
             }
             visit::walk_stmt(self, statement);
         }
@@ -1635,11 +1662,15 @@ fn active_attachment_layout_facts(
             if let ExprKind::If {
                 condition,
                 then_expr,
+                else_expr,
                 ..
             } = &expression.kind
-                && contains_offset(then_expr.span, self.offset)
             {
-                collect_attachment_layout_facts(self.syntax, condition, &mut self.facts);
+                if contains_offset(then_expr.span, self.offset) {
+                    collect_attachment_layout_facts(self.syntax, condition, &mut self.facts);
+                } else if contains_offset(else_expr.span, self.offset) {
+                    collect_attachment_layout_falsy_facts(self.syntax, condition, &mut self.facts);
+                }
             }
             visit::walk_expr(self, expression);
         }
@@ -1656,14 +1687,92 @@ fn active_attachment_layout_facts(
     finder.facts
 }
 
-fn layout_facts_satisfy(
+fn layout_group_is_active<Field>(
+    syntax: &Program,
+    groups: &[crate::ast::ConditionalFieldsDecl<Field>],
+    target: usize,
+    active: &[(crate::ast::RecordFieldId, crate::ast::EnumVariantId)],
+) -> bool {
+    let mut chain_start = target;
+    while chain_start > 0 && groups[chain_start].else_span.is_some() {
+        chain_start -= 1;
+    }
+    for group in &groups[chain_start..target] {
+        let Some(condition) = &group.condition else {
+            return false;
+        };
+        if layout_condition_value(syntax, active, condition) != Some(false) {
+            return false;
+        }
+    }
+    groups[target]
+        .condition
+        .as_ref()
+        .is_none_or(|condition| layout_condition_value(syntax, active, condition) == Some(true))
+}
+
+fn layout_condition_value(
     syntax: &Program,
     active: &[(crate::ast::RecordFieldId, crate::ast::EnumVariantId)],
     condition: &Expr,
-) -> bool {
-    let mut required = Vec::new();
-    collect_attachment_layout_facts(syntax, condition, &mut required);
-    !required.is_empty() && required.iter().all(|fact| active.contains(fact))
+) -> Option<bool> {
+    match &condition.kind {
+        ExprKind::Bool(value) => Some(*value),
+        ExprKind::Unary {
+            op: crate::ast::UnaryOp::Not,
+            expr,
+        } => layout_condition_value(syntax, active, expr).map(|value| !value),
+        ExprKind::Binary {
+            op: crate::ast::BinaryOp::And,
+            left,
+            right,
+        } => match (
+            layout_condition_value(syntax, active, left),
+            layout_condition_value(syntax, active, right),
+        ) {
+            (Some(false), _) | (_, Some(false)) => Some(false),
+            (Some(true), Some(true)) => Some(true),
+            _ => None,
+        },
+        ExprKind::Binary {
+            op: crate::ast::BinaryOp::Or,
+            left,
+            right,
+        } => match (
+            layout_condition_value(syntax, active, left),
+            layout_condition_value(syntax, active, right),
+        ) {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (Some(false), Some(false)) => Some(false),
+            _ => None,
+        },
+        ExprKind::Binary {
+            op: crate::ast::BinaryOp::Eq | crate::ast::BinaryOp::Ne,
+            left,
+            right,
+        } => {
+            let fact = attachment_layout_fact(syntax, left, right)
+                .or_else(|| attachment_layout_fact(syntax, right, left))?;
+            let selected = active
+                .iter()
+                .find(|(field, _)| *field == fact.0)
+                .map(|(_, variant)| *variant == fact.1)?;
+            Some(
+                if matches!(
+                    condition.kind,
+                    ExprKind::Binary {
+                        op: crate::ast::BinaryOp::Ne,
+                        ..
+                    }
+                ) {
+                    !selected
+                } else {
+                    selected
+                },
+            )
+        }
+        _ => None,
+    }
 }
 
 fn collect_attachment_layout_facts(
@@ -1693,6 +1802,63 @@ fn collect_attachment_layout_facts(
         }
         _ => {}
     }
+}
+
+fn collect_attachment_layout_falsy_facts(
+    syntax: &Program,
+    expression: &Expr,
+    output: &mut Vec<(crate::ast::RecordFieldId, crate::ast::EnumVariantId)>,
+) {
+    if let ExprKind::Binary {
+        op: crate::ast::BinaryOp::Or,
+        left,
+        right,
+    } = &expression.kind
+    {
+        collect_attachment_layout_falsy_facts(syntax, left, output);
+        collect_attachment_layout_falsy_facts(syntax, right, output);
+    } else if let Some(fact) = inverse_attachment_layout_fact(syntax, expression) {
+        output.push(fact);
+    }
+}
+
+fn inverse_attachment_layout_fact(
+    syntax: &Program,
+    expression: &Expr,
+) -> Option<(crate::ast::RecordFieldId, crate::ast::EnumVariantId)> {
+    let ExprKind::Binary {
+        op: crate::ast::BinaryOp::Eq | crate::ast::BinaryOp::Ne,
+        left,
+        right,
+    } = &expression.kind
+    else {
+        return None;
+    };
+    let selected = attachment_layout_fact(syntax, left, right)
+        .or_else(|| attachment_layout_fact(syntax, right, left))?;
+    if matches!(
+        expression.kind,
+        ExprKind::Binary {
+            op: crate::ast::BinaryOp::Ne,
+            ..
+        }
+    ) {
+        return Some(selected);
+    }
+    let enumeration = syntax.enum_declarations().find(|enumeration| {
+        enumeration
+            .variants
+            .iter()
+            .any(|variant| variant.id == selected.1)
+    })?;
+    if enumeration.variants.len() != 2 {
+        return None;
+    }
+    let inverse = enumeration
+        .variants
+        .iter()
+        .find(|variant| variant.id != selected.1)?;
+    Some((selected.0, inverse.id))
 }
 
 fn attachment_layout_fact(
@@ -3152,7 +3318,7 @@ image "Assembly-CSharp" {
         static GameManager instance;
         u32 common;
         if layout.edition == Edition.BaseGame { u32 level; }
-        if layout.edition == Edition.Demo { u32 scene; }
+        else { u32 scene; }
     }
 }
 state Unity ["game.exe"] { layout { edition: Edition } }
@@ -3174,6 +3340,15 @@ onAttach { return Layout { edition: Edition.BaseGame } }
         assert!(fields.contains(&"common".to_owned()), "{fields:#?}");
         assert!(fields.contains(&"level".to_owned()), "{fields:#?}");
         assert!(!fields.contains(&"scene".to_owned()), "{fields:#?}");
+
+        let source = format!(
+            "{schema}\nwhileAttached {{\n    let manager = GameManager.instance else return\n    if layout.edition == Edition.BaseGame {{\n        print(\"base\")\n    }} else {{\n        manager.\n    }}\n}}"
+        );
+        let mut database = CompilerDatabase::new(source);
+        let fields = labels(&mut database, "        manager.");
+        assert!(fields.contains(&"common".to_owned()), "{fields:#?}");
+        assert!(!fields.contains(&"level".to_owned()), "{fields:#?}");
+        assert!(fields.contains(&"scene".to_owned()), "{fields:#?}");
     }
 
     #[test]

@@ -21,6 +21,16 @@ pub(super) struct LayoutConstraint {
     pub(super) variant: EnumVariantId,
 }
 
+/// A bounded set of exact attachment-layout assignments.
+///
+/// Each alternative contains one variant for every declared layout dimension.
+/// This disjunctive representation lets declaration `else` branches retain
+/// complements that cannot be expressed as one conjunction.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct LayoutPredicate {
+    pub(super) alternatives: Vec<Vec<LayoutConstraint>>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum RuntimeSettingKind {
     Bool,
@@ -179,10 +189,10 @@ pub(super) struct DeclarationEnvironment {
     /// Concrete fields available after refining `layout` to a variant.
     pub(super) layout_state_fields: HashMap<EnumVariantId, HashMap<String, (ValueId, Type)>>,
     /// State declarations guarded by attachment-wide layout facts.
-    pub(super) conditional_state_fields:
-        HashMap<String, Vec<(ValueId, Type, Vec<LayoutConstraint>)>>,
-    /// Canonical layout facts guarding each conditionally bound managed field.
-    pub(super) conditional_managed_fields: HashMap<ManagedFieldId, Vec<LayoutConstraint>>,
+    pub(super) conditional_state_fields: HashMap<String, Vec<(ValueId, Type, LayoutPredicate)>>,
+    pub(super) conditional_state_field_predicates: HashMap<ValueId, LayoutPredicate>,
+    /// Exact layout alternatives guarding each conditionally bound managed field.
+    pub(super) conditional_managed_fields: HashMap<ManagedFieldId, LayoutPredicate>,
     /// Concrete declarations mapped to their physical snapshot field. Common
     /// declarations from later layouts map to the first layout's identity.
     pub(super) state_storage_fields: HashMap<ValueId, ValueId>,
@@ -214,6 +224,7 @@ impl DeclarationEnvironment {
             state_field_spans: HashMap::new(),
             layout_state_fields: HashMap::new(),
             conditional_state_fields: HashMap::new(),
+            conditional_state_field_predicates: HashMap::new(),
             conditional_managed_fields: HashMap::new(),
             state_storage_fields: HashMap::new(),
             settings: HashMap::new(),

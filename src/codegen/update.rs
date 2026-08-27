@@ -460,9 +460,9 @@ pub(super) fn compile_update(
     if state.layouts.is_empty() {
         let mut prefix_emission = PrefixEmissionState::default();
         for (read_index, field) in all_fields.iter().enumerate() {
-            let constraints = semantics.state_field_layout_constraints(field.id);
-            if !constraints.is_empty() {
-                emit_layout_constraints(&mut function, program, constraints, lowering);
+            let predicate = semantics.state_field_layout_predicate(field.id);
+            if let Some(predicate) = predicate {
+                emit_layout_predicate(&mut function, program, predicate, lowering);
                 function.instruction(&Instruction::If(BlockType::Empty));
             }
             emit_state_field_poll(
@@ -474,10 +474,10 @@ pub(super) fn compile_update(
                     poll_result_local: first_poll_result + read_index as u32,
                 },
                 &mut prefix_emission,
-                !constraints.is_empty(),
+                predicate.is_some(),
                 &snapshot_poll,
             );
-            if !constraints.is_empty() {
+            if predicate.is_some() {
                 function.instruction(&Instruction::End);
             }
         }
@@ -661,6 +661,23 @@ pub(super) fn compile_update(
     function
 }
 
+fn emit_layout_predicate(
+    function: &mut Function,
+    program: &Program,
+    predicate: &crate::semantic::ResolvedLayoutPredicate,
+    lowering: &UpdateContext<'_>,
+) {
+    for (alternative_index, alternative) in predicate.alternatives.iter().enumerate() {
+        emit_layout_constraints(function, program, alternative, lowering);
+        if alternative_index != 0 {
+            function.instruction(&Instruction::I32Or);
+        }
+    }
+    if predicate.alternatives.is_empty() {
+        function.instruction(&Instruction::I32Const(0));
+    }
+}
+
 fn emit_layout_constraints(
     function: &mut Function,
     program: &Program,
@@ -753,7 +770,7 @@ fn emit_managed_field_presence_validation(
 
     for class in &lowering.managed.classes {
         for group in &class.conditional_fields {
-            emit_layout_constraints(function, program, &group.constraints, lowering);
+            emit_layout_predicate(function, program, &group.predicate, lowering);
             function.instruction(&Instruction::If(BlockType::Empty));
             for field in &group.fields {
                 let name = managed_field_presence_name(field.id.index());

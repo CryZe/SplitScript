@@ -318,6 +318,9 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
                 .chain(class.conditional_fields.iter().map(|group| group.span.end)),
         );
         for group in &class.conditional_fields {
+            if let Some(else_span) = group.else_span {
+                self.join_before.insert(else_span.start);
+            }
             self.mark_declaration_items_vertical(
                 group.span,
                 group.fields.iter().map(|field| field.span.end),
@@ -340,6 +343,9 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             self.visit_state_field(field);
         }
         for group in &state.conditional_fields {
+            if let Some(else_span) = group.else_span {
+                self.join_before.insert(else_span.start);
+            }
             self.break_after.insert(group.span.end);
             self.continuation_before_block(group.span.start, group.opening_span.start);
             for field in &group.fields {
@@ -1341,7 +1347,9 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
             if !group.fields.is_empty() {
                 self.mark_semicolon(group.span);
             }
-            self.visit_expr(&group.condition);
+            if let Some(condition) = &group.condition {
+                self.visit_expr(condition);
+            }
             for field in &group.fields {
                 self.visit_state_field(field);
             }
@@ -2598,8 +2606,8 @@ onAttach {
     #[test]
     fn formats_shared_layout_conditions_in_state_and_managed_schemas() {
         let source = r#"enum Edition{Base,Demo}
-image "Assembly-CSharp"{class GameManager{if layout.edition==Edition.Base{static u32 level;}}}
-state Unity ["game.exe"]{layout{edition:Edition}if layout.edition==Edition.Demo{scene:u8 at 0x100;}}"#;
+image "Assembly-CSharp"{class GameManager{if layout.edition==Edition.Base{static u32 level;}else{static u32 scene;}}}
+state Unity ["game.exe"]{layout{edition:Edition}if layout.edition==Edition.Base{level:u8 at 0x100;}else if layout.edition==Edition.Demo{scene:u8 at 0x200;}else{unknown:u8 at 0x300;}}"#;
         let expected = r#"enum Edition {
     Base,
     Demo,
@@ -2608,6 +2616,8 @@ image "Assembly-CSharp" {
     class GameManager {
         if layout.edition == Edition.Base {
             static u32 level;
+        } else {
+            static u32 scene;
         }
     }
 }
@@ -2615,8 +2625,12 @@ state Unity ["game.exe"] {
     layout {
         edition: Edition,
     }
-    if layout.edition == Edition.Demo {
-        scene: u8 at 0x100;
+    if layout.edition == Edition.Base {
+        level: u8 at 0x100;
+    } else if layout.edition == Edition.Demo {
+        scene: u8 at 0x200;
+    } else {
+        unknown: u8 at 0x300;
     }
 }
 "#;

@@ -35,13 +35,13 @@ fn check_layout_conditions(checker: &mut Checker, program: &Program) {
         .state
         .iter()
         .flat_map(|state| &state.conditional_fields)
-        .map(|group| &group.condition)
+        .filter_map(|group| group.condition.as_ref())
         .chain(
             program
                 .managed_class_declarations()
                 .into_iter()
                 .flat_map(|class| &class.conditional_fields)
-                .map(|group| &group.condition),
+                .filter_map(|group| group.condition.as_ref()),
         )
     {
         checker.expr(condition, Some(expected));
@@ -272,8 +272,14 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
             check_state_expression(checker, field);
         }
         for group in &state.conditional_fields {
-            let constraints = checker.layout_constraints(&group.condition);
-            checker.with_layout_constraints(constraints.as_deref(), |checker| {
+            let predicate = group.fields.first().and_then(|field| {
+                checker
+                    .declarations
+                    .conditional_state_field_predicates
+                    .get(&field.id)
+                    .cloned()
+            });
+            checker.with_layout_predicate(predicate.as_ref(), |checker| {
                 for field in &group.fields {
                     check_state_expression(checker, field);
                 }
@@ -825,10 +831,19 @@ fn automatic_layout_selection(
                 .declarations
                 .conditional_managed_fields
                 .get(&field)
-                .into_iter()
-                .flatten()
-                .map(|constraint| (constraint.dimension, constraint.variant))
-                .collect()
+                .map(|predicate| {
+                    predicate
+                        .alternatives
+                        .iter()
+                        .map(|alternative| {
+                            alternative
+                                .iter()
+                                .map(|constraint| (constraint.dimension, constraint.variant))
+                                .collect()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
         },
     );
     if let crate::layout_selection::AutomaticLayoutSelection::Available(plan) = &selection

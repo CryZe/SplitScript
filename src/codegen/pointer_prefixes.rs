@@ -177,13 +177,16 @@ impl PointerPrefixPlan {
             if !state.layouts.is_empty() {
                 return named_layouts.get(&left) == named_layouts.get(&right);
             }
-            let left = semantics.state_field_layout_constraints(left);
-            let right = semantics.state_field_layout_constraints(right);
-            !left.iter().any(|left| {
-                right
+            match (
+                semantics.state_field_layout_predicate(left),
+                semantics.state_field_layout_predicate(right),
+            ) {
+                (Some(left), Some(right)) => left
+                    .alternatives
                     .iter()
-                    .any(|right| left.dimension == right.dimension && left.variant != right.variant)
-            })
+                    .any(|left| right.alternatives.contains(left)),
+                _ => true,
+            }
         };
         let shared = nodes
             .iter()

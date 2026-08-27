@@ -56,10 +56,8 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
                 );
             }
         }
-        for group in &state.conditional_fields {
-            let constraints = checker
-                .require_layout_constraints(&group.condition)
-                .unwrap_or_default();
+        let predicates = checker.layout_branch_predicates(&state.conditional_fields);
+        for (group, predicate) in state.conditional_fields.iter().zip(predicates) {
             let mut names = state
                 .fields
                 .iter()
@@ -82,16 +80,14 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
                     .conditional_state_fields
                     .entry(field.name.clone())
                     .or_default()
-                    .push((field.id, ty, constraints.clone()));
+                    .push((field.id, ty, predicate.clone()));
+                checker
+                    .declarations
+                    .conditional_state_field_predicates
+                    .insert(field.id, predicate.clone());
                 checker.semantics.resolve_conditional_state_field(
                     field.id,
-                    constraints
-                        .iter()
-                        .map(|constraint| crate::semantic::ResolvedLayoutConstraint {
-                            dimension: constraint.dimension,
-                            variant: constraint.variant,
-                        })
-                        .collect(),
+                    resolved_layout_predicate(&predicate),
                 );
                 if !names.insert(field.name.clone()) {
                     checker.error(
@@ -593,10 +589,8 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
                 &mut common_metadata_names,
             );
         }
-        for group in &class.conditional_fields {
-            let constraints = checker
-                .require_layout_constraints(&group.condition)
-                .unwrap_or_default();
+        let predicates = checker.layout_branch_predicates(&class.conditional_fields);
+        for (group, predicate) in class.conditional_fields.iter().zip(predicates) {
             let mut fields = common_fields.clone();
             let mut metadata_names = common_metadata_names.clone();
             for field in &group.fields {
@@ -610,16 +604,10 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
                 checker
                     .declarations
                     .conditional_managed_fields
-                    .insert(field.id, constraints.clone());
+                    .insert(field.id, predicate.clone());
                 checker.semantics.resolve_conditional_managed_field(
                     field.id,
-                    constraints
-                        .iter()
-                        .map(|constraint| crate::semantic::ResolvedLayoutConstraint {
-                            dimension: constraint.dimension,
-                            variant: constraint.variant,
-                        })
-                        .collect(),
+                    resolved_layout_predicate(&predicate),
                 );
             }
         }
@@ -666,6 +654,26 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
         if enumeration.variants.is_empty() {
             checker.error("an enum needs at least one variant", enumeration.span);
         }
+    }
+}
+
+fn resolved_layout_predicate(
+    predicate: &super::declarations::LayoutPredicate,
+) -> crate::semantic::ResolvedLayoutPredicate {
+    crate::semantic::ResolvedLayoutPredicate {
+        alternatives: predicate
+            .alternatives
+            .iter()
+            .map(|alternative| {
+                alternative
+                    .iter()
+                    .map(|constraint| crate::semantic::ResolvedLayoutConstraint {
+                        dimension: constraint.dimension,
+                        variant: constraint.variant,
+                    })
+                    .collect()
+            })
+            .collect(),
     }
 }
 

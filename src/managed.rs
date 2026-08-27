@@ -40,7 +40,7 @@ pub(crate) struct ManagedClassBinding {
 /// Managed fields guarded by attachment-wide layout facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ManagedConditionalBinding {
-    pub constraints: Vec<crate::semantic::ResolvedLayoutConstraint>,
+    pub predicate: crate::semantic::ResolvedLayoutPredicate,
     pub fields: Vec<ManagedFieldBinding>,
 }
 
@@ -162,13 +162,14 @@ fn class_binding(
             .conditional_fields
             .iter()
             .map(|group| ManagedConditionalBinding {
-                constraints: group
+                predicate: group
                     .fields
                     .first()
                     .map(|field| {
                         semantics
-                            .managed_field_layout_constraints(field.id)
-                            .to_vec()
+                            .managed_field_layout_predicate(field.id)
+                            .cloned()
+                            .unwrap_or_default()
                     })
                     .unwrap_or_default(),
                 fields: group
@@ -308,6 +309,7 @@ onAttach { return Layout { edition: Edition.Demo } }
 
         let conditional = &manager.conditional_fields[0];
         assert_eq!(manager.fields.iter().chain(&conditional.fields).count(), 4);
-        assert_eq!(conditional.constraints.len(), 1);
+        assert_eq!(conditional.predicate.alternatives.len(), 1);
+        assert_eq!(conditional.predicate.alternatives[0].len(), 1);
     }
 }

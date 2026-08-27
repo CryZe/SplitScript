@@ -551,7 +551,7 @@ mod tests {
                         i32 currentLevel;
                     }
 
-                    if layout.edition == Edition.DlcDemo {
+                    else {
                         i32 gameState from "GameState";
                         String currentScene from "_currentScene";
                     }
@@ -595,6 +595,8 @@ mod tests {
             ["Instance", "_instance"]
         );
         assert_eq!(manager.conditional_fields.len(), 2);
+        assert!(manager.conditional_fields[0].else_span.is_none());
+        assert!(manager.conditional_fields[0].condition.is_some());
         assert_eq!(manager.conditional_fields[0].fields[0].name, "gameState");
         assert_eq!(
             manager.conditional_fields[0].fields[0]
@@ -603,6 +605,8 @@ mod tests {
             Some("State used by the base game.")
         );
         assert_eq!(manager.conditional_fields[1].fields[1].name, "currentScene");
+        assert!(manager.conditional_fields[1].else_span.is_some());
+        assert!(manager.conditional_fields[1].condition.is_none());
     }
 
     #[test]

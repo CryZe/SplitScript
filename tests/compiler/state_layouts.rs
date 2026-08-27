@@ -255,6 +255,112 @@ fn conditional_state_fields_refine_multiple_attachment_dimensions() {
 }
 
 #[test]
+fn conditional_state_field_chains_preserve_exact_remaining_layouts() {
+    let source = r#"
+        enum Edition { Base, Demo }
+        enum Storefront { Steam, GOG }
+
+        state "game.exe" {
+            layout {
+                edition: Edition,
+                storefront: Storefront,
+            }
+            if layout.edition == Edition.Base && layout.storefront == Storefront.Steam {
+                steamLevel: u8 at 0x100;
+            } else if layout.edition == Edition.Base {
+                gogLevel: u8 at 0x200;
+            } else {
+                demoLevel: u8 at 0x300;
+            }
+        }
+
+        onAttach {
+            return Layout {
+                edition: Edition.Base,
+                storefront: Storefront.GOG,
+            }
+        }
+
+        split {
+            if layout.edition == Edition.Base && layout.storefront == Storefront.Steam {
+                return current.steamLevel != old.steamLevel
+            } else if layout.edition == Edition.Base && layout.storefront == Storefront.GOG {
+                return current.gogLevel != old.gogLevel
+            } else if layout.edition == Edition.Demo {
+                return current.demoLevel != old.demoLevel
+            }
+            return false
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("else-if state fields should retain the exact layouts left by earlier branches");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("conditional branch predicates should lower to valid Wasm GC");
+
+    let insufficiently_refined = source.replace(
+        "if layout.edition == Edition.Base && layout.storefront == Storefront.Steam {\n                return current.steamLevel != old.steamLevel\n            } else if layout.edition == Edition.Base && layout.storefront == Storefront.GOG {\n                return current.gogLevel != old.gogLevel\n            } else if layout.edition == Edition.Demo {\n                return current.demoLevel != old.demoLevel\n            }\n            return false",
+        "if layout.edition == Edition.Base {\n                return current.gogLevel != old.gogLevel\n            }\n            return false",
+    );
+    let diagnostics = splitscript::compile(&insufficiently_refined)
+        .expect_err("the else-if field is absent from the earlier Base/Steam branch");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("state field `gogLevel` is conditional")
+    }));
+}
+
+#[test]
+fn conditional_layout_branch_enumeration_has_a_deterministic_bound() {
+    let source = r#"
+        enum Binary { A, B }
+        state "game.exe" {
+            layout {
+                a: Binary,
+                b: Binary,
+                c: Binary,
+                d: Binary,
+                e: Binary,
+                f: Binary,
+                g: Binary,
+                h: Binary,
+                i: Binary,
+            }
+            if layout.a == Binary.A {
+                value: u8 at 0x100;
+            } else {
+                other: u8 at 0x200;
+            }
+        }
+        onAttach {
+            return Layout {
+                a: Binary.A,
+                b: Binary.A,
+                c: Binary.A,
+                d: Binary.A,
+                e: Binary.A,
+                f: Binary.A,
+                g: Binary.A,
+                h: Binary.A,
+                i: Binary.A,
+            }
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("conditional declarations must not enumerate an unbounded layout product");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("conditional fields require a bounded attachment layout")
+            && diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("at most 256 layout combinations"))
+    }));
+}
+
+#[test]
 fn managed_fields_share_the_attachment_layout_refinement_model() {
     let source = r#"
         enum Edition { BaseGame, Demo }
@@ -265,7 +371,7 @@ fn managed_fields_share_the_attachment_layout_refinement_model() {
                 if layout.edition == Edition.BaseGame {
                     u32 level;
                 }
-                if layout.edition == Edition.Demo {
+                else {
                     u32 scene;
                 }
             }
@@ -334,7 +440,7 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
                     i32 level from "currentLevel";
                 }
 
-                if layout.edition == Edition.DlcDemo {
+                else {
                     address scene from "_currentScene";
                 }
             }
@@ -357,7 +463,7 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
             if layout.edition == Edition.BaseGame {
                 level: i32 = GameManager.instance?.level?;
             }
-            if layout.edition == Edition.DlcDemo {
+            else {
                 scene: String = process.readManagedString(GameManager.instance?.scene?, 16)?;
             }
             levelTime: f32 = Timer.instance?.levelTime?;

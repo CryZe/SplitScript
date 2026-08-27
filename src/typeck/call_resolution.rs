@@ -2318,9 +2318,7 @@ impl Checker {
                                 .declarations
                                 .conditional_managed_fields
                                 .get(&field.id)
-                                .is_some_and(|constraints| {
-                                    self.layout_constraints_satisfied(constraints)
-                                })
+                                .is_some_and(|predicate| self.layout_predicate_satisfied(predicate))
                     })
             })
             .cloned()
@@ -2344,9 +2342,7 @@ impl Checker {
                     .and_then(|candidates| {
                         candidates
                             .iter()
-                            .find(|(_, _, constraints)| {
-                                self.layout_constraints_satisfied(constraints)
-                            })
+                            .find(|(_, _, predicate)| self.layout_predicate_satisfied(predicate))
                             .map(|(field, ty, _)| (*field, *ty))
                     })
             })

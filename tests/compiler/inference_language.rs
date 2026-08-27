@@ -720,6 +720,8 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
         onDetach { timer.pauseGameTime() }
         onAttach { setTickRate(120.0) }
         onStateReady { print(current.level) }
+        onStart { print("started") }
+        onReset { print("reset") }
         whileAttached { print("tick") }
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
@@ -735,6 +737,8 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
             ActionKind::OnDetach,
             ActionKind::OnAttach,
             ActionKind::OnStateReady,
+            ActionKind::OnStart,
+            ActionKind::OnReset,
             ActionKind::WhileAttached,
         ]
     );

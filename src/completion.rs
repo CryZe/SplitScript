@@ -3074,7 +3074,7 @@ fn masked(value) {
             ("state \"game.exe\" {}", "pro", "process"),
             ("state GBA {}", "gb", "gba"),
         ] {
-            for action in ["setup", "onDetach"] {
+            for action in ["setup", "onDetach", "onStart", "onReset"] {
                 let detached = format!("{state}\n{action} {{ {prefix} }}");
                 let mut database = CompilerDatabase::new(detached);
                 assert!(
@@ -3146,7 +3146,7 @@ fn relay() {
     return changed()
 }
 "#;
-        for action in ["setup", "onAttach", "onDetach"] {
+        for action in ["setup", "onAttach", "onDetach", "onStart", "onReset"] {
             let source = format!("{declarations}\n{action} {{ cur }}");
             let mut database = CompilerDatabase::new(source);
             assert!(!labels(&mut database, "{ cur").contains(&"current".to_owned()));

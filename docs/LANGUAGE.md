@@ -1491,6 +1491,34 @@ the block runs. `process`, `gba`, `current`, and
 `old` are unavailable because closure may happen before initialization or the
 first snapshot completes.
 
+`onStart` and `onReset` react to timer transitions independently of process
+attachment:
+
+```text
+onStart {
+    attempts += 1
+}
+
+onReset {
+    clearRunState()
+}
+```
+
+After refreshing settings near the beginning of every update, the generated
+monitor samples the timer state. The first sample establishes a baseline
+without firing. A later transition from `TimerState.NotRunning` to any active
+state runs `onStart`; a transition back to `TimerState.NotRunning` runs
+`onReset`. This happens before attachment and state polling, so both blocks run
+while detached as well. They may use settings and ordinary globals, but cannot
+use `process`, an emulator provider, attachment-scoped globals, `layout`,
+`current`, or `old`. They do not suspend and do not return a value.
+
+The decision actions do not invoke these blocks directly. If `start` or `reset`
+requests a timer mutation, the corresponding transition is sampled once on the
+following update. A transition that persists across an update is therefore
+delivered exactly once; multiple opposing timer changes entirely between two
+updates cannot be reconstructed without a future host event queue.
+
 `setTickRate(hz)` uses updates per second. The runtime reads the
 resulting interval after the current `update` returns, so a call affects the
 wait before the following update rather than the invocation already in
@@ -1553,7 +1581,7 @@ and `reset`; those blocks are simply boolean and default to `false`.
 `fromDays`, and `fromNanoseconds` accept every integer and floating-point type.
 Integer inputs stay exact without passing through floating point. A day is
 always exactly 86,400 seconds; these are elapsed durations, not calendar values. `setup`,
-`onDetach` and `onStateReady` return nothing.
+`onDetach`, `onStart`, `onReset`, and `onStateReady` return nothing.
 `whileAttached` runs before timer actions on every initialized attached tick.
 It may explicitly return a boolean control result: `false` skips all timer
 decisions for the current update, while `true`, a bare `return`, and fallthrough
@@ -2097,13 +2125,15 @@ mutation for lifecycle cleanup. Prefer `isLoading` for ordinary load removal.
 
 The generated loop follows this order:
 
-1. Attach to the configured process, or return and retry next tick.
-2. Detect a closed process, detach, and return.
-3. Commit the first complete state as equal `old` and `current` snapshots, run
+1. Refresh settings, sample timer state when `onStart` or `onReset` exists, and
+   dispatch one observed lifecycle transition.
+2. Attach to the configured process, or return and retry next tick.
+3. Detect a closed process, detach, and return.
+4. Commit the first complete state as equal `old` and `current` snapshots, run
    `onStateReady`, and return; or rotate and refresh an initialized snapshot.
-4. On initialized updates after that first snapshot, run `whileAttached`.
-5. If the timer has not started, evaluate `start`.
-6. If it is running or paused, apply `isLoading`, then `gameTime`, then `reset`;
+5. On initialized updates after that first snapshot, run `whileAttached`.
+6. If the timer has not started, evaluate `start`.
+7. If it is running or paused, apply `isLoading`, then `gameTime`, then `reset`;
    evaluate `split` only when reset did not trigger.
 
 ## Why GC and linear memory both appear

@@ -1715,7 +1715,6 @@ fn abi_catalog_drives_wasm_imports_and_the_internal_reference() {
         }
     }
     let required = [
-        AbiImportId::TimerGetState,
         AbiImportId::RuntimeSetTickRate,
         AbiImportId::ProcessAttach,
         AbiImportId::ProcessDetach,
@@ -2190,6 +2189,8 @@ fn language_catalog_is_valid_documented_and_compilable() {
         splitscript::compiler::ast::ActionKind::OnDetach,
         splitscript::compiler::ast::ActionKind::OnAttach,
         splitscript::compiler::ast::ActionKind::OnStateReady,
+        splitscript::compiler::ast::ActionKind::OnStart,
+        splitscript::compiler::ast::ActionKind::OnReset,
         splitscript::compiler::ast::ActionKind::WhileAttached,
         splitscript::compiler::ast::ActionKind::Start,
         splitscript::compiler::ast::ActionKind::Split,

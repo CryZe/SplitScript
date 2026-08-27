@@ -112,7 +112,7 @@ fn legacy_lifecycle_blocks_get_semantic_migration_guidance() {
         whileAttached { print("retained") }
     "#;
     let recovered = splitscript::parse_recovering(source).unwrap();
-    assert_eq!(recovered.diagnostics().len(), 8);
+    assert_eq!(recovered.diagnostics().len(), 6);
     for expected in [
         "ASL `startup` is not a SplitScript lifecycle block",
         "ASL `init` has no blind one-to-one lifecycle rename",
@@ -129,16 +129,9 @@ fn legacy_lifecycle_blocks_get_semantic_migration_guidance() {
             recovered.diagnostics()
         );
     }
-    assert_eq!(
-        recovered
-            .diagnostics()
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic.message == "ASL timer event handlers are not SplitScript decision blocks"
-            })
-            .count(),
-        3
-    );
+    assert!(recovered.diagnostics().iter().any(|diagnostic| {
+        diagnostic.message == "ASL `onSplit` has no exact SplitScript equivalent yet"
+    }));
     assert!(
         recovered
             .diagnostics()
@@ -161,10 +154,12 @@ fn legacy_lifecycle_blocks_get_semantic_migration_guidance() {
             .iter()
             .filter(|topic| **topic == "asl.timer.events")
             .count(),
-        3
+        1
     );
-    assert_eq!(recovered.syntax().actions.len(), 1);
-    assert_eq!(recovered.syntax().actions[0].kind.name(), "whileAttached");
+    assert_eq!(recovered.syntax().actions.len(), 3);
+    assert_eq!(recovered.syntax().actions[0].kind.name(), "onStart");
+    assert_eq!(recovered.syntax().actions[1].kind.name(), "onReset");
+    assert_eq!(recovered.syntax().actions[2].kind.name(), "whileAttached");
 }
 
 #[test]

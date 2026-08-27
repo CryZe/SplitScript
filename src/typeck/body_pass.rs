@@ -987,9 +987,11 @@ fn action_return_type(
     automatic_attachment_layout: bool,
 ) -> Type {
     match action {
-        ActionKind::Setup | ActionKind::OnDetach | ActionKind::OnStateReady => {
-            checker.core_type(CoreTypeId::None)
-        }
+        ActionKind::Setup
+        | ActionKind::OnDetach
+        | ActionKind::OnStateReady
+        | ActionKind::OnStart
+        | ActionKind::OnReset => checker.core_type(CoreTypeId::None),
         ActionKind::OnAttach => program.state.as_ref().map_or_else(
             || checker.core_type(CoreTypeId::None),
             |state| {

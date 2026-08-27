@@ -329,11 +329,12 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
         id: ASL_TIMER_EVENT_DIAGNOSTIC,
         concept: MigrationConceptId::new("asl.timer.events"),
-        message: "ASL timer event handlers are not SplitScript decision blocks",
-        primary_label: "an external timer event can occur independently of this script's decision",
+        message: "ASL `onSplit` has no exact SplitScript equivalent yet",
+        primary_label: "split observation needs ordered host event data",
         notes: &[
-            "simple run-start state can be reconstructed from `timer.state()` in `whileAttached`",
-            "exact `onStart`, `onSplit`, and `onReset` delivery needs the planned ordered host event contract",
+            "SplitScript supports sampled `onStart` and `onReset` actions directly, including while detached",
+            "an exact `onSplit` must distinguish splits, skips, and undos that can occur between two updates",
+            "the runtime evolution plan records the required ordered host event contract",
         ],
     },
     MigrationDiagnostic {
@@ -997,7 +998,7 @@ pub fn legacy_lifecycle_diagnostic(name: &str) -> Option<MigrationDiagnosticId> 
         "update" => ASL_UPDATE_DIAGNOSTIC,
         "exit" => ASL_EXIT_DIAGNOSTIC,
         "shutdown" => ASL_SHUTDOWN_DIAGNOSTIC,
-        "onStart" | "onSplit" | "onReset" => ASL_TIMER_EVENT_DIAGNOSTIC,
+        "onSplit" => ASL_TIMER_EVENT_DIAGNOSTIC,
         _ => return None,
     })
 }
@@ -2040,11 +2041,24 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         spellings: &[],
     },
     MigrationConcept {
+        id: MigrationConceptId::new("asl.timer.start-reset-events"),
+        name: "start and reset timer event handlers",
+        sources: ASL,
+        support: MigrationSupport::Direct,
+        summary: "Keep [`onStart`] and [`onReset`]; SplitScript samples timer transitions before process attachment so both actions also run while detached.",
+        targets: &[
+            MigrationTarget::Language("onStart"),
+            MigrationTarget::Language("onReset"),
+        ],
+        cookbook_anchor: Some("legacy-asl-lifecycle-blocks"),
+        spellings: &[],
+    },
+    MigrationConcept {
         id: MigrationConceptId::new("asl.timer.events"),
-        name: "timer event handlers",
+        name: "split timer event handler",
         sources: ASL,
         support: MigrationSupport::Planned,
-        summary: "Simple start transitions can be reconstructed in [`whileAttached`]; exact ordered start, split, and reset events need host support.",
+        summary: "Exact `onSplit` delivery still needs an ordered host event contract that can distinguish splits, skips, and undos between updates.",
         targets: &[],
         cookbook_anchor: Some("legacy-asl-lifecycle-blocks"),
         spellings: &[],

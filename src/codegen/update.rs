@@ -103,6 +103,17 @@ pub(super) fn compile_update(
     let globals = lowering.runtime_globals;
     let semantics = lowering.semantics;
     let has_game_time = actions.contains_key(&ActionKind::GameTime);
+    let has_timer_lifecycle = globals.observed_timer_state.is_some();
+    let has_timer_decisions = actions.keys().any(|action| {
+        matches!(
+            action,
+            ActionKind::Start
+                | ActionKind::Split
+                | ActionKind::Reset
+                | ActionKind::IsLoading
+                | ActionKind::GameTime
+        )
+    });
     let timer_state = 0;
     let nullable_bool = 1;
     let newly_attached = 2;
@@ -158,6 +169,15 @@ pub(super) fn compile_update(
 
     if let Some(refresh_settings) = refresh_settings {
         function.instruction(&Instruction::Call(refresh_settings));
+    }
+    if let Some(observed_timer_state) = globals.observed_timer_state {
+        emit_timer_lifecycle_events(
+            &mut function,
+            timer_state,
+            observed_timer_state,
+            actions,
+            abi,
+        );
     }
     function
         .instruction(&Instruction::GlobalGet(globals.process))
@@ -558,107 +578,159 @@ pub(super) fn compile_update(
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End);
     }
-    function
-        .instruction(&Instruction::Call(abi.function(AbiImportId::TimerGetState)))
-        .instruction(&Instruction::LocalSet(timer_state));
+    if has_timer_decisions {
+        if !has_timer_lifecycle {
+            function
+                .instruction(&Instruction::Call(abi.function(AbiImportId::TimerGetState)))
+                .instruction(&Instruction::LocalSet(timer_state));
+        }
 
-    if let Some(start) = actions.get(&ActionKind::Start) {
+        if let Some(start) = actions.get(&ActionKind::Start) {
+            function
+                .instruction(&Instruction::LocalGet(timer_state))
+                .instruction(&Instruction::I32Eqz)
+                .instruction(&Instruction::If(BlockType::Empty));
+            emit_action_args(&mut function, globals);
+            function
+                .instruction(&Instruction::Call(*start))
+                .instruction(&Instruction::I32Const(1))
+                .instruction(&Instruction::I32Eq)
+                .instruction(&Instruction::If(BlockType::Empty))
+                .instruction(&Instruction::Call(abi.function(AbiImportId::TimerStart)))
+                .instruction(&Instruction::End)
+                .instruction(&Instruction::End);
+        }
+
         function
             .instruction(&Instruction::LocalGet(timer_state))
-            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::LocalGet(timer_state))
+            .instruction(&Instruction::I32Const(2))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::I32Or)
             .instruction(&Instruction::If(BlockType::Empty));
-        emit_action_args(&mut function, globals);
-        function
-            .instruction(&Instruction::Call(*start))
-            .instruction(&Instruction::I32Const(1))
-            .instruction(&Instruction::I32Eq)
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::Call(abi.function(AbiImportId::TimerStart)))
-            .instruction(&Instruction::End)
-            .instruction(&Instruction::End);
-    }
 
-    function
-        .instruction(&Instruction::LocalGet(timer_state))
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::I32Eq)
-        .instruction(&Instruction::LocalGet(timer_state))
-        .instruction(&Instruction::I32Const(2))
-        .instruction(&Instruction::I32Eq)
-        .instruction(&Instruction::I32Or)
-        .instruction(&Instruction::If(BlockType::Empty));
+        if let Some(is_loading) = actions.get(&ActionKind::IsLoading) {
+            emit_action_args(&mut function, globals);
+            function
+                .instruction(&Instruction::Call(*is_loading))
+                .instruction(&Instruction::LocalTee(nullable_bool))
+                .instruction(&Instruction::I32Const(-1))
+                .instruction(&Instruction::I32Ne)
+                .instruction(&Instruction::If(BlockType::Empty))
+                .instruction(&Instruction::LocalGet(nullable_bool))
+                .instruction(&Instruction::If(BlockType::Empty))
+                .instruction(&Instruction::Call(
+                    abi.function(AbiImportId::TimerPauseGameTime),
+                ))
+                .instruction(&Instruction::Else)
+                .instruction(&Instruction::Call(
+                    abi.function(AbiImportId::TimerResumeGameTime),
+                ))
+                .instruction(&Instruction::End)
+                .instruction(&Instruction::End);
+        }
+        if let Some(game_time) = actions.get(&ActionKind::GameTime) {
+            emit_action_args(&mut function, globals);
+            function
+                .instruction(&Instruction::Call(*game_time))
+                .instruction(&Instruction::LocalTee(duration_local))
+                .instruction(&Instruction::RefIsNull)
+                .instruction(&Instruction::If(BlockType::Empty))
+                .instruction(&Instruction::Else)
+                .instruction(&Instruction::LocalGet(duration_local))
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: lowering.gc.standard_index(StdlibTypeId::Duration),
+                    field_index: lowering
+                        .gc
+                        .standard_field_index(StdlibFieldId::DurationSeconds),
+                })
+                .instruction(&Instruction::LocalGet(duration_local))
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: lowering.gc.standard_index(StdlibTypeId::Duration),
+                    field_index: lowering
+                        .gc
+                        .standard_field_index(StdlibFieldId::DurationNanoseconds),
+                })
+                .instruction(&Instruction::Call(
+                    abi.function(AbiImportId::TimerSetGameTime),
+                ))
+                .instruction(&Instruction::End);
+        }
 
-    if let Some(is_loading) = actions.get(&ActionKind::IsLoading) {
-        emit_action_args(&mut function, globals);
-        function
-            .instruction(&Instruction::Call(*is_loading))
-            .instruction(&Instruction::LocalTee(nullable_bool))
-            .instruction(&Instruction::I32Const(-1))
-            .instruction(&Instruction::I32Ne)
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::LocalGet(nullable_bool))
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::Call(
-                abi.function(AbiImportId::TimerPauseGameTime),
-            ))
-            .instruction(&Instruction::Else)
-            .instruction(&Instruction::Call(
-                abi.function(AbiImportId::TimerResumeGameTime),
-            ))
-            .instruction(&Instruction::End)
-            .instruction(&Instruction::End);
-    }
-    if let Some(game_time) = actions.get(&ActionKind::GameTime) {
-        emit_action_args(&mut function, globals);
-        function
-            .instruction(&Instruction::Call(*game_time))
-            .instruction(&Instruction::LocalTee(duration_local))
-            .instruction(&Instruction::RefIsNull)
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::Else)
-            .instruction(&Instruction::LocalGet(duration_local))
-            .instruction(&Instruction::RefAsNonNull)
-            .instruction(&Instruction::StructGet {
-                struct_type_index: lowering.gc.standard_index(StdlibTypeId::Duration),
-                field_index: lowering
-                    .gc
-                    .standard_field_index(StdlibFieldId::DurationSeconds),
-            })
-            .instruction(&Instruction::LocalGet(duration_local))
-            .instruction(&Instruction::RefAsNonNull)
-            .instruction(&Instruction::StructGet {
-                struct_type_index: lowering.gc.standard_index(StdlibTypeId::Duration),
-                field_index: lowering
-                    .gc
-                    .standard_field_index(StdlibFieldId::DurationNanoseconds),
-            })
-            .instruction(&Instruction::Call(
-                abi.function(AbiImportId::TimerSetGameTime),
-            ))
-            .instruction(&Instruction::End);
-    }
-
-    if let Some(reset) = actions.get(&ActionKind::Reset) {
-        emit_action_args(&mut function, globals);
-        function
-            .instruction(&Instruction::Call(*reset))
-            .instruction(&Instruction::I32Const(1))
-            .instruction(&Instruction::I32Eq)
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::Call(abi.function(AbiImportId::TimerReset)));
-        if let Some(split) = actions.get(&ActionKind::Split) {
-            function.instruction(&Instruction::Else);
+        if let Some(reset) = actions.get(&ActionKind::Reset) {
+            emit_action_args(&mut function, globals);
+            function
+                .instruction(&Instruction::Call(*reset))
+                .instruction(&Instruction::I32Const(1))
+                .instruction(&Instruction::I32Eq)
+                .instruction(&Instruction::If(BlockType::Empty))
+                .instruction(&Instruction::Call(abi.function(AbiImportId::TimerReset)));
+            if let Some(split) = actions.get(&ActionKind::Split) {
+                function.instruction(&Instruction::Else);
+                emit_split(&mut function, *split, abi, globals);
+            }
+            function.instruction(&Instruction::End);
+        } else if let Some(split) = actions.get(&ActionKind::Split) {
             emit_split(&mut function, *split, abi, globals);
         }
+
         function.instruction(&Instruction::End);
-    } else if let Some(split) = actions.get(&ActionKind::Split) {
-        emit_split(&mut function, *split, abi, globals);
     }
 
+    function.instruction(&Instruction::End);
     function
-        .instruction(&Instruction::End)
+}
+
+fn emit_timer_lifecycle_events(
+    function: &mut Function,
+    timer_state: u32,
+    observed_timer_state: u32,
+    actions: &HashMap<ActionKind, u32>,
+    abi: &Abi,
+) {
+    function
+        .instruction(&Instruction::Call(abi.function(AbiImportId::TimerGetState)))
+        .instruction(&Instruction::LocalSet(timer_state))
+        .instruction(&Instruction::GlobalGet(observed_timer_state))
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(timer_state))
+        .instruction(&Instruction::GlobalSet(observed_timer_state))
+        .instruction(&Instruction::Else);
+
+    if let Some(on_start) = actions.get(&ActionKind::OnStart) {
+        function
+            .instruction(&Instruction::GlobalGet(observed_timer_state))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::LocalGet(timer_state))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::I32And)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Call(*on_start))
+            .instruction(&Instruction::End);
+    }
+    if let Some(on_reset) = actions.get(&ActionKind::OnReset) {
+        function
+            .instruction(&Instruction::GlobalGet(observed_timer_state))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::LocalGet(timer_state))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::I32And)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Call(*on_reset))
+            .instruction(&Instruction::End);
+    }
+    function
+        .instruction(&Instruction::LocalGet(timer_state))
+        .instruction(&Instruction::GlobalSet(observed_timer_state))
         .instruction(&Instruction::End);
-    function
 }
 
 fn emit_layout_predicate(

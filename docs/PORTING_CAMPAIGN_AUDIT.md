@@ -668,9 +668,11 @@ The campaign provides remaining concrete cases for:
 
 ### Actual host or language boundaries
 
-Exact `shutdown`, `onStart`, `onSplit`, and `onReset` behavior needs ordered,
-lossless host events. Dialogs, timing-method mutation, arbitrary filesystem or
-process control, and similar UI capabilities need a sandbox policy. Full
+`onStart` and `onReset` are available through timer-state sampling, including
+while detached. Exact lossless delivery across multiple transitions between
+updates, `shutdown`, and `onSplit` still need ordered host events. Dialogs,
+timing-method mutation, arbitrary filesystem or process control, and similar UI
+capabilities need a sandbox policy. Full
 unknown-module enumeration and portable process identity remain runtime design
 work. Dynamic bags, closures, and user-created background threads are not
 justified by these candidates because their reviewed uses already have typed

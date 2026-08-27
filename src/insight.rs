@@ -2106,6 +2106,24 @@ split { return layout == StateLayout.Steam }
     }
 
     #[test]
+    fn timer_lifecycle_hover_describes_detached_sampling() {
+        let source = "state \"game.exe\" {}\nonStart {}\nonReset {}";
+        let mut database = CompilerDatabase::new(source);
+        for (action, transition) in [
+            ("onStart", "leave `TimerState.NotRunning`"),
+            ("onReset", "enter `TimerState.NotRunning`"),
+        ] {
+            let hover = database
+                .hover(source.find(action).unwrap() + 1)
+                .unwrap()
+                .expect("timer lifecycle hover");
+            assert!(hover.markdown.contains(transition), "{}", hover.markdown);
+            assert!(hover.markdown.contains("while detached"));
+            assert!(hover.markdown.contains("following update"));
+        }
+    }
+
+    #[test]
     fn source_hover_renders_inferred_value_and_field_types() {
         let source = r#"
 record Point { x: i32 }

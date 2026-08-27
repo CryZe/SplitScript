@@ -289,12 +289,14 @@ fn is_complete_process_list(tokens: &[&crate::lexer::Token]) -> bool {
     !expects_string
 }
 
-fn all_actions() -> [ActionKind; 10] {
+fn all_actions() -> [ActionKind; 12] {
     [
         ActionKind::Setup,
         ActionKind::OnDetach,
         ActionKind::OnAttach,
         ActionKind::OnStateReady,
+        ActionKind::OnStart,
+        ActionKind::OnReset,
         ActionKind::WhileAttached,
         ActionKind::Start,
         ActionKind::Split,

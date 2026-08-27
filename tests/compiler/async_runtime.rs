@@ -120,6 +120,7 @@ fn never_can_appear_as_an_uninhabited_aggregate_payload() {
 #[derive(Default)]
 struct AsyncTestHost {
     process_open: bool,
+    timer_state: i32,
     messages: Vec<String>,
     memory_regions: Vec<(u64, Vec<u8>)>,
     module_lookups: usize,
@@ -168,6 +169,11 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
                         "process_is_open" => {
                             results[0] = Val::I32(i32::from(caller.data().process_open));
                         }
+                        "timer_get_state" => {
+                            results[0] = Val::I32(caller.data().timer_state);
+                        }
+                        "timer_start" => caller.data_mut().timer_state = 1,
+                        "timer_reset" => caller.data_mut().timer_state = 0,
                         "process_get_module_address" => {
                             caller.data_mut().module_lookups += 1;
                             results[0] = Val::I64(0x1000);
@@ -249,6 +255,7 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
         &engine,
         AsyncTestHost {
             process_open: true,
+            timer_state: 0,
             messages: Vec::new(),
             memory_regions: Vec::new(),
             module_lookups: 0,
@@ -268,6 +275,111 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
         .call(&mut store, ())
         .unwrap();
     (store, instance)
+}
+
+#[test]
+fn timer_lifecycle_actions_observe_transitions_once_while_detached() {
+    let source = r#"
+        state "missing.exe" {}
+
+        onStart {
+            print("started")
+        }
+
+        onReset {
+            print("reset")
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    store.data_mut().process_open = false;
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    assert!(
+        store.data().messages.is_empty(),
+        "the first sample is a baseline"
+    );
+
+    store.data_mut().timer_state = 1;
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["started"]);
+
+    store.data_mut().timer_state = 0;
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["started", "reset"]);
+}
+
+#[test]
+fn timer_state_monitor_is_absent_without_lifecycle_or_decision_actions() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                print("attached")
+            }
+        "#,
+    )
+    .expect("a script without timer behavior should compile");
+    let imports = wasmparser::Parser::new(0)
+        .parse_all(&wasm)
+        .filter_map(Result::ok)
+        .filter_map(|payload| match payload {
+            wasmparser::Payload::ImportSection(section) => Some(section),
+            _ => None,
+        })
+        .flat_map(|section| section.into_imports().filter_map(Result::ok))
+        .map(|import| import.name.to_owned())
+        .collect::<Vec<_>>();
+
+    assert!(!imports.iter().any(|name| name == "timer_get_state"));
+}
+
+#[test]
+fn script_timer_decisions_are_observed_on_the_following_update() {
+    let source = r#"
+        state "game.exe" {}
+
+        onStart {
+            print("started")
+        }
+
+        onReset {
+            print("reset")
+        }
+
+        start {
+            return true
+        }
+
+        reset {
+            return true
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    // The first update establishes both the timer and state baselines. The
+    // second requests a start, but must not invoke `onStart` directly.
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert!(store.data().messages.is_empty());
+    assert_eq!(store.data().timer_state, 1);
+
+    // The next update observes that start exactly once, then requests a reset.
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["started"]);
+    assert_eq!(store.data().timer_state, 0);
+
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["started", "reset"]);
 }
 
 #[test]

@@ -27,7 +27,6 @@ impl BackendDependencies {
         reachability: &super::reachability::Reachability,
     ) -> Self {
         let mut dependencies = Self::default();
-        dependencies.require_import(AbiImportId::TimerGetState);
         dependencies.require_import(AbiImportId::ProcessAttach);
         dependencies.require_import(AbiImportId::ProcessDetach);
         dependencies.require_import(AbiImportId::ProcessIsOpen);
@@ -74,14 +73,28 @@ impl BackendDependencies {
         }
         for action in &program.actions {
             match action.kind {
-                ActionKind::Start => dependencies.require_import(AbiImportId::TimerStart),
-                ActionKind::Split => dependencies.require_import(AbiImportId::TimerSplit),
-                ActionKind::Reset => dependencies.require_import(AbiImportId::TimerReset),
+                ActionKind::OnStart | ActionKind::OnReset => {
+                    dependencies.require_import(AbiImportId::TimerGetState);
+                }
+                ActionKind::Start => {
+                    dependencies.require_import(AbiImportId::TimerGetState);
+                    dependencies.require_import(AbiImportId::TimerStart);
+                }
+                ActionKind::Split => {
+                    dependencies.require_import(AbiImportId::TimerGetState);
+                    dependencies.require_import(AbiImportId::TimerSplit);
+                }
+                ActionKind::Reset => {
+                    dependencies.require_import(AbiImportId::TimerGetState);
+                    dependencies.require_import(AbiImportId::TimerReset);
+                }
                 ActionKind::IsLoading => {
+                    dependencies.require_import(AbiImportId::TimerGetState);
                     dependencies.require_import(AbiImportId::TimerPauseGameTime);
                     dependencies.require_import(AbiImportId::TimerResumeGameTime);
                 }
                 ActionKind::GameTime => {
+                    dependencies.require_import(AbiImportId::TimerGetState);
                     dependencies.require_import(AbiImportId::TimerSetGameTime);
                 }
                 ActionKind::Setup

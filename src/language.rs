@@ -563,6 +563,8 @@ const LIFECYCLE_SOURCE: &str = r#"state "game.exe" {}
 setup {}
 onDetach {}
 onAttach {}
+onStart {}
+onReset {}
 whileAttached {}
 start {}
 split {}
@@ -1855,6 +1857,22 @@ define_language_catalog! {
         "onStateReady {\n    print(`Initial level: {current.level}`)\n}"
     ),
     action_item!(
+        OnStart,
+        OnStart,
+        "onStart",
+        "Reacts after the timer starts.",
+        "Runs once when consecutive updates observe the timer leave [`TimerState.NotRunning`]. The first update establishes a baseline without firing. Observation happens after settings refresh but before process attachment and state polling, so the action remains available while detached. Process providers, attachment-scoped globals, [`layout`], [`current`], and [`old`] are unavailable. A start requested by this script is observed on the following update rather than invoking this action directly from the [`start`] decision.",
+        "onStart {\n    print(\"Attempt started\")\n}"
+    ),
+    action_item!(
+        OnReset,
+        OnReset,
+        "onReset",
+        "Reacts after the timer resets.",
+        "Runs once when consecutive updates observe the timer enter [`TimerState.NotRunning`]. The first update establishes a baseline without firing. Observation happens after settings refresh but before process attachment and state polling, so the action remains available while detached. Process providers, attachment-scoped globals, [`layout`], [`current`], and [`old`] are unavailable. A reset requested by this script is observed on the following update rather than invoking this action directly from the [`reset`] decision.",
+        "onReset {\n    print(\"Attempt reset\")\n}"
+    ),
+    action_item!(
         WhileAttached,
         WhileAttached,
         "whileAttached",
@@ -2020,6 +2038,8 @@ impl LanguageCatalog {
             ActionKind::OnDetach,
             ActionKind::OnAttach,
             ActionKind::OnStateReady,
+            ActionKind::OnStart,
+            ActionKind::OnReset,
             ActionKind::WhileAttached,
             ActionKind::Start,
             ActionKind::Split,

@@ -121,16 +121,15 @@ shutdown, hot reload, trapped updates, and cancelled async work.
 
 **Status:** Required semantics known; transport undecided.
 
-The current runtime calls only the Wasm `update` export. Polling
-`timer_current_split_index` observes ordinary advancement, but it cannot
-distinguish an undo followed by another split between two updates. It also
-cannot provide exact `onStart`, `onSplit`, and `onReset` events while detached.
-The maintained Axiom Verge port can clear its event cursors after an attached
-`NotRunning` transition, but cannot reproduce the legacy `OnStart` callback
-when the timer starts before process attachment. Its diagnostic-only `OnSplit`
-callback is intentionally omitted rather than approximated. Circuit Superstars
-likewise rearms accumulated game time in `onStart`; moving that reset into its
-game-driven `start` predicate would miss externally initiated starts.
+The current runtime calls only the Wasm `update` export. SplitScript can sample
+`timer_get_state` before process attachment on every update, so `onStart` and
+`onReset` are useful while detached and also observe changes initiated outside
+the script. This remains sampled rather than lossless: a start and reset that
+both occur between updates collapse to no visible transition. Polling
+`timer_current_split_index` has a more serious ambiguity because it cannot
+distinguish an undo followed by another split between two updates. Diagnostic
+and bookkeeping `onSplit` callbacks are therefore intentionally omitted rather
+than approximated.
 
 The runtime should eventually expose an ordered, lossless timer-event contract.
 This could be callback exports or a sequenced event queue consumed during
@@ -146,8 +145,9 @@ This could be callback exports or a sequenced event queue consumed during
 - reentrancy and suspension behavior are defined;
 - a sequence number makes missed or duplicated delivery testable.
 
-SplitScript can build optional `onStart`, `onSplit`, and `onReset` blocks only
-after this host contract exists. It must not invent exports that LiveSplit does
+SplitScript's sampled `onStart` and `onReset` actions require no new export and
+remain zero-cost when unused. Exact lossless variants and `onSplit` still need
+this host contract; the compiler must not invent exports that the runtime does
 not call.
 
 ## R3: typed process and module discovery

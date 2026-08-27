@@ -68,7 +68,6 @@ state Unity.il2cpp(2020) ["Lunistice.exe", "Lunistice-Demo.exe"] {
 
 let runTimeSeconds = 0.0
 let beyondFirstLevel = false
-let lastTimerState = TimerState.NotRunning
 
 fn twoDigits(value) {
     if value < 10 {
@@ -110,16 +109,20 @@ fn characterName(character, dlcDemo) {
     }
 }
 
-whileAttached {
-    let timerState = timer.state()
-    let timerStarted = lastTimerState == TimerState.NotRunning
-        && timerState != TimerState.NotRunning
-    if timerStarted {
-        runTimeSeconds = 0
-        beyondFirstLevel = false
-    }
-    lastTimerState = timerState
+fn resetRunTracking() {
+    runTimeSeconds = 0
+    beyondFirstLevel = false
+}
 
+onStart {
+    resetRunTracking()
+}
+
+onReset {
+    resetRunTracking()
+}
+
+whileAttached {
     setVariable("Points", current.points)
     setVariable("Resets", current.deaths)
     setVariable("Level Time", current.levelTimeParts)
@@ -145,16 +148,12 @@ start {
         current.scene == "Shrine01"
     }
     if old.timerStopped != current.timerStopped && !current.timerStopped && isFirstLevel {
-        runTimeSeconds = 0
-        beyondFirstLevel = false
         return true
     }
 }
 
 reset {
     if current.levelTime < old.levelTime && !beyondFirstLevel {
-        runTimeSeconds = 0
-        beyondFirstLevel = false
         return true
     }
 }

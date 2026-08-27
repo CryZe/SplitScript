@@ -463,11 +463,20 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Lifecycle semantics exposed by legacy ASL
 
-- [ ] Keep ASL `shutdown` and exact `onStart`/`onSplit`/`onReset` events as host
-  requirements rather than approximating them. Shutdown requires the host to
-  invoke a teardown export before disabling, reloading, or dropping a module;
-  timer events require the ordered lossless contract in R2. Track teardown in
-  R6 of [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
+- [x] Add timer-global `onStart` and `onReset` actions by sampling
+  `timer_get_state` near the beginning of each update, before process
+  attachment and state polling. The first update establishes a baseline;
+  later `NotRunning -> active` and `active -> NotRunning` transitions fire
+  once, including while detached. Process providers, attachment globals,
+  `layout`, `current`, and `old` remain unavailable. The compiler emits the
+  monitor global, import, and transition code only when either action exists.
+  Script-requested starts and resets are observed naturally on the following
+  update rather than being invoked directly and then rediscovered.
+- [ ] Keep ASL `shutdown` and exact `onSplit` delivery as host requirements.
+  Shutdown requires the host to invoke a teardown export before disabling,
+  reloading, or dropping a module; lossless split/skip/undo ordering requires
+  the event contract in R2. Track teardown in R6 of
+  [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
 
 ### State layouts, discovery, and process identity
 
@@ -819,18 +828,13 @@ remaining work is product hardening and distribution.
 
 ## P1 — remaining language and runtime breadth
 
-- [ ] Design host-driven `onStart`, `onReset`, and `onSplit` timer-event
-  actions. They must fire even when no game process or emulator is attached;
-  they are timer lifecycle events, not aliases for process lifecycle blocks.
-  Inside these actions, expose attachment-dependent roots (`process` or `gba`)
-  and the whole `old`/`current` snapshots as typed options, so code must handle
-  absence before reading members. Specify the snapshot captured for each event,
-  whether `onSplit` observes the segment before or after advancement, ordering
-  relative to polling and detach, reentrancy, and whether suspension is safe.
-  Add host ABI, runtime, type-checking, hover/completion, and detached-event
-  fixtures together; do not weaken availability in ordinary attached blocks.
-  The current LiveSplit Wasm runtime only calls `update`; this requires a real
-  upstream host contract before any event export may be implemented. R2 in
+- [ ] Design exact host-driven `onSplit` delivery. It must fire even when no
+  game process or emulator is attached and distinguish an ordinary split from
+  skips, undos, and multiple timer operations between updates. Specify the
+  segment identity, whether it is observed before or after advancement,
+  ordering relative to polling and detach, reentrancy, and suspension. Keep
+  attachment-dependent roots unavailable rather than fabricating stale
+  snapshots. The current runtime only calls `update`; R2 in
   [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md) is the canonical
   runtime-side requirement.
 - [ ] Design the remaining typed least-privilege timer/run API without

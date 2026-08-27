@@ -93,7 +93,9 @@ pub struct StateSnapshotViolation {
 /// and editor candidate filtering as new lifecycle contexts are introduced.
 pub const fn action_has_attached_process(action: ActionKind) -> bool {
     match action {
-        ActionKind::Setup | ActionKind::OnDetach => false,
+        ActionKind::Setup | ActionKind::OnDetach | ActionKind::OnStart | ActionKind::OnReset => {
+            false
+        }
         ActionKind::OnAttach
         | ActionKind::OnStateReady
         | ActionKind::WhileAttached

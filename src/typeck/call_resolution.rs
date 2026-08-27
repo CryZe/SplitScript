@@ -1945,6 +1945,12 @@ impl Checker {
                     "state snapshots are not available until `onAttach` completes"
                 }
                 ActionKind::OnDetach => "state snapshots are not guaranteed to exist in `onDetach`",
+                ActionKind::OnStart => {
+                    "state snapshots are unavailable in the timer-global `onStart` action"
+                }
+                ActionKind::OnReset => {
+                    "state snapshots are unavailable in the timer-global `onReset` action"
+                }
                 _ => unreachable!("the remaining actions have committed snapshots"),
             };
             self.errors.push(

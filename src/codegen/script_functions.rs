@@ -1039,7 +1039,13 @@ pub(super) fn compile_action(
         &mut matches,
         &mut local_types,
         LocalPlanOptions {
-            parameter_count: if matches!(action.kind, ActionKind::Setup | ActionKind::OnDetach) {
+            parameter_count: if matches!(
+                action.kind,
+                ActionKind::Setup
+                    | ActionKind::OnDetach
+                    | ActionKind::OnStart
+                    | ActionKind::OnReset
+            ) {
                 0
             } else {
                 2
@@ -1128,7 +1134,9 @@ pub(super) fn emit_action_default(function: &mut Function, action: ActionKind, g
         ActionKind::Setup
         | ActionKind::OnDetach
         | ActionKind::OnAttach
-        | ActionKind::OnStateReady => {}
+        | ActionKind::OnStateReady
+        | ActionKind::OnStart
+        | ActionKind::OnReset => {}
     }
 }
 

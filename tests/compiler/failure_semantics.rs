@@ -1982,3 +1982,30 @@ fn known_alternate_modules_and_runtime_pointer_bounds_need_no_enumeration_or_ind
         .validate_all(&wasm)
         .expect("the focused Hades discovery shape should produce valid Wasm GC");
 }
+
+#[test]
+fn timer_lifecycle_actions_cannot_depend_on_an_attachment() {
+    for action in ["onStart", "onReset"] {
+        for (expression, expected) in [
+            ("process.name()", "requires an attached process"),
+            ("current.value", "state snapshots are unavailable"),
+        ] {
+            let source = format!(
+                r#"
+                    state "game.exe" {{ value: u32 at 0x100; }}
+                    {action} {{
+                        print({expression})
+                    }}
+                "#
+            );
+            let diagnostics = splitscript::compile(&source)
+                .expect_err("timer lifecycle actions run even without an attached process");
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.message.contains(expected)),
+                "{diagnostics:#?}"
+            );
+        }
+    }
+}

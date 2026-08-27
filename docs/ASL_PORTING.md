@@ -1720,7 +1720,8 @@ LiveSplit component invokes them at different boundaries:
 | `update` | After each refresh and before all timer decisions; `false` skips the remaining decisions for that tick | Put ordinary per-tick work in [`whileAttached`]. An explicit `return false` preserves the legacy control result exactly. |
 | `exit` | When the attached process exits | Use [`onDetach`]. It runs exactly once for a real process closure and never at initial detached startup. |
 | `shutdown` | When the script is disabled, reloaded, dropped, or LiveSplit exits | No exact host callback exists yet; do not approximate it with [`onDetach`]. |
-| `timer.OnStart`, `timer.OnSplit`, `timer.OnReset` | LiveSplit timer events, which may be raised independently of this script's decision blocks | Reconstruct only simple observable transitions in [`whileAttached`]. Exact lossless events require the planned host contract. |
+| `timer.OnStart`, `timer.OnReset` | Timer events that may be raised independently of this script's decision blocks and while no game is attached | Keep the logic in [`onStart`] and [`onReset`]. SplitScript samples timer state before process attachment on every update, so these actions remain available while detached. |
+| `timer.OnSplit` | An ordered segment event that must distinguish ordinary splits, skips, and undos | No exact host event exists yet. Do not approximate bookkeeping-sensitive behavior from only the current split index. |
 
 For example, process-independent ASL startup statements belong in [`setup`], not
 [`onAttach`]:
@@ -1736,6 +1737,16 @@ setup {
 after settings are available, but cannot use `process`, `gba`, [`current`],
 [`old`], [`await`], or [`retry`]. A debug-watch replacement loads a new module and
 therefore runs it again on that module's first update.
+
+[`onStart`] and [`onReset`] are timer-global rather than process lifecycle
+actions. They run before attachment and state polling when two consecutive
+updates observe the timer leave or enter [`TimerState.NotRunning`]. The first
+update only establishes a baseline. They may use settings and ordinary globals,
+but not `process`, an emulator provider, attachment-scoped globals, [`layout`],
+[`current`], or [`old`]. A start or reset requested by this script is observed
+on the following update instead of being invoked directly from [`start`] or
+[`reset`]. This sampled contract delivers an ordinary persistent transition
+once, but cannot recover a start and reset that both occur between updates.
 
 Legacy `init` combines two boundaries that SplitScript keeps explicit. Use
 [`onAttach`] for discovery that may suspend and for layout selection. Use

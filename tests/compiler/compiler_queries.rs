@@ -1042,6 +1042,46 @@ fn managed_rename_keeps_explicit_metadata_names_unchanged() {
 }
 
 #[test]
+fn setting_rename_preserves_the_host_key() {
+    use splitscript::tooling::database::CompilerDatabase;
+
+    let source = r#"
+        state "game.exe" {}
+        settings {
+            "Automatic splitting" => autoSplit: true,
+            "Automatic reset" => autoReset key "reset-enabled": true,
+        }
+        whileAttached {
+            print(settings.autoSplit)
+            print(settings.autoReset)
+        }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    database
+        .check()
+        .expect("setting rename fixture should check");
+
+    let auto_split_use = source.rfind("autoSplit").unwrap();
+    let auto_split = database.rename_at(auto_split_use, "splitEnabled").unwrap();
+    assert_eq!(auto_split.edits.len(), 3);
+    assert!(auto_split.edits.iter().any(|edit| {
+        edit.span.start == source.find("autoSplit:").unwrap() + "autoSplit".len()
+            && edit.span.start == edit.span.end
+            && edit.replacement == " key \"autoSplit\""
+    }));
+
+    let auto_reset_use = source.rfind("autoReset").unwrap();
+    let auto_reset = database.rename_at(auto_reset_use, "resetEnabled").unwrap();
+    assert_eq!(auto_reset.edits.len(), 2);
+    assert!(
+        auto_reset
+            .edits
+            .iter()
+            .all(|edit| edit.span.start != edit.span.end)
+    );
+}
+
+#[test]
 fn live_managed_paths_use_schema_definitions_and_documentation() {
     use splitscript::tooling::database::{CompilerDatabase, SourceDefinitionId};
 

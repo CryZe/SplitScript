@@ -147,7 +147,7 @@ impl CompilerDatabase {
             });
         }
 
-        if let Some(preservation) = self.managed_metadata_preservation(target.id, &target.name)? {
+        if let Some(preservation) = self.external_identity_preservation(target.id, &target.name)? {
             edits.push(preservation);
         }
         edits.sort_by_key(|edit| (edit.span.start, edit.span.end));
@@ -178,10 +178,11 @@ impl CompilerDatabase {
         })
     }
 
-    /// Preserves the runtime metadata identity of a managed declaration when
-    /// its source-facing name changes. Explicit metadata names already provide
-    /// that stable boundary and therefore need no additional edit.
-    fn managed_metadata_preservation(
+    /// Preserves an external identity that would otherwise be inherited from
+    /// the declaration's source-facing name. Each domain keeps its own syntax
+    /// and cardinality: settings have one stable `key`, managed declarations
+    /// have one or more lookup names introduced by `from`.
+    fn external_identity_preservation(
         &mut self,
         target: SourceDefinitionId,
         old_name: &str,
@@ -189,6 +190,19 @@ impl CompilerDatabase {
         let parsed = self.parse().map_err(RenameError::Diagnostics)?;
         let syntax = parsed.syntax();
         let edit = match target {
+            SourceDefinitionId::Value(id) => syntax
+                .settings
+                .iter()
+                .find(|setting| {
+                    setting.id == id && setting.source_visible && setting.external_key.is_none()
+                })
+                .map(|setting| TextEdit {
+                    span: Span {
+                        start: setting.name_span.end,
+                        end: setting.name_span.end,
+                    },
+                    replacement: format!(" key \"{old_name}\""),
+                }),
             SourceDefinitionId::ManagedClass(id) => syntax
                 .managed_class_declarations()
                 .into_iter()

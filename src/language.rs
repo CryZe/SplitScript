@@ -1252,7 +1252,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "class Name from \"MetadataName\" { ... } | Type field from [\"name\", \"fallback\"];",
         "Supplies one or more runtime metadata names for a managed declaration.",
-        "Without [`from`], a managed [`class`] or field uses its SplitScript declaration name for metadata lookup. A single quoted name replaces that default. An array tries its names in order, which supports renamed classes and fields across builds without changing the stable source-facing name. For an instance field without an explicit [`from`], lookup also accepts the conventional C# automatic-property backing-field spelling.",
+        "Without [`from`], a managed [`class`] or field uses its SplitScript declaration name for metadata lookup. A single quoted name replaces that default. An array tries its names in order, which supports renamed classes and fields across builds without changing the stable source-facing name. For an instance field without an explicit [`from`], lookup also accepts the conventional C# automatic-property backing-field spelling. Editor rename preserves the effective metadata candidates by inserting an explicit [`from`] clause when changing a declaration whose source name was still implicit.",
         &[Example::checked(
             "Try alternate managed field names",
             "u32 score from [\"_score\", \"<Score>k__BackingField\"];",
@@ -1352,7 +1352,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "\"Label\" => name key \"host-key\": value",
         "Assigns an explicit stable key in the host settings map.",
-        "The quoted key is used for persistent host storage and dynamic [`SettingsView.enabled`] lookups. The source identifier remains the statically typed member exposed through [`settings`] and [`oldSettings`]. Without [`key`](syntax@stable setting key), the source identifier is also the host key.",
+        "The quoted key is used for persistent host storage and dynamic [`SettingsView.enabled`] lookups. The source identifier remains the statically typed member exposed through [`settings`] and [`oldSettings`]. Without [`key`](syntax@stable setting key), the source identifier is also the host key. Editor rename inserts that previous identifier as an explicit [`key`](syntax@stable setting key), preserving saved settings while allowing the local member name to change.",
         SETTING_KEY_EXAMPLE
     ),
     language_item!(

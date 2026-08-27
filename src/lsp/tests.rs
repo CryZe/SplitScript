@@ -1899,6 +1899,55 @@ state Unity ["game.exe"] {
 }
 
 #[test]
+fn setting_rename_emits_stable_key_preservation_edit() {
+    let source = r#"state "game.exe" {}
+settings {
+    "Automatic splitting" => autoSplit: true,
+}
+whileAttached {
+    print(settings.autoSplit)
+}
+"#;
+    let uri = "file:///setting-rename.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+
+    let use_site = source.rfind("autoSplit").unwrap();
+    let (line, character) = position_parts(source, use_site + 1);
+    let renamed = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 172,
+        "method": "textDocument/rename",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character },
+            "newName": "splitEnabled"
+        }
+    }));
+    let edits = renamed[0]["result"]["changes"][uri]
+        .as_array()
+        .expect("setting rename edits");
+    assert_eq!(edits.len(), 3);
+    assert_eq!(
+        edits
+            .iter()
+            .filter_map(|edit| edit["newText"].as_str())
+            .collect::<Vec<_>>(),
+        ["splitEnabled", " key \"autoSplit\"", "splitEnabled"]
+    );
+}
+
+#[test]
 fn document_symbols_and_code_actions_preserve_compiler_structure() {
     let symbols_source = concat!(
         "record Point { x: i32 }\n",

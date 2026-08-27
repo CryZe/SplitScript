@@ -5,6 +5,7 @@ use std::{fmt, sync::Arc};
 use crate::{
     Diagnostic,
     ast::Span,
+    diagnostic::TextEdit,
     language::LanguageCatalog,
     stdlib::{StandardLibrary, StdlibOwner},
 };
@@ -20,8 +21,8 @@ pub struct RenameTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenamePlan {
-    pub replacement: String,
-    pub spans: Vec<Span>,
+    pub new_name: String,
+    pub edits: Vec<TextEdit>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,10 +105,12 @@ impl CompilerDatabase {
         Ok(target.filter(|target| !self.is_generated_layout_symbol(target.id)))
     }
 
-    /// Validates an identity-preserving source rename and returns every exact
-    /// identifier span to edit. The rebuilt candidate must type-check and all
-    /// existing source references must retain their stable declaration IDs.
-    pub fn rename_at(&mut self, offset: usize, new_name: &str) -> Result<Vec<Span>, RenameError> {
+    /// Validates an identity-preserving source rename and returns its complete
+    /// text-edit plan. The rebuilt candidate must type-check and all existing
+    /// source references must retain their stable declaration IDs. Declarations
+    /// whose local spelling also supplies an external identity may add a
+    /// zero-width preservation edit.
+    pub fn rename_at(&mut self, offset: usize, new_name: &str) -> Result<RenamePlan, RenameError> {
         self.check().map_err(RenameError::Diagnostics)?;
         let target = self
             .rename_target_at(offset)
@@ -129,11 +132,27 @@ impl CompilerDatabase {
             .collect::<Vec<_>>();
         spans.sort_by_key(|span| (span.start, span.end));
         spans.dedup();
+        let mut edits = spans
+            .iter()
+            .copied()
+            .map(|span| TextEdit {
+                span,
+                replacement: new_name.to_owned(),
+            })
+            .collect::<Vec<_>>();
         if new_name == target.name {
-            return Ok(spans);
+            return Ok(RenamePlan {
+                new_name: new_name.to_owned(),
+                edits,
+            });
         }
 
-        let candidate_source = replace_spans(self.source(), &spans, new_name);
+        if let Some(preservation) = self.managed_metadata_preservation(target.id, &target.name)? {
+            edits.push(preservation);
+        }
+        edits.sort_by_key(|edit| (edit.span.start, edit.span.end));
+
+        let candidate_source = apply_edits(self.source(), &edits);
         let mut candidate = Self::with_context(self.context.clone(), candidate_source);
         candidate
             .check()
@@ -142,7 +161,7 @@ impl CompilerDatabase {
             .definition_index()
             .map_err(|_| RenameError::ConflictingBinding)?;
         for reference in definitions.syntax_references() {
-            let mapped = remap_span(reference.span, &spans, new_name.len());
+            let mapped = remap_span(reference.span, &edits);
             if !candidate_definitions
                 .reference_at(mapped.start)
                 .is_some_and(|candidate_reference| {
@@ -153,7 +172,49 @@ impl CompilerDatabase {
                 return Err(RenameError::ConflictingBinding);
             }
         }
-        Ok(spans)
+        Ok(RenamePlan {
+            new_name: new_name.to_owned(),
+            edits,
+        })
+    }
+
+    /// Preserves the runtime metadata identity of a managed declaration when
+    /// its source-facing name changes. Explicit metadata names already provide
+    /// that stable boundary and therefore need no additional edit.
+    fn managed_metadata_preservation(
+        &mut self,
+        target: SourceDefinitionId,
+        old_name: &str,
+    ) -> Result<Option<TextEdit>, RenameError> {
+        let parsed = self.parse().map_err(RenameError::Diagnostics)?;
+        let syntax = parsed.syntax();
+        let edit = match target {
+            SourceDefinitionId::ManagedClass(id) => syntax
+                .managed_class_declarations()
+                .into_iter()
+                .find(|class| class.id == id && class.metadata_names.keyword_span.is_none())
+                .map(|class| TextEdit {
+                    span: Span {
+                        start: class.name_span.end,
+                        end: class.name_span.end,
+                    },
+                    replacement: format!(" from \"{old_name}\""),
+                }),
+            SourceDefinitionId::ManagedField(id) => syntax
+                .managed_class_declarations()
+                .into_iter()
+                .flat_map(|class| class.all_fields())
+                .find(|field| field.id == id && field.metadata_names.keyword_span.is_none())
+                .map(|field| TextEdit {
+                    span: Span {
+                        start: field.name_span.end,
+                        end: field.name_span.end,
+                    },
+                    replacement: format!(" from [\"{old_name}\", \"<{old_name}>k__BackingField\"]"),
+                }),
+            _ => None,
+        };
+        Ok(edit)
     }
 
     /// Compatible declarations across named layouts expose one shared
@@ -214,7 +275,7 @@ impl CompilerDatabase {
         let mut replacement = format!("_{}", target.name);
         loop {
             match self.rename_at(offset, &replacement) {
-                Ok(spans) => return Ok(Some(RenamePlan { replacement, spans })),
+                Ok(plan) => return Ok(Some(plan)),
                 Err(RenameError::ConflictingBinding | RenameError::ReservedIdentifier) => {
                     replacement.insert(0, '_');
                 }
@@ -255,36 +316,40 @@ fn is_reserved_source_identifier(standard_library: StandardLibrary, name: &str) 
     language_reserved || standard_library_reserved
 }
 
-fn replace_spans(source: &str, spans: &[Span], replacement: &str) -> String {
-    let removed = spans
+fn apply_edits(source: &str, edits: &[TextEdit]) -> String {
+    let removed = edits
         .iter()
-        .map(|span| span.end - span.start)
+        .map(|edit| edit.span.end - edit.span.start)
         .sum::<usize>();
     let mut result = String::with_capacity(
-        source.len() - removed + spans.len().saturating_mul(replacement.len()),
+        source.len() - removed
+            + edits
+                .iter()
+                .map(|edit| edit.replacement.len())
+                .sum::<usize>(),
     );
     let mut cursor = 0;
-    for span in spans {
-        result.push_str(&source[cursor..span.start]);
-        result.push_str(replacement);
-        cursor = span.end;
+    for edit in edits {
+        result.push_str(&source[cursor..edit.span.start]);
+        result.push_str(&edit.replacement);
+        cursor = edit.span.end;
     }
     result.push_str(&source[cursor..]);
     result
 }
 
-fn remap_span(span: Span, replacements: &[Span], replacement_len: usize) -> Span {
+fn remap_span(span: Span, edits: &[TextEdit]) -> Span {
     let mut delta = 0isize;
-    for replacement in replacements {
-        if *replacement == span {
+    for edit in edits {
+        if edit.span == span {
             let start = span.start.checked_add_signed(delta).unwrap();
             return Span {
                 start,
-                end: start + replacement_len,
+                end: start + edit.replacement.len(),
             };
         }
-        if replacement.end <= span.start {
-            delta += replacement_len as isize - (replacement.end - replacement.start) as isize;
+        if edit.span.end <= span.start {
+            delta += edit.replacement.len() as isize - (edit.span.end - edit.span.start) as isize;
         } else {
             break;
         }

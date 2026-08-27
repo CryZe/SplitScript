@@ -894,8 +894,13 @@ fn managed_class_types_use_the_source_symbol_graph() {
             .all(|span| &source[span.start..span.end] == "Player")
     );
 
-    let edits = database.rename_at(parameter_type, "PlayerState").unwrap();
-    assert_eq!(edits.len(), 3);
+    let plan = database.rename_at(parameter_type, "PlayerState").unwrap();
+    assert_eq!(plan.edits.len(), 4);
+    assert!(plan.edits.iter().any(|edit| {
+        edit.span.start == declaration + "Player".len()
+            && edit.span.start == edit.span.end
+            && edit.replacement == " from \"Player\""
+    }));
 
     let field_declaration = source.find("i32 points").unwrap() + "i32 ".len();
     let field_access = source.rfind("manager.points").unwrap() + "manager.".len();
@@ -971,17 +976,68 @@ fn managed_schema_owners_share_source_identity_hover_and_rename() {
     let class_use = source.rfind("Player").expect("parameter uses the class");
     let class_edits = database.rename_at(class_use, "PlayerState").unwrap();
     assert_eq!(
-        class_edits.len(),
-        2,
-        "class declaration and use are renamed"
+        class_edits.edits.len(),
+        3,
+        "class declaration and use are renamed while metadata identity is preserved"
     );
+    assert!(class_edits.edits.iter().any(|edit| {
+        edit.span.start == source.find("Player {").unwrap() + "Player".len()
+            && edit.span.start == edit.span.end
+            && edit.replacement == " from \"Player\""
+    }));
 
     let field_use = source.rfind("health").expect("return reads the field");
     let field_edits = database.rename_at(field_use, "hitPoints").unwrap();
     assert_eq!(
-        field_edits.len(),
-        2,
-        "field declaration and use are renamed"
+        field_edits.edits.len(),
+        3,
+        "field declaration and use are renamed while metadata identity is preserved"
+    );
+    assert!(field_edits.edits.iter().any(|edit| {
+        edit.span.start == source.find("health;").unwrap() + "health".len()
+            && edit.span.start == edit.span.end
+            && edit.replacement == " from [\"health\", \"<health>k__BackingField\"]"
+    }));
+}
+
+#[test]
+fn managed_rename_keeps_explicit_metadata_names_unchanged() {
+    use splitscript::tooling::database::CompilerDatabase;
+
+    let source = r#"
+        image "Assembly-CSharp" {
+            class Player from "Game.Player" {
+                static Player instance from "Instance";
+                u32 score from ["_score", "<Score>k__BackingField"];
+            }
+        }
+        state Unity ["game.exe"] {
+            score: u32 = Player.instance?.score?
+        }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    database
+        .check()
+        .expect("managed rename fixture should check");
+
+    let class_use = source.rfind("Player.instance").unwrap();
+    let class_plan = database.rename_at(class_use, "Actor").unwrap();
+    assert_eq!(class_plan.edits.len(), 3);
+    assert!(
+        class_plan
+            .edits
+            .iter()
+            .all(|edit| edit.span.start != edit.span.end)
+    );
+
+    let field_use = source.rfind("score?").unwrap();
+    let field_plan = database.rename_at(field_use, "points").unwrap();
+    assert_eq!(field_plan.edits.len(), 2);
+    assert!(
+        field_plan
+            .edits
+            .iter()
+            .all(|edit| edit.span.start != edit.span.end)
     );
 }
 
@@ -1109,12 +1165,12 @@ fn rename_queries_validate_identifiers_reservations_and_binding_identity() {
     let mut database = CompilerDatabase::new(source);
 
     let parameter = source.find("value: i32").unwrap();
-    let edits = database.rename_at(parameter, "amount").unwrap();
-    assert_eq!(edits.len(), 2);
+    let plan = database.rename_at(parameter, "amount").unwrap();
+    assert_eq!(plan.edits.len(), 2);
     assert!(
-        edits
+        plan.edits
             .iter()
-            .all(|span| &source[span.start..span.end] == "value")
+            .all(|edit| &source[edit.span.start..edit.span.end] == "value")
     );
     let target = database.rename_target_at(parameter).unwrap().unwrap();
     assert_eq!(target.name, "value");
@@ -1257,13 +1313,13 @@ fn underscore_suppression_reuses_validated_identity_renames() {
         .underscore_suppression_at(global_offset)
         .unwrap()
         .expect("the unused global is renameable");
-    assert_eq!(global.replacement, "__deadGlobal");
-    assert_eq!(global.spans.len(), 2);
+    assert_eq!(global.new_name, "__deadGlobal");
+    assert_eq!(global.edits.len(), 2);
     assert!(
         global
-            .spans
+            .edits
             .iter()
-            .all(|span| &source[span.start..span.end] == "deadGlobal")
+            .all(|edit| &source[edit.span.start..edit.span.end] == "deadGlobal")
     );
 
     let field_offset = source.find("unusedField: i32").unwrap();
@@ -1271,13 +1327,13 @@ fn underscore_suppression_reuses_validated_identity_renames() {
         .underscore_suppression_at(field_offset)
         .unwrap()
         .expect("the unread field is renameable");
-    assert_eq!(field.replacement, "_unusedField");
-    assert_eq!(field.spans.len(), 2);
+    assert_eq!(field.new_name, "_unusedField");
+    assert_eq!(field.edits.len(), 2);
     assert!(
         field
-            .spans
+            .edits
             .iter()
-            .all(|span| &source[span.start..span.end] == "unusedField")
+            .all(|edit| &source[edit.span.start..edit.span.end] == "unusedField")
     );
 }
 

@@ -198,7 +198,14 @@ whileAttached {
     assert_eq!(definition.span.start, declaration);
     assert!(matches!(definition.id, SourceDefinitionId::Function(_)));
     assert_eq!(database.references_at(reference, true).unwrap().len(), 2);
-    assert_eq!(database.rename_at(reference, "advance").unwrap().len(), 2);
+    assert_eq!(
+        database
+            .rename_at(reference, "advance")
+            .unwrap()
+            .edits
+            .len(),
+        2
+    );
     let highlights = database.semantic_highlights().unwrap();
     let highlight = highlights
         .highlights()
@@ -296,9 +303,14 @@ whileAttached {
 
     assert_eq!(database.references_at(use_x, true).unwrap().len(), 2);
     let renamed = database.rename_at(use_x, "left").unwrap();
-    assert_eq!(renamed.len(), 2);
-    assert!(renamed.iter().any(|span| span.start == declaration_x));
-    assert!(renamed.iter().any(|span| span.start == use_x));
+    assert_eq!(renamed.edits.len(), 2);
+    assert!(
+        renamed
+            .edits
+            .iter()
+            .any(|edit| edit.span.start == declaration_x)
+    );
+    assert!(renamed.edits.iter().any(|edit| edit.span.start == use_x));
 }
 
 #[test]

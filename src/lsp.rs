@@ -23,7 +23,7 @@ use protocol::{
 };
 
 use crate::{
-    DiagnosticCode, DiagnosticFix, FixApplicability, TextEdit,
+    DiagnosticCode, DiagnosticFix, FixApplicability,
     database::DefinitionTarget,
     documentation::DocumentationReference,
     highlight::{SEMANTIC_TOKEN_MODIFIERS, SemanticTokenKind},
@@ -372,16 +372,9 @@ impl LanguageServer {
                 {
                     let original = &source[diagnostic.span.start..diagnostic.span.end];
                     fixes.push(DiagnosticFix {
-                        title: format!("rename `{original}` to `{}`", plan.replacement),
+                        title: format!("rename `{original}` to `{}`", plan.new_name),
                         applicability: FixApplicability::MachineApplicable,
-                        edits: plan
-                            .spans
-                            .into_iter()
-                            .map(|span| TextEdit {
-                                span,
-                                replacement: plan.replacement.clone(),
-                            })
-                            .collect(),
+                        edits: plan.edits,
                     });
                 }
                 for fix in fixes.iter() {
@@ -708,19 +701,20 @@ impl LanguageServer {
         let Some((source, offset, document)) = self.document_at_position(&params.position) else {
             return error_response(id, -32602, "invalid rename document or position");
         };
-        let spans = match document.database.rename_at(offset, &params.new_name) {
-            Ok(spans) => spans,
+        let plan = match document.database.rename_at(offset, &params.new_name) {
+            Ok(plan) => plan,
             Err(error) => return error_response(id, -32602, error.to_string()),
         };
-        let edits = spans
+        let edits = plan
+            .edits
             .into_iter()
-            .map(|span| {
+            .map(|edit| {
                 json!({
                     "range": {
-                        "start": position(&source, span.start),
-                        "end": position(&source, span.end)
+                        "start": position(&source, edit.span.start),
+                        "end": position(&source, edit.span.end)
                     },
-                    "newText": params.new_name
+                    "newText": edit.replacement
                 })
             })
             .collect();

@@ -1844,6 +1844,61 @@ fn prepare_rename_and_rename_emit_validated_workspace_edits() {
 }
 
 #[test]
+fn managed_rename_emits_external_identity_preservation_edits() {
+    let source = r#"image "Assembly-CSharp" {
+    class Player {
+        static Player instance;
+        u32 score;
+    }
+}
+state Unity ["game.exe"] {
+    score: u32 = Player.instance?.score?
+}
+"#;
+    let uri = "file:///managed-rename.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+
+    let score = source.rfind("score?").unwrap();
+    let (line, character) = position_parts(source, score + 1);
+    let renamed = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 171,
+        "method": "textDocument/rename",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character },
+            "newName": "points"
+        }
+    }));
+    let edits = renamed[0]["result"]["changes"][uri]
+        .as_array()
+        .expect("managed field rename edits");
+    assert_eq!(edits.len(), 3);
+    assert_eq!(
+        edits
+            .iter()
+            .filter_map(|edit| edit["newText"].as_str())
+            .collect::<Vec<_>>(),
+        [
+            "points",
+            " from [\"score\", \"<score>k__BackingField\"]",
+            "points",
+        ]
+    );
+}
+
+#[test]
 fn document_symbols_and_code_actions_preserve_compiler_structure() {
     let symbols_source = concat!(
         "record Point { x: i32 }\n",

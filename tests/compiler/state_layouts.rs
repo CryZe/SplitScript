@@ -1106,22 +1106,22 @@ fn renaming_a_named_layout_field_updates_the_shared_state_interface() {
     let second_declaration = source.match_indices("level: u32").nth(1).unwrap().0;
     let mut database = CompilerDatabase::new(source);
 
-    let spans = database.rename_at(second_declaration, "stage").unwrap();
-    assert_eq!(spans.len(), 4);
+    let plan = database.rename_at(second_declaration, "stage").unwrap();
+    assert_eq!(plan.edits.len(), 4);
     assert!(
-        spans
+        plan.edits
             .iter()
-            .all(|span| &source[span.start..span.end] == "level")
+            .all(|edit| &source[edit.span.start..edit.span.end] == "level")
     );
 
     let mut renamed = source.to_owned();
-    for span in spans.iter().rev() {
-        renamed.replace_range(span.start..span.end, "stage");
+    for edit in plan.edits.iter().rev() {
+        renamed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
     }
     splitscript::compile(&renamed).expect("the renamed shared state interface should compile");
 
     let use_site = source.find("current.level").unwrap() + "current.".len();
-    assert_eq!(database.rename_at(use_site, "stage").unwrap(), spans);
+    assert_eq!(database.rename_at(use_site, "stage").unwrap(), plan);
 }
 
 #[test]
@@ -1143,17 +1143,21 @@ fn renaming_a_conflicting_layout_field_keeps_the_other_layout_independent() {
     "#;
     let first_declaration = source.find("bike: i16").unwrap();
     let mut database = CompilerDatabase::new(source);
-    let spans = database.rename_at(first_declaration, "vehicle").unwrap();
-    assert_eq!(spans.len(), 2);
+    let plan = database.rename_at(first_declaration, "vehicle").unwrap();
+    assert_eq!(plan.edits.len(), 2);
     assert!(
-        spans
+        plan.edits
             .iter()
-            .all(|span| &source[span.start..span.end] == "bike")
+            .all(|edit| &source[edit.span.start..edit.span.end] == "bike")
     );
     let v9_declaration = source.find("bike: u16").unwrap();
     let v9_use = source.rfind("current.bike").unwrap() + "current.".len();
-    assert!(spans.iter().all(|span| span.start != v9_declaration));
-    assert!(spans.iter().all(|span| span.start != v9_use));
+    assert!(
+        plan.edits
+            .iter()
+            .all(|edit| edit.span.start != v9_declaration)
+    );
+    assert!(plan.edits.iter().all(|edit| edit.span.start != v9_use));
 }
 
 #[test]

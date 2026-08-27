@@ -172,6 +172,24 @@ whileAttached {
     }
 }"#;
 
+const MANAGED_NAMESPACE_SOURCE: &str = r#"image "Assembly-CSharp" {
+    namespace Game {
+        class Player {
+            u32 score;
+        }
+    }
+}
+
+state Unity ["game.exe"] {}"#;
+
+const MANAGED_FROM_SOURCE: &str = r#"image "Assembly-CSharp" {
+    class Player from ["Game.Player", "Player"] {
+        u32 score from ["_score", "<Score>k__BackingField"];
+    }
+}
+
+state Unity ["game.exe"] {}"#;
+
 const GBA_STATE_SOURCE: &str = r#"state GBA {
     room: u8 at 0x03000010;
 }"#;
@@ -1190,12 +1208,25 @@ define_language_catalog! {
         )]
     ),
     language_item!(
+        ManagedNamespace,
+        "namespace",
+        LanguageItemKind::Declaration,
+        "namespace Name { class Type { ... } }",
+        "Declares a managed metadata namespace inside an image schema.",
+        "A [`namespace`] preserves the metadata qualification shared by the managed [`class`] declarations nested inside it. Namespaces may be nested when the runtime metadata uses several qualification segments. Source code still refers to a declared class by its SplitScript class name; the namespace controls managed metadata lookup rather than creating a value namespace.",
+        &[Example::checked(
+            "Declare a class in a managed namespace",
+            "namespace Game {\n    class Player {\n        u32 score;\n    }\n}",
+            MANAGED_NAMESPACE_SOURCE,
+        )]
+    ),
+    language_item!(
         ManagedClass,
         "class",
         LanguageItemKind::Declaration,
         "class Name from [\"Alias\", ...] { Type field; static Type field; if layout.dimension == Variant { ... } }",
         "Declares a typed managed class binding.",
-        "Fields without [`static`](syntax@managed static field) are read from a live class reference; static fields are read through the class name. Each field hop is independently fallible and yields [`T!`], so postfix [`?`] can propagate an unsuccessful lookup to the surrounding state field, function, or [`retry`] boundary. The optional `from` list tries the written managed type names in order and binds the first complete schema. Fields declared directly in the class are always available. Put build-specific fields in an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain over the attachment-wide [`layout`] value. Each later branch describes exactly the layouts left unmatched by earlier branches, and the same branch predicate refines those fields in ordinary code.",
+        "Fields without [`static`] are read from a live class reference; static fields are read through the class name. Each field hop is independently fallible and yields [`T!`], so postfix [`?`] can propagate an unsuccessful lookup to the surrounding state field, function, or [`retry`] boundary. The optional [`from`] list tries the written managed type names in order and binds the first complete schema. Fields declared directly in the class are always available. Put build-specific fields in an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain over the attachment-wide [`layout`] value. Each later branch describes exactly the layouts left unmatched by earlier branches, and the same branch predicate refines those fields in ordinary code.",
         &[Example::checked(
             "Follow a typed managed field path",
             "score: u32 = GameManager.instance?.player?.score?",
@@ -1204,7 +1235,7 @@ define_language_catalog! {
     ),
     language_item!(
         ManagedStaticField,
-        "managed static field",
+        "static",
         LanguageItemKind::Syntax,
         "static Type field;",
         "Declares a managed field read through its class rather than an instance.",
@@ -1213,6 +1244,19 @@ define_language_catalog! {
             "Read a managed singleton",
             "let manager = GameManager.instance else return",
             MANAGED_IMAGE_SOURCE,
+        )]
+    ),
+    language_item!(
+        ManagedMetadataNames,
+        "from",
+        LanguageItemKind::Syntax,
+        "class Name from \"MetadataName\" { ... } | Type field from [\"name\", \"fallback\"];",
+        "Supplies one or more runtime metadata names for a managed declaration.",
+        "Without [`from`], a managed [`class`] or field uses its SplitScript declaration name for metadata lookup. A single quoted name replaces that default. An array tries its names in order, which supports renamed classes and fields across builds without changing the stable source-facing name. For an instance field without an explicit [`from`], lookup also accepts the conventional C# automatic-property backing-field spelling.",
+        &[Example::checked(
+            "Try alternate managed field names",
+            "u32 score from [\"_score\", \"<Score>k__BackingField\"];",
+            MANAGED_FROM_SOURCE,
         )]
     ),
     language_item!(

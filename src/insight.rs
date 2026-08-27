@@ -2312,6 +2312,82 @@ let player: Player.Ref? = None
     }
 
     #[test]
+    fn every_managed_schema_keyword_has_language_hover() {
+        let source = r#"
+image "Assembly-CSharp" {
+    namespace Game {
+        class Player from ["Game.Player", "Player"] {
+            static Player instance from "Instance";
+        }
+    }
+}
+state Unity ["game.exe"] {}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        database.check().expect("managed schema hover fixture");
+
+        for (needle, form, summary, uri) in [
+            (
+                "image ",
+                "image \"Assembly-CSharp\"",
+                "managed types exposed by one runtime image",
+                "/language/image.md",
+            ),
+            (
+                "namespace ",
+                "namespace Name",
+                "managed metadata namespace",
+                "/language/namespace.md",
+            ),
+            (
+                "class ",
+                "class Name from",
+                "typed managed class binding",
+                "/language/class.md",
+            ),
+            (
+                "static ",
+                "static Type field",
+                "managed field read through its class",
+                "/language/static.md",
+            ),
+            (
+                "from [",
+                "class Name from",
+                "runtime metadata names",
+                "/language/from.md",
+            ),
+        ] {
+            let hover = database
+                .hover(source.find(needle).unwrap() + 1)
+                .unwrap()
+                .expect("managed keyword hover");
+            assert!(
+                hover.markdown.contains(form),
+                "{needle}: {}",
+                hover.markdown
+            );
+            assert!(
+                hover.markdown.contains(summary),
+                "{needle}: {}",
+                hover.markdown
+            );
+            assert_eq!(hover.documentation_uri.as_deref(), Some(uri));
+        }
+
+        let second_from = source.rfind("from ").unwrap() + 1;
+        let hover = database
+            .hover(second_from)
+            .unwrap()
+            .expect("managed field `from` hover");
+        assert!(hover.markdown.contains("runtime metadata names"));
+        assert_eq!(
+            hover.documentation_uri.as_deref(),
+            Some("/language/from.md")
+        );
+    }
+
+    #[test]
     fn source_hover_includes_user_documentation() {
         let source = r#"
 /// A point in game memory.

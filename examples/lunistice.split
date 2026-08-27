@@ -69,6 +69,11 @@ state Unity.il2cpp(2020) ["Lunistice.exe", "Lunistice-Demo.exe"] {
 let runTimeSeconds = 0.0
 let beyondFirstLevel = false
 
+onStart {
+    runTimeSeconds = 0
+    beyondFirstLevel = false
+}
+
 fn twoDigits(value) {
     if value < 10 {
         return `0{value}`
@@ -107,19 +112,6 @@ fn characterName(character, dlcDemo) {
         7 if dlcDemo => "BoxBuddy",
         _ => "Unknown",
     }
-}
-
-fn resetRunTracking() {
-    runTimeSeconds = 0
-    beyondFirstLevel = false
-}
-
-onStart {
-    resetRunTracking()
-}
-
-onReset {
-    resetRunTracking()
 }
 
 whileAttached {

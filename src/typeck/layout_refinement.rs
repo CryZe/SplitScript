@@ -79,6 +79,25 @@ impl Checker {
         }])
     }
 
+    /// Returns layout facts that are necessarily true whenever `expression`
+    /// is true. Unlike declaration predicates, ordinary boolean expressions
+    /// may contain unrelated conditions; a conjunction still preserves every
+    /// layout fact contributed by either side.
+    pub(super) fn truthy_layout_constraints(&self, expression: &Expr) -> Vec<LayoutConstraint> {
+        let mut candidates = Vec::new();
+        self.collect_truthy_layout_constraints(expression, &mut candidates);
+        canonical_constraints(candidates)
+    }
+
+    /// Returns layout facts that are necessarily true whenever `expression`
+    /// is false. A disjunction must have every operand false, so exact
+    /// two-variant complements remain available through an entire `||` chain.
+    pub(super) fn falsy_layout_constraints(&self, expression: &Expr) -> Vec<LayoutConstraint> {
+        let mut candidates = Vec::new();
+        self.collect_falsy_layout_constraints(expression, &mut candidates);
+        canonical_constraints(candidates)
+    }
+
     /// Requires a declaration predicate to be statically understandable.
     pub(super) fn require_layout_constraints(
         &mut self,
@@ -153,6 +172,54 @@ impl Checker {
         }
     }
 
+    fn collect_truthy_layout_constraints(
+        &self,
+        expression: &Expr,
+        output: &mut Vec<LayoutConstraint>,
+    ) {
+        match &expression.kind {
+            ExprKind::Binary {
+                op: BinaryOp::And,
+                left,
+                right,
+            } => {
+                self.collect_truthy_layout_constraints(left, output);
+                self.collect_truthy_layout_constraints(right, output);
+            }
+            ExprKind::Binary {
+                op: BinaryOp::Eq,
+                left,
+                right,
+            } => {
+                if let Some(constraint) = self
+                    .layout_constraint_atom(left, right)
+                    .or_else(|| self.layout_constraint_atom(right, left))
+                {
+                    output.push(constraint);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_falsy_layout_constraints(
+        &self,
+        expression: &Expr,
+        output: &mut Vec<LayoutConstraint>,
+    ) {
+        if let ExprKind::Binary {
+            op: BinaryOp::Or,
+            left,
+            right,
+        } = &expression.kind
+        {
+            self.collect_falsy_layout_constraints(left, output);
+            self.collect_falsy_layout_constraints(right, output);
+        } else if let Some(constraints) = self.inverse_layout_constraints(expression) {
+            output.extend(constraints);
+        }
+    }
+
     fn layout_constraint_atom(&self, dimension: &Expr, variant: &Expr) -> Option<LayoutConstraint> {
         let dimension_path = expression_path(dimension)?;
         let [root, dimension_name] = dimension_path.as_slice() else {
@@ -192,6 +259,28 @@ impl Checker {
             variant: variant.id,
         })
     }
+}
+
+fn canonical_constraints(candidates: Vec<LayoutConstraint>) -> Vec<LayoutConstraint> {
+    let mut dimensions = HashMap::new();
+    for constraint in candidates {
+        dimensions
+            .entry(constraint.dimension)
+            .and_modify(|variant: &mut Option<_>| {
+                if *variant != Some(constraint.variant) {
+                    *variant = None;
+                }
+            })
+            .or_insert(Some(constraint.variant));
+    }
+    let mut constraints = dimensions
+        .into_iter()
+        .filter_map(|(dimension, variant)| {
+            variant.map(|variant| LayoutConstraint { dimension, variant })
+        })
+        .collect::<Vec<_>>();
+    constraints.sort_by_key(|constraint| constraint.dimension.index());
+    constraints
 }
 
 fn expression_path(expression: &Expr) -> Option<Vec<&str>> {

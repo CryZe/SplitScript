@@ -164,11 +164,9 @@ reset {
 
 split {
     let enteredResults = old.gameState != 6 && current.gameState == 6
-    let creditsTransition = if layout.edition == Edition.BaseGame {
-        old.level >= 13 && current.level == 2
-    } else {
-        false
-    }
+    let creditsTransition = layout.edition == Edition.BaseGame
+        && old.level >= 13
+        && current.level == 2
 
     if enteredResults || creditsTransition {
         beyondFirstLevel = true

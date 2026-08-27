@@ -1723,7 +1723,14 @@ impl Checker {
         if matches!(op, BinaryOp::Or | BinaryOp::And) {
             let bool_type = self.core_type(crate::stdlib::CoreTypeId::Bool);
             self.expr(left, Some(bool_type));
-            self.expr(right, Some(bool_type));
+            let constraints = match op {
+                BinaryOp::And => self.truthy_layout_constraints(left),
+                BinaryOp::Or => self.falsy_layout_constraints(left),
+                _ => unreachable!("logical operators were matched above"),
+            };
+            self.with_layout_constraints(Some(&constraints), |checker| {
+                checker.expr(right, Some(bool_type));
+            });
             return self.expect_expression(expression, bool_type, expected, span);
         }
 

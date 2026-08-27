@@ -208,6 +208,9 @@ fn conditional_state_fields_refine_multiple_attachment_dimensions() {
                 storefront: Storefront,
             }
             common: u8 at 0x100;
+            if layout.edition == Edition.BaseGame {
+                baseLevel: u8 at 0x180;
+            }
             if layout.edition == Edition.BaseGame
                 && layout.storefront == Storefront.Steam
             {
@@ -223,12 +226,13 @@ fn conditional_state_fields_refine_multiple_attachment_dimensions() {
         }
 
         split {
-            if layout.edition == Edition.BaseGame
+            let steamLevelChanged = layout.edition == Edition.BaseGame
                 && layout.storefront == Storefront.Steam
-            {
-                return current.steamLevel != old.steamLevel
-            }
-            return current.common != old.common
+                && current.steamLevel != old.steamLevel
+            let baseLevelKnown = layout.edition == Edition.DlcDemo
+                || current.common == 255
+                || current.baseLevel > 0
+            return steamLevelChanged || baseLevelKnown || current.common != old.common
         }
     "#;
     let wasm = splitscript::compile(source)
@@ -238,8 +242,8 @@ fn conditional_state_fields_refine_multiple_attachment_dimensions() {
         .expect("conditional state polling should produce valid Wasm GC");
 
     let unrefined = source.replace(
-        "return current.common != old.common",
-        "return current.steamLevel != old.steamLevel",
+        "current.common != old.common",
+        "current.steamLevel != old.steamLevel",
     );
     let diagnostics =
         splitscript::compile(&unrefined).expect_err("conditional fields need refinement");

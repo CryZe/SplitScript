@@ -1,10 +1,12 @@
-//! Attachment-scoped global lifetime and initialization analysis.
+//! Lifecycle-scoped global lifetime and definite-initialization analysis.
 //!
-//! A bare top-level `let` is backed by an ordinary mutable Wasm global, but
-//! its source lifetime begins only when `onAttach` initializes it and ends
-//! when that process detaches. This pass is the semantic authority for which
-//! named state layouts establish each value. Backend defaults must never
-//! become observable source values.
+//! A bare top-level `let` is backed by ordinary mutable Wasm storage, but its
+//! source lifetime is inferred from the lifecycle action that definitely
+//! initializes it. `onAttach` owns attachment-scoped values and `onStart`
+//! owns attempt-scoped values. This pass is the semantic authority for those
+//! lifetimes, layout-dependent attachment availability, and the viral helper
+//! requirements they induce. Backend defaults must never become observable
+//! source values.
 
 use std::{
     cell::RefCell,
@@ -26,17 +28,63 @@ pub enum AttachmentLayout {
     Named(EnumVariantId),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GlobalLifetime {
+    Attachment,
+    Attempt,
+}
+
+/// Lifecycle actions whose invocation is either the attempt initializer itself
+/// or is guarded by the generated attempt-readiness state.
+pub const fn action_has_attempt_scope(action: ActionKind) -> bool {
+    matches!(
+        action,
+        ActionKind::OnStart
+            | ActionKind::OnReset
+            | ActionKind::Split
+            | ActionKind::Reset
+            | ActionKind::IsLoading
+            | ActionKind::GameTime
+    )
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AttachmentGlobalAnalysis {
-    globals: HashSet<ValueId>,
+pub struct ScopedGlobalAnalysis {
+    lifetimes: HashMap<ValueId, GlobalLifetime>,
     layouts: Vec<AttachmentLayout>,
     available_in: HashMap<ValueId, HashSet<AttachmentLayout>>,
     function_layouts: HashMap<FunctionId, HashSet<AttachmentLayout>>,
+    function_requires_attempt: HashSet<FunctionId>,
+    action_requires_attempt: HashSet<ActionKind>,
 }
 
-impl AttachmentGlobalAnalysis {
+impl ScopedGlobalAnalysis {
+    pub fn lifetime(&self, value: ValueId) -> Option<GlobalLifetime> {
+        self.lifetimes.get(&value).copied()
+    }
+
+    pub fn is_scoped_global(&self, value: ValueId) -> bool {
+        self.lifetimes.contains_key(&value)
+    }
+
     pub fn is_attachment_global(&self, value: ValueId) -> bool {
-        self.globals.contains(&value)
+        self.lifetime(value) == Some(GlobalLifetime::Attachment)
+    }
+
+    pub fn is_attempt_global(&self, value: ValueId) -> bool {
+        self.lifetime(value) == Some(GlobalLifetime::Attempt)
+    }
+
+    pub fn attachment_globals(&self) -> impl Iterator<Item = ValueId> + '_ {
+        self.lifetimes.iter().filter_map(|(value, lifetime)| {
+            (*lifetime == GlobalLifetime::Attachment).then_some(*value)
+        })
+    }
+
+    pub fn attempt_globals(&self) -> impl Iterator<Item = ValueId> + '_ {
+        self.lifetimes.iter().filter_map(|(value, lifetime)| {
+            (*lifetime == GlobalLifetime::Attempt).then_some(*value)
+        })
     }
 
     pub fn layouts(&self) -> &[AttachmentLayout] {
@@ -64,6 +112,14 @@ impl AttachmentGlobalAnalysis {
             .into_iter()
             .flatten()
             .copied()
+    }
+
+    pub fn function_requires_attempt(&self, function: FunctionId) -> bool {
+        self.function_requires_attempt.contains(&function)
+    }
+
+    pub fn action_requires_attempt(&self, action: ActionKind) -> bool {
+        self.action_requires_attempt.contains(&action)
     }
 }
 
@@ -102,8 +158,8 @@ pub(crate) fn analyze(
     syntax: &Program,
     hir: &TypedProgram,
     semantics: &SemanticModel,
-) -> (AttachmentGlobalAnalysis, Vec<Diagnostic>) {
-    let globals = hir.attachment_globals().collect::<HashSet<_>>();
+) -> (ScopedGlobalAnalysis, Vec<Diagnostic>) {
+    let bare_globals = hir.bare_globals().collect::<HashSet<_>>();
     let layouts = syntax.state.as_ref().map_or_else(
         || vec![AttachmentLayout::Single],
         |state| {
@@ -118,36 +174,96 @@ pub(crate) fn analyze(
             }
         },
     );
-    let mut analysis = AttachmentGlobalAnalysis {
-        globals: globals.clone(),
+    let mut analysis = ScopedGlobalAnalysis {
+        lifetimes: HashMap::new(),
         layouts,
         available_in: HashMap::new(),
         function_layouts: HashMap::new(),
+        function_requires_attempt: HashSet::new(),
+        action_requires_attempt: HashSet::new(),
     };
-    if globals.is_empty() {
+    if bare_globals.is_empty() {
         return (analysis, Vec::new());
     }
 
-    let Some(on_attach) = hir.action_body(ActionKind::OnAttach) else {
-        let diagnostics = syntax
-            .globals
-            .iter()
-            .filter(|global| global.value.is_none())
-            .map(|global| {
-                Diagnostic::semantic(
+    let assigned_by_attach = assignments_in_action(hir, ActionKind::OnAttach, &bare_globals);
+    let assigned_by_start = assignments_in_action(hir, ActionKind::OnStart, &bare_globals);
+    let declarations = syntax
+        .globals
+        .iter()
+        .filter(|global| global.value.is_none())
+        .map(|global| (global.id, global))
+        .collect::<HashMap<_, _>>();
+    let mut diagnostics = Vec::new();
+    for value in &bare_globals {
+        let in_attach = assigned_by_attach.contains(value);
+        let in_start = assigned_by_start.contains(value);
+        match (in_attach, in_start) {
+            (true, false) => {
+                analysis
+                    .lifetimes
+                    .insert(*value, GlobalLifetime::Attachment);
+            }
+            (false, true) => {
+                analysis.lifetimes.insert(*value, GlobalLifetime::Attempt);
+            }
+            (true, true) => {
+                let Some(global) = declarations.get(value) else {
+                    continue;
+                };
+                let mut diagnostic = Diagnostic::semantic(
                     format!(
-                        "attachment-scoped global `{}` requires an `onAttach` block",
+                        "bare global `{}` has both attachment and attempt initializers",
                         global.name
                     ),
                     global.name_span,
                 )
-                .with_primary_label("this value has no attachment-time initializer")
-            })
-            .collect();
-        return (analysis, diagnostics);
-    };
+                .with_primary_label(
+                    "a bare global must have exactly one lifecycle initialization boundary",
+                );
+                if let Some(action) = syntax
+                    .actions
+                    .iter()
+                    .find(|action| action.kind == ActionKind::OnAttach)
+                {
+                    diagnostic = diagnostic.with_secondary_label(
+                        action.span,
+                        "attachment initialization happens here",
+                    );
+                }
+                if let Some(action) = syntax
+                    .actions
+                    .iter()
+                    .find(|action| action.kind == ActionKind::OnStart)
+                {
+                    diagnostic = diagnostic
+                        .with_secondary_label(action.span, "attempt initialization happens here");
+                }
+                diagnostics.push(diagnostic);
+            }
+            (false, false) => {
+                let Some(global) = declarations.get(value) else {
+                    continue;
+                };
+                diagnostics.push(
+                    Diagnostic::semantic(
+                        format!("bare global `{}` has no lifecycle initializer", global.name),
+                        global.name_span,
+                    )
+                    .with_primary_label(
+                        "assign this value in either `onAttach` or `onStart`",
+                    )
+                    .with_note(
+                        "`onAttach` creates attachment-scoped state; `onStart` creates attempt-scoped state",
+                    ),
+                );
+            }
+        }
+    }
 
     let requirements = infer_function_requirements(syntax, hir, &analysis);
+    let attachment_globals = analysis.attachment_globals().collect::<HashSet<_>>();
+    let attempt_globals = analysis.attempt_globals().collect::<HashSet<_>>();
     let layout_variants = analysis
         .layouts
         .iter()
@@ -156,115 +272,94 @@ pub(crate) fn analyze(
             AttachmentLayout::Single => None,
         })
         .collect();
-    let initializer = Initializer {
-        hir,
-        semantics,
-        globals: &globals,
-        debug_globals: hir
-            .attachment_globals_with_debug()
-            .filter_map(|(value, debug_only)| debug_only.then_some(value))
-            .collect(),
-        layout_variants,
-        requirements: &requirements,
-        uninitialized_reads: RefCell::new(HashSet::new()),
-    };
-    let mut flow = initializer.eval_block(on_attach, vec![EvalPath::new(HashSet::new())]);
-    if analysis.layouts == [AttachmentLayout::Single] {
-        // Explicit empty returns and ordinary fallthrough both complete a
-        // single-layout attachment successfully.
-        flow.returned.append(&mut flow.normal);
-        record_availability(
-            &mut analysis.available_in,
-            AttachmentLayout::Single,
-            &flow.returned,
-            &globals,
-        );
-    } else {
-        for layout in analysis.layouts.iter().copied() {
-            let AttachmentLayout::Named(variant) = layout else {
-                unreachable!()
-            };
-            let paths = flow
-                .returned
-                .iter()
-                .filter(|path| {
-                    path.layouts
-                        .as_ref()
-                        .is_none_or(|variants| variants.contains(&variant))
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            if !paths.is_empty() {
-                record_availability(&mut analysis.available_in, layout, &paths, &globals);
+    if let Some(on_attach) = hir.action_body(ActionKind::OnAttach)
+        && !attachment_globals.is_empty()
+    {
+        let initializer = Initializer {
+            hir,
+            semantics,
+            globals: &attachment_globals,
+            debug_globals: debug_globals(hir, &attachment_globals),
+            layout_variants,
+            requirements: &requirements,
+            uninitialized_reads: RefCell::new(HashSet::new()),
+        };
+        let mut flow = initializer.eval_block(on_attach, vec![EvalPath::new(HashSet::new())]);
+        if analysis.layouts == [AttachmentLayout::Single] {
+            // Explicit empty returns and ordinary fallthrough both complete a
+            // single-layout attachment successfully.
+            flow.returned.append(&mut flow.normal);
+            record_availability(
+                &mut analysis.available_in,
+                AttachmentLayout::Single,
+                &flow.returned,
+                &attachment_globals,
+            );
+        } else {
+            for layout in analysis.layouts.iter().copied() {
+                let AttachmentLayout::Named(variant) = layout else {
+                    unreachable!()
+                };
+                let paths = flow
+                    .returned
+                    .iter()
+                    .filter(|path| {
+                        path.layouts
+                            .as_ref()
+                            .is_none_or(|variants| variants.contains(&variant))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !paths.is_empty() {
+                    record_availability(
+                        &mut analysis.available_in,
+                        layout,
+                        &paths,
+                        &attachment_globals,
+                    );
+                }
             }
         }
+        diagnostics.extend(initialization_diagnostics(
+            &attachment_globals,
+            &initializer,
+            &declarations,
+            on_attach.span,
+            GlobalLifetime::Attachment,
+            |value| {
+                analysis
+                    .available_in
+                    .get(&value)
+                    .is_some_and(|layouts| !layouts.is_empty())
+            },
+        ));
     }
 
-    let assigned_on_any_return = flow
-        .returned
-        .iter()
-        .flat_map(|path| path.assigned.iter().copied())
-        .collect::<HashSet<_>>();
-    let declarations = syntax
-        .globals
-        .iter()
-        .filter(|global| global.value.is_none())
-        .map(|global| (global.id, global))
-        .collect::<HashMap<_, _>>();
-    let mut diagnostics: Vec<Diagnostic> = globals
-        .iter()
-        .filter(|global| {
-            analysis
-                .available_in
-                .get(global)
-                .is_none_or(HashSet::is_empty)
-        })
-        .filter_map(|global| declarations.get(global))
-        .map(|global| {
-            let (message, label) = if assigned_on_any_return.contains(&global.id) {
-                (
-                    format!(
-                        "attachment-scoped global `{}` is not initialized on every successful `onAttach` path",
-                        global.name
-                    ),
-                    "assign this value on every path that completes the corresponding attachment layout",
-                )
-            } else {
-                (
-                    format!(
-                        "attachment-scoped global `{}` is never initialized by `onAttach`",
-                        global.name
-                    ),
-                    "assign this value before completing a supported attachment",
-                )
-            };
-            Diagnostic::semantic(
-                message,
-                global.name_span,
-            )
-            .with_primary_label(label)
-            .with_secondary_label(on_attach.span, "attachment initialization happens here")
-        })
-        .collect();
-    for (value, span) in initializer.uninitialized_reads.into_inner() {
-        let Some(global) = declarations.get(&value) else {
-            continue;
+    if let Some(on_start) = hir.action_body(ActionKind::OnStart)
+        && !attempt_globals.is_empty()
+    {
+        let initializer = Initializer {
+            hir,
+            semantics,
+            globals: &attempt_globals,
+            debug_globals: debug_globals(hir, &attempt_globals),
+            layout_variants: HashSet::new(),
+            requirements: &requirements,
+            uninitialized_reads: RefCell::new(HashSet::new()),
         };
-        diagnostics.push(
-            Diagnostic::semantic(
-                format!(
-                    "attachment-scoped global `{}` may be read before it is initialized",
-                    global.name
-                ),
-                span,
-            )
-            .with_primary_label("this path has not assigned the value yet")
-            .with_secondary_label(
-                global.name_span,
-                "the attachment-scoped global is declared here",
-            ),
-        );
+        let mut flow = initializer.eval_block(on_start, vec![EvalPath::new(HashSet::new())]);
+        flow.returned.append(&mut flow.normal);
+        let definitely_initialized = intersection_of_assignments(&flow.returned, &attempt_globals);
+        diagnostics.extend(initialization_diagnostics(
+            &attempt_globals,
+            &initializer,
+            &declarations,
+            on_start.span,
+            GlobalLifetime::Attempt,
+            |value| definitely_initialized.contains(&value),
+        ));
     }
+
     analysis.function_layouts = requirements
         .iter()
         .map(|(function, facts)| {
@@ -274,7 +369,7 @@ pub(crate) fn analyze(
                 .copied()
                 .filter(|layout| {
                     facts
-                        .globals
+                        .attachment_globals
                         .iter()
                         .all(|global| analysis.is_available_in(*global, *layout))
                 })
@@ -282,8 +377,132 @@ pub(crate) fn analyze(
             (*function, valid)
         })
         .collect();
+    analysis.function_requires_attempt = requirements
+        .iter()
+        .filter_map(|(function, facts)| (!facts.attempt_globals.is_empty()).then_some(*function))
+        .collect();
+    analysis.action_requires_attempt =
+        infer_action_attempt_requirements(hir, &analysis, &requirements);
     diagnostics.extend(validate_uses(syntax, hir, &analysis, &requirements));
     (analysis, diagnostics)
+}
+
+fn debug_globals(hir: &TypedProgram, globals: &HashSet<ValueId>) -> HashSet<ValueId> {
+    hir.bare_globals_with_debug()
+        .filter_map(|(value, debug_only)| (debug_only && globals.contains(&value)).then_some(value))
+        .collect()
+}
+
+fn assignments_in_action(
+    hir: &TypedProgram,
+    action: ActionKind,
+    globals: &HashSet<ValueId>,
+) -> HashSet<ValueId> {
+    struct Collector<'a> {
+        globals: &'a HashSet<ValueId>,
+        assigned: HashSet<ValueId>,
+    }
+
+    impl ScopedUseVisitor for Collector<'_> {
+        fn visit_closure_bodies(&self) -> bool {
+            false
+        }
+
+        fn global(&mut self, _value: ValueId, _span: Span, _refined: Option<AttachmentLayout>) {}
+
+        fn global_write(
+            &mut self,
+            value: ValueId,
+            _span: Span,
+            _refined: Option<AttachmentLayout>,
+        ) {
+            if self.globals.contains(&value) {
+                self.assigned.insert(value);
+            }
+        }
+
+        fn call(&mut self, _function: FunctionId, _span: Span, _refined: Option<AttachmentLayout>) {
+        }
+    }
+
+    let mut collector = Collector {
+        globals,
+        assigned: HashSet::new(),
+    };
+    if let Some(body) = hir.action_body(action) {
+        walk_block(&mut collector, body, hir, None, None);
+    }
+    collector.assigned
+}
+
+fn intersection_of_assignments(paths: &[EvalPath], globals: &HashSet<ValueId>) -> HashSet<ValueId> {
+    let mut assigned = globals.clone();
+    for path in paths {
+        assigned.retain(|value| path.assigned.contains(value));
+    }
+    assigned
+}
+
+fn initialization_diagnostics(
+    globals: &HashSet<ValueId>,
+    initializer: &Initializer<'_>,
+    declarations: &HashMap<ValueId, &crate::ast::VariableDecl>,
+    action_span: Span,
+    lifetime: GlobalLifetime,
+    is_initialized: impl Fn(ValueId) -> bool,
+) -> Vec<Diagnostic> {
+    let (scope_name, action_name, completion_label) = match lifetime {
+        GlobalLifetime::Attachment => (
+            "attachment-scoped",
+            "onAttach",
+            "assign this value on every path that completes the corresponding attachment layout",
+        ),
+        GlobalLifetime::Attempt => (
+            "attempt-scoped",
+            "onStart",
+            "assign this value on every path that completes attempt initialization",
+        ),
+    };
+    let mut diagnostics = globals
+        .iter()
+        .filter(|value| !is_initialized(**value))
+        .filter_map(|value| declarations.get(value))
+        .map(|global| {
+            // Lifetime classification already proved that the initializer
+            // contains a direct assignment. Reaching here therefore means the
+            // assignment is conditional, not absent.
+            let message = format!(
+                "{scope_name} global `{}` is not initialized on every `{action_name}` path",
+                global.name
+            );
+            Diagnostic::semantic(message, global.name_span)
+                .with_primary_label(completion_label)
+                .with_secondary_label(
+                    action_span,
+                    format!("{scope_name} initialization happens here"),
+                )
+        })
+        .collect::<Vec<_>>();
+    for (value, span) in initializer.uninitialized_reads.borrow().iter().copied() {
+        let Some(global) = declarations.get(&value) else {
+            continue;
+        };
+        diagnostics.push(
+            Diagnostic::semantic(
+                format!(
+                    "{scope_name} global `{}` may be read before it is initialized",
+                    global.name
+                ),
+                span,
+            )
+            .with_primary_label("this path has not assigned the value yet")
+            .with_secondary_label(
+                global.name_span,
+                format!("the {scope_name} global is declared here"),
+            ),
+        );
+    }
+    diagnostics
 }
 
 fn record_availability(
@@ -436,7 +655,12 @@ impl Initializer<'_> {
             | ResolvedCall::UserMethod { function, .. } = call
                 && let Some(requirements) = self.requirements.get(function)
             {
-                for value in &requirements.globals {
+                for value in requirements
+                    .attachment_globals
+                    .iter()
+                    .chain(&requirements.attempt_globals)
+                    .filter(|value| self.globals.contains(value))
+                {
                     self.record_uninitialized(*value, expression.span, &input);
                 }
             }
@@ -565,6 +789,14 @@ impl Initializer<'_> {
                     returned,
                 }
             }
+            // Constructing a closure does not execute its body. Any scoped
+            // requirements of that body are enforced when the callable is
+            // invoked, rather than pretending its assignments initialized the
+            // surrounding lifecycle action.
+            TypedExpressionKind::Closure { .. } => Flow {
+                normal: input,
+                returned: Vec::new(),
+            },
             _ => self.eval_sequence(&expression_children(&expression.kind), input),
         };
         if matches!(
@@ -597,7 +829,8 @@ impl Initializer<'_> {
     }
 
     fn record_uninitialized(&self, value: ValueId, span: Span, paths: &[EvalPath]) {
-        if paths.iter().any(|path| !path.assigned.contains(&value)) {
+        if self.globals.contains(&value) && paths.iter().any(|path| !path.assigned.contains(&value))
+        {
             self.uninitialized_reads.borrow_mut().insert((value, span));
         }
     }
@@ -616,11 +849,19 @@ fn collapse_paths(paths: Vec<EvalPath>) -> Vec<EvalPath> {
 
 #[derive(Clone, Default)]
 struct FunctionRequirements {
-    globals: HashSet<ValueId>,
+    attachment_globals: HashSet<ValueId>,
+    attempt_globals: HashSet<ValueId>,
     callees: HashSet<FunctionId>,
 }
 
-trait AttachmentUseVisitor {
+trait ScopedUseVisitor {
+    /// Closure bodies execute only when invoked, not when the closure value is
+    /// created. Lifecycle initializer classification therefore opts out while
+    /// dependency analysis retains the conservative body traversal.
+    fn visit_closure_bodies(&self) -> bool {
+        true
+    }
+
     fn global(&mut self, value: ValueId, span: Span, refined: Option<AttachmentLayout>);
     fn global_write(&mut self, value: ValueId, span: Span, refined: Option<AttachmentLayout>);
     fn call(&mut self, function: FunctionId, span: Span, refined: Option<AttachmentLayout>);
@@ -629,22 +870,30 @@ trait AttachmentUseVisitor {
 fn infer_function_requirements(
     _syntax: &Program,
     hir: &TypedProgram,
-    analysis: &AttachmentGlobalAnalysis,
+    analysis: &ScopedGlobalAnalysis,
 ) -> HashMap<FunctionId, FunctionRequirements> {
     struct Collector<'a> {
-        analysis: &'a AttachmentGlobalAnalysis,
+        analysis: &'a ScopedGlobalAnalysis,
         facts: FunctionRequirements,
     }
-    impl AttachmentUseVisitor for Collector<'_> {
+    impl ScopedUseVisitor for Collector<'_> {
         fn global(&mut self, value: ValueId, _span: Span, refined: Option<AttachmentLayout>) {
-            if refined.is_none() && self.analysis.is_attachment_global(value) {
-                self.facts.globals.insert(value);
+            if refined.is_none() {
+                if self.analysis.is_attachment_global(value) {
+                    self.facts.attachment_globals.insert(value);
+                } else if self.analysis.is_attempt_global(value) {
+                    self.facts.attempt_globals.insert(value);
+                }
             }
         }
 
         fn global_write(&mut self, value: ValueId, _span: Span, refined: Option<AttachmentLayout>) {
-            if refined.is_none() && self.analysis.is_attachment_global(value) {
-                self.facts.globals.insert(value);
+            if refined.is_none() {
+                if self.analysis.is_attachment_global(value) {
+                    self.facts.attachment_globals.insert(value);
+                } else if self.analysis.is_attempt_global(value) {
+                    self.facts.attempt_globals.insert(value);
+                }
             }
         }
 
@@ -681,9 +930,16 @@ fn infer_function_requirements(
         for facts in requirements.values_mut() {
             for callee in facts.callees.clone() {
                 if let Some(callee) = previous.get(&callee) {
-                    let old_len = facts.globals.len();
-                    facts.globals.extend(callee.globals.iter().copied());
-                    changed |= facts.globals.len() != old_len;
+                    let old_attachment_len = facts.attachment_globals.len();
+                    let old_attempt_len = facts.attempt_globals.len();
+                    facts
+                        .attachment_globals
+                        .extend(callee.attachment_globals.iter().copied());
+                    facts
+                        .attempt_globals
+                        .extend(callee.attempt_globals.iter().copied());
+                    changed |= facts.attachment_globals.len() != old_attachment_len
+                        || facts.attempt_globals.len() != old_attempt_len;
                 }
             }
         }
@@ -694,18 +950,74 @@ fn infer_function_requirements(
     requirements
 }
 
+fn infer_action_attempt_requirements(
+    hir: &TypedProgram,
+    analysis: &ScopedGlobalAnalysis,
+    requirements: &HashMap<FunctionId, FunctionRequirements>,
+) -> HashSet<ActionKind> {
+    struct Collector<'a> {
+        analysis: &'a ScopedGlobalAnalysis,
+        requirements: &'a HashMap<FunctionId, FunctionRequirements>,
+        requires_attempt: bool,
+    }
+
+    impl ScopedUseVisitor for Collector<'_> {
+        fn global(&mut self, value: ValueId, _span: Span, _refined: Option<AttachmentLayout>) {
+            self.requires_attempt |= self.analysis.is_attempt_global(value);
+        }
+
+        fn global_write(
+            &mut self,
+            value: ValueId,
+            _span: Span,
+            _refined: Option<AttachmentLayout>,
+        ) {
+            self.requires_attempt |= self.analysis.is_attempt_global(value);
+        }
+
+        fn call(&mut self, function: FunctionId, _span: Span, _refined: Option<AttachmentLayout>) {
+            self.requires_attempt |= self
+                .requirements
+                .get(&function)
+                .is_some_and(|facts| !facts.attempt_globals.is_empty());
+        }
+    }
+
+    let layout_value = hir
+        .declarations()
+        .declarations_named("layout")
+        .find_map(|declaration| match declaration.id {
+            crate::hir::DeclarationId::Global(value) => Some(value),
+            _ => None,
+        });
+    hir.action_bodies()
+        .filter_map(|action| {
+            let mut collector = Collector {
+                analysis,
+                requirements,
+                requires_attempt: false,
+            };
+            walk_block(&mut collector, &action.body, hir, layout_value, None);
+            collector.requires_attempt.then_some(action.action)
+        })
+        .collect()
+}
+
 fn validate_uses(
     syntax: &Program,
     hir: &TypedProgram,
-    analysis: &AttachmentGlobalAnalysis,
+    analysis: &ScopedGlobalAnalysis,
     requirements: &HashMap<FunctionId, FunctionRequirements>,
 ) -> Vec<Diagnostic> {
     struct Validator<'a> {
         syntax: &'a Program,
-        analysis: &'a AttachmentGlobalAnalysis,
+        analysis: &'a ScopedGlobalAnalysis,
         requirements: &'a HashMap<FunctionId, FunctionRequirements>,
         base: Vec<AttachmentLayout>,
         detached_action: Option<ActionKind>,
+        validate_attachment: bool,
+        attempt_available: bool,
+        attempt_context: String,
         diagnostics: Vec<Diagnostic>,
         seen: HashSet<(usize, usize, Option<ValueId>, Option<FunctionId>)>,
     }
@@ -778,7 +1090,36 @@ fn validate_uses(
             refined: Option<AttachmentLayout>,
             access: &str,
         ) {
+            if self.analysis.is_attempt_global(value) {
+                if self.attempt_available
+                    || !self.seen.insert((span.start, span.end, Some(value), None))
+                {
+                    return;
+                }
+                let name = self.global_name(value).to_owned();
+                let mut diagnostic = Diagnostic::semantic(
+                    format!(
+                        "attempt-scoped global `{name}` is unavailable in {}",
+                        self.attempt_context
+                    ),
+                    span,
+                )
+                .with_primary_label(format!(
+                    "this {access} can occur before `onStart` initializes the value"
+                ));
+                if let Some(declaration) = self.global_declaration_span(value) {
+                    diagnostic = diagnostic.with_secondary_label(
+                        declaration,
+                        "the attempt-scoped global is declared here",
+                    );
+                }
+                self.diagnostics.push(diagnostic);
+                return;
+            }
             if !self.analysis.is_attachment_global(value) {
+                return;
+            }
+            if !self.validate_attachment {
                 return;
             }
             if let Some(action) = self.detached_action {
@@ -829,7 +1170,7 @@ fn validate_uses(
         }
     }
 
-    impl AttachmentUseVisitor for Validator<'_> {
+    impl ScopedUseVisitor for Validator<'_> {
         fn global(&mut self, value: ValueId, span: Span, refined: Option<AttachmentLayout>) {
             self.validate_global_access(value, span, refined, "read");
         }
@@ -842,16 +1183,54 @@ fn validate_uses(
             let Some(facts) = self.requirements.get(&function) else {
                 return;
             };
+            if !facts.attempt_globals.is_empty()
+                && !self.attempt_available
+                && self
+                    .seen
+                    .insert((span.start, span.end, None, Some(function)))
+            {
+                let name = self
+                    .syntax
+                    .functions
+                    .iter()
+                    .find(|candidate| candidate.id == function)
+                    .map_or("function", |candidate| candidate.name.as_str());
+                let mut diagnostic = Diagnostic::semantic(
+                    format!(
+                        "`{name}` requires attempt state unavailable in {}",
+                        self.attempt_context
+                    ),
+                    span,
+                )
+                .with_primary_label(
+                    "this helper may only be called after `onStart` initializes the attempt",
+                );
+                if let Some(declaration) = self
+                    .syntax
+                    .functions
+                    .iter()
+                    .find(|candidate| candidate.id == function)
+                {
+                    diagnostic = diagnostic.with_secondary_label(
+                        declaration.name_span,
+                        "the helper's attempt requirement originates here",
+                    );
+                }
+                self.diagnostics.push(diagnostic);
+            }
             let invalid = self
                 .active(refined)
                 .into_iter()
                 .filter(|layout| {
                     facts
-                        .globals
+                        .attachment_globals
                         .iter()
                         .any(|global| !self.analysis.is_available_in(*global, *layout))
                 })
                 .collect::<Vec<_>>();
+            if !self.validate_attachment {
+                return;
+            }
             if invalid.is_empty()
                 || !self
                     .seen
@@ -890,10 +1269,7 @@ fn validate_uses(
 
     let layout_value = syntax.state.as_ref().and_then(|state| state.layout_value);
     let mut diagnostics = Vec::new();
-    for action in hir
-        .action_bodies()
-        .filter(|action| action.action != ActionKind::OnAttach)
-    {
+    for action in hir.action_bodies() {
         let detached_action =
             (!crate::effects::action_has_attached_process(action.action)).then_some(action.action);
         let mut validator = Validator {
@@ -902,6 +1278,9 @@ fn validate_uses(
             requirements,
             base: analysis.layouts.clone(),
             detached_action,
+            validate_attachment: action.action != ActionKind::OnAttach,
+            attempt_available: action_has_attempt_scope(action.action),
+            attempt_context: format!("`{}`", action.action.name()),
             diagnostics: Vec::new(),
             seen: HashSet::new(),
         };
@@ -918,6 +1297,9 @@ fn validate_uses(
                 .function_layouts(function.function.function)
                 .collect(),
             detached_action: None,
+            validate_attachment: true,
+            attempt_available: true,
+            attempt_context: "this helper".to_owned(),
             diagnostics: Vec::new(),
             seen: HashSet::new(),
         };
@@ -954,6 +1336,9 @@ fn validate_uses(
                 requirements,
                 base: vec![layout],
                 detached_action: None,
+                validate_attachment: true,
+                attempt_available: false,
+                attempt_context: "state polling".to_owned(),
                 diagnostics: Vec::new(),
                 seen: HashSet::new(),
             };
@@ -970,6 +1355,9 @@ fn validate_uses(
                 requirements,
                 base: vec![layout],
                 detached_action: None,
+                validate_attachment: true,
+                attempt_available: false,
+                attempt_context: "a state transform".to_owned(),
                 diagnostics: Vec::new(),
                 seen: HashSet::new(),
             };
@@ -987,7 +1375,7 @@ fn validate_uses(
 }
 
 fn walk_block(
-    visitor: &mut impl AttachmentUseVisitor,
+    visitor: &mut impl ScopedUseVisitor,
     block: &TypedBlock,
     hir: &TypedProgram,
     layout_value: Option<ValueId>,
@@ -1043,7 +1431,7 @@ fn walk_block(
 }
 
 fn walk_expression(
-    visitor: &mut impl AttachmentUseVisitor,
+    visitor: &mut impl ScopedUseVisitor,
     id: crate::ast::ExprId,
     hir: &TypedProgram,
     layout_value: Option<ValueId>,
@@ -1120,6 +1508,11 @@ fn walk_expression(
             walk_expression(visitor, *value, hir, layout_value, refined);
             walk_expression(visitor, *fallback, hir, layout_value, refined);
         }
+        TypedExpressionKind::Closure { body, .. } => {
+            if visitor.visit_closure_bodies() {
+                walk_expression(visitor, *body, hir, layout_value, refined);
+            }
+        }
         _ => {
             for child in expression_children(&expression.kind) {
                 walk_expression(visitor, child, hir, layout_value, refined);
@@ -1172,7 +1565,9 @@ fn expression_children(kind: &TypedExpressionKind) -> Vec<crate::ast::ExprId> {
         TypedExpressionKind::Invoke { callee, arguments } => std::iter::once(*callee)
             .chain(arguments.iter().copied())
             .collect(),
-        TypedExpressionKind::Closure { body, .. } => vec![*body],
+        TypedExpressionKind::Closure { .. } => {
+            unreachable!("closure bodies are handled before child collection")
+        }
         TypedExpressionKind::None
         | TypedExpressionKind::IteratorEnd
         | TypedExpressionKind::Bool(_)

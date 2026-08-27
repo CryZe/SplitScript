@@ -66,8 +66,8 @@ state Unity.il2cpp(2020) ["Lunistice.exe", "Lunistice-Demo.exe"] {
     character: u32 = Timer.instance?.character?;
 }
 
-let runTimeSeconds = 0.0
-let beyondFirstLevel = false
+let runTimeSeconds
+let beyondFirstLevel
 
 onStart {
     runTimeSeconds = 0
@@ -127,10 +127,6 @@ whileAttached {
         "Character",
         characterName(current.character, layout.edition == Edition.DlcDemo),
     )
-
-    if current.levelTime < old.levelTime && beyondFirstLevel {
-        runTimeSeconds += old.levelTime
-    }
 }
 
 start {
@@ -169,5 +165,8 @@ isLoading {
 }
 
 gameTime {
+    if current.levelTime < old.levelTime && beyondFirstLevel {
+        runTimeSeconds += old.levelTime
+    }
     return Duration.fromSeconds(runTimeSeconds + current.levelTime)
 }

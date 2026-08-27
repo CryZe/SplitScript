@@ -614,21 +614,21 @@ fn attachment_scoped_globals_infer_from_on_attach_and_support_layout_specific_va
     let globals = checked.syntax().globals.iter().collect::<Vec<_>>();
     assert!(
         checked
-            .attachment_globals()
+            .scoped_globals()
             .available_layouts(globals[0].id)
             .count()
             == 2
     );
     assert!(
         checked
-            .attachment_globals()
+            .scoped_globals()
             .available_layouts(globals[1].id)
             .count()
             == 1
     );
     assert!(
         checked
-            .attachment_globals()
+            .scoped_globals()
             .available_layouts(globals[2].id)
             .count()
             == 1
@@ -822,6 +822,112 @@ fn attachment_globals_are_viral_and_unavailable_after_detach() {
     assert!(errors.iter().any(|error| {
         error.message == "`hasBase` requires an attached process and is unavailable in `onDetach`"
     }));
+}
+
+#[test]
+fn attempt_scoped_globals_infer_from_on_start_and_are_viral() {
+    let source = r#"
+        let accumulated
+        state "game.exe" {}
+
+        onStart {
+            accumulated = 0.0
+        }
+
+        fn add(value: f64) {
+            accumulated += value
+        }
+
+        gameTime {
+            add(1.5)
+            return Duration.fromSeconds(accumulated)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("onStart should infer attempt-scoped globals and helper requirements");
+    let accumulated = checked.syntax().globals[0].id;
+    assert!(checked.scoped_globals().is_attempt_global(accumulated));
+    let helper = checked.syntax().functions[0].id;
+    assert!(checked.scoped_globals().function_requires_attempt(helper));
+
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("attempt-scoped global WebAssembly GC should validate");
+}
+
+#[test]
+fn attempt_scoped_globals_require_one_definite_initializer() {
+    let partial = r#"
+        let accumulated: f64
+        state "game.exe" {}
+        onStart {
+            if timer.state() == TimerState.Running {
+                accumulated = 0.0
+            }
+        }
+        gameTime { return Duration.fromSeconds(accumulated) }
+    "#;
+    let diagnostics = splitscript::compile(partial)
+        .expect_err("attempt globals need assignment on every completed onStart path");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "attempt-scoped global `accumulated` is not initialized on every `onStart` path",
+        )
+    }));
+
+    let read_before_write = r#"
+        let accumulated: f64
+        state "game.exe" {}
+        onStart {
+            print(accumulated)
+            accumulated = 0.0
+        }
+    "#;
+    let diagnostics = splitscript::compile(read_before_write)
+        .expect_err("backend defaults must not be observable in onStart");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message
+            == "attempt-scoped global `accumulated` may be read before it is initialized"
+    }));
+
+    let ambiguous = r#"
+        let value: u32
+        state "game.exe" {}
+        onAttach { value = 1 }
+        onStart { value = 2 }
+    "#;
+    let diagnostics = splitscript::compile(ambiguous)
+        .expect_err("one bare global cannot have two lifecycle owners");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message == "bare global `value` has both attachment and attempt initializers"
+    }));
+}
+
+#[test]
+fn attempt_scoped_globals_are_rejected_outside_attempt_actions() {
+    for action in ["setup", "onAttach", "onDetach", "whileAttached", "start"] {
+        let source = format!(
+            r#"
+                let accumulated: f64
+                state "game.exe" {{}}
+                onStart {{ accumulated = 0.0 }}
+                {action} {{ print(accumulated) }}
+            "#
+        );
+        let diagnostics = match splitscript::compile(&source) {
+            Err(diagnostics) => diagnostics,
+            Ok(_) => panic!("`{action}` can execute before attempt initialization"),
+        };
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(&format!(
+                    "attempt-scoped global `accumulated` is unavailable in `{action}`"
+                )))
+        );
+    }
 }
 
 #[test]

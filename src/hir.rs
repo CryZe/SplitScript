@@ -544,7 +544,10 @@ pub struct TypedProgram {
     function_bodies: Vec<FunctionBody>,
     action_bodies: Vec<ActionBody>,
     global_initializers: Vec<GlobalInitializer>,
-    attachment_globals: Vec<(ValueId, bool)>,
+    /// Top-level declarations without a source initializer. A later scoped
+    /// initialization analysis classifies each one by the lifecycle action
+    /// that definitely assigns it.
+    bare_globals: Vec<(ValueId, bool)>,
     state_sources: Vec<(ValueId, ExprId)>,
     state_transforms: Vec<StateTransform>,
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
@@ -625,7 +628,7 @@ impl TypedProgram {
                 })
             })
             .collect();
-        let attachment_globals = syntax
+        let bare_globals = syntax
             .globals
             .iter()
             .filter(|global| global.value.is_none())
@@ -718,7 +721,7 @@ impl TypedProgram {
             function_bodies,
             action_bodies,
             global_initializers,
-            attachment_globals,
+            bare_globals,
             state_sources,
             state_transforms,
             setting_choice_defaults,
@@ -876,20 +879,12 @@ impl TypedProgram {
 
     /// Globals whose storage is initialized by a successful `onAttach` run
     /// and cleared when that attachment ends.
-    pub fn attachment_globals(&self) -> impl Iterator<Item = ValueId> + '_ {
-        self.attachment_globals.iter().map(|(value, _)| *value)
+    pub fn bare_globals(&self) -> impl Iterator<Item = ValueId> + '_ {
+        self.bare_globals.iter().map(|(value, _)| *value)
     }
 
-    pub(crate) fn attachment_globals_with_debug(
-        &self,
-    ) -> impl Iterator<Item = (ValueId, bool)> + '_ {
-        self.attachment_globals.iter().copied()
-    }
-
-    pub fn is_attachment_global(&self, value: ValueId) -> bool {
-        self.attachment_globals
-            .iter()
-            .any(|(candidate, _)| *candidate == value)
+    pub(crate) fn bare_globals_with_debug(&self) -> impl Iterator<Item = (ValueId, bool)> + '_ {
+        self.bare_globals.iter().copied()
     }
 
     pub fn state_sources(&self) -> impl Iterator<Item = (ValueId, ExprId)> + '_ {

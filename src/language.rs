@@ -1148,7 +1148,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "let name = expression or let name",
         "Declares an inferred variable.",
-        "Bindings are mutable and their types are inferred bidirectionally from initializers, assignments, and uses. A bare top-level [`let`] is attachment-scoped: [`onAttach`] must initialize it before completing, attached polling code may read it only for layouts whose attach paths assigned it, and the runtime clears it on detach. Ordinary initialized globals remain run-scoped.",
+        "Bindings are mutable and their types are inferred bidirectionally from initializers, assignments, and uses. A bare top-level [`let`] gets its lifetime from its direct lifecycle initializer: [`onAttach`] creates attachment-scoped state that is cleared on detach, while [`onStart`] creates attempt-scoped state that is cleared after [`onReset`]. The initializer must assign it on every completing path. An initialized top-level binding is ordinary module state.",
         LET_EXAMPLE
     ),
     language_item!(
@@ -1861,15 +1861,15 @@ define_language_catalog! {
         OnStart,
         "onStart",
         "Reacts after the timer starts.",
-        "Runs once when consecutive updates observe the timer leave [`TimerState.NotRunning`]. The first update establishes a baseline without firing. Observation happens after settings refresh but before process attachment and state polling, so the action remains available while detached. Process providers, attachment-scoped globals, [`layout`], [`current`], and [`old`] are unavailable. A start requested by this script is observed on the following update rather than invoking this action directly from the [`start`] decision.",
-        "onStart {\n    print(\"Attempt started\")\n}"
+        "Runs once when consecutive updates observe the timer leave [`TimerState.NotRunning`]. A bare global assigned on every completing path becomes attempt-scoped: it remains live across process detach and is cleared after [`onReset`]. The first update establishes a baseline without firing, so loading during an active attempt does not synthesize initialization. Observation happens after settings refresh but before process attachment and state polling, so this action can run while detached. Process providers, attachment-scoped globals, [`layout`], [`current`], and [`old`] are unavailable. A start requested by this script is observed on the following update rather than invoking this action directly from the [`start`] decision.",
+        "let elapsed\n\nonStart {\n    elapsed = 0.0\n}"
     ),
     action_item!(
         OnReset,
         OnReset,
         "onReset",
         "Reacts after the timer resets.",
-        "Runs once when consecutive updates observe the timer enter [`TimerState.NotRunning`]. The first update establishes a baseline without firing. Observation happens after settings refresh but before process attachment and state polling, so the action remains available while detached. Process providers, attachment-scoped globals, [`layout`], [`current`], and [`old`] are unavailable. A reset requested by this script is observed on the following update rather than invoking this action directly from the [`reset`] decision.",
+        "Runs once when consecutive updates observe the timer enter [`TimerState.NotRunning`]. Attempt-scoped globals remain available during this action and are cleared after it completes. The first update establishes a baseline without firing. Observation happens after settings refresh but before process attachment and state polling, so the action remains available while detached. Process providers, attachment-scoped globals, [`layout`], [`current`], and [`old`] are unavailable. A reset requested by this script is observed on the following update rather than invoking this action directly from the [`reset`] decision.",
         "onReset {\n    print(\"Attempt reset\")\n}"
     ),
     action_item!(

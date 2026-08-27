@@ -22,14 +22,25 @@ ordinary assignment supplies a `T`; a standalone `None` global remains the
 zero-sized `None` type. An explicit annotation remains available when it makes
 the intended stored type clearer.
 
-A top-level declaration without an initializer, such as `let gameAssembly`, is
-attachment-scoped. `onAttach` must assign it on every successful attachment
-path that uses it. Its type is inferred bidirectionally from those assignments
-and later uses, and its storage is cleared when the process detaches. It is not
+A top-level declaration without an initializer gets its lifetime from the one
+lifecycle action that initializes it. `onAttach` creates attachment-scoped
+state, while `onStart` creates attempt-scoped state. The initializer must
+assign the value on every completing path, and its type is inferred
+bidirectionally from those assignments and later uses. Assigning the same bare
+global from both boundaries is an error rather than an implicit lifetime
+choice.
+
+Attachment-scoped storage is cleared when the process detaches and is not
 available in detached actions. With named state layouts, a value may be
 initialized for only some returned layouts; a direct `match layout` refines
-where it and helpers that use it are available. An initialized top-level
-declaration remains run-scoped.
+where it and helpers that use it are available.
+
+Attempt-scoped storage remains alive across process detach and is cleared after
+`onReset`. It is available in `onStart`, `onReset`, `split`, `reset`,
+`isLoading`, and `gameTime`; helpers inherit this requirement. Actions that
+may otherwise run before a start, such as `setup`, `onAttach`, `onDetach`,
+`whileAttached`, and `start`, cannot use it. An initialized top-level
+declaration remains module-scoped.
 
 Closed comma-separated forms use punctuation rather than line breaks to
 separate items. This includes arguments, array and record literals, match arms,
@@ -1495,20 +1506,32 @@ first snapshot completes.
 attachment:
 
 ```text
+let elapsed
+let leftFirstLevel
+
 onStart {
-    attempts += 1
+    elapsed = 0.0
+    leftFirstLevel = false
 }
 
 onReset {
-    clearRunState()
+    print(`Finished with {elapsed} seconds`)
 }
 ```
+
+A bare global assigned by `onStart` is attempt-scoped. It needs no dummy
+initializer, remains available if the game process detaches during the attempt,
+and is released after `onReset` completes. This keeps attempt state as an
+ordinary global rather than introducing a second attempt declaration syntax.
+Attempt-scoped values are also available from `split`, `reset`, `isLoading`,
+and `gameTime`.
 
 After refreshing settings near the beginning of every update, the generated
 monitor samples the timer state. The first sample establishes a baseline
 without firing. A later transition from `TimerState.NotRunning` to any active
 state runs `onStart`; a transition back to `TimerState.NotRunning` runs
-`onReset`. This happens before attachment and state polling, so both blocks run
+`onReset`. `onReset` can inspect attempt-scoped values before they are cleared.
+This happens before attachment and state polling, so both blocks run
 while detached as well. They may use settings and ordinary globals, but cannot
 use `process`, an emulator provider, attachment-scoped globals, `layout`,
 `current`, or `old`. They do not suspend and do not return a value.
@@ -1518,6 +1541,13 @@ requests a timer mutation, the corresponding transition is sampled once on the
 following update. A transition that persists across an update is therefore
 delivered exactly once; multiple opposing timer changes entirely between two
 updates cannot be reconstructed without a future host event queue.
+
+The first observed timer state is only a baseline. Loading a script while the
+timer is already active therefore does not invent an `onStart` event, and
+attempt-dependent decision actions remain inactive until a later observed
+start. Autosplitters are normally loaded before an attempt begins; scripts that
+must reconstruct an already-running attempt should use explicitly initialized
+module state instead.
 
 `setTickRate(hz)` uses updates per second. The runtime reads the
 resulting interval after the current `update` returns, so a call affects the

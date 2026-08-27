@@ -44,6 +44,8 @@ pub(super) struct UpdateContext<'a> {
     pub globals: &'a HashMap<ValueId, u32>,
     pub global_types: &'a HashMap<ValueId, Type>,
     pub attachment_globals: &'a [ValueId],
+    pub attempt_globals: &'a [ValueId],
+    pub scoped_globals: &'a crate::ScopedGlobalAnalysis,
     pub process_names: &'a [&'a str],
     pub provider_attach: Option<ProviderAttach>,
     pub provider_preparation: Option<ProviderPreparation>,
@@ -176,7 +178,7 @@ pub(super) fn compile_update(
             timer_state,
             observed_timer_state,
             actions,
-            abi,
+            lowering,
         );
     }
     function
@@ -612,9 +614,17 @@ pub(super) fn compile_update(
             .instruction(&Instruction::If(BlockType::Empty));
 
         if let Some(is_loading) = actions.get(&ActionKind::IsLoading) {
-            emit_action_args(&mut function, globals);
+            emit_action_result(
+                &mut function,
+                *is_loading,
+                ActionKind::IsLoading,
+                ValType::I32,
+                |function| {
+                    function.instruction(&Instruction::I32Const(-1));
+                },
+                lowering,
+            );
             function
-                .instruction(&Instruction::Call(*is_loading))
                 .instruction(&Instruction::LocalTee(nullable_bool))
                 .instruction(&Instruction::I32Const(-1))
                 .instruction(&Instruction::I32Ne)
@@ -632,9 +642,24 @@ pub(super) fn compile_update(
                 .instruction(&Instruction::End);
         }
         if let Some(game_time) = actions.get(&ActionKind::GameTime) {
-            emit_action_args(&mut function, globals);
+            emit_action_result(
+                &mut function,
+                *game_time,
+                ActionKind::GameTime,
+                ValType::Ref(RefType {
+                    nullable: true,
+                    heap_type: HeapType::Concrete(
+                        lowering.gc.standard_index(StdlibTypeId::Duration),
+                    ),
+                }),
+                |function| {
+                    function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                        lowering.gc.standard_index(StdlibTypeId::Duration),
+                    )));
+                },
+                lowering,
+            );
             function
-                .instruction(&Instruction::Call(*game_time))
                 .instruction(&Instruction::LocalTee(duration_local))
                 .instruction(&Instruction::RefIsNull)
                 .instruction(&Instruction::If(BlockType::Empty))
@@ -662,20 +687,19 @@ pub(super) fn compile_update(
         }
 
         if let Some(reset) = actions.get(&ActionKind::Reset) {
-            emit_action_args(&mut function, globals);
+            emit_action_bool_result(&mut function, *reset, ActionKind::Reset, lowering);
             function
-                .instruction(&Instruction::Call(*reset))
                 .instruction(&Instruction::I32Const(1))
                 .instruction(&Instruction::I32Eq)
                 .instruction(&Instruction::If(BlockType::Empty))
                 .instruction(&Instruction::Call(abi.function(AbiImportId::TimerReset)));
             if let Some(split) = actions.get(&ActionKind::Split) {
                 function.instruction(&Instruction::Else);
-                emit_split(&mut function, *split, abi, globals);
+                emit_split(&mut function, *split, abi, lowering);
             }
             function.instruction(&Instruction::End);
         } else if let Some(split) = actions.get(&ActionKind::Split) {
-            emit_split(&mut function, *split, abi, globals);
+            emit_split(&mut function, *split, abi, lowering);
         }
 
         function.instruction(&Instruction::End);
@@ -690,8 +714,9 @@ fn emit_timer_lifecycle_events(
     timer_state: u32,
     observed_timer_state: u32,
     actions: &HashMap<ActionKind, u32>,
-    abi: &Abi,
+    lowering: &UpdateContext<'_>,
 ) {
+    let abi = lowering.abi;
     function
         .instruction(&Instruction::Call(abi.function(AbiImportId::TimerGetState)))
         .instruction(&Instruction::LocalSet(timer_state))
@@ -712,10 +737,15 @@ fn emit_timer_lifecycle_events(
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::I32And)
             .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::Call(*on_start))
-            .instruction(&Instruction::End);
+            .instruction(&Instruction::Call(*on_start));
+        if let Some(attempt_ready) = lowering.runtime_globals.attempt_ready {
+            function
+                .instruction(&Instruction::I32Const(1))
+                .instruction(&Instruction::GlobalSet(attempt_ready));
+        }
+        function.instruction(&Instruction::End);
     }
-    if let Some(on_reset) = actions.get(&ActionKind::OnReset) {
+    if actions.contains_key(&ActionKind::OnReset) || !lowering.attempt_globals.is_empty() {
         function
             .instruction(&Instruction::GlobalGet(observed_timer_state))
             .instruction(&Instruction::I32Eqz)
@@ -723,9 +753,39 @@ fn emit_timer_lifecycle_events(
             .instruction(&Instruction::LocalGet(timer_state))
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::I32And)
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::Call(*on_reset))
-            .instruction(&Instruction::End);
+            .instruction(&Instruction::If(BlockType::Empty));
+        if let Some(on_reset) = actions.get(&ActionKind::OnReset) {
+            if lowering
+                .scoped_globals
+                .action_requires_attempt(ActionKind::OnReset)
+            {
+                let ready = lowering
+                    .runtime_globals
+                    .attempt_ready
+                    .expect("attempt-dependent onReset has readiness storage");
+                function
+                    .instruction(&Instruction::GlobalGet(ready))
+                    .instruction(&Instruction::If(BlockType::Empty))
+                    .instruction(&Instruction::Call(*on_reset))
+                    .instruction(&Instruction::End);
+            } else {
+                function.instruction(&Instruction::Call(*on_reset));
+            }
+        }
+        for value in lowering.attempt_globals {
+            let ty = lowering.global_types[value];
+            if !ty.has_runtime_value() {
+                continue;
+            }
+            emit_storage_default(function, lowering.gc.val_type(ty));
+            function.instruction(&Instruction::GlobalSet(lowering.globals[value]));
+        }
+        if let Some(attempt_ready) = lowering.runtime_globals.attempt_ready {
+            function
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::GlobalSet(attempt_ready));
+        }
+        function.instruction(&Instruction::End);
     }
     function
         .instruction(&Instruction::LocalGet(timer_state))
@@ -1175,15 +1235,60 @@ fn emit_cancel_region(
     }
 }
 
-fn emit_split(function: &mut Function, split: u32, abi: &Abi, globals: RuntimeGlobals) {
-    emit_action_args(function, globals);
+fn emit_split(function: &mut Function, split: u32, abi: &Abi, lowering: &UpdateContext<'_>) {
+    emit_action_bool_result(function, split, ActionKind::Split, lowering);
     function
-        .instruction(&Instruction::Call(split))
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::I32Eq)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::Call(abi.function(AbiImportId::TimerSplit)))
         .instruction(&Instruction::End);
+}
+
+fn emit_action_bool_result(
+    function: &mut Function,
+    action: u32,
+    kind: ActionKind,
+    lowering: &UpdateContext<'_>,
+) {
+    emit_action_result(
+        function,
+        action,
+        kind,
+        ValType::I32,
+        |function| {
+            function.instruction(&Instruction::I32Const(0));
+        },
+        lowering,
+    );
+}
+
+fn emit_action_result(
+    function: &mut Function,
+    action: u32,
+    kind: ActionKind,
+    result: ValType,
+    emit_unavailable: impl FnOnce(&mut Function),
+    lowering: &UpdateContext<'_>,
+) {
+    if lowering.scoped_globals.action_requires_attempt(kind) {
+        let ready = lowering
+            .runtime_globals
+            .attempt_ready
+            .expect("attempt-dependent action has readiness storage");
+        function
+            .instruction(&Instruction::GlobalGet(ready))
+            .instruction(&Instruction::If(BlockType::Result(result)));
+        emit_action_args(function, lowering.runtime_globals);
+        function
+            .instruction(&Instruction::Call(action))
+            .instruction(&Instruction::Else);
+        emit_unavailable(function);
+        function.instruction(&Instruction::End);
+    } else {
+        emit_action_args(function, lowering.runtime_globals);
+        function.instruction(&Instruction::Call(action));
+    }
 }
 
 fn emit_action_args(function: &mut Function, globals: RuntimeGlobals) {

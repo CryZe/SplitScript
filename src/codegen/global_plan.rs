@@ -60,6 +60,9 @@ pub(super) struct RuntimeGlobals {
     /// means the loaded script has not established its baseline yet.
     /// Storage exists only when a timer lifecycle observer is declared.
     pub observed_timer_state: Option<u32>,
+    /// Whether an observed start transition has completed `onStart` for the
+    /// current timer attempt. Storage exists only for attempt-scoped globals.
+    pub attempt_ready: Option<u32>,
     /// Current compiler-derived structural formatting depth. This bounds
     /// recursive container graphs without allocating traversal state.
     pub debug_depth: u32,
@@ -276,6 +279,18 @@ pub(super) fn encode(
             );
             index
         });
+    let attempt_ready = wasm_ir.attempt_globals().next().is_some().then(|| {
+        let index = section.len();
+        section.global(
+            GlobalType {
+                val_type: ValType::I32,
+                mutable: true,
+                shared: false,
+            },
+            &ConstExpr::i32_const(0),
+        );
+        index
+    });
     let debug_depth = section.len();
     section.global(
         GlobalType {
@@ -390,6 +405,7 @@ pub(super) fn encode(
             attach_ready,
             state_ready,
             observed_timer_state,
+            attempt_ready,
             debug_depth,
             async_frame,
         },

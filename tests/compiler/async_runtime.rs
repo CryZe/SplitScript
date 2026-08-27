@@ -315,6 +315,58 @@ fn timer_lifecycle_actions_observe_transitions_once_while_detached() {
 }
 
 #[test]
+fn attempt_scoped_storage_is_hidden_until_start_and_cleared_after_reset() {
+    let source = r#"
+        let label
+        state "game.exe" {}
+
+        onStart {
+            label = "ready"
+            print("started")
+        }
+
+        onReset {
+            print(label)
+        }
+
+        gameTime {
+            print(label)
+            return None
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    // Loading while a timer is already active establishes a baseline rather
+    // than inventing an `onStart` event. Attempt-dependent actions must not
+    // observe the backend's empty storage in this state.
+    store.data_mut().timer_state = 1;
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert!(store.data().messages.is_empty());
+
+    // Returning to not-running does not invoke an attempt-dependent onReset
+    // for an attempt the script never observed starting.
+    store.data_mut().timer_state = 0;
+    update.call(&mut store, ()).unwrap();
+    assert!(store.data().messages.is_empty());
+
+    // A real transition initializes the attempt before later tick actions.
+    store.data_mut().timer_state = 1;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["started", "ready"]);
+
+    // onReset sees the still-live attempt value; storage is cleared only
+    // after the callback completes.
+    store.data_mut().timer_state = 0;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["started", "ready", "ready"]);
+}
+
+#[test]
 fn timer_state_monitor_is_absent_without_lifecycle_or_decision_actions() {
     let wasm = splitscript::compile(
         r#"

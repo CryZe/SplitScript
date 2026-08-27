@@ -1560,7 +1560,7 @@ fn compile_resolved_path(
                         let ty = context.global_types[&value];
                         if ty.has_runtime_value() {
                             function.instruction(&Instruction::GlobalGet(context.globals[&value]));
-                            if context.wasm_ir.is_attachment_global(value)
+                            if context.wasm_ir.is_scoped_global(value)
                                 && matches!(context.gc.val_type(ty), ValType::Ref(reference) if !reference.nullable)
                             {
                                 // Definite-initialization and layout analysis prove

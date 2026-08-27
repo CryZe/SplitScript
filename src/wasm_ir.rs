@@ -646,6 +646,7 @@ pub struct Program {
     bodies: Vec<Body>,
     global_initializers: Vec<(ValueId, ExprId)>,
     attachment_globals: Vec<ValueId>,
+    attempt_globals: Vec<ValueId>,
     state_expressions: Vec<StateExpression>,
     state_transforms: Vec<StateTransform>,
     closures: Vec<ClosureBody>,
@@ -667,6 +668,7 @@ impl Program {
         semantics: &SemanticModel,
         effects: &OperationAnalysis,
         capabilities: &crate::capabilities::CapabilityAnalysis,
+        scoped_globals: &crate::scoped_globals::ScopedGlobalAnalysis,
         profile: crate::BuildProfile,
     ) -> Self {
         let expressions = typed_hir
@@ -698,10 +700,20 @@ impl Program {
             .filter(|initializer| !initializer.debug_only || profile == crate::BuildProfile::Debug)
             .map(|initializer| (initializer.value, initializer.expression))
             .collect();
-        let attachment_globals = typed_hir
-            .attachment_globals_with_debug()
+        let bare_globals = typed_hir
+            .bare_globals_with_debug()
             .filter(|(_, debug_only)| !*debug_only || profile == crate::BuildProfile::Debug)
             .map(|(value, _)| value)
+            .collect::<Vec<_>>();
+        let attachment_globals = bare_globals
+            .iter()
+            .copied()
+            .filter(|value| scoped_globals.is_attachment_global(*value))
+            .collect();
+        let attempt_globals = bare_globals
+            .iter()
+            .copied()
+            .filter(|value| scoped_globals.is_attempt_global(*value))
             .collect();
         let mut program = Self {
             standard_library: typed_hir.standard_library().clone(),
@@ -709,6 +721,7 @@ impl Program {
             bodies: Vec::new(),
             global_initializers,
             attachment_globals,
+            attempt_globals,
             state_expressions: Vec::new(),
             state_transforms: Vec::new(),
             closures: Vec::new(),
@@ -726,6 +739,7 @@ impl Program {
             .iter()
             .map(|(value, _)| *value)
             .chain(program.attachment_globals.iter().copied())
+            .chain(program.attempt_globals.iter().copied())
             .collect::<HashSet<_>>();
         let closures = typed_hir
             .all_expressions()
@@ -907,6 +921,7 @@ impl Program {
             .iter()
             .any(|(candidate, _)| *candidate == value)
             || self.attachment_globals.contains(&value)
+            || self.attempt_globals.contains(&value)
     }
 
     pub fn attachment_globals(&self) -> impl Iterator<Item = ValueId> + '_ {
@@ -915,6 +930,18 @@ impl Program {
 
     pub fn is_attachment_global(&self, value: ValueId) -> bool {
         self.attachment_globals.contains(&value)
+    }
+
+    pub fn attempt_globals(&self) -> impl Iterator<Item = ValueId> + '_ {
+        self.attempt_globals.iter().copied()
+    }
+
+    pub fn is_attempt_global(&self, value: ValueId) -> bool {
+        self.attempt_globals.contains(&value)
+    }
+
+    pub fn is_scoped_global(&self, value: ValueId) -> bool {
+        self.is_attachment_global(value) || self.is_attempt_global(value)
     }
 
     pub fn bodies(&self) -> impl Iterator<Item = &Body> {

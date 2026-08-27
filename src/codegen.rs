@@ -243,6 +243,7 @@ pub struct BackendProgram<'a> {
     memory_layouts: &'a MemoryLayouts,
     equality: &'a EqualityCapabilities,
     capabilities: &'a crate::capabilities::CapabilityAnalysis,
+    scoped_globals: &'a crate::ScopedGlobalAnalysis,
     source_name: &'a str,
     source: &'a str,
 }
@@ -284,6 +285,7 @@ impl<'a> BackendProgram<'a> {
             memory_layouts: checked.capabilities.memory(),
             equality: checked.capabilities.equality(),
             capabilities: &checked.capabilities,
+            scoped_globals: &checked.scoped_globals,
             source_name: checked.source_name(),
             source: checked.document.source(),
         }
@@ -324,6 +326,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         memory_layouts,
         equality,
         capabilities,
+        scoped_globals,
         source_name,
         source,
     } = inputs;
@@ -593,6 +596,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         }
     });
     let attachment_globals = wasm_ir.attachment_globals().collect::<Vec<_>>();
+    let attempt_globals = wasm_ir.attempt_globals().collect::<Vec<_>>();
     let update_context = update::UpdateContext {
         standard_library: &standard_library,
         abi: &abi,
@@ -607,6 +611,8 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         globals: &global_indices,
         global_types: &global_types,
         attachment_globals: &attachment_globals,
+        attempt_globals: &attempt_globals,
+        scoped_globals,
         process_names: &process_names,
         provider_attach,
         provider_preparation,

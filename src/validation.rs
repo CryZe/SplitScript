@@ -31,7 +31,7 @@ use crate::{
 mod stdlib_bodies;
 
 pub(crate) struct ValidationOutput {
-    pub(crate) attachment_globals: crate::attachment_globals::AttachmentGlobalAnalysis,
+    pub(crate) scoped_globals: crate::scoped_globals::ScopedGlobalAnalysis,
     pub(crate) capabilities: CapabilityAnalysis,
     pub(crate) effects: OperationAnalysis,
     pub(crate) diagnostics: Vec<Diagnostic>,
@@ -44,8 +44,8 @@ pub(crate) fn validate(
     semantics: &SemanticModel,
     enum_types: &[EnumDecl],
 ) -> ValidationOutput {
-    let (attachment_globals, attachment_diagnostics) =
-        crate::attachment_globals::analyze(syntax, hir, semantics);
+    let (scoped_globals, scoped_global_diagnostics) =
+        crate::scoped_globals::analyze(syntax, hir, semantics);
     let capabilities = CapabilityAnalysis::build(
         &syntax.records,
         enum_types,
@@ -53,9 +53,9 @@ pub(crate) fn validate(
         semantics,
         standard_library.clone(),
     );
-    let effects = OperationAnalysis::infer(syntax, hir, semantics, &capabilities);
+    let effects = OperationAnalysis::infer(syntax, hir, semantics, &capabilities, &scoped_globals);
     let mut diagnostics = Vec::new();
-    diagnostics.extend(attachment_diagnostics);
+    diagnostics.extend(scoped_global_diagnostics);
     diagnostics.extend(stdlib_bodies::validate_signatures(
         &standard_library,
         syntax,
@@ -305,7 +305,7 @@ pub(crate) fn validate(
     }
 
     ValidationOutput {
-        attachment_globals,
+        scoped_globals,
         capabilities,
         effects,
         diagnostics,

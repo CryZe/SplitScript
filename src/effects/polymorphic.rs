@@ -215,6 +215,7 @@ struct Evaluator<'a> {
     program: &'a TypedProgram,
     semantics: &'a SemanticModel,
     capabilities: &'a crate::capabilities::CapabilityAnalysis,
+    scoped_globals: &'a crate::scoped_globals::ScopedGlobalAnalysis,
     summaries: &'a [FunctionSummary],
     env: HashMap<ValueId, SymbolicValue>,
     accumulator: Accumulator,
@@ -228,6 +229,7 @@ impl<'a> Evaluator<'a> {
         program: &'a TypedProgram,
         semantics: &'a SemanticModel,
         capabilities: &'a crate::capabilities::CapabilityAnalysis,
+        scoped_globals: &'a crate::scoped_globals::ScopedGlobalAnalysis,
         summaries: &'a [FunctionSummary],
         env: HashMap<ValueId, SymbolicValue>,
     ) -> Self {
@@ -236,6 +238,7 @@ impl<'a> Evaluator<'a> {
             program,
             semantics,
             capabilities,
+            scoped_globals,
             summaries,
             env,
             accumulator: Accumulator::default(),
@@ -269,7 +272,7 @@ impl<'a> Evaluator<'a> {
                     self.apply_resolved_call(None, call, &[], false);
                 }
                 self.env.insert(assignment.target, value);
-                if self.program.is_attachment_global(assignment.target) {
+                if self.scoped_globals.is_attachment_global(assignment.target) {
                     self.accumulator.effect(Effect::RequiresAttachedProcess);
                 }
             }
@@ -575,7 +578,7 @@ impl<'a> Evaluator<'a> {
                 self.accumulator.effect(Effect::RequiresStateSnapshots);
             }
             if let Some(ResolvedValue::Variable(value)) = root
-                && self.program.is_attachment_global(value)
+                && self.scoped_globals.is_attachment_global(value)
             {
                 self.accumulator.effect(Effect::RequiresAttachedProcess);
             }
@@ -605,7 +608,7 @@ impl<'a> Evaluator<'a> {
             .receiver()
             .and_then(|receiver| receiver.path().map(|(root, _)| root))
             .and_then(ResolvedValue::source_value)
-            .is_some_and(|value| self.program.is_attachment_global(value))
+            .is_some_and(|value| self.scoped_globals.is_attachment_global(value))
         {
             self.accumulator.effect(Effect::RequiresAttachedProcess);
         }
@@ -712,6 +715,7 @@ impl<'a> Evaluator<'a> {
                     self.program,
                     self.semantics,
                     self.capabilities,
+                    self.scoped_globals,
                     self.summaries,
                     env,
                 );
@@ -876,6 +880,7 @@ fn evaluate_function(
     program: &TypedProgram,
     semantics: &SemanticModel,
     capabilities: &crate::capabilities::CapabilityAnalysis,
+    scoped_globals: &crate::scoped_globals::ScopedGlobalAnalysis,
     summaries: &[FunctionSummary],
 ) -> FunctionSummary {
     let mut evaluator = Evaluator::new(
@@ -883,6 +888,7 @@ fn evaluate_function(
         program,
         semantics,
         capabilities,
+        scoped_globals,
         summaries,
         function_environment(function, syntax),
     );
@@ -898,6 +904,7 @@ pub(super) fn infer(
     program: &TypedProgram,
     semantics: &SemanticModel,
     capabilities: &crate::capabilities::CapabilityAnalysis,
+    scoped_globals: &crate::scoped_globals::ScopedGlobalAnalysis,
 ) -> OperationAnalysis {
     let function_count = program
         .all_function_bodies()
@@ -915,6 +922,7 @@ pub(super) fn infer(
                 program,
                 semantics,
                 capabilities,
+                scoped_globals,
                 &summaries,
             );
         }
@@ -932,6 +940,7 @@ pub(super) fn infer(
             program,
             semantics,
             capabilities,
+            scoped_globals,
             &summaries,
             HashMap::new(),
         )
@@ -944,6 +953,7 @@ pub(super) fn infer(
             program,
             semantics,
             capabilities,
+            scoped_globals,
             &summaries,
             HashMap::new(),
         )
@@ -956,6 +966,7 @@ pub(super) fn infer(
             program,
             semantics,
             capabilities,
+            scoped_globals,
             &summaries,
             HashMap::new(),
         )

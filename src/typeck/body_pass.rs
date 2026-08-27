@@ -199,7 +199,7 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
         }
         checker.semantics.resolve_value_type(global.id, ty);
         if global.value.is_none() {
-            checker.declarations.attachment_globals.insert(global.id);
+            checker.declarations.bare_globals.insert(global.id);
         }
         checker.declarations.globals.insert(
             global.name.clone(),

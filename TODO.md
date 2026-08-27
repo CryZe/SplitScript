@@ -472,6 +472,13 @@ semantic-review evidence, not as a conformance corpus.
   monitor global, import, and transition code only when either action exists.
   Script-requested starts and resets are observed naturally on the following
   update rather than being invoked directly and then rediscovered.
+- [x] Infer attempt-scoped bare globals from definite `onStart` assignments,
+  using the same global syntax and viral requirement analysis as attachment
+  state instead of adding a separate attempt block. Generated readiness keeps
+  backend defaults unobservable, detach preserves the values, `onReset` can
+  inspect them before they are cleared, and a mid-attempt first timer sample
+  deliberately remains only a baseline. Lunistice now uses this state without
+  dummy initializers or reset bookkeeping in `whileAttached`.
 - [ ] Keep ASL `shutdown` and exact `onSplit` delivery as host requirements.
   Shutdown requires the host to invoke a teardown export before disabling,
   reloading, or dropping a module; lossless split/skip/undo ordering requires

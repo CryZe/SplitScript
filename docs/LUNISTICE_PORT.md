@@ -22,8 +22,8 @@ The authoritative source for this port is
 | Points, resets, level time, level/scene, character runtime variables | GC string formatting plus `setVariable` |
 | 1 Hz detached polling and 120 Hz attached polling | Language defaults apply 120 Hz before cooperative `onAttach` discovery and restore 1 Hz on process close |
 | Auto-start when the in-game timer begins in the first level | `timerStopped` transition plus base level / DLC Shrine checks |
-| Any timer start/reset clears accumulated run state | Timer-global `onStart` and `onReset` actions share one `resetRunTracking()` helper |
-| Game-time accumulation across level-clock rollovers | `runTimeSeconds` plus `Duration.fromSeconds` |
+| A timer start initializes accumulated run state | Bare attempt-scoped globals are initialized by timer-global `onStart` and released after reset |
+| Game-time accumulation across level-clock rollovers | `runTimeSeconds` is updated and consumed inside `gameTime`, plus `Duration.fromSeconds` |
 | Reset on a rollover before leaving the first level | `reset` action |
 | Results and final-level-to-credits splits | `split` action with both original predicates |
 | Permanently paused LiveSplit game time with explicit game time | `isLoading { return true }` plus `gameTime` |

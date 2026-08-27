@@ -144,8 +144,9 @@ impl OperationAnalysis {
         program: &TypedProgram,
         semantics: &SemanticModel,
         capabilities: &crate::capabilities::CapabilityAnalysis,
+        scoped_globals: &crate::scoped_globals::ScopedGlobalAnalysis,
     ) -> Self {
-        polymorphic::infer(syntax, program, semantics, capabilities)
+        polymorphic::infer(syntax, program, semantics, capabilities, scoped_globals)
     }
 
     pub fn function(&self, function: FunctionId) -> FunctionOperationSemantics {

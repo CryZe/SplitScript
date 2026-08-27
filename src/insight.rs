@@ -672,16 +672,24 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                     "Read-only memory layout selected for the attached game build.".to_owned(),
                 )
             } else if let Some(global) = syntax.globals.iter().find(|global| global.id == value) {
-                let kind = if global.value.is_none() {
-                    "Attachment-scoped global variable"
-                } else {
-                    "Global variable"
+                let scoped = context
+                    .snapshot
+                    .checked()
+                    .and_then(|checked| checked.scoped_globals().lifetime(value));
+                let kind = match scoped {
+                    Some(crate::GlobalLifetime::Attachment) => {
+                        "Attachment-scoped global variable; initialized by `onAttach` and cleared on detach"
+                    }
+                    Some(crate::GlobalLifetime::Attempt) => {
+                        "Attempt-scoped global variable; initialized by `onStart` and cleared after `onReset`"
+                    }
+                    None => "Global variable",
                 };
                 let mut description = documented_description(kind, global.documentation.as_deref());
-                if global.value.is_none()
+                if scoped == Some(crate::GlobalLifetime::Attachment)
                     && let Some(checked) = context.snapshot.checked()
                 {
-                    let attachment = checked.attachment_globals();
+                    let attachment = checked.scoped_globals();
                     let layouts = attachment.available_layouts(value).collect::<Vec<_>>();
                     append_attachment_layouts(
                         &mut description,
@@ -819,7 +827,7 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 );
             }
             if let Some(checked) = context.snapshot.checked() {
-                let attachment = checked.attachment_globals();
+                let attachment = checked.scoped_globals();
                 let allowed = attachment.function_layouts(function.id).collect::<Vec<_>>();
                 append_attachment_layouts(
                     &mut description,
@@ -827,6 +835,11 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                     &allowed,
                     attachment.layouts().len(),
                 );
+                if attachment.function_requires_attempt(function.id) {
+                    description.push_str(
+                        "\n\n**Attempt state:** requires an attempt initialized by `onStart`.",
+                    );
+                }
             }
             Some(source_markdown(
                 &format!(
@@ -2275,6 +2288,35 @@ split {
             helper
                 .markdown
                 .contains("**Attachment layouts:** `StateLayout.Steam`")
+        );
+    }
+
+    #[test]
+    fn hover_describes_attempt_scoped_globals_and_helpers() {
+        let source = r#"
+let elapsed
+state "game.exe" {}
+onStart { elapsed = 0.0 }
+fn elapsedTime() { return Duration.fromSeconds(elapsed) }
+gameTime { return elapsedTime() }
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let global = database
+            .hover(source.find("elapsed\n").unwrap() + 1)
+            .unwrap()
+            .expect("attempt global hover");
+        assert!(global.markdown.contains("let elapsed: f64"));
+        assert!(global.markdown.contains("Attempt-scoped global variable"));
+        assert!(global.markdown.contains("initialized by `onStart`"));
+
+        let helper = database
+            .hover(source.find("elapsedTime() {").unwrap() + 1)
+            .unwrap()
+            .expect("attempt helper hover");
+        assert!(
+            helper
+                .markdown
+                .contains("**Attempt state:** requires an attempt initialized by `onStart`.")
         );
     }
 

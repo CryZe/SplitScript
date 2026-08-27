@@ -1748,6 +1748,30 @@ on the following update instead of being invoked directly from [`start`] or
 [`reset`]. This sampled contract delivers an ordinary persistent transition
 once, but cannot recover a start and reset that both occur between updates.
 
+Attempt state uses the same global syntax as attachment state; there is no
+separate attempt declaration or lifecycle block. Declare a bare global and
+assign it directly on every completing path through [`onStart`]:
+
+```splitscript
+let collectedItems
+
+onStart {
+    collectedItems = 0
+}
+
+onReset {
+    print(`Collected {collectedItems} items`)
+}
+```
+
+The compiler infers `collectedItems` as attempt-scoped. It remains available
+across a game-process detach and is cleared after [`onReset`] completes. It may
+also be used from [`split`], [`reset`], [`isLoading`], and [`gameTime`], with the
+requirement propagating through helper functions. Loading an autosplitter while
+the timer is already running does not synthesize a start event or expose backend
+default storage; ordinary use should load the autosplitter before beginning the
+attempt.
+
 Legacy `init` combines two boundaries that SplitScript keeps explicit. Use
 [`onAttach`] for discovery that may suspend and for layout selection. Use
 [`onStateReady`] for synchronous initialization that needs polled state:

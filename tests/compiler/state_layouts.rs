@@ -313,11 +313,6 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
             DlcDemo,
         }
 
-        enum LevelOrScene {
-            Level(i32),
-            Scene(String),
-        }
-
         record LevelTimeParts {
             minutes: f32,
             seconds: f32,
@@ -355,11 +350,12 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
             gameState: i32 = GameManager.instance?.gameState?;
             points: u32 = GameManager.instance?.points?;
             deaths: u32 = GameManager.instance?.deaths?;
-            levelOrScene = if layout.edition == Edition.BaseGame {
-                LevelOrScene.Level(GameManager.instance?.level?)
-            } else {
-                LevelOrScene.Scene(process.readManagedString(GameManager.instance?.scene?, 16)?)
-            };
+            if layout.edition == Edition.BaseGame {
+                level: i32 = GameManager.instance?.level?;
+            }
+            if layout.edition == Edition.DlcDemo {
+                scene: String = process.readManagedString(GameManager.instance?.scene?, 16)?;
+            }
             levelTime: f32 = Timer.instance?.levelTime?;
             levelTimeParts: LevelTimeParts = Timer.instance?.levelTimeParts?;
             timerStopped: bool = Timer.instance?.stopped?;
@@ -367,8 +363,12 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
         }
 
         whileAttached {
-            print(current.levelOrScene)
             print(current.levelTimeParts)
+            if layout.edition == Edition.BaseGame {
+                print(current.level)
+            } else {
+                print(current.scene)
+            }
         }
     "#;
 

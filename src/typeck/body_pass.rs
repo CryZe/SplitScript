@@ -4,7 +4,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     Diagnostic, DiagnosticFix, FixApplicability, TextEdit,
-    ast::{ActionKind, ExprKind, FunctionId, Program, Span, StateDecl, StateSource, Stmt},
+    ast::{
+        ActionKind, ExprKind, FunctionId, Program, Span, StateDecl, StateField, StateSource, Stmt,
+    },
     inference::Type,
     stdlib::{CoreTypeId, ItemKind, StdlibOwner, StdlibTypeId},
     visit::{self, Visitor},
@@ -263,125 +265,119 @@ fn globals_inferred_as_options(program: &Program) -> HashSet<String> {
 fn check_state_expressions(checker: &mut Checker, program: &Program) {
     checker.scopes.clear();
     checker.with_expression_mode(ExpressionMode::StateSource, |checker| {
-        for field in program
-            .state
-            .as_ref()
-            .into_iter()
-            .flat_map(|state| state.all_fields())
-        {
-            let field_type = checker.declarations.state_fields_by_id[&field.id];
-            if let StateSource::Expression(expression) = &field.source {
-                let boundary = contains_propagation(expression)
-                    .then(|| Type::Result(checker.inference.result_type(field_type)));
-                let (actual, failure) = checker.with_failure_context(
-                    boundary.map_or(FailureContext::None, FailureContext::boundary),
-                    |checker| checker.expr(expression, None),
-                );
-                let used_propagation = failure.propagated();
-                if let Some(actual) = actual {
-                    let actual = checker.shallow_type(actual);
-                    let poll_result = if used_propagation {
-                        let boundary =
-                            boundary.expect("propagation syntax creates a failure boundary");
-                        if let Type::Result(result) = actual {
-                            let value = checker.inference.result_value(result);
-                            unify_state_field_value(
-                                checker,
-                                value,
-                                field_type,
-                                field,
-                                expression.span,
-                            );
-                            checker.expect_expression(
-                                expression.id,
-                                actual,
-                                Some(boundary),
-                                expression.span,
-                            );
-                        } else {
-                            unify_state_field_value(
-                                checker,
-                                actual,
-                                field_type,
-                                field,
-                                expression.span,
-                            );
-                            checker.expect_expression(
-                                expression.id,
-                                actual,
-                                Some(boundary),
-                                expression.span,
-                            );
-                        }
-                        boundary
-                    } else if let Type::Result(result) = actual {
-                        let value = checker.inference.result_value(result);
-                        unify_state_field_value(checker, value, field_type, field, expression.span);
-                        actual
-                    } else {
-                        unify_state_field_value(
-                            checker,
-                            actual,
-                            field_type,
-                            field,
-                            expression.span,
-                        );
-                        let result = Type::Result(checker.inference.result_type(actual));
-                        checker.expect_expression(
-                            expression.id,
-                            actual,
-                            Some(result),
-                            expression.span,
-                        );
-                        result
-                    };
-                    checker
-                        .semantics
-                        .resolve_state_poll_result(field.id, poll_result);
+        let Some(state) = program.state.as_ref() else {
+            return;
+        };
+        for field in &state.fields {
+            check_state_expression(checker, field);
+        }
+        for group in &state.conditional_fields {
+            let constraints = checker.layout_constraints(&group.condition);
+            checker.with_layout_constraints(constraints.as_deref(), |checker| {
+                for field in &group.fields {
+                    check_state_expression(checker, field);
                 }
-            }
-
-            if let Some(transform) = &field.transform {
-                checker.scopes.push(HashMap::from([(
-                    "value".to_owned(),
-                    Binding {
-                        id: Some(transform.value),
-                        ty: field_type,
-                        mutable: false,
-                        debug_only: false,
-                        declaration_span: Some(field.span),
-                    },
-                )]));
-                checker
-                    .semantics
-                    .resolve_value_type(transform.value, field_type);
-                let poll_result = Type::Result(checker.inference.result_type(field_type));
-                let field_type_name = checker.type_name(field_type);
-                let (actual, _) = checker.with_failure_context(
-                    FailureContext::boundary(poll_result),
-                    |checker| {
-                        checker.with_expected_type_source(
-                            super::ExpectedTypeSource {
-                                span: state_field_declaration_span(field),
-                                label: format!(
-                                    "state field `{}` is declared as `{field_type_name}`",
-                                    field.name
-                                ),
-                            },
-                            |checker| checker.expr(&transform.expression, Some(poll_result)),
-                        )
-                    },
-                );
-                if actual.is_none() {
-                    checker.error(
-                        "a state field filter must produce a value or an error",
-                        transform.expression.span,
-                    );
+            });
+        }
+        for layout in &state.layouts {
+            checker.with_state_layout(Some(layout.variant), |checker| {
+                for field in &layout.fields {
+                    check_state_expression(checker, field);
                 }
-                checker.scopes.pop();
-            }
+            });
         }
     });
+}
+
+/// Checks one state-field source in the layout context established by its
+/// declaration. The caller owns that context so conditional state fields and
+/// named layouts can refine every expression attached to the field uniformly.
+fn check_state_expression(checker: &mut Checker, field: &StateField) {
+    let field_type = checker.declarations.state_fields_by_id[&field.id];
+    if let StateSource::Expression(expression) = &field.source {
+        let boundary = contains_propagation(expression)
+            .then(|| Type::Result(checker.inference.result_type(field_type)));
+        let (actual, failure) = checker.with_failure_context(
+            boundary.map_or(FailureContext::None, FailureContext::boundary),
+            |checker| checker.expr(expression, None),
+        );
+        let used_propagation = failure.propagated();
+        if let Some(actual) = actual {
+            let actual = checker.shallow_type(actual);
+            let poll_result = if used_propagation {
+                let boundary = boundary.expect("propagation syntax creates a failure boundary");
+                if let Type::Result(result) = actual {
+                    let value = checker.inference.result_value(result);
+                    unify_state_field_value(checker, value, field_type, field, expression.span);
+                    checker.expect_expression(
+                        expression.id,
+                        actual,
+                        Some(boundary),
+                        expression.span,
+                    );
+                } else {
+                    unify_state_field_value(checker, actual, field_type, field, expression.span);
+                    checker.expect_expression(
+                        expression.id,
+                        actual,
+                        Some(boundary),
+                        expression.span,
+                    );
+                }
+                boundary
+            } else if let Type::Result(result) = actual {
+                let value = checker.inference.result_value(result);
+                unify_state_field_value(checker, value, field_type, field, expression.span);
+                actual
+            } else {
+                unify_state_field_value(checker, actual, field_type, field, expression.span);
+                let result = Type::Result(checker.inference.result_type(actual));
+                checker.expect_expression(expression.id, actual, Some(result), expression.span);
+                result
+            };
+            checker
+                .semantics
+                .resolve_state_poll_result(field.id, poll_result);
+        }
+    }
+
+    if let Some(transform) = &field.transform {
+        checker.scopes.push(HashMap::from([(
+            "value".to_owned(),
+            Binding {
+                id: Some(transform.value),
+                ty: field_type,
+                mutable: false,
+                debug_only: false,
+                declaration_span: Some(field.span),
+            },
+        )]));
+        checker
+            .semantics
+            .resolve_value_type(transform.value, field_type);
+        let poll_result = Type::Result(checker.inference.result_type(field_type));
+        let field_type_name = checker.type_name(field_type);
+        let (actual, _) =
+            checker.with_failure_context(FailureContext::boundary(poll_result), |checker| {
+                checker.with_expected_type_source(
+                    super::ExpectedTypeSource {
+                        span: state_field_declaration_span(field),
+                        label: format!(
+                            "state field `{}` is declared as `{field_type_name}`",
+                            field.name
+                        ),
+                    },
+                    |checker| checker.expr(&transform.expression, Some(poll_result)),
+                )
+            });
+        if actual.is_none() {
+            checker.error(
+                "a state field filter must produce a value or an error",
+                transform.expression.span,
+            );
+        }
+        checker.scopes.pop();
+    }
 }
 
 fn unify_state_field_value(

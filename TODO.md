@@ -154,7 +154,7 @@ to inference or code generation.
 
 ### P0.2 — bind schemas once per attachment
 
-- [ ] Introduce a single internal Unity metadata adapter shared by Mono and
+- [x] Introduce a single internal Unity metadata adapter shared by Mono and
   IL2CPP. Keep native metadata traversal and process scanning intrinsic, but
   generate high-level bindings and reads from the source schema. Replace the
   internal split between `UnityModule`/`UnityClass` and
@@ -248,7 +248,7 @@ to inference or code generation.
   singleton replacement, backing-field lookup, inherited fields, failed reads,
   and ambiguous layouts. Compare the resulting script structure and behavior
   with `C:\Projekte\lunistice-auto-splitter`.
-- [ ] Treat the milestone as complete only when all generated Unity symbols are
+- [x] Treat the milestone as complete only when all generated Unity symbols are
   navigable and documented in the editor and reference viewer, and the port no
   longer contains manual Unity metadata offsets or attachment bookkeeping.
 
@@ -309,10 +309,13 @@ or assumptions tied to one generated corpus.
   `Unity.mono`, and conceptual queries such as “managed field” reach this
   workflow rather than a low-level class API. Contextual migration diagnostics
   cover the old helper spellings without claiming a mechanically safe rewrite.
-- [ ] Extend that journey with transactional snapshots once `.snapshot()` is
-  implemented, and add a higher-level bounded managed-string declaration after
-  its source design is approved. Keep examples and diagnostics synchronized
-  with those facilities rather than documenting raw traversal as a workaround.
+- [x] Extend that journey with transactional snapshots. The managed-class
+  reference documents `T.Ref`, fallible live hops, `T`, transactional
+  `.snapshot()`, layout refinement, and demand-driven reader generation; editor
+  hover and navigation lead back to the source class and fields.
+- [ ] Add a higher-level bounded managed-string declaration after its source
+  design is approved. Keep examples and diagnostics synchronized with that
+  facility rather than documenting raw traversal as a workaround.
 - [ ] Make emulator providers equally difficult to miss. The latest exercise
   manually searched Dolphin mappings and byte-swapped GameCube values, manually
   followed Fusion RAM, and kept only one RetroArch layout even though `state

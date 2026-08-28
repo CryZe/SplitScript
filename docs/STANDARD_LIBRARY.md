@@ -590,7 +590,24 @@ the conventional C# automatic-property backing-field spelling. Class-typed
 static and instance fields are live references: every state poll rereads the
 current singleton and following object pointers instead of caching a transient
 object address during attachment. Scalar leaves use their declared fixed-width
-type. The runtime traversal types and raw metadata offsets remain private to the
+type.
+
+The declared class name `T` is an immutable local snapshot, while `T.Ref` is a
+live remote object reference. Each instance-field hop from `T.Ref` is fallible.
+Use postfix `?` to propagate a failed hop to the surrounding state field,
+function, or `retry` boundary. Calling `reference.snapshot()` reads every
+active instance field before constructing `T`; if any field fails, the whole
+operation returns an error and no partial snapshot escapes. Conditional fields
+follow the selected attachment layout, and snapshot readers are generated only
+when used:
+
+```splitscript
+state Unity ["game.exe"] {
+    manager: GameManager = GameManager.instance?.snapshot()?;
+}
+```
+
+The runtime traversal types and raw metadata offsets remain private to the
 trusted standard library and generated schema binder.
 
 The IL2CPP implementation supports the existing 64-bit base, 2019, 2020, and

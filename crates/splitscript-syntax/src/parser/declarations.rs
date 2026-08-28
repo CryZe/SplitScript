@@ -81,7 +81,7 @@ impl Parser<'_> {
 
     fn managed_namespace_decl(&mut self) -> Result<ManagedNamespaceDecl, Diagnostic> {
         let start = self.expect_ident("namespace")?;
-        let (name, name_span) = self.expect_any_ident("expected a namespace name")?;
+        let (name, name_span) = self.expect_declared_ident("expected a namespace name")?;
         let id = ManagedNamespaceId::from_index(self.next_managed_namespace_id);
         self.next_managed_namespace_id += 1;
         let opening_span =
@@ -104,7 +104,7 @@ impl Parser<'_> {
 
     fn managed_class_decl(&mut self) -> Result<ManagedClassDecl, Diagnostic> {
         let start = self.expect_ident("class")?;
-        let (name, name_span) = self.expect_any_ident("expected a managed class name")?;
+        let (name, name_span) = self.expect_declared_ident("expected a managed class name")?;
         let id = ManagedClassId::from_index(self.next_managed_class_id);
         self.next_managed_class_id += 1;
         let metadata_names = self.managed_metadata_names()?;
@@ -256,7 +256,7 @@ impl Parser<'_> {
         };
         let start = static_span.map_or(self.current().span.start, |span| span.start);
         let (ty, type_span) = self.parse_type("expected a managed field type")?;
-        let (name, name_span) = self.expect_any_ident("expected a managed field name")?;
+        let (name, name_span) = self.expect_declared_ident("expected a managed field name")?;
         let metadata_names = self.managed_metadata_names()?;
         let closing = self.expect(
             TokenKind::Semicolon,
@@ -420,7 +420,7 @@ impl Parser<'_> {
 
     pub(super) fn enum_decl(&mut self) -> Result<EnumDecl, Diagnostic> {
         let start = self.expect_ident("enum")?.start;
-        let (name, name_span) = self.expect_any_ident("expected an enum name")?;
+        let (name, name_span) = self.expect_declared_ident("expected an enum name")?;
         let id = EnumId::from_index(self.next_enum_id);
         self.next_enum_id += 1;
         self.expect(TokenKind::LBrace, "expected `{` after the enum name")?;
@@ -440,7 +440,7 @@ impl Parser<'_> {
             }
             let parsed = (|| {
                 let (variant_name, variant_span) =
-                    self.expect_any_ident("expected a variant name")?;
+                    self.expect_declared_ident("expected a variant name")?;
                 let payload = if self.eat(&TokenKind::LParen).is_some() {
                     let (ty, _) = self.parse_type("expected a payload type")?;
                     self.expect(TokenKind::RParen, "expected `)` after the payload type")?;
@@ -478,7 +478,7 @@ impl Parser<'_> {
 
     pub(super) fn record_decl(&mut self) -> Result<RecordDecl, Diagnostic> {
         let start = self.expect_ident("record")?.start;
-        let (name, name_span) = self.expect_any_ident("expected a record name")?;
+        let (name, name_span) = self.expect_declared_ident("expected a record name")?;
         let id = RecordId::from_index(self.next_record_id);
         self.next_record_id += 1;
         self.expect(TokenKind::LBrace, "expected `{` after the record name")?;
@@ -497,7 +497,8 @@ impl Parser<'_> {
                 break;
             }
             let parsed = (|| {
-                let (field_name, field_start) = self.expect_any_ident("expected a field name")?;
+                let (field_name, field_start) =
+                    self.expect_declared_ident("expected a field name")?;
                 self.expect(TokenKind::Colon, "expected `:` after the field name")?;
                 let (ty, type_span) = self.parse_type("expected a field type")?;
                 let field = RecordField {
@@ -532,7 +533,7 @@ impl Parser<'_> {
         let id = FunctionId::from_index(self.next_function_id);
         self.next_function_id += 1;
         let start = self.bump().span.start;
-        let (first_name, first_span) = self.expect_any_ident("expected a function name")?;
+        let (first_name, first_span) = self.expect_declared_ident("expected a function name")?;
         let (method_of, name, name_span) = if self.eat(&TokenKind::Dot).is_some() {
             let receiver_name = self
                 .record_foreign_spelling_diagnostic(
@@ -543,7 +544,7 @@ impl Parser<'_> {
                 .unwrap_or(&first_name);
             let receiver = self.resolve_type(receiver_name, first_span)?;
             let (method, method_span) =
-                self.expect_any_ident("expected a method name after `.`")?;
+                self.expect_declared_ident("expected a method name after `.`")?;
             (Some(receiver), method, method_span)
         } else {
             (None, first_name, first_span)
@@ -576,7 +577,7 @@ impl Parser<'_> {
             let item_start = self.cursor.position();
             let parsed = (|| {
                 let (param_name, param_start) =
-                    self.expect_any_ident("expected a parameter name")?;
+                    self.expect_declared_ident("expected a parameter name")?;
                 let (annotation, type_span) = if self.eat(&TokenKind::Colon).is_some() {
                     let (ty, span) = self.parse_type("expected a parameter type")?;
                     (Some(ty), span)
@@ -913,7 +914,7 @@ impl Parser<'_> {
             let field_documentation = self.take_source_documentation();
             let parsed = (|| {
                 let (name, name_span) =
-                    self.expect_any_ident("expected a layout dimension name")?;
+                    self.expect_declared_ident("expected a layout dimension name")?;
                 self.expect(
                     TokenKind::Colon,
                     "expected `:` after the layout dimension name",
@@ -960,7 +961,7 @@ impl Parser<'_> {
         documentation: Option<String>,
     ) -> Result<(StateLayoutDecl, EnumVariant), Diagnostic> {
         let start = self.expect_ident("layout")?.start;
-        let (name, name_span) = self.expect_any_ident("expected a layout name")?;
+        let (name, name_span) = self.expect_declared_ident("expected a layout name")?;
         let variant = EnumVariant {
             id: self.new_enum_variant_id(),
             name,
@@ -1007,9 +1008,9 @@ impl Parser<'_> {
         let legacy_string = self.legacy_string_field_prefix();
         let (name, field_start) = if legacy_string.is_some() {
             self.bump();
-            self.expect_any_ident("expected a field name after the ASL `stringN` type")?
+            self.expect_declared_ident("expected a field name after the ASL `stringN` type")?
         } else {
-            self.expect_any_ident("expected a state field name")?
+            self.expect_declared_ident("expected a state field name")?
         };
         let annotation = if legacy_string.is_none() && self.eat(&TokenKind::Colon).is_some() {
             let (ty, _) = self.parse_type("expected a state field type")?;
@@ -1296,7 +1297,7 @@ impl Parser<'_> {
             && matches!(self.peek(3).kind, TokenKind::Assign)
             && matches!(&self.peek(4).kind, TokenKind::Ident(value) if value == "true" || value == "false")
         {
-            let (name, start) = self.expect_any_ident("expected a setting name")?;
+            let (name, start) = self.expect_declared_ident("expected a setting name")?;
             self.bump();
             self.bump();
             self.bump();
@@ -1357,7 +1358,7 @@ impl Parser<'_> {
         }
 
         self.expect(TokenKind::FatArrow, "expected `=>` after the setting label")?;
-        let (name, name_span) = self.expect_any_ident("expected a setting name")?;
+        let (name, name_span) = self.expect_declared_ident("expected a setting name")?;
         let external_key = if self.at_ident("key") {
             let keyword_span = self.bump().span;
             let token = self.current().clone();
@@ -1416,7 +1417,8 @@ impl Parser<'_> {
         tooltip: Option<String>,
     ) -> Result<(), Diagnostic> {
         let start_span = self.expect_ident("for")?;
-        let (binding, binding_span) = self.expect_any_ident("expected a binding after `for`")?;
+        let (binding, binding_span) =
+            self.expect_declared_ident("expected a binding after `for`")?;
         let in_span = self.expect_ident("in")?;
         let (range_start, range_start_span) = self.setting_family_bound()?;
         self.expect(
@@ -1839,7 +1841,8 @@ impl Parser<'_> {
                 break;
             }
             let parsed = (|| {
-                let (name, field_start) = self.expect_any_ident("expected a state field name")?;
+                let (name, field_start) =
+                    self.expect_declared_ident("expected a state field name")?;
                 self.expect(TokenKind::Colon, "expected `:` after the field name")?;
                 self.expect_ident("memory")?;
                 self.expect(TokenKind::Dot, "expected `.` after `memory`")?;

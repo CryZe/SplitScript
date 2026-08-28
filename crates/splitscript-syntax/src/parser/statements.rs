@@ -129,7 +129,7 @@ impl Parser<'_> {
         }
         if self.eat_ident("for").is_some() {
             let start = self.previous().span.start;
-            let (name, name_span) = self.expect_any_ident("expected a binding after `for`")?;
+            let (name, name_span) = self.expect_declared_ident("expected a binding after `for`")?;
             let in_span = self.expect_ident("in")?;
             let iterable = self.root_expression();
             let body = self.block()?;
@@ -304,7 +304,7 @@ impl Parser<'_> {
             );
             self.bump();
         }
-        let (name, name_span) = self.expect_any_ident("expected a variable name")?;
+        let (name, name_span) = self.expect_declared_ident("expected a variable name")?;
         let annotation = if self.eat(&TokenKind::Colon).is_some() {
             Some(self.parse_type_before_assignment("expected a type name")?.0)
         } else {

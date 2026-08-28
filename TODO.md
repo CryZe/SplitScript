@@ -353,11 +353,16 @@ or assumptions tied to one generated corpus.
   longer leak at an unrelated declaration. Attachment- and attempt-scoped
   inference remains shared, and a concrete `MemoryPath` initialization/use
   regression verifies that valid attachment state still infers normally.
-- [ ] Give reserved keywords used as identifiers a focused parser diagnostic.
-  The exercise's `let loop = ...` reported a missing block brace later in the
-  file. Point at `loop`, explain that it is reserved, and offer a safe rename;
-  audit the other declaration positions and contextual keywords with the same
-  recovery path.
+- [x] Give reserved keywords used as identifiers a focused parser diagnostic.
+  Source-defined names now share one recovering parser path: a reserved word
+  is consumed in place, diagnosed at its declaration, and gets a
+  machine-applicable trailing-underscore rename instead of producing a later
+  missing-brace cascade. The path covers globals, locals, loop/closure/pattern
+  bindings, functions and parameters, records, enums, managed declarations,
+  layouts, state fields, and settings. The reserved set is intentionally
+  limited to words that take over expression or statement grammar; contextual
+  DSL words such as `at`, `from`, `key`, and `static` remain legal ordinary
+  names away from their grammar positions.
 - [ ] Convert the remaining campaign boundaries into focused decisions rather
   than preserving workarounds as recommendations:
   - Decide whether pure source-defined constructors such as

@@ -293,7 +293,8 @@ impl Parser<'_> {
             && name != "_"
             && self.peek(1).kind == TokenKind::FatArrow
         {
-            let name_span = self.bump().span;
+            let (name, name_span) =
+                self.expect_declared_ident("expected a closure parameter name")?;
             let arrow_span = self.bump().span;
             let parameter = super::Parameter {
                 id: self.new_value_id(),
@@ -319,7 +320,8 @@ impl Parser<'_> {
             let start = self.expect(TokenKind::LParen, "expected `(`")?;
             let mut params = Vec::new();
             while !self.at(&TokenKind::RParen) {
-                let (name, name_span) = self.expect_any_ident("expected a parameter name")?;
+                let (name, name_span) =
+                    self.expect_declared_ident("expected a closure parameter name")?;
                 let (annotation, end) = if self.eat(&TokenKind::Colon).is_some() {
                     let (ty, span) = self.parse_type("expected a closure parameter type")?;
                     (Some(ty), span)
@@ -1153,7 +1155,7 @@ impl Parser<'_> {
                 self.bump();
                 self.bump();
                 let (binding_name, binding_span) =
-                    self.expect_any_ident("expected a binding or `_` in the wrapper pattern")?;
+                    self.expect_declared_ident("expected a binding or `_` in the wrapper pattern")?;
                 self.expect(TokenKind::RParen, "expected `)` after the wrapper binding")?;
                 let binding = (binding_name != "_").then(|| PatternBinding {
                     id: self.new_value_id(),
@@ -1181,7 +1183,7 @@ impl Parser<'_> {
                     let variant = segment;
                     let binding = if self.eat(&TokenKind::LParen).is_some() {
                         let (name, name_span) =
-                            self.expect_any_ident("expected a payload binding")?;
+                            self.expect_declared_ident("expected a payload binding")?;
                         self.expect(TokenKind::RParen, "expected `)` after the payload binding")?;
                         Some(PatternBinding {
                             id: self.new_value_id(),

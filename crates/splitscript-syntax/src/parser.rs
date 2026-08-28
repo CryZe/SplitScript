@@ -525,6 +525,102 @@ mod tests {
     }
 
     #[test]
+    fn reserved_declaration_names_report_the_name_and_offer_a_rename() {
+        let cases = [
+            (
+                "state \"game.exe\" {} fn test() { let loop = 1 }",
+                "loop",
+                "loop_",
+            ),
+            ("state \"game.exe\" {} fn await() {}", "await", "await_"),
+            (
+                "state \"game.exe\" {} record Example { return: u32, }",
+                "return",
+                "return_",
+            ),
+            (
+                "state \"game.exe\" {} enum Example { None, }",
+                "None",
+                "None_",
+            ),
+            (
+                "state \"game.exe\" { match: u32 at 0x1000; }",
+                "match",
+                "match_",
+            ),
+            (
+                "state \"game.exe\" {} settings { \"Enabled\" => if: true, }",
+                "if",
+                "if_",
+            ),
+            (
+                "state \"game.exe\" {} fn test() { for return in [1] {} }",
+                "return",
+                "return_",
+            ),
+            (
+                "state \"game.exe\" {} fn test() { let callback = (while) => 1 }",
+                "while",
+                "while_",
+            ),
+        ];
+
+        for (source, reserved, replacement) in cases {
+            let output = parse_recovering(source, lex(source, SyntaxMode::Program).unwrap());
+            assert_eq!(output.diagnostics.len(), 1, "{source}");
+            let diagnostic = &output.diagnostics[0];
+            assert_eq!(
+                diagnostic.message,
+                format!("`{reserved}` is reserved and cannot be used as an identifier")
+            );
+            assert_eq!(
+                &source[diagnostic.span.start..diagnostic.span.end],
+                reserved
+            );
+            assert_eq!(diagnostic.fixes.len(), 1);
+            assert_eq!(
+                diagnostic.fixes[0].applicability,
+                FixApplicability::MachineApplicable
+            );
+            assert_eq!(diagnostic.fixes[0].edits[0].replacement, replacement);
+        }
+    }
+
+    #[test]
+    fn contextual_dsl_words_remain_valid_as_ordinary_names() {
+        let source = r#"
+            state "game.exe" {}
+
+            record ContextualNames {
+                at: u32,
+                from: u32,
+                key: u32,
+                static: u32,
+                in: u32,
+                as: u32,
+                async: u32,
+                where: u32,
+            }
+
+            fn from(key: u32, in: u32, as: u32, async: u32, where: u32) {
+                let at = key
+                return ContextualNames {
+                    at: at,
+                    from: key,
+                    key: key,
+                    static: key,
+                    in: in,
+                    as: as,
+                    async: async,
+                    where: where,
+                }
+            }
+        "#;
+        parse(source, lex(source, SyntaxMode::Program).unwrap())
+            .expect("contextual DSL words should not become globally reserved identifiers");
+    }
+
+    #[test]
     fn parses_documented_managed_image_schemas_with_stable_member_shapes() {
         let source = r#"
             enum Edition { Base, DlcDemo }

@@ -1,6 +1,31 @@
 //! parser recovery integration tests.
 
 #[test]
+fn reserved_binding_names_do_not_cascade_into_later_syntax_errors() {
+    let source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let loop = 1
+            print("the later statement remains parseable")
+        }
+        split { return false }
+    "#;
+    let recovered = splitscript::parse_recovering(source).unwrap();
+
+    assert_eq!(recovered.diagnostics().len(), 1);
+    let diagnostic = &recovered.diagnostics()[0];
+    assert_eq!(
+        diagnostic.message,
+        "`loop` is reserved and cannot be used as an identifier"
+    );
+    assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "loop");
+    assert_eq!(diagnostic.fixes.len(), 1);
+    assert_eq!(diagnostic.fixes[0].edits[0].replacement, "loop_");
+    assert_eq!(recovered.syntax().actions.len(), 2);
+    assert_eq!(recovered.syntax().actions[0].body.statements.len(), 2);
+}
+
+#[test]
 fn recovering_parse_reports_multiple_errors_and_keeps_later_declarations() {
     use splitscript::compiler::syntax::RecoveryNodeKind;
 

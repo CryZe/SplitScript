@@ -125,6 +125,38 @@ impl Parser<'_> {
         }
     }
 
+    /// Consumes a source-defined name and records a focused diagnostic when
+    /// the spelling is reserved by expression or statement grammar.
+    ///
+    /// SplitScript lexes words as identifiers and interprets many of them
+    /// contextually. Consequently this check deliberately does not reject DSL
+    /// words such as `at`, `from`, or `key`: those remain ordinary names away
+    /// from their specific grammar positions. The words below cannot be
+    /// referenced unambiguously as user bindings, so accepting them here would
+    /// only move the parser error to a later, unrelated token.
+    pub(super) fn expect_declared_ident(
+        &mut self,
+        message: &'static str,
+    ) -> Result<(String, Span), Diagnostic> {
+        let (name, span) = self.expect_any_ident(message)?;
+        if is_reserved_declared_identifier(&name) {
+            let replacement = format!("{name}_");
+            self.diagnostics.push(
+                Diagnostic::new(
+                    format!("`{name}` is reserved and cannot be used as an identifier"),
+                    span,
+                )
+                .with_primary_label("choose a different name for this declaration")
+                .with_machine_applicable_fix(
+                    format!("rename this declaration to `{replacement}`"),
+                    span,
+                    replacement,
+                ),
+            );
+        }
+        Ok((name, span))
+    }
+
     pub(super) fn expect(
         &mut self,
         kind: TokenKind,
@@ -494,4 +526,32 @@ impl Parser<'_> {
                 | TokenKind::Minus
         )
     }
+}
+
+fn is_reserved_declared_identifier(name: &str) -> bool {
+    matches!(
+        name,
+        "let"
+            | "debug"
+            | "if"
+            | "else"
+            | "while"
+            | "loop"
+            | "for"
+            | "break"
+            | "continue"
+            | "return"
+            | "throw"
+            | "await"
+            | "retry"
+            | "match"
+            | "true"
+            | "false"
+            | "None"
+            | "Some"
+            | "Ok"
+            | "Err"
+            | "End"
+            | "Item"
+    )
 }

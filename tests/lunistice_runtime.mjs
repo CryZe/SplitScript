@@ -5,6 +5,11 @@ if (!wasmPath) throw new Error("usage: node tests/lunistice_runtime.mjs <lunisti
 
 const bytes = fs.readFileSync(wasmPath);
 const dlc = process.argv.includes("--dlc");
+const ambiguousClass = process.argv.includes("--ambiguous-class");
+const missingClass = process.argv.includes("--missing-class");
+const ambiguousField = process.argv.includes("--ambiguous-field");
+const missingField = process.argv.includes("--missing-field");
+const transientBindingRead = process.argv.includes("--transient-binding-read");
 const decoder = new TextDecoder();
 const base = 0x1000n;
 const memoryImage = new Uint8Array(0x2800000);
@@ -76,9 +81,15 @@ view.setUint32(0xd00, 0, true);
 pointer(0x900, 0x1d10);
 pointer(0xd10, 0x3000);
 pointer(0xd18, 0x3800);
+if (ambiguousClass) {
+    view.setUint32(0xb18, 3, true);
+    pointer(0xd20, 0x4000);
+    pointer(0x3010, 0xb000);
+    pointer(0x3018, 0xb040);
+}
 
 // Class names and common empty namespace.
-string(0xa000, "GameManager");
+string(0xa000, missingClass ? "UnrelatedManager" : "GameManager");
 string(0xa020, "Timer");
 string(0xa040, "");
 
@@ -103,7 +114,7 @@ view.setUint16(0x2120, 119, true);
 const gameFieldNames = [
     "<Instance>k__BackingField",
     dlc ? "<GameState>k__BackingField" : "gameState",
-    "_points",
+    missingField ? "unrelatedPoints" : "_points",
     "_deaths",
     dlc ? "_currentScene" : "currentLevel",
 ];
@@ -112,6 +123,10 @@ for (let index = 0; index < gameFieldNames.length; index += 1) {
     const relative = 0xa100 + index * 0x30;
     string(relative, gameFieldNames[index]);
     field(0x4000, index, absolute(relative), gameFieldOffsets[index]);
+}
+if (ambiguousField) {
+    string(0xa1f0, "_points");
+    field(0x4000, 5, absolute(0xa1f0), 0x48);
 }
 pointer(0x6020, 0xa000);
 
@@ -218,7 +233,31 @@ const env = {
 
 ({ instance } = await WebAssembly.instantiate(bytes, { env }));
 instance.exports._start();
+if (transientBindingRead) {
+    failReads = true;
+    for (let tick = 0; tick < 3; tick += 1) instance.exports.update();
+    failReads = false;
+}
 for (let tick = 0; tick < 180 && variableWrites < 5; tick += 1) instance.exports.update();
+const expectedBindingFailure = ambiguousClass
+    ? "multiple Unity classes match metadata names"
+    : missingClass
+        ? "no Unity class matches metadata names"
+        : ambiguousField
+            ? "multiple Unity fields match metadata names"
+            : missingField
+                ? "no Unity field matches metadata names"
+                : undefined;
+if (expectedBindingFailure !== undefined) {
+    if (variableWrites !== 0) {
+        throw new Error(`an invalid binding reached state polling: ${variableWrites}`);
+    }
+    if (!messages.some(message => message.includes(expectedBindingFailure))) {
+        throw new Error(`missing binding diagnostic ${JSON.stringify(expectedBindingFailure)}: ${JSON.stringify(messages)}`);
+    }
+    console.log(JSON.stringify({ messages, variableWrites, tickRates }));
+    process.exit(0);
+}
 if (variableWrites < 5) {
     throw new Error(
         `attachment did not finish: messages=${JSON.stringify(messages)}, scanReads=${scanReads}, variableWrites=${variableWrites}, tickRates=${JSON.stringify(tickRates)}`,

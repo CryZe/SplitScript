@@ -6177,12 +6177,27 @@ private struct UnityImage {
         name: String,
     ) -> async UnityClass;
 
-    // Finds the first class matching the schema's ordered metadata aliases.
+    // Completes one readable metadata probe for all schema aliases. A class
+    // with address zero is the compiler-private ambiguity sentinel.
     @requires(attachedProcess)
     @cancellation(processClose)
     @availability(onAttach)
     @intrinsic(UnityImageClassAny)
-    private fn classAny(names: [String]) -> async UnityClass;
+    private fn probeClassAny(names: [String]) -> async UnityClass?;
+
+    // Resolves exactly one runtime class for a source schema declaration.
+    private fn classAny(names: [String]) -> async UnityClass {
+        let candidate = await self.probeClassAny(names)
+        let class = candidate else {
+            print(`no Unity class matches metadata names {names}`)
+            await process.closed()
+        }
+        if class.address == 0 {
+            print(`multiple Unity classes match metadata names {names}`)
+            await process.closed()
+        }
+        return class
+    }
 }
 
 /// Describes a Unity runtime class.
@@ -6241,7 +6256,7 @@ private struct UnityClass {
         name: String,
     ) -> async u32;
 
-    /// Finds the first matching field.
+    /// Finds the unique field matching one of the supplied metadata names.
     ///
     /// Returns both the field offset and selected candidate index.
     ///
@@ -6255,21 +6270,36 @@ private struct UnityClass {
     /// let gameManager = await image.class("GameManager")
     /// let levelField = await gameManager.fieldAny(["currentLevel", "level"])
     /// ```
-    @requires(attachedProcess)
-    @cancellation(processClose)
-    @availability(onAttach)
-    @intrinsic(UnityClassFieldAny)
     fn fieldAny(
-        /// Candidate field names in priority order.
+        /// Alternative field metadata names.
         names: [String],
-    ) -> async UnityField;
+    ) -> async UnityField {
+        let candidate = await self.probeFieldAny(names)
+        let field = candidate else {
+            print(`no Unity field matches metadata names {names}`)
+            await process.closed()
+        }
+        return field
+    }
 
-    // Completes after one successful metadata traversal, preserving absence.
+    // Completes after one successful metadata traversal. Index !0 is the
+    // compiler-private ambiguity sentinel returned by the raw backend probe.
+    private fn probeFieldAny(names: [String]) -> async UnityField? {
+        let candidate = await self.rawProbeFieldAny(names)
+        match candidate {
+            Some(field) if field.index == !0 => {
+                print(`multiple Unity fields match metadata names {names}`)
+                await process.closed()
+            },
+            _ => return candidate,
+        }
+    }
+
     @requires(attachedProcess)
     @cancellation(processClose)
     @availability(onAttach)
     @intrinsic(UnityClassProbeFieldAny)
-    private fn probeFieldAny(names: [String]) -> async UnityField?;
+    private fn rawProbeFieldAny(names: [String]) -> async UnityField?;
 
     /// Finds a class's static-field table.
     ///
@@ -6664,23 +6694,17 @@ private struct MonoModule {
     // Owns the raw-address traversal exposed through MonoImage.class().
     private fn classAnyInImage(image: address, names: [String]) -> async MonoClass {
         while true {
-            let selectedIndex: u32? = None
             let selectedClass: address = 0
+            let ambiguous = false
             let cache = image.add(self.layout.imageClassCache)
-            let bucketCount = match process.read<i32>(cache.add(self.layout.hashSize)) {
-                Ok(count) => count,
-                Err(_) => 0,
-            }
+            let bucketCount = retry process.read<i32>(cache.add(self.layout.hashSize))
             if bucketCount > 0 {
                 let table = retry self.readPointer(cache.add(self.layout.hashTable))
                 let bucket: i32 = 0
                 while bucket < bucketCount {
-                    let classAddress = match self.readPointer(
+                    let classAddress = retry self.readPointer(
                         table.add((bucket as u64) * self.pointerBytes()),
-                    ) {
-                        Ok(address) => address,
-                        Err(_) => 0 as address,
-                    }
+                    )
                     while classAddress != 0 {
                         let namePointer = retry self.readPointer(
                             classAddress.add(self.layout.className),
@@ -6710,32 +6734,31 @@ private struct MonoModule {
                                     None => true,
                                 }
                                 if namespaceMatches {
-                                    let isHigherPriority = match selectedIndex {
-                                        Some(index) => candidateIndex < index,
-                                        None => true,
+                                    if selectedClass != 0 && selectedClass != classAddress {
+                                        ambiguous = true
                                     }
-                                    if isHigherPriority {
-                                        selectedIndex = candidateIndex
-                                        selectedClass = classAddress
-                                    }
+                                    selectedClass = classAddress
                                 }
                             }
                             candidateIndex += 1
                         }
-                        classAddress = match self.readPointer(
+                        classAddress = retry self.readPointer(
                             classAddress.add(self.layout.classNextCache),
-                        ) {
-                            Ok(address) => address,
-                            Err(_) => 0 as address,
-                        }
+                        )
                     }
                     bucket += 1
                 }
-                if selectedClass != 0 {
+                if ambiguous {
+                    print(`multiple Unity classes match metadata names {names}`)
+                    await process.closed()
+                } else if selectedClass != 0 {
                     return MonoClass {
                         address: selectedClass,
                         module: self,
                     }
+                } else {
+                    print(`no Unity class matches metadata names {names}`)
+                    await process.closed()
                 }
             }
             await nextTick()
@@ -6752,6 +6775,9 @@ private struct MonoModule {
         names: [String],
     ) -> async UnityField? {
         let current = classAddress
+        let selectedOffset: u32? = None
+        let selectedIndex: u32 = 0
+        let ambiguous = false
         while current != 0 {
             let count = retry process.read<i32>(
                 current.add(self.layout.classFieldCount),
@@ -6768,28 +6794,52 @@ private struct MonoModule {
                     )
                     let candidate = retry process.readUtf8(namePointer, 256)
                     let candidateIndex: u32 = 0
+                    let matchingIndex: u32? = None
                     while candidateIndex < names.length() {
                         let name = names[candidateIndex]
                         if candidate == name || candidate == `<{name}>k__BackingField` {
+                            matchingIndex = Some(candidateIndex)
+                            break
+                        }
+                        candidateIndex += 1
+                    }
+                    match matchingIndex {
+                        Some(candidateIndex) => {
                             let offset = retry process.read<u32>(
                                 field.add(self.layout.fieldValue),
                             )
-                            return UnityField {
-                                offset: offset,
-                                index: candidateIndex,
+                            match selectedOffset {
+                                Some(previous) if previous != offset => {
+                                    ambiguous = true
+                                },
+                                Some(_) => {},
+                                None => {
+                                    selectedOffset = Some(offset)
+                                    selectedIndex = candidateIndex
+                                },
                             }
-                        }
-                        candidateIndex += 1
+                        },
+                        None => {},
                     }
                     index += 1
                 }
             }
             current = retry self.readPointer(current.add(self.layout.classParent))
         }
-        return None
+        if ambiguous {
+            print(`multiple Unity fields match metadata names {names}`)
+            await process.closed()
+        }
+        return match selectedOffset {
+            Some(offset) => Some(UnityField {
+                offset: offset,
+                index: selectedIndex,
+            }),
+            None => None,
+        }
     }
 
-    // Finds the first candidate field while traversing one class hierarchy.
+    // Resolves exactly one runtime field while traversing one class hierarchy.
     private fn fieldAnyInClass(
         classAddress: address,
         names: [String],
@@ -6797,8 +6847,8 @@ private struct MonoModule {
         while true {
             let found = await self.probeFieldAnyInClass(classAddress, names)
             let field = found else {
-                await nextTick()
-                continue
+                print(`no Unity field matches metadata names {names}`)
+                await process.closed()
             }
             return field
         }
@@ -6905,7 +6955,7 @@ private struct MonoImage {
         return await self.module.classAnyInImage(self.address, [name])
     }
 
-    // Finds the first class matching the schema's ordered metadata aliases.
+    // Resolves exactly one class matching the schema's metadata aliases.
     private fn classAny(names: [String]) -> async MonoClass {
         return await self.module.classAnyInImage(self.address, names)
     }
@@ -6980,7 +7030,7 @@ private struct MonoClass {
         return await self.module.fieldInClass(self.address, name)
     }
 
-    // Finds the first field matching an ordered set of metadata names.
+    // Resolves exactly one field matching the schema's metadata aliases.
     private fn fieldAny(names: [String]) -> async UnityField {
         return await self.module.fieldAnyInClass(self.address, names)
     }

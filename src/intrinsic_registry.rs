@@ -382,10 +382,12 @@ const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::UnityClassField
         | IntrinsicId::UnityClassStaticInstance
         | IntrinsicId::UnityClassStaticTable => scratch(ScratchType::Core(CoreTypeId::U64), 1),
-        IntrinsicId::UnityModuleImage
-        | IntrinsicId::UnityImageClass
-        | IntrinsicId::UnityImageClassAny
-        | IntrinsicId::UnityClassFieldAny => scratch(ScratchType::Expression, 1),
+        IntrinsicId::UnityModuleImage | IntrinsicId::UnityImageClass => {
+            scratch(ScratchType::Expression, 1)
+        }
+        IntrinsicId::UnityImageClassAny => {
+            scratch(ScratchType::Standard(StdlibTypeId::UnityClass), 1)
+        }
         IntrinsicId::UnityClassProbeFieldAny => {
             scratch(ScratchType::Standard(StdlibTypeId::UnityField), 1)
         }
@@ -513,7 +515,6 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::UnityImageClass => &[Helper(Runtime::UnityGetClass)],
         IntrinsicId::UnityImageClassAny => &[Helper(Runtime::UnityGetClassAny)],
         IntrinsicId::UnityClassField => &[Helper(Runtime::UnityGetFieldOffset)],
-        IntrinsicId::UnityClassFieldAny => &[Helper(Runtime::UnityGetFieldAny)],
         IntrinsicId::UnityClassProbeFieldAny => &[Helper(Runtime::UnityGetFieldAny)],
         IntrinsicId::UnityClassStaticInstance => &[Helper(Runtime::UnityGetStaticInstance)],
         IntrinsicId::GBAEmulatorRead => &[Helper(Runtime::GBAReadMemory)],
@@ -647,6 +648,10 @@ const INSTANT: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Instant
 const UNITY_MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityModule);
 const UNITY_IMAGE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityImage);
 const UNITY_CLASS: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityClass);
+const UNITY_CLASS_OPTION: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Option,
+    arguments: &[UNITY_CLASS],
+};
 const UNITY_FIELD: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityField);
 const UNITY_FIELD_OPTION: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Option,
@@ -1904,7 +1909,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 NO_TYPE_PARAMETERS,
                 Some(UNITY_IMAGE),
                 params![value(STRING_ARRAY)],
-                UNITY_CLASS,
+                UNITY_CLASS_OPTION,
             ),
             PROCESS_SUSPEND,
             OnAttach,
@@ -1918,19 +1923,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 Some(UNITY_CLASS),
                 params![value(STRING)],
                 U32,
-            ),
-            PROCESS_SUSPEND,
-            OnAttach,
-            Suspension
-        ),
-        IntrinsicId::UnityClassFieldAny => contract!(
-            UnityClassFieldAny,
-            Method,
-            signature(
-                NO_TYPE_PARAMETERS,
-                Some(UNITY_CLASS),
-                params![value(STRING_ARRAY)],
-                UNITY_FIELD,
             ),
             PROCESS_SUSPEND,
             OnAttach,

@@ -93,14 +93,16 @@ to inference or code generation.
     declarations. Type checking and backend planning now share exact `from`
     alternatives and implicit source-name/backing-field candidates, and reject
     collisions between either form before runtime binding.
-  - [x] Feed ordered, namespace-qualified class aliases into both Mono and
-    IL2CPP attachment binders. The generated binder performs alias discovery
-    once per attachment and retains the selected class metadata for later
+  - [x] Feed namespace-qualified class aliases into both Mono and IL2CPP
+    attachment binders. The generated binder performs alias discovery once per
+    attachment and retains the uniquely selected class metadata for later
     field binding.
-  - [ ] Replace first-match alias selection with a complete binding probe and
-    report zero or multiple runtime matches against the responsible source
-    aliases. A missing candidate must be distinguishable from a transient
-    process-memory failure so layout discovery cannot retry forever.
+  - [x] Replace first-match alias selection with complete Mono and IL2CPP
+    binding probes. A completed traversal now distinguishes a unique match, a
+    stable miss, an ambiguity, and a transient structural process-memory failure;
+    misses and ambiguities report the responsible source aliases once and keep
+    the attachment inert until the process closes instead of rescanning
+    metadata forever.
 - [x] Replace independent state and managed-class layouts with one
   attachment-wide `layout: Layout` record composed from explicitly declared,
   enum-valued dimensions such as edition, storefront, renderer, or build.

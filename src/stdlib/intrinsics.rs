@@ -117,7 +117,6 @@ macro_rules! trusted_intrinsics {
             UnityImageClass,
             UnityImageClassAny,
             UnityClassField,
-            UnityClassFieldAny,
             UnityClassProbeFieldAny,
             UnityClassStaticTable,
             UnityClassStaticInstance,

@@ -18,6 +18,7 @@ use super::super::{GcLayout, Type, emit_array_get, memarg};
 const LOOKUP_RETRY: i32 = 0;
 const LOOKUP_MISSING: i32 = 1;
 const LOOKUP_FOUND: i32 = 2;
+const LOOKUP_AMBIGUOUS: i32 = 3;
 
 /// Stops the surrounding class traversal when the remote C string exactly
 /// matches an internal IL2CPP boundary name. A failed metadata read also ends
@@ -374,7 +375,7 @@ pub(super) fn compile_unity_get_class(
     gc: &GcLayout,
     abi_read: AbiReadScratch,
 ) -> Function {
-    let mut function = Function::new([(8, ValType::I64), (3, ValType::I32)]);
+    let mut function = Function::new([(9, ValType::I64), (3, ValType::I32)]);
     let process = 0;
     let image_value = 1;
     let expected_name = 2;
@@ -386,9 +387,10 @@ pub(super) fn compile_unity_get_class(
     let class = 8;
     let name_ptr = 9;
     let namespace_ptr = 10;
-    let dot_plus_one = 11;
-    let scan_index = 12;
-    let metadata_handle = 13;
+    let selected = 11;
+    let dot_plus_one = 12;
+    let scan_index = 13;
+    let metadata_handle = 14;
 
     // Find the last namespace separator in the requested class name.
     function
@@ -620,7 +622,42 @@ pub(super) fn compile_unity_get_class(
         .instruction(&Instruction::I32Ne)
         .instruction(&Instruction::BrIf(1))
         .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(selected))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(class))
+        .instruction(&Instruction::LocalSet(selected))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(selected))
+        .instruction(&Instruction::LocalGet(class))
+        .instruction(&Instruction::I64Ne)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_AMBIGUOUS))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.standard_index(StdlibTypeId::UnityClass),
+        )))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(selected))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_MISSING))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.standard_index(StdlibTypeId::UnityClass),
+        )))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::LocalGet(selected))
         .instruction(&Instruction::LocalGet(image_value))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
@@ -630,24 +667,13 @@ pub(super) fn compile_unity_get_class(
         .instruction(&Instruction::StructNew(
             gc.standard_index(StdlibTypeId::UnityClass),
         ))
-        .instruction(&Instruction::Return)
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::I64Const(1))
-        .instruction(&Instruction::I64Add)
-        .instruction(&Instruction::LocalSet(index))
-        .instruction(&Instruction::Br(0))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::RefNull(HeapType::Concrete(
-            gc.standard_index(StdlibTypeId::UnityClass),
-        )))
         .instruction(&Instruction::End);
     function
 }
 
 fn emit_unity_class_failure(function: &mut Function, gc: &GcLayout) {
     function
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
         .instruction(&Instruction::RefNull(HeapType::Concrete(
             gc.standard_index(StdlibTypeId::UnityClass),
         )))
@@ -664,7 +690,7 @@ pub(super) fn compile_unity_get_field_offset(
     gc: &GcLayout,
     abi_read: AbiReadScratch,
 ) -> Function {
-    let mut function = Function::new([(9, ValType::I64), (1, ValType::I32)]);
+    let mut function = Function::new([(10, ValType::I64), (1, ValType::I32)]);
     let process = 0;
     let class_value = 1;
     let expected_name = 2;
@@ -677,7 +703,8 @@ pub(super) fn compile_unity_get_field_offset(
     let parent = 9;
     let encoded = 10;
     let field_count_offset = 11;
-    let comparison = 12;
+    let selected_encoded = 12;
+    let comparison = 13;
     function
         .instruction(&Instruction::LocalGet(class_value))
         .instruction(&Instruction::RefAsNonNull)
@@ -910,9 +937,21 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::I64Const(1))
         .instruction(&Instruction::I64Add)
         .instruction(&Instruction::LocalSet(encoded))
-        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::LocalGet(selected_encoded))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(encoded))
+        .instruction(&Instruction::LocalSet(selected_encoded))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(selected_encoded))
+        .instruction(&Instruction::LocalGet(encoded))
+        .instruction(&Instruction::I64Ne)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_AMBIGUOUS))
+        .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(index))
@@ -946,8 +985,14 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::Br(0))
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(selected_encoded))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
         .instruction(&Instruction::I32Const(LOOKUP_MISSING))
-        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(selected_encoded))
         .instruction(&Instruction::End);
     function
 }
@@ -959,8 +1004,8 @@ pub(super) fn compile_unity_get_field_any(
     gc: &GcLayout,
 ) -> Function {
     let mut function = Function::new([
-        (2, ValType::I32),
-        (1, ValType::I64),
+        (3, ValType::I32),
+        (2, ValType::I64),
         (
             1,
             ValType::Ref(RefType {
@@ -974,8 +1019,10 @@ pub(super) fn compile_unity_get_field_any(
     let names = 2;
     let index = 3;
     let status = 4;
-    let encoded = 5;
-    let names_backing = 6;
+    let selected_index = 5;
+    let encoded = 6;
+    let selected_encoded = 7;
+    let names_backing = 8;
     function
         .instruction(&Instruction::LocalGet(names))
         .instruction(&Instruction::RefAsNonNull)
@@ -1021,19 +1068,45 @@ pub(super) fn compile_unity_get_field_any(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(status))
-        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::I32Const(LOOKUP_AMBIGUOUS))
         .instruction(&Instruction::I32Eq)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I32Const(LOOKUP_FOUND))
-        .instruction(&Instruction::LocalGet(encoded))
-        .instruction(&Instruction::I64Const(1))
-        .instruction(&Instruction::I64Sub)
-        .instruction(&Instruction::I32WrapI64)
-        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(-1))
         .instruction(&Instruction::StructNew(
             gc.standard_index(StdlibTypeId::UnityField),
         ))
         .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(status))
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(selected_encoded))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(encoded))
+        .instruction(&Instruction::LocalSet(selected_encoded))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalSet(selected_index))
+        .instruction(&Instruction::Else)
+        // Two aliases resolving to the same metadata field are one runtime
+        // match, not an ambiguity (for example a property name and its
+        // explicitly listed backing-field spelling).
+        .instruction(&Instruction::LocalGet(encoded))
+        .instruction(&Instruction::LocalGet(selected_encoded))
+        .instruction(&Instruction::I64Ne)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::StructNew(
+            gc.standard_index(StdlibTypeId::UnityField),
+        ))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::I32Const(1))
@@ -1042,17 +1115,32 @@ pub(super) fn compile_unity_get_field_any(
         .instruction(&Instruction::Br(0))
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(selected_encoded))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I32Const(LOOKUP_MISSING))
         .instruction(&Instruction::RefNull(HeapType::Concrete(
             gc.standard_index(StdlibTypeId::UnityField),
         )))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::LocalGet(selected_encoded))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::I32WrapI64)
+        .instruction(&Instruction::LocalGet(selected_index))
+        .instruction(&Instruction::StructNew(
+            gc.standard_index(StdlibTypeId::UnityField),
+        ))
         .instruction(&Instruction::End);
     function
 }
 
-/// Selects the first class matching an ordered schema alias without making
-/// each alias a separate suspension point. The underlying class scan is still
-/// the single canonical IL2CPP metadata implementation.
+/// Probes every schema alias and returns a completed missing, unique, or
+/// ambiguous result. A class whose address is zero is the private ambiguity
+/// sentinel consumed by the source-defined binding policy. Transient memory
+/// failures remain distinct and suspend the caller.
 pub(super) fn compile_unity_get_class_any(
     unity_get_class: u32,
     names_array: u32,
@@ -1060,7 +1148,7 @@ pub(super) fn compile_unity_get_class_any(
     gc: &GcLayout,
 ) -> Function {
     let mut function = Function::new([
-        (1, ValType::I32),
+        (2, ValType::I32),
         (
             1,
             ValType::Ref(RefType {
@@ -1069,7 +1157,7 @@ pub(super) fn compile_unity_get_class_any(
             }),
         ),
         (
-            1,
+            2,
             ValType::Ref(RefType {
                 nullable: true,
                 heap_type: HeapType::Concrete(gc.standard_index(StdlibTypeId::UnityClass)),
@@ -1080,8 +1168,10 @@ pub(super) fn compile_unity_get_class_any(
     let image = 1;
     let names = 2;
     let index = 3;
-    let names_backing = 4;
-    let class = 5;
+    let status = 4;
+    let names_backing = 5;
+    let class = 6;
+    let selected = 7;
     function
         .instruction(&Instruction::LocalGet(names))
         .instruction(&Instruction::RefAsNonNull)
@@ -1114,12 +1204,73 @@ pub(super) fn compile_unity_get_class_any(
     );
     function
         .instruction(&Instruction::Call(unity_get_class))
-        .instruction(&Instruction::LocalTee(class))
+        .instruction(&Instruction::LocalSet(class))
+        .instruction(&Instruction::LocalSet(status))
+        .instruction(&Instruction::LocalGet(status))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_RETRY))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.standard_index(StdlibTypeId::UnityClass),
+        )))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(status))
+        .instruction(&Instruction::I32Const(LOOKUP_AMBIGUOUS))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::LocalGet(image))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: gc.standard_index(StdlibTypeId::UnityImage),
+            field_index: gc.standard_field_index(StdlibFieldId::UnityImageModule),
+        })
+        .instruction(&Instruction::StructNew(
+            gc.standard_index(StdlibTypeId::UnityClass),
+        ))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(status))
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(selected))
         .instruction(&Instruction::RefIsNull)
-        .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(class))
+        .instruction(&Instruction::LocalSet(selected))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(selected))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: gc.standard_index(StdlibTypeId::UnityClass),
+            field_index: gc.standard_field_index(StdlibFieldId::UnityClassAddress),
+        })
+        .instruction(&Instruction::LocalGet(class))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: gc.standard_index(StdlibTypeId::UnityClass),
+            field_index: gc.standard_field_index(StdlibFieldId::UnityClassAddress),
+        })
+        .instruction(&Instruction::I64Ne)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::LocalGet(image))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: gc.standard_index(StdlibTypeId::UnityImage),
+            field_index: gc.standard_field_index(StdlibFieldId::UnityImageModule),
+        })
+        .instruction(&Instruction::StructNew(
+            gc.standard_index(StdlibTypeId::UnityClass),
+        ))
         .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::I32Const(1))
@@ -1128,9 +1279,14 @@ pub(super) fn compile_unity_get_class_any(
         .instruction(&Instruction::Br(0))
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
-        .instruction(&Instruction::RefNull(HeapType::Concrete(
-            gc.standard_index(StdlibTypeId::UnityClass),
-        )))
+        .instruction(&Instruction::LocalGet(selected))
+        .instruction(&Instruction::RefIsNull)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(LOOKUP_MISSING))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(LOOKUP_FOUND))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(selected))
         .instruction(&Instruction::End);
     function
 }

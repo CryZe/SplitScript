@@ -1871,19 +1871,19 @@ fn compile_suspension_poll(
                     });
             }
         }
-        Some(IntrinsicId::UnityImageClass | IntrinsicId::UnityImageClassAny) => {
-            let helper = match resolved_intrinsic(target) {
-                Some(IntrinsicId::UnityImageClass) => RuntimeHelperId::UnityGetClass,
-                Some(IntrinsicId::UnityImageClassAny) => RuntimeHelperId::UnityGetClassAny,
-                _ => unreachable!(),
-            };
+        Some(IntrinsicId::UnityImageClass) => {
             function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
             function
-                .instruction(&Instruction::Call(context.runtime_helpers.function(helper)))
-                .instruction(&Instruction::LocalTee(unity_class_local))
-                .instruction(&Instruction::RefIsNull)
+                .instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::UnityGetClass),
+                ))
+                .instruction(&Instruction::LocalSet(unity_class_local))
+                .instruction(&Instruction::I32Const(2))
+                .instruction(&Instruction::I32Ne)
                 .instruction(&Instruction::If(BlockType::Empty))
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
@@ -1898,7 +1898,7 @@ fn compile_suspension_poll(
                     });
             }
         }
-        Some(IntrinsicId::UnityClassFieldAny) => {
+        Some(IntrinsicId::UnityImageClassAny) => {
             function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
@@ -1906,19 +1906,33 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Call(
                     context
                         .runtime_helpers
-                        .function(RuntimeHelperId::UnityGetFieldAny),
+                        .function(RuntimeHelperId::UnityGetClassAny),
                 ))
-                .instruction(&Instruction::LocalSet(unity_field_local))
-                .instruction(&Instruction::I32Const(2))
-                .instruction(&Instruction::I32Ne)
+                .instruction(&Instruction::LocalSet(unity_class_local))
+                // A transient metadata read is the only incomplete outcome.
+                .instruction(&Instruction::I32Eqz)
                 .instruction(&Instruction::If(BlockType::Empty))
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(destination) {
+            if let Some((field, Type::Option(option))) = layout.field(destination) {
                 context.locals.frame().emit(function);
                 function
-                    .instruction(&Instruction::LocalGet(unity_field_local))
+                    .instruction(&Instruction::LocalGet(unity_class_local))
+                    .instruction(&Instruction::RefIsNull)
+                    .instruction(&Instruction::If(BlockType::Result(
+                        context.gc.val_type(Type::Option(option)),
+                    )))
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(
+                        context.gc.index(Type::Option(option)),
+                    )))
+                    .instruction(&Instruction::Else)
+                    .instruction(&Instruction::LocalGet(unity_class_local))
+                    .instruction(&Instruction::RefAsNonNull)
+                    .instruction(&Instruction::StructNew(
+                        context.gc.index(Type::Option(option)),
+                    ))
+                    .instruction(&Instruction::End)
                     .instruction(&Instruction::StructSet {
                         struct_type_index: context.locals.frame().struct_type,
                         field_index: field,

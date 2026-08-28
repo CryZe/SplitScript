@@ -1197,72 +1197,59 @@ incomplete reads reject that state field update and retain its preceding value;
 they do not publish a partially populated loaded-scene array. The signed index
 preserves Unity's initialization value of `-1`.
 
-For modern 64-bit Windows Unity games using Mono, prefer the typed metadata
-provider over copying `asl-help` callbacks or raw class-layout traversal into
-the script:
+## UnityASL and managed metadata
+
+Do not copy `UnityASL`, `mono.Make<T>`, `mono.MakeString`, image lookup, class
+lookup, or metadata-offset bookkeeping into a SplitScript port. Declare the
+managed shape once with [`image`], [`namespace`], [`class`], [`static`], and
+[`from`]. The [`Unity`] state provider discovers the selected Mono or IL2CPP
+backend, binds the schema once per attachment, and exposes ordinary typed,
+fallible references:
 
 ```splitscript
-# state "game.exe" {}
-# onAttach {
-let mono = await Unity.mono(MonoVersion.V2)
-let image = await mono.image("Assembly-CSharp")
-let data = await image.class("AutoSplitterData")
-let runningAddress = await data.staticField("isRunning")
-# print(runningAddress)
-# }
+image "Assembly-CSharp" {
+    class PlayerStats {
+        static PlayerStats current from ["Instance", "_instance"];
+        i32 district from "currDistrict";
+        bool inRun;
+        address sceneName;
+    }
+}
+
+state Unity ["game.exe"] {
+    district: i32 = PlayerStats.current?.district?;
+    inRun: bool = PlayerStats.current?.inRun?;
+    sceneName: String = process.readManagedString(PlayerStats.current?.sceneName?, 64)?;
+}
 ```
 
-[`MonoVersion.V3`] selects the Unity 2021.2-and-newer PE64 layout; `V2` selects
-the preceding modern layout. These are explicit target-memory contracts, not
-automatically detected marketing versions. When a static field holds a
-replaceable managed singleton, retain the slot as a path and append the
-instance field:
+The automatic [`Unity`] selector chooses a supported backend from the loaded
+modules. Select `Unity.mono(MonoVersion.V2)` or `Unity.il2cpp(2020)` after the
+[`state`] keyword only when the target's exact metadata layout is known and
+automatic detection is inappropriate. [`MonoVersion.V3`] selects the Unity
+2021.2-and-newer PE64 Mono layout; `V2` selects the preceding modern layout.
 
-```splitscript
-# state "game.exe" {}
-# let valuePath: MemoryPath? = None
-# onAttach {
-# let mono = await Unity.mono(MonoVersion.V2)
-# let image = await mono.image("Assembly-CSharp")
-# let data = await image.class("AutoSplitterData")
-let singleton = await data.staticFieldPath("script")
-let valueOffset = await data.field("value")
-valuePath = singleton.dereference(valueOffset as i64)
-# }
-```
+A class-typed field is a live managed reference. Every poll rereads the current
+static singleton and each following object pointer, so replacing a managed
+object does not leave an attachment-time address cached in the script. Scalar
+fields use their declared fixed-width type. A managed string field is currently
+declared as an [`address`] and decoded explicitly with
+[`Process.readManagedString`](method@Process.readManagedString), whose bound is
+the maximum UTF-16 code-unit length accepted from the target process.
 
-This rereads the singleton pointer whenever the state field resolves the path,
-rather than caching an attachment-time object address.
+Use [`from`] for exact metadata names or ordered name alternatives. Without it,
+the source declaration name is used and instance fields also recognize the
+conventional C# automatic-property backing-field spelling. Build-specific
+managed shapes use the same attachment-wide [`layout`] dimensions and
+[`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chains as state fields.
+The compiler rejects a native [`state`] declaration that tries to consume managed
+schema references, so managed reads cannot silently bypass the Unity provider.
 
-Metadata offsets may come from different classes. For example, a generic base
-class can declare a static singleton slot while the concrete derived class owns
-the static storage and declares the instance value. Compose those facts
-explicitly instead of requiring one class wrapper to hide the inheritance:
-
-```splitscript
-# state "game.exe" {}
-# let levelStatePath: MemoryPath? = None
-# onAttach {
-let mono = await Unity.mono(MonoVersion.V2)
-let core = await mono.image("com.unity-common.core")
-let service = await core.class("Service`1")
-let game = await mono.image("Assembly-CSharp")
-let levelFlow = await game.class("LevelFlowService")
-let staticTable = await levelFlow.staticTable()
-let instanceOffset = await service.field("_instance")
-let stateOffset = await levelFlow.field("_state")
-levelStatePath = staticTable
-    .memoryPath([], instanceOffset as i64, mono.pointerSize)
-    .dereference(stateOffset as i64)
-# }
-```
-
-[`MonoClass.staticTable`](method@MonoClass.staticTable) selects the concrete
-class's storage, [`MonoClass.field`](method@MonoClass.field) supplies each
-declaring class's offset, and
-[`MemoryPath.dereference`](method@MemoryPath.dereference) performs the managed
-reference read. Older V1, 32-bit, ELF, and Mach-O Mono targets remain future
-layout families rather than falling back to a guessed offset set.
+Cross-class inheritance layouts in which a static slot is declared on one
+managed class but stored in another class's static table are not yet expressible
+through the public schema. Record that as a schema requirement rather than
+reintroducing raw metadata traversal or guessed offsets. Older V1, 32-bit, ELF,
+and Mach-O Mono targets likewise need explicit backend support.
 
 When a port needs the mapping metadata itself, take a typed snapshot rather
 than reproducing the host's numeric count/index ABI:
@@ -1753,6 +1740,7 @@ separate attempt declaration or lifecycle block. Declare a bare global and
 assign it directly on every completing path through [`onStart`]:
 
 ```splitscript
+# state "game.exe" {}
 let collectedItems
 
 onStart {
@@ -1777,15 +1765,15 @@ Legacy `init` combines two boundaries that SplitScript keeps explicit. Use
 [`onStateReady`] for synchronous initialization that needs polled state:
 
 ```splitscript
-# state "game.exe" {
-#     level: u32 at 0x1000;
-# }
-# let gameManager: address = 0x0
-onAttach {
-    let unity = await Unity.il2cpp(2020)
-    let image = await unity.image("Assembly-CSharp")
-    let gameManagerClass = await image.class("GameManager")
-    gameManager = await gameManagerClass.staticInstance(["Instance"])
+image "Assembly-CSharp" {
+    class GameManager {
+        static GameManager instance from "Instance";
+        u32 level;
+    }
+}
+
+state Unity ["game.exe"] {
+    level: u32 = GameManager.instance?.level?;
 }
 
 onStateReady {

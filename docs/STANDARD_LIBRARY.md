@@ -556,82 +556,49 @@ possible. Compiler lowering is reserved for representation primitives, host
 imports, static signature data, and suspension points that cannot yet be
 expressed as normal source code.
 
-## Unity IL2CPP
+## Unity managed schemas
 
-The implemented IL2CPP surface supports 64-bit Unity base, 2019, 2020, and
-2022 layouts. `Unity.il2cpp` is implemented in standard-library SplitScript:
-its supported-version policy, signatures, scan windows, and instruction
-displacements are visible together in one source body. It composes the same
-bounded module and range scans available to scripts, so discovery yields
-between scan windows rather than hiding an unbounded compiler helper. Only the
-target-memory metadata offsets and object-layout facts needed by low-level
-operations remain compiler-owned.
-
-```text
-let unity = await Unity.il2cpp(2020)
-let image = await unity.image("Assembly-CSharp")
-let gameManager = await image.class("GameManager")
-let instanceOffset = await gameManager.field("Instance")
-let staticTable = await gameManager.staticTable()
-let instance = retry process.read<address>(staticTable.offset(instanceOffset))
-```
-
-`UnityModule` exposes `assemblies`, `typeInfoTable`, `version`, and
-`pointerSize`. `UnityImage` and `UnityClass` expose their metadata `address`.
-Each discovery operation retries across ticks. Field lookup walks parent
-classes and recognizes C# auto-property backing fields, so `field("Instance")`
-also matches `<Instance>k__BackingField`.
-
-## Unity Mono
-
-The initial Mono surface supports the 64-bit Windows
-`mono-2.0-bdwgc.dll` family with explicit `MonoVersion.V2` and
-`MonoVersion.V3` target layouts. V3 corresponds to Unity 2021.2 and newer;
-the enum names describe internal metadata layouts rather than Mono marketing
-versions. Older V1 layouts, 32-bit layouts, ELF, and Mach-O are not silently
-guessed.
+Managed Mono and IL2CPP metadata is exposed through top-level schemas rather
+than public runtime, image, class, or field traversal objects. A script declares
+the managed names and types it consumes; `state Unity` discovers the backend,
+binds that schema once per attachment, and exposes live fallible references:
 
 ```splitscript
-let mono = await Unity.mono(MonoVersion.V2)
-let image = await mono.image("Assembly-CSharp")
-let autosplitter = await image.class("AutoSplitterData")
-let gameTime = await autosplitter.staticField("inGameTime")
+image "Assembly-CSharp" {
+    class PlayerStats {
+        static PlayerStats current from ["Instance", "_instance"];
+        i32 district from "currDistrict";
+        bool inRun;
+    }
+}
+
+state Unity ["game.exe"] {
+    district: i32 = PlayerStats.current?.district?;
+    inRun: bool = PlayerStats.current?.inRun?;
+}
 ```
 
-Discovery resolves `mono_assembly_foreach` through the source-defined
-`Module.peExport`, finds Mono's assembly-list global from its RIP-relative
-load, and yields while assemblies or metadata are not ready. Class names may
-be simple or namespace-qualified. Field lookup walks parent classes and also
-recognizes C# auto-property backing fields. The implementation and its target
-offsets live in `stdlib/standard.split`; Mono does not add compiler intrinsics
-or type-checker cases.
+`state Unity` automatically distinguishes supported Mono and IL2CPP backends.
+An exact known target may select `Unity.mono(MonoVersion.V2)`,
+`Unity.mono(MonoVersion.V3)`, or an IL2CPP layout such as
+`Unity.il2cpp(2020)` in the state header. These selectors configure the provider;
+they are not callable discovery functions.
 
-Static managed singletons can remain dynamically resolved instead of caching
-the object address observed during attachment. `staticFieldPath` describes the
-static slot as a `MemoryPath`, and immutable `dereference` appends the instance
-field access:
+`from "name"` supplies an exact metadata name and `from ["first", "second"]`
+supplies ordered alternatives. Instance fields without `from` also recognize
+the conventional C# automatic-property backing-field spelling. Class-typed
+static and instance fields are live references: every state poll rereads the
+current singleton and following object pointers instead of caching a transient
+object address during attachment. Scalar leaves use their declared fixed-width
+type. The runtime traversal types and raw metadata offsets remain private to the
+trusted standard library and generated schema binder.
 
-```splitscript
-let playerStats = await image.class("PlayerStats")
-let script = await playerStats.staticFieldPath("script")
-let districtOffset = await playerStats.field("currDistrict")
-let district = script.dereference(districtOffset as i64)
-```
-
-Resolving `district` during each state poll rereads the static slot, so a
-replacement singleton is observed without rerunning `onAttach`. The maintained
-[`Himno` port](HIMNO_PORT.md) verifies this behavior against three distinct
-managed objects.
-
-`fieldAny([names...])` returns a `UnityField { offset, index }`, making
-version-dependent layouts explicit without manual races. `staticInstance`
-combines alternative field lookup, static-table discovery, and a retrying
-non-null pointer read:
-
-```text
-let layout = await gameManager.fieldAny(["currentLevel", "_currentScene"])
-let instance = await gameManager.staticInstance(["Instance", "_instance"])
-```
+The IL2CPP implementation supports the existing 64-bit base, 2019, 2020, and
+2022 layouts. The Mono implementation supports modern 64-bit Windows V2 and V3
+metadata layouts, where V3 corresponds to Unity 2021.2 and newer. Older Mono V1,
+32-bit, ELF, and Mach-O layouts require explicit backend support rather than
+guessed offsets. Both binders yield between bounded discovery work so attachment
+does not monopolize a timer update.
 
 Loaded Windows modules expose `peExport(name) -> address!` as ordinary
 source-defined standard-library composition. It validates the mapped PE export

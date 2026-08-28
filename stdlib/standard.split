@@ -1079,16 +1079,24 @@ namespace timer {
     }
 }
 
-/// Discovers and inspects Unity runtimes.
+/// Provides Unity runtime utilities outside managed schema declarations.
 ///
-/// Unity operations attach to IL2CPP metadata and produce typed images, classes, and fields.
+/// Use the [`Unity`] state provider with top-level [`image`] and [`class`]
+/// declarations for managed Mono or IL2CPP state. This namespace contains
+/// supplementary Unity facilities such as native scene discovery; raw managed
+/// metadata traversal is an implementation detail of the provider.
 ///
 /// # Example
 ///
-/// Enter Unity discovery through its namespace
+/// Prepare native Unity scene discovery
 ///
 /// ```splitscript
-/// let runtime = await Unity.il2cpp(2020)
+/// # state "game.exe" {}
+/// onAttach {
+///     let scenes = await Unity.sceneManager()
+///     let active = scenes.activeScene() else return
+///     print(active.name)
+/// }
 /// ```
 namespace Unity {
     // Builds the provider's backend-independent context after auto-detection.
@@ -1173,19 +1181,9 @@ namespace Unity {
         return MonoVersion.V2
     }
 
-    /// Discovers an IL2CPP runtime.
-    ///
-    /// Suspends until GameAssembly and the IL2CPP metadata structures are available.
-    ///
-    /// # Example
-    ///
-    /// Discover IL2CPP metadata
-    ///
-    /// ```splitscript
-    /// let unity = await Unity.il2cpp(2020)
-    /// ```
-    fn il2cpp(
-        /// The Unity metadata layout version.
+    // Discovers the IL2CPP metadata used by the generated Unity schema binder.
+    private fn il2cpp(
+        // The Unity metadata layout version.
         version: u32,
     ) -> async UnityModule {
         if version != 0 && version != 2019 && version != 2020 && version != 2022 {
@@ -1220,21 +1218,9 @@ namespace Unity {
         }
     }
 
-    /// Discovers a 64-bit Windows Unity Mono runtime.
-    ///
-    /// The version selects the target-memory metadata layout explicitly. The
-    /// current implementation supports the modern `mono-2.0-bdwgc.dll` PE
-    /// family; older Mono and non-PE layouts remain separate future families.
-    ///
-    /// # Example
-    ///
-    /// Discover Mono metadata
-    ///
-    /// ```splitscript
-    /// let mono = await Unity.mono(MonoVersion.V2)
-    /// ```
-    fn mono(
-        /// Exact Mono metadata layout used by the target Unity release.
+    // Discovers the Mono metadata used by the generated Unity schema binder.
+    private fn mono(
+        // Exact Mono metadata layout used by the target Unity release.
         version: MonoVersion,
     ) -> async MonoModule {
         return await MonoModule.discover(version)
@@ -6067,7 +6053,7 @@ struct UnityScene {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
-struct UnityModule {
+private struct UnityModule {
     /// Returns the IL2CPP assemblies metadata address.
     ///
     /// # Example
@@ -6152,7 +6138,7 @@ struct UnityModule {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
-struct UnityImage {
+private struct UnityImage {
     /// Returns the Unity image address.
     ///
     /// # Example
@@ -6214,7 +6200,7 @@ struct UnityImage {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
-struct UnityClass {
+private struct UnityClass {
     /// Returns the Unity class address.
     ///
     /// # Example
@@ -6345,7 +6331,7 @@ struct UnityClass {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
-struct UnityField {
+private struct UnityField {
     /// Returns the instance-field byte offset.
     ///
     /// # Example
@@ -6400,7 +6386,7 @@ enum MonoVersion {
     /// Discover a V2 runtime
     ///
     /// ```splitscript
-    /// let v2Runtime = await Unity.mono(MonoVersion.V2)
+    /// state Unity.mono(MonoVersion.V2) ["legacy-unity-game.exe"] {}
     /// ```
     V2,
 
@@ -6411,7 +6397,7 @@ enum MonoVersion {
     /// Discover a V3 runtime
     ///
     /// ```splitscript
-    /// let v3Runtime = await Unity.mono(MonoVersion.V3)
+    /// state Unity.mono(MonoVersion.V3) ["modern-unity-game.exe"] {}
     /// ```
     V3,
 }
@@ -6510,7 +6496,7 @@ private struct MonoLayout {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
-struct MonoModule {
+private struct MonoModule {
     /// Address of Mono's global assembly-list pointer.
     ///
     /// # Example
@@ -6870,7 +6856,7 @@ struct MonoModule {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
-struct MonoImage {
+private struct MonoImage {
     /// Address of the target Mono image metadata.
     ///
     /// # Example
@@ -6942,7 +6928,7 @@ struct MonoImage {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
-struct MonoClass {
+private struct MonoClass {
     /// Address of the target Mono class metadata.
     ///
     /// # Example

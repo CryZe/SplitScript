@@ -2436,6 +2436,10 @@ mod tests {
                 "/migration/asl/state/memory-watcher-list.md",
             ),
             ("Task.Run", "/migration/asl/async/task-run.md"),
+            ("UnityASL", "/migration/asl/unity/managed-schema.md"),
+            ("mono.Make", "/migration/asl/unity/managed-schema.md"),
+            ("mono.MakeString", "/migration/asl/unity/managed-schema.md"),
+            ("Unity.mono", "/migration/asl/unity/managed-schema.md"),
             (
                 "settings.ContainsKey",
                 "/migration/asl/settings/dynamic-lookup.md",

@@ -132,6 +132,22 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
     assert_eq!(layout.visibility, TypeVisibility::LibraryPrivate);
     assert!(library.type_by_name("MonoLayout").is_none());
     assert!(library.types().all(|ty| ty.id != StdlibTypeId::MonoLayout));
+    for (id, name) in [
+        (StdlibTypeId::MonoModule, "MonoModule"),
+        (StdlibTypeId::MonoImage, "MonoImage"),
+        (StdlibTypeId::MonoClass, "MonoClass"),
+        (StdlibTypeId::UnityModule, "UnityModule"),
+        (StdlibTypeId::UnityImage, "UnityImage"),
+        (StdlibTypeId::UnityClass, "UnityClass"),
+        (StdlibTypeId::UnityField, "UnityField"),
+    ] {
+        assert_eq!(
+            library.type_decl(id).visibility,
+            TypeVisibility::LibraryPrivate
+        );
+        assert!(library.type_by_name(name).is_none());
+        assert!(library.types().all(|ty| ty.id != id));
+    }
     for (id, qualified_name) in [
         (StdlibItemId::DolphinCoreBase, "dolphinCoreBase"),
         (
@@ -271,17 +287,16 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
             state "game.exe" {}
             onAttach {
                 let mono = await Unity.mono(MonoVersion.V2)
-                let class = await mono.classInImage(0x1000, "GameManager")
             }
         "#,
     )
-    .expect_err("user code must use typed Mono traversal wrappers");
+    .expect_err("user code must use managed schemas instead of manual traversal");
     assert!(
         diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("type `MonoModule` has no method `classInImage`")
-                && !diagnostic.message.contains("private")
+                .contains("declare Unity managed metadata with an `image` schema")
+                && diagnostic.migration_topic.as_deref() == Some("asl.unity.managed-schema")
         }),
         "{diagnostics:#?}"
     );
@@ -2062,6 +2077,12 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
             library
                 .fields()
                 .iter()
+                .filter(|field| match field.owner {
+                    StdlibOwner::Type(owner) => {
+                        library.type_decl(owner).visibility == TypeVisibility::Public
+                    }
+                    _ => true,
+                })
                 .map(|value| (value.name, value.documentation)),
         )
         .chain(
@@ -2116,7 +2137,15 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
             library
                 .fields()
                 .iter()
-                .filter(|value| value.visibility == FieldVisibility::Public)
+                .filter(|value| {
+                    value.visibility == FieldVisibility::Public
+                        && match value.owner {
+                            StdlibOwner::Type(owner) => {
+                                library.type_decl(owner).visibility == TypeVisibility::Public
+                            }
+                            _ => true,
+                        }
+                })
                 .map(|value| ("field", value.name, value.documentation)),
         )
         .chain(

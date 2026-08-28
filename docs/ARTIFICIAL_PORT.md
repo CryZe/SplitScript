@@ -9,18 +9,21 @@ The maintained port maps those semantics directly:
 
 | Legacy ASL | SplitScript |
 | --- | --- |
-| `state("ARTIFICIAL")` | `state "ARTIFICIAL.exe"` because the current Wasm runtime attaches by complete executable name |
-| `vars.Helper.TryLoad` Mono callback | ordinary awaited discovery in `onAttach` |
-| `mono.Make<T>("AutoSplitterData", field)` | `MonoClass.staticField(field)` followed by typed state reads |
+| `state("ARTIFICIAL")` | `state Unity.mono(MonoVersion.V2) ["ARTIFICIAL.exe"]` because the current Wasm runtime attaches by complete executable name |
+| `vars.Helper.TryLoad` Mono callback | the generated Unity provider preparation phase |
+| `mono.Make<T>("AutoSplitterData", field)` | static fields declared on the `AutoSplitterData` managed class schema |
 | `TimeSpan.FromSeconds` | `Duration.fromSeconds` |
 | `start` / `split` / `reset` / `gameTime` / `isLoading` | the corresponding typed lifecycle blocks |
 
-The provider is source-defined in `stdlib/standard.split`. It resolves
+The private provider implementation is source-defined in
+`stdlib/standard.split`. It resolves
 `mono_assembly_foreach` from `mono-2.0-bdwgc.dll`, derives the assembly-list
 global from the exported function, finds `Assembly-CSharp`, traverses Mono's
-class cache and field metadata, and resolves the static-data table. The port
-selects `MonoVersion.V2` explicitly; automatic layout detection would obscure
-a target-memory assumption that should remain auditable.
+class cache and field metadata, and resolves the static-data table. Generated
+state expressions read `AutoSplitterData.inGameTime`, `levelId`, and
+`isRunning` directly. The port selects `MonoVersion.V2` explicitly; automatic
+layout detection would obscure a target-memory assumption that should remain
+auditable.
 
 The deterministic fixture constructs a minimal PE32+ export table and a sparse
 Mono V2 metadata graph. It proves that the real compiled Wasm discovers all

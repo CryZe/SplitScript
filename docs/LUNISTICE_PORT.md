@@ -10,12 +10,12 @@ The authoritative source for this port is
 | --- | --- |
 | Attach to `Lunistice.exe`, then `Lunistice-Demo.exe` | Ordered process list in `state` |
 | Cancel initialization when the process closes | Generated process-lifetime attach continuation |
-| Unity IL2CPP V2020 registration discovery | `await Unity.il2cpp(2020)` using ASR signatures |
-| `Assembly-CSharp`, `GameManager`, and `Timer` lookup | Awaitable image/class metadata APIs |
-| Original/DLC GameManager binding race | `fieldAny(["currentLevel", "_currentScene"])` and alternative game-state fields |
+| Unity IL2CPP V2020 registration discovery | `state Unity.il2cpp(2020)` prepares the generated schema binder |
+| `Assembly-CSharp`, `GameManager`, and `Timer` lookup | Top-level `image` and `class` declarations |
+| Original/DLC GameManager binding race | Attachment-wide layout conditions and explicit `from` names |
 | C# property backing fields | Transparent `<Name>k__BackingField` matching |
-| `Instance` / legacy `_instance` singleton race | `staticInstance(["Instance", "_instance"])` |
-| Derived IL2CPP class field bindings | Discovered offsets stored once and consumed by expression-backed state fields |
+| `Instance` / legacy `_instance` singleton race | `static Timer instance from ["Instance", "_instance"]` |
+| Derived IL2CPP class field bindings | Generated live references consumed by expression-backed state fields |
 | `Watcher<GameManager>`, `Watcher<Timer>` | GC `current`/`old` snapshots; failed fields retain their last accepted values |
 | Adjacent minutes, seconds, and hundredths reads | One naturally laid-out `LevelTimeParts` record read and local GC deserialization |
 | DLC managed scene name | Bounded UTF-16 `process.readManagedString` with surrogate-pair decoding |

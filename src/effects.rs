@@ -681,8 +681,8 @@ fn answer() -> async i32 {
         let source = r#"
 state "game.exe" {}
 
-fn loadUnity() {
-    return await Unity.il2cpp(2020)
+fn loadMainModule() {
+    return await process.mainModule()
 }
 "#;
         let checked = crate::check(crate::lower(crate::parse(source).unwrap())).unwrap();

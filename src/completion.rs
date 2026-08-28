@@ -2571,8 +2571,18 @@ enum Mode {
     fn private_standard_library_types_are_not_completed() {
         let mut database = CompilerDatabase::new("let value:  = None\nstate \"game.exe\" {}");
         let candidates = labels(&mut database, "value: ");
-        assert!(candidates.contains(&"MonoModule".to_owned()));
-        assert!(!candidates.contains(&"MonoLayout".to_owned()));
+        for private_type in [
+            "MonoLayout",
+            "MonoModule",
+            "MonoImage",
+            "MonoClass",
+            "UnityModule",
+            "UnityImage",
+            "UnityClass",
+            "UnityField",
+        ] {
+            assert!(!candidates.contains(&private_type.to_owned()));
+        }
     }
 
     #[test]

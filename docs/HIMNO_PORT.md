@@ -5,20 +5,26 @@ of the reviewed Himno ASL. The legacy helper starts from the static
 `PlayerStats.script` singleton and follows it to the instance fields
 `currDistrict` and `inRun`.
 
-The maintained port keeps that indirection explicit and reusable:
+The maintained port declares that indirection as managed metadata:
 
 ```splitscript
-let playerStats = await image.class("PlayerStats")
-let script = await playerStats.staticFieldPath("script")
-let districtOffset = await playerStats.field("currDistrict")
-districtPath = script.dereference(districtOffset as i64)
+image "Assembly-CSharp" {
+    class PlayerStats {
+        static PlayerStats script;
+        i32 currDistrict;
+        bool inRun;
+    }
+}
+
+state Unity.mono(MonoVersion.V2) ["Himno.exe"] {
+    district: i32 = PlayerStats.script?.currDistrict?;
+    inRun: bool = PlayerStats.script?.inRun?;
+}
 ```
 
-`MonoClass.staticFieldPath` describes the static field without resolving it
-once during attachment. `MemoryPath.dereference` moves the old final offset
-into the path's pointer-read sequence and applies a new final offset. State
-polling therefore observes a replacement `PlayerStats.script` object without
-rerunning `onAttach` or caching a stale target address.
+The generated live reference rereads the static `PlayerStats.script` field on
+every poll. State polling therefore observes a replacement managed object
+without rerunning `onAttach` or caching a stale target address.
 
 The deterministic fixture constructs the same PE64 Mono V2 metadata graph used
 by the ARTIFICIAL conformance test, then replaces the static singleton between

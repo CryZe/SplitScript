@@ -8,8 +8,8 @@ use crate::{
     inference::{InferenceError, Requirements, Type, type_may_have_capability},
     migration::{
         ASL_SETTINGS_ADD_DIAGNOSTIC, ASL_SETTINGS_LOOKUP_DIAGNOSTIC, ForeignSpellingContext,
-        foreign_spelling, legacy_array_field_diagnostic, legacy_set_field_diagnostic,
-        legacy_static_call_diagnostic, legacy_string_field_diagnostic,
+        foreign_spelling, legacy_array_field_diagnostic, legacy_managed_method_diagnostic,
+        legacy_set_field_diagnostic, legacy_static_call_diagnostic, legacy_string_field_diagnostic,
         legacy_string_method_diagnostic, legacy_value_path_diagnostic, migration_diagnostic,
     },
     semantic::{PendingResolvedCall, ResolvedMember, ResolvedValue},
@@ -668,6 +668,10 @@ impl Checker {
                     span,
                 );
             }
+            if let Some(id) = legacy_managed_method_diagnostic(method) {
+                self.migration_member_error(id, name_span, None);
+                return None;
+            }
             if !type_arguments.is_empty() {
                 self.error(
                     "explicit type arguments are currently supported on standard-library calls",
@@ -806,6 +810,10 @@ impl Checker {
                 expression,
                 span,
             );
+        }
+        if let Some(id) = legacy_managed_method_diagnostic(method) {
+            self.migration_member_error(id, name_span, None);
+            return None;
         }
         if !type_arguments.is_empty() {
             self.error(
@@ -1026,6 +1034,10 @@ impl Checker {
         span: Span,
         suggestion: Option<&str>,
     ) {
+        if let Some(id) = legacy_managed_method_diagnostic(method) {
+            self.migration_member_error(id, name_span, None);
+            return;
+        }
         if matches!(
             receiver,
             Type::Known(id)

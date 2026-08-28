@@ -3461,35 +3461,24 @@ fn state_initialization_requires_one_complete_poll_and_seeds_equal_snapshots() {
 }
 
 #[test]
-fn unity_il2cpp_attachment_is_typed_and_suspension_safe() {
+fn unity_managed_schemas_are_typed_and_suspension_safe() {
     let source = r#"
-        state "game.exe" {}
-        onAttach {
-            let unity: UnityModule = await Unity.il2cpp(2020u32)
-            let image: UnityImage = await unity.image("Assembly-CSharp")
-            let gameManager: UnityClass = await image.class("GameManager")
-            let instanceOffset: u32 = await gameManager.field("Instance")
-            let levelField: UnityField = await gameManager.fieldAny(["currentLevel", "_currentScene"])
-            let staticTable: address = await gameManager.staticTable()
-            let instance = retry process.read<address>(staticTable.offset(instanceOffset))
-            let singleton = await gameManager.staticInstance(["Instance", "_instance"])
-            if (unity.assemblies != 0
-                && unity.typeInfoTable != 0
-                && unity.version == 2020u32
-                && unity.pointerSize == 8u32
-                && image.address != 0
-                && gameManager.address != 0
-                && instanceOffset == 0x20u32
-                && levelField.offset != 0u32
-                && levelField.index < 2u32
-                && staticTable != 0
-                && instance != 0
-                && singleton != 0) {
-                print("IL2CPP ready")
+        image "Assembly-CSharp" {
+            class GameManager {
+                static GameManager instance from ["Instance", "_instance"];
+                i32 currentLevel from ["currentLevel", "_currentScene"];
             }
         }
+
+        state Unity.il2cpp(2020) ["game.exe"] {
+            currentLevel: i32 = GameManager.instance?.currentLevel?;
+        }
+
+        onAttach {
+            print("IL2CPP schema ready")
+        }
     "#;
-    let wasm = splitscript::compile(source).expect("Unity IL2CPP attach should compile");
+    let wasm = splitscript::compile(source).expect("Unity IL2CPP schema should compile");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("Unity module GC values should produce valid Wasm");
@@ -3521,10 +3510,14 @@ fn unity_static_data_is_emitted_only_when_required() {
 
     let unity = splitscript::compile(
         r#"
-            state "game.exe" {}
-            onAttach {
-                let unity = await Unity.il2cpp(2020)
-                print(`Found {unity.version}`)
+            image "Assembly-CSharp" {
+                class GameManager {
+                    static GameManager instance;
+                    i32 state;
+                }
+            }
+            state Unity.il2cpp(2020) ["game.exe"] {
+                state: i32 = GameManager.instance?.state?;
             }
         "#,
     )

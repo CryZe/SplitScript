@@ -398,21 +398,19 @@ exact build selection retains one narrow host requirement.
 
 Campaign status: `BLOCKED`
 
-Audit result: managed instance traversal is already expressible; exact timer
+Audit result: the managed path fits the canonical Unity schema; exact timer
 start notification is the only active behavior that remains host-limited.
 
 - Source: UnityASL finds `RaceManager.Instance`, reads two fields on that
   replaceable singleton, and follows its `localStage` reference to
   `RaceStage.State`. This is not unstructured runtime reflection after
   attachment; every class and field name is statically known.
-- Existing translation: discover `RaceManager` and `RaceStage` through the
-  explicit `MonoVersion` layout, retain `RaceManager.staticFieldPath("Instance")`,
-  append instance offsets with `MemoryPath.dereference`, and resolve those paths
-  for typed expression-backed state fields. The singleton slot is reread on
-  every poll, so replacing the manager or stage object does not leave a stale
-  cached address.
+- Existing translation: declare `RaceManager.Instance`, its scalar fields, the
+  `localStage` class reference, and `RaceStage.State` in one top-level managed
+  schema. Generated live references reread the singleton and nested object on
+  every poll, so replacement does not leave a stale cached address.
 - A focused current-compiler probe covers both singleton fields, the nested
-  `localStage -> State` path, fallible path resolution at the state boundary,
+  `localStage -> State` reference, fallible reads at the state boundary,
   start/split decisions, accumulated game time, and the always-paused loading
   clock. It compiles without a new instance-binding API or dynamic state field.
 - The source's `onStart` callback clears accumulated time and rearms splitting.
@@ -464,8 +462,8 @@ already expressible.
 Campaign status: `BLOCKED`
 
 Audit result: both reported blockers are existing facilities. The active timer
-behavior is representable without runtime settings registration or a new
-managed-object bridge.
+behavior is representable with finite settings declarations and the canonical
+managed schema.
 
 - Source: `startup` registers the fixed keys `"1"` through `"51"`; only levels
   13, 26, and 39 default to enabled. This is bounded declaration data despite
@@ -474,12 +472,10 @@ managed-object bridge.
   `settings.enabled(current.level as String)` performs the same dynamic lookup,
   gated by the source's `levels` parent setting.
 - Source: UnityASL follows the static `Main.instance` singleton and reads four
-  fields declared on `Main`. Existing Mono metadata can retain
-  `Main.staticFieldPath("instance")`, discover each offset with `Main.field`, and
-  append it with `MemoryPath.dereference`. Resolving those paths from state
-  expressions observes a replaced singleton rather than caching one object
-  address at attachment time.
-- A focused current-compiler probe covers all four paths, the partitioned level
+  fields declared on `Main`. A top-level `Main` schema declares that singleton
+  and its fields directly; generated live references observe a replaced
+  singleton rather than caching one object address at attachment time.
+- A focused current-compiler probe covers all four fields, the partitioned level
   settings, computed string-key lookup, and the original start, split, and reset
   predicates. The source's `Log` watcher and scene-helper opt-in do not feed any
   active timer decision.
@@ -493,25 +489,27 @@ managed-object bridge.
 
 Campaign status: `BLOCKED`
 
-Audit result: the managed-object half is already expressible. Unity loading
-scene snapshots are the one timer-critical provider gap.
+Audit result: the source exposes two distinct requirements. Loading-scene
+snapshots remain timer-critical, while its unusual cross-class static path is
+also a managed-schema gap now that raw metadata traversal is intentionally
+private.
 
 - Source: the generic `Service` base class declares `_instance`, the concrete
   `LevelFlowService` class supplies the static storage and `_state` instance
   field, and `GameStart.forceReloadGame` is an ordinary static boolean. The
   metadata comes from multiple classes, but the resulting reads are still one
   static slot followed by one managed pointer dereference.
-- Existing translation: obtain the concrete class's `staticTable`, use
-  `field("_instance")` from the generic base and `field("_state")` from the
-  concrete class, then compose them with `memoryPath(...).dereference(...)`.
-  `GameStart.staticFieldPath("forceReloadGame")` covers the second value. A
-  focused current-compiler probe validates this cross-class composition and the
-  original start/reset edge predicate.
+- The ordinary `GameStart.forceReloadGame` static field fits the current schema.
+  The `_instance` slot does not: it is declared by the generic base while its
+  static storage belongs to the concrete class. Preserve this as evidence for
+  an approved cross-class schema design rather than restoring public
+  `staticTable`, raw field offsets, or `MemoryPath` composition.
 - Residual gap: every split condition branches on
   `vars.Unity.Scenes.Loading[0].Index`. No process-memory substitute in the
   source identifies that value, and SplitScript does not yet expose a typed
   Unity active/loading scene snapshot. A faithful port remains blocked on the
-  existing scene-provider roadmap item, not on a generic managed-instance API.
+  existing scene-provider roadmap item. The port therefore has two focused
+  schema/provider blockers rather than a need for a generic public metadata API.
 - Attachment under the current exact-name contract is `AWC.exe`. Mono layout,
   class names, offsets, scene semantics, and lifecycle timing still require
   live-game validation once the scene provider exists.

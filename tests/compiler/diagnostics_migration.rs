@@ -3026,6 +3026,41 @@ fn reported_asl_helper_gaps_produce_focused_migration_diagnostics() {
 }
 
 #[test]
+fn legacy_unity_traversal_points_to_managed_schemas() {
+    for source in [
+        r#"
+            state "game.exe" {}
+            onAttach { let runtime = await Unity.mono(MonoVersion.V2) }
+        "#,
+        r#"
+            state "game.exe" {}
+            fn inspect(runtime: MonoModule) { print(runtime) }
+        "#,
+        r#"
+            state "game.exe" {}
+            onAttach {
+                let mono = 0
+                mono.Make<String>("Game.Manager", "state")
+            }
+        "#,
+    ] {
+        let diagnostics = splitscript::compile(source)
+            .expect_err("legacy managed traversal should receive focused guidance");
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.migration_topic.as_deref() == Some("asl.unity.managed-schema")
+            })
+            .unwrap_or_else(|| panic!("missing managed-schema diagnostic in {diagnostics:#?}"));
+        assert_eq!(
+            diagnostic.message,
+            "declare Unity managed metadata with an `image` schema"
+        );
+        assert!(diagnostic.fixes.is_empty());
+    }
+}
+
+#[test]
 fn settings_map_syntax_guides_to_typed_settings_view_operations() {
     use splitscript::FixApplicability;
 

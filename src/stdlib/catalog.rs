@@ -69,7 +69,7 @@ mod tests {
         assert_eq!(
             unity_fields,
             vec![
-                ("address", FieldVisibility::Public),
+                ("address", FieldVisibility::RuntimePrivate),
                 ("module", FieldVisibility::RuntimePrivate),
             ]
         );
@@ -82,15 +82,7 @@ mod tests {
             })
             .map(|item| (item.name, item.qualified_name))
             .collect::<Vec<_>>();
-        assert_eq!(
-            unity_methods,
-            vec![
-                ("field", "UnityClass.field"),
-                ("fieldAny", "UnityClass.fieldAny"),
-                ("staticTable", "UnityClass.staticTable"),
-                ("staticInstance", "UnityClass.staticInstance"),
-            ]
-        );
+        assert!(unity_methods.is_empty());
 
         assert_eq!(
             library

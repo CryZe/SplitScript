@@ -1,27 +1,20 @@
 // ARTIFICIAL stores its autosplitter values in one managed static class. The
-// source-defined Unity Mono provider discovers that class and turns its static
-// fields into ordinary target addresses before state polling begins.
-state "ARTIFICIAL.exe" {
-    /// Total in-game time reported by the game.
-    inGameTime: f64 = process.read(inGameTimeAddress);
-    /// Identifier of the currently active level.
-    levelId: i32 = process.read(levelIdAddress);
-    /// Whether an active run is in progress.
-    isRunning: bool = process.read(isRunningAddress);
+// Unity schema binds its fields once and exposes fallible typed reads.
+image "Assembly-CSharp" {
+    class AutoSplitterData {
+        static f64 inGameTime;
+        static i32 levelId from "levelID";
+        static bool isRunning;
+    }
 }
 
-let inGameTimeAddress: address = 0
-let levelIdAddress: address = 0
-let isRunningAddress: address = 0
-
-onAttach {
-    let mono = await Unity.mono(MonoVersion.V2)
-    let image = await mono.image("Assembly-CSharp")
-    let autosplitter = await image.class("AutoSplitterData")
-
-    inGameTimeAddress = await autosplitter.staticField("inGameTime")
-    levelIdAddress = await autosplitter.staticField("levelID")
-    isRunningAddress = await autosplitter.staticField("isRunning")
+state Unity.mono(MonoVersion.V2) ["ARTIFICIAL.exe"] {
+    /// Total in-game time reported by the game.
+    inGameTime: f64 = AutoSplitterData.inGameTime?;
+    /// Identifier of the currently active level.
+    levelId: i32 = AutoSplitterData.levelId?;
+    /// Whether an active run is in progress.
+    isRunning: bool = AutoSplitterData.isRunning?;
 }
 
 start {

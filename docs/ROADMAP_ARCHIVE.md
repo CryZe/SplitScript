@@ -1,5 +1,21 @@
 # SplitScript roadmap
 
+## 2026-08-28: schema-only public Unity metadata
+
+- Made top-level managed `image`, `namespace`, `class`, `static`, and `from`
+  declarations the sole public route for Mono and IL2CPP metadata. The runtime,
+  image, class, field, static-table, and offset objects remain available to the
+  trusted provider implementation but no longer appear in user lookup,
+  completion, hover, navigation, or generated reference pages.
+- Ported the maintained ARTIFICIAL, Himno, and attachment smoke examples to
+  generated schema bindings. Their deterministic runtime fixtures continue to
+  cover static scalar fields, replaceable singleton references, and bounded
+  cooperative IL2CPP discovery.
+- Rebuilt the ASL migration journey around the schema model and added focused
+  diagnostics and documentation search coverage for `UnityASL`,
+  `mono.Make<T>`, `mono.MakeString`, `Unity.mono`, hidden traversal types, and
+  managed-field concepts without offering an unsafe mechanical rewrite.
+
 ## 2026-08-26: demand-driven generated code
 
 - Kept source-defined async functions fully lazy: construction only captures

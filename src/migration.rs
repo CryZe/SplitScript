@@ -5,8 +5,9 @@ pub use splitscript_syntax::migration::{
     ForeignSpellingContext, ForeignSpellingReplacement, MigrationConcept, MigrationConceptId,
     MigrationDiagnostic, MigrationDiagnosticId, MigrationSupport, MigrationTarget, SourceLanguage,
     diagnostic as migration_diagnostic, foreign_spelling, legacy_array_field_diagnostic,
-    legacy_set_field_diagnostic, legacy_static_call_diagnostic, legacy_string_field_diagnostic,
-    legacy_string_method_diagnostic, legacy_type_diagnostic, legacy_value_path_diagnostic,
+    legacy_managed_method_diagnostic, legacy_set_field_diagnostic, legacy_static_call_diagnostic,
+    legacy_string_field_diagnostic, legacy_string_method_diagnostic, legacy_type_diagnostic,
+    legacy_value_path_diagnostic,
 };
 
 use crate::{CompilerContext, language::LanguageCatalog};

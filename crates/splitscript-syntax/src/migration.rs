@@ -251,6 +251,8 @@ pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.timespan.parse-call");
 pub const CSHARP_TIMESPAN_TICKS_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.timespan.from-ticks-call");
+pub const ASL_UNITY_SCHEMA_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.unity.managed-schema");
 
 pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
@@ -848,7 +850,22 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "there is no automatic rewrite because SplitScript's exact nanosecond constructor cannot represent the full C# tick range through a single `i64` nanosecond count",
         ],
     },
+    MigrationDiagnostic {
+        id: ASL_UNITY_SCHEMA_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.unity.managed-schema"),
+        message: "declare Unity managed metadata with an `image` schema",
+        primary_label: "manual Unity runtime and metadata traversal is not a public SplitScript API",
+        notes: &[
+            "use `state Unity` (or an explicit `Unity.mono(...)` / `Unity.il2cpp(...)` provider selector), then declare managed images, classes, static roots, and fields at the top level",
+            "read generated managed references in state expressions; each field hop is fallible and can use postfix `?`",
+            "there is no mechanical rewrite because legacy helper calls do not contain the complete class and field schema",
+        ],
+    },
 ];
+
+pub fn legacy_managed_method_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
+    matches!(name, "Make" | "MakeString").then_some(ASL_UNITY_SCHEMA_DIAGNOSTIC)
+}
 
 pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
     match name {
@@ -885,6 +902,14 @@ pub fn legacy_static_call_diagnostic(
 ) -> Option<MigrationDiagnosticId> {
     if matches!(path, [task, method] if task == "Task" && method == "Run") {
         return Some(ASL_TASK_RUN_DIAGNOSTIC);
+    }
+    if matches!(
+        path,
+        [owner, method]
+            if (owner == "Unity" && matches!(method.as_str(), "mono" | "il2cpp"))
+                || (owner == "mono" && matches!(method.as_str(), "Make" | "MakeString"))
+    ) {
+        return Some(ASL_UNITY_SCHEMA_DIAGNOSTIC);
     }
     if matches!(path, [modules, method] if modules == "modules" && method == "First") {
         return Some(if argument_count == 0 {
@@ -1045,6 +1070,8 @@ pub fn legacy_type_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
         "List" => Some(ASL_LIST_TYPE_DIAGNOSTIC),
         "MemoryWatcherList" => Some(ASL_MEMORY_WATCHER_LIST_DIAGNOSTIC),
         "TimerPhase" => Some(ASL_TIMER_PHASE_DIAGNOSTIC),
+        "UnityModule" | "UnityImage" | "UnityClass" | "UnityField" | "MonoModule" | "MonoImage"
+        | "MonoClass" => Some(ASL_UNITY_SCHEMA_DIAGNOSTIC),
         _ => None,
     }
 }
@@ -2248,6 +2275,23 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         summary: "Use `state Genesis`; the `genesis` root normalizes emulator storage and reads original work-RAM offsets.",
         targets: &[MigrationTarget::StateProvider("Genesis")],
         cookbook_anchor: None,
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.unity.managed-schema"),
+        name: "UnityASL, mono.Make, and managed metadata",
+        sources: ASL_CSHARP,
+        support: MigrationSupport::Direct,
+        summary: "Use the [`Unity`] state provider with top-level [`image`], [`namespace`], and [`class`] schemas instead of manually discovering Mono or IL2CPP metadata with `UnityASL`, `mono.Make<T>`, or `mono.MakeString`.",
+        targets: &[
+            MigrationTarget::StateProvider("Unity"),
+            MigrationTarget::Language("image"),
+            MigrationTarget::Language("namespace"),
+            MigrationTarget::Language("class"),
+            MigrationTarget::Language("static"),
+            MigrationTarget::Language("from"),
+        ],
+        cookbook_anchor: Some("unityasl-and-managed-metadata"),
         spellings: &[],
     },
 ];

@@ -148,13 +148,16 @@ to inference or code generation.
 - [ ] Introduce a single internal Unity metadata adapter shared by Mono and
   IL2CPP. Keep native metadata traversal and process scanning intrinsic, but
   generate high-level bindings and reads from the source schema. Replace the
-  public split between `UnityModule`/`UnityClass` and
-  `MonoModule`/`MonoClass` where it no longer expresses a real semantic
-  difference. Make the existing manual runtime/image/class/offset traversal
-  private when it is needed to implement providers and generated bindings, and
-  remove it when it is unused. Do not preserve a public dynamic escape hatch by
-  default: introduce one only after a representative schema limitation proves
-  its need and its source design has been approved.
+  internal split between `UnityModule`/`UnityClass` and
+  `MonoModule`/`MonoClass` where it no longer expresses a real backend
+  difference.
+  - [x] Make manual runtime/image/class/offset traversal and all of its backend
+    record types private to the trusted standard library. Remove them from
+    public lookup, completion, hover, navigation, and generated documentation;
+    retain only the pieces reached by provider preparation and schema binding.
+    Do not preserve a public dynamic escape hatch by default: introduce one
+    only after a representative schema limitation proves its need and its
+    source design has been approved.
 - [x] Make Unity an attachment/state provider with an automatic form and
   explicit backend/version forms, including `state Unity [...]`,
   `state Unity.il2cpp(2020) [...]`, and `state Unity.mono(...) [...]`.
@@ -268,7 +271,7 @@ or assumptions tied to one generated corpus.
 
 ### Turn every reported blocker into an actionable product outcome
 
-- [ ] Make managed schemas the one canonical public Unity workflow. Move
+- [x] Make managed schemas the one canonical public Unity workflow. Move
   `Unity.mono`, `Unity.il2cpp`, `MonoModule` / `MonoImage` / `MonoClass`,
   `UnityModule` / `UnityImage` / `UnityClass`, and raw managed field/static-table
   traversal behind the trusted standard library where generated providers and
@@ -277,15 +280,17 @@ or assumptions tied to one generated corpus.
   bring a concrete schema limitation and proposed source API back for approval.
   A script using `state Unity` must not be led toward discovering the same
   runtime again in `onAttach`.
-- [ ] Rebuild the Unity documentation journey around one complete schema-first
-  port: `state Unity`, `image`, namespace/class declarations, static and
-  instance roots, managed strings, layout dimensions, fallible paths, and
-  snapshots. Exact searches for `UnityASL`, `mono.Make<T>`, `mono.MakeString`,
-  `Unity.mono`, and conceptual queries such as “managed field” must reach this
-  workflow rather than a low-level class API. Add contextual migration
-  diagnostics for old helper spellings and for redundant manual discovery in a
-  Unity-provider script, with fixes only where the rewrite is mechanically
-  sound.
+- [x] Rebuild the current Unity documentation journey around schema-first
+  ports: `state Unity`, `image`, namespace/class declarations, static and
+  instance roots, bounded managed strings, layout dimensions, and fallible
+  live paths. Exact searches for `UnityASL`, `mono.Make<T>`, `mono.MakeString`,
+  `Unity.mono`, and conceptual queries such as “managed field” reach this
+  workflow rather than a low-level class API. Contextual migration diagnostics
+  cover the old helper spellings without claiming a mechanically safe rewrite.
+- [ ] Extend that journey with transactional snapshots once `.snapshot()` is
+  implemented, and add a higher-level bounded managed-string declaration after
+  its source design is approved. Keep examples and diagnostics synchronized
+  with those facilities rather than documenting raw traversal as a workaround.
 - [ ] Make emulator providers equally difficult to miss. The latest exercise
   manually searched Dolphin mappings and byte-swapped GameCube values, manually
   followed Fusion RAM, and kept only one RetroArch layout even though `state

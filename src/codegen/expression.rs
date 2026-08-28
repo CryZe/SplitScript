@@ -16,7 +16,8 @@ use crate::{
     stdlib::{
         IntrinsicId, MANAGED_POINTER_SIZE_FIELD, PROVIDER_BINDINGS_TYPE, RuntimeRepresentation,
         StandardLibrary, StdlibFieldId, StdlibOwner, StdlibTypeConstructorId, StdlibTypeId,
-        managed_field_offset_name, managed_static_table_name, provider_context_field_name,
+        managed_field_offset_name, managed_instance_header_name, managed_static_table_name,
+        provider_context_field_name,
     },
     types::{EnumTypeId, ResolvedArrayType, TypeId},
     wasm_ir::{self, TemporaryId},
@@ -1399,6 +1400,11 @@ fn resolved_receiver<'a>(
             receiver_type,
         } => (receiver, *receiver_type),
         wasm_ir::CallTarget::ManagedSnapshot {
+            receiver,
+            receiver_type,
+            ..
+        } => (receiver, *receiver_type),
+        wasm_ir::CallTarget::ManagedComponent {
             receiver,
             receiver_type,
             ..
@@ -3700,6 +3706,51 @@ fn compile_expr_unconverted(
                 compile_receiver(function, target, context);
                 function.instruction(&Instruction::Call(
                     context.managed_snapshot_functions[class],
+                ));
+            }
+            wasm_ir::CallTarget::ManagedComponent {
+                class,
+                result,
+                helper,
+                helper_result,
+                ..
+            } => {
+                compile_receiver(function, target, context);
+                emit_managed_binding_field(
+                    function,
+                    &managed_instance_header_name(class.index()),
+                    context,
+                );
+                let helper = context.called_instance(helper);
+                function.instruction(&Instruction::Call(context.functions[&helper].call));
+
+                let local = context.matches.intrinsic_temps[&expression][0];
+                let Type::Result(helper_layout) = context.ty(*helper_result) else {
+                    unreachable!("Unity component traversal helper returns address!")
+                };
+                function.instruction(&Instruction::LocalSet(local));
+                for (field, field_type) in [(0, Type::Address), (1, Type::I32)] {
+                    function
+                        .instruction(&Instruction::LocalGet(local))
+                        .instruction(&Instruction::RefAsNonNull);
+                    emit_typed_struct_get(
+                        function,
+                        context.gc.index(Type::Result(helper_layout)),
+                        field,
+                        field_type,
+                    );
+                }
+                function
+                    .instruction(&Instruction::LocalGet(local))
+                    .instruction(&Instruction::RefAsNonNull);
+                emit_typed_struct_get(
+                    function,
+                    context.gc.index(Type::Result(helper_layout)),
+                    2,
+                    Type::Standard(StdlibTypeId::String),
+                );
+                function.instruction(&Instruction::StructNew(
+                    context.gc.index(Type::Result(*result)),
                 ));
             }
             wasm_ir::CallTarget::ManagedInstances { .. } => {

@@ -1229,7 +1229,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "class Name from [\"Alias\", ...] { Type field; static Type field; if layout.dimension == Variant { ... } }",
         "Declares a typed managed class binding.",
-        "The class name `T` denotes an immutable local snapshot, while `T.Ref` denotes a live remote object reference. Fields without [`static`] are read fallibly from a `T.Ref`; static fields are read through the class name. Each live field hop yields [`T!`], so postfix [`?`] can propagate an unsuccessful lookup to the surrounding state field, function, or [`retry`] boundary. Calling `reference.snapshot()` reads every active instance field first and exposes one [`T!`] only when the complete snapshot succeeds; conditional fields follow the refined attachment [`layout`]. `await T.instances()` cooperatively scans readable, writable, non-executable process memory and returns a completed `[T.Ref]` snapshot. The scan has bounded work per poll, is cancelled when the process closes, and is generated only when used. Snapshot readers are likewise generated only when used. The optional [`from`] list supplies runtime metadata names. Fields declared directly in the class are always available. Put build-specific fields in an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain over the attachment-wide [`layout`] value. Each later branch describes exactly the layouts left unmatched by earlier branches, and the same branch predicate refines those fields in ordinary code.",
+        "The class name `T` denotes an immutable local snapshot, while `T.Ref` denotes a live remote object reference. Fields without [`static`] are read fallibly from a `T.Ref`; static fields are read through the class name. Each live field hop yields [`T!`], so postfix [`?`] can propagate an unsuccessful lookup to the surrounding state field, function, or [`retry`] boundary. Calling `reference.snapshot()` reads every active instance field first and exposes one [`T!`] only when the complete snapshot succeeds; conditional fields follow the refined attachment [`layout`]. `await T.instances()` cooperatively scans readable, writable, non-executable process memory and returns a completed `[T.Ref]` snapshot. A [`UnityGameObject`](type@UnityGameObject) obtained through `unity.scenes` can use `component<T>()` to find the same typed `T.Ref` by runtime class. Both traversal paths are bounded, and generated support is retained only when used. The optional [`from`] list supplies runtime metadata names. Fields declared directly in the class are always available. Put build-specific fields in an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain over the attachment-wide [`layout`] value. Each later branch describes exactly the layouts left unmatched by earlier branches, and the same branch predicate refines those fields in ordinary code.",
         &[
             Example::checked(
                 "Follow a typed managed field path",
@@ -1244,6 +1244,11 @@ define_language_catalog! {
             Example::checked(
                 "Discover live instances cooperatively",
                 "let managers = await GameManager.instances()",
+                MANAGED_IMAGE_SOURCE,
+            ),
+            Example::checked(
+                "Read a component from a scene hierarchy",
+                "let scene = unity.scenes.active() else return\nlet object = scene.find(\"Managers/GameManager\") else return\nlet manager = object.component<GameManager>() else return",
                 MANAGED_IMAGE_SOURCE,
             ),
         ]

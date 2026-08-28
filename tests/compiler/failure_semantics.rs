@@ -1351,6 +1351,38 @@ fn managed_snapshot_reads_require_an_attached_process() {
 }
 
 #[test]
+fn typed_unity_components_require_the_unity_provider_and_a_schema_class() {
+    let provider_diagnostics = splitscript::compile(
+        r#"
+            image "Assembly-CSharp" {
+                class Player {}
+            }
+            state "game.exe" {}
+            fn player(object: UnityGameObject) {
+                return object.component<Player>()
+            }
+        "#,
+    )
+    .expect_err("component lookup depends on Unity attachment metadata");
+    assert!(provider_diagnostics.iter().any(|diagnostic| {
+        diagnostic.message == "Unity component lookup requires a Unity state provider"
+    }));
+
+    let type_diagnostics = splitscript::compile(
+        r#"
+            state Unity ["game.exe"] {}
+            fn value(object: UnityGameObject) {
+                return object.component<u32>()
+            }
+        "#,
+    )
+    .expect_err("component lookup should only accept managed schema classes");
+    assert!(type_diagnostics.iter().any(|diagnostic| {
+        diagnostic.message == "`component<T>` requires a declared managed class for `T`"
+    }));
+}
+
+#[test]
 fn detach_does_not_expose_a_closed_process_or_uninitialized_snapshots() {
     let process_errors = splitscript::compile(
         r#"

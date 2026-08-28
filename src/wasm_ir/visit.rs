@@ -275,6 +275,14 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
                         },
                     ..
                 }
+                | super::CallTarget::ManagedComponent {
+                    receiver:
+                        crate::semantic::ResolvedReceiver::Expression {
+                            expression: receiver,
+                            ..
+                        },
+                    ..
+                }
                 | super::CallTarget::Intrinsic {
                     receiver:
                         Some(crate::semantic::ResolvedReceiver::Expression {

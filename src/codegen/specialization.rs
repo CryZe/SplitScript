@@ -193,6 +193,7 @@ fn called_function(
                 wasm_ir::CallTarget::Intrinsic { .. }
                 | wasm_ir::CallTarget::DefaultDisplay { .. }
                 | wasm_ir::CallTarget::ManagedSnapshot { .. }
+                | wasm_ir::CallTarget::ManagedComponent { .. }
                 | wasm_ir::CallTarget::ManagedInstances { .. }
                 | wasm_ir::CallTarget::ResultError { .. }
                 | wasm_ir::CallTarget::OptionSome { .. }
@@ -206,6 +207,7 @@ fn called_function(
         wasm_ir::CallTarget::Intrinsic { .. }
         | wasm_ir::CallTarget::DefaultDisplay { .. }
         | wasm_ir::CallTarget::ManagedSnapshot { .. }
+        | wasm_ir::CallTarget::ManagedComponent { .. }
         | wasm_ir::CallTarget::ManagedInstances { .. }
         | wasm_ir::CallTarget::ResultError { .. }
         | wasm_ir::CallTarget::OptionSome { .. }
@@ -275,6 +277,14 @@ fn materialize_expression_types(
             }
             wasm_ir::CallTarget::ManagedSnapshot { receiver_type, .. } => {
                 materialize_type(semantics, instance, *receiver_type, ids, constructed);
+            }
+            wasm_ir::CallTarget::ManagedComponent {
+                receiver_type,
+                helper_result,
+                ..
+            } => {
+                materialize_type(semantics, instance, *receiver_type, ids, constructed);
+                materialize_type(semantics, instance, *helper_result, ids, constructed);
             }
             wasm_ir::CallTarget::UserFunction { .. }
             | wasm_ir::CallTarget::ManagedInstances { .. }

@@ -864,6 +864,7 @@ fn resolved_intrinsic(target: &wasm_ir::CallTarget) -> Option<IntrinsicId> {
         | wasm_ir::CallTarget::CapabilityRequirement { .. }
         | wasm_ir::CallTarget::DefaultDisplay { .. }
         | wasm_ir::CallTarget::ManagedSnapshot { .. }
+        | wasm_ir::CallTarget::ManagedComponent { .. }
         | wasm_ir::CallTarget::ManagedInstances { .. }
         | wasm_ir::CallTarget::ResultError { .. }
         | wasm_ir::CallTarget::OptionSome { .. }

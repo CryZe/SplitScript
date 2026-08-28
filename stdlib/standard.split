@@ -54,6 +54,25 @@ stateProvider Native as process {}
 /// ```splitscript
 /// state Unity ["game.exe"] {}
 /// ```
+///
+/// # Example
+///
+/// Read a managed component from the active scene hierarchy
+///
+/// ```splitscript
+/// state Unity ["game.exe"] {
+///     player = unity.scenes.active()?
+///         .find("World/Player")?
+///         .component<PlayerController>()?
+///         .snapshot();
+/// }
+///
+/// image "Assembly-CSharp" {
+///     class PlayerController {
+///         u32 score;
+///     }
+/// }
+/// ```
 @processType(Process)
 @processes(source)
 @attachment(identity)
@@ -6023,6 +6042,54 @@ struct UnityScenes {
     /// Pointer width used by the attached Unity player.
     private pointerSize: PointerSize,
 
+    // Reads one non-null native pointer using the attached player's width.
+    private fn pointer(address: address) -> address! {
+        let value: address = match self.pointerSize {
+            PointerSize.Bit32 => process.read<u32>(address)? as address,
+            PointerSize.Bit64 => process.read<u64>(address)? as address,
+        }
+        if value == 0 {
+            throw "Unity pointer is null"
+        }
+        return Ok(value)
+    }
+
+    // Finds an exact root GameObject without materializing the whole scene
+    // hierarchy. The traversal limit prevents a corrupt linked list from
+    // monopolizing an update.
+    private fn root(sceneAddress: address, name: String) -> UnityGameObject! {
+        let rootStorageOffset: u64 = match self.pointerSize {
+            PointerSize.Bit32 => 0x88,
+            PointerSize.Bit64 => 0xb0,
+        }
+        let pointerBytes: u64 = match self.pointerSize {
+            PointerSize.Bit32 => 4,
+            PointerSize.Bit64 => 8,
+        }
+        let first = self.pointer(sceneAddress.add(rootStorageOffset))?
+        let current = first
+        let inspected: u32 = 0
+
+        while inspected < 1024 {
+            let next = self.pointer(current)?
+            let transform = self.pointer(current.add(pointerBytes * 2))?
+            let object = UnityGameObject {
+                scenes: self,
+                transformAddress: transform,
+            }
+            if object.name()? == name {
+                return Ok(object)
+            }
+
+            inspected += 1
+            if next == first {
+                throw "Unity root GameObject was not found"
+            }
+            current = next
+        }
+        throw "Unity root GameObject traversal exceeded its safety limit"
+    }
+
     private fn snapshot(sceneAddress: address) -> UnityScene! {
         if sceneAddress == 0 {
             throw "Unity scene address is unavailable"
@@ -6057,6 +6124,7 @@ struct UnityScenes {
         let name = path.slice(nameStart, nameEnd)?
 
         return Ok(UnityScene {
+            scenes: self,
             address: sceneAddress,
             index: process.read<i32>(sceneAddress.add(buildIndexOffset))?,
             path: path,
@@ -6190,6 +6258,9 @@ struct UnityScenes {
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
 struct UnityScene {
+    /// Scene-manager context retained for live hierarchy lookups.
+    private scenes: UnityScenes,
+
     /// Native address from which this scene snapshot was read.
     ///
     /// The address is retained for advanced native Unity reads. The other
@@ -6226,7 +6297,8 @@ struct UnityScene {
 
     /// Full asset path captured from Unity.
     ///
-    /// A typical value resembles `Assets/Scenes/Forest.unity`. Use [`name`]
+    /// A typical value resembles `Assets/Scenes/Forest.unity`. Use
+    /// [`name`](field@UnityScene.name)
     /// when only the final scene identifier is needed.
     ///
     /// # Example
@@ -6258,6 +6330,251 @@ struct UnityScene {
     /// }
     /// ```
     name: String,
+
+    /// Finds a GameObject by an exact hierarchy path.
+    ///
+    /// The first path segment selects a root object in this scene. Every later
+    /// segment selects one direct child. Empty segments and missing objects
+    /// return an error. Traversal is bounded so malformed native lists cannot
+    /// monopolize an update.
+    ///
+    /// # Example
+    ///
+    /// Find the player beneath a world root
+    ///
+    /// ```splitscript
+    /// # state Unity ["game.exe"] {}
+    /// whileAttached {
+    ///     let scene = unity.scenes.active() else return
+    ///     let player = scene.find("World/Player") else return
+    ///     print(player.name() else "Unknown")
+    /// }
+    /// ```
+    @mustUse("The discovered Unity GameObject is otherwise discarded.")
+    fn find(
+        /// Exact slash-separated hierarchy path to resolve.
+        path: String,
+    ) -> UnityGameObject! {
+        let parts = path.split("/")?
+        if parts.isEmpty() || parts[0].isEmpty() {
+            throw "Unity GameObject path is empty"
+        }
+
+        let object = self.scenes.root(self.address, parts[0])?
+        let index: u32 = 1
+        while index < parts.length() {
+            if parts[index].isEmpty() {
+                throw "Unity GameObject path contains an empty segment"
+            }
+            object = object.child(parts[index])?
+            index += 1
+        }
+        return Ok(object)
+    }
+}
+
+/// A live GameObject in an attached Unity scene hierarchy.
+///
+/// This value retains the native Transform address used to reach the object.
+/// It is a live remote handle rather than an immutable snapshot: scene changes
+/// may invalidate it. `component<T>() -> T.Ref!` finds a component whose
+/// runtime class matches the declared managed schema class `T`. The resulting
+/// typed live reference supports ordinary managed field reads and
+/// `.snapshot()` when stable local state is required. Component traversal is
+/// bounded to keep a corrupt native component list from monopolizing an
+/// update.
+///
+/// # Example
+///
+/// Resolve a child object
+///
+/// ```splitscript
+/// # state Unity ["game.exe"] {}
+/// whileAttached {
+///     let scene = unity.scenes.active() else return
+///     let camera = scene.find("World/Player/Camera") else return
+///     print(camera.name() else "Unknown")
+/// }
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+struct UnityGameObject {
+    /// Scene-manager context used for native hierarchy traversal.
+    private scenes: UnityScenes,
+
+    /// Native Transform address associated with this GameObject.
+    private transformAddress: address,
+
+    /// Reads this GameObject's current name.
+    ///
+    /// The name is decoded from Unity's native GameObject storage on every
+    /// call, so a stale or unreadable live handle returns an error.
+    ///
+    /// # Example
+    ///
+    /// Inspect a resolved object's name
+    ///
+    /// ```splitscript
+    /// # state Unity ["game.exe"] {}
+    /// whileAttached {
+    ///     let scene = unity.scenes.active() else return
+    ///     let player = scene.find("Player") else return
+    ///     print(player.name() else "Unknown")
+    /// }
+    /// ```
+    @mustUse("The Unity GameObject name is otherwise discarded.")
+    fn name() -> String! {
+        let gameObjectOffset: u64 = match self.scenes.pointerSize {
+            PointerSize.Bit32 => 0x1c,
+            PointerSize.Bit64 => 0x30,
+        }
+        let nameOffset: u64 = match self.scenes.pointerSize {
+            PointerSize.Bit32 => 0x3c,
+            PointerSize.Bit64 => 0x60,
+        }
+        let gameObject = self.scenes.pointer(self.transformAddress.add(gameObjectOffset))?
+        let nativeString = self.scenes.pointer(gameObject.add(nameOffset))?
+        let text = self.scenes.pointer(nativeString)?
+        return process.readUtf8(text, 128)
+    }
+
+    /// Finds one exact direct child by name.
+    ///
+    /// Prefer [`find`](method@UnityGameObject.find) when several hierarchy
+    /// segments are already known.
+    ///
+    /// # Example
+    ///
+    /// Resolve a direct child
+    ///
+    /// ```splitscript
+    /// # state Unity ["game.exe"] {}
+    /// whileAttached {
+    ///     let scene = unity.scenes.active() else return
+    ///     let world = scene.find("World") else return
+    ///     let player = world.child("Player") else return
+    ///     print(player.name() else "Unknown")
+    /// }
+    /// ```
+    @mustUse("The discovered Unity GameObject is otherwise discarded.")
+    fn child(
+        /// Exact name of the direct child to find.
+        name: String,
+    ) -> UnityGameObject! {
+        let childrenOffset: u64 = match self.scenes.pointerSize {
+            PointerSize.Bit32 => 0x50,
+            PointerSize.Bit64 => 0x70,
+        }
+        let pointerBytes: u64 = match self.scenes.pointerSize {
+            PointerSize.Bit32 => 4,
+            PointerSize.Bit64 => 8,
+        }
+        let children = self.scenes.pointer(self.transformAddress.add(childrenOffset))?
+        let count: u64 = match self.scenes.pointerSize {
+            PointerSize.Bit32 => process.read<u32>(self.transformAddress.add(childrenOffset + 8))? as u64,
+            PointerSize.Bit64 => process.read<u64>(self.transformAddress.add(childrenOffset + 16))?,
+        }
+        if count > 128 {
+            throw "Unity child traversal exceeded its safety limit"
+        }
+
+        for index in 0..<count {
+            let transform = self.scenes.pointer(children.add(index * pointerBytes))?
+            let child = UnityGameObject {
+                scenes: self.scenes,
+                transformAddress: transform,
+            }
+            if child.name()? == name {
+                return Ok(child)
+            }
+        }
+        throw "Unity child GameObject was not found"
+    }
+
+    /// Finds a descendant by an exact path relative to this GameObject.
+    ///
+    /// Each slash-separated segment selects one direct child. This does not
+    /// perform an ambiguous recursive name search.
+    ///
+    /// # Example
+    ///
+    /// Resolve a nested descendant
+    ///
+    /// ```splitscript
+    /// # state Unity ["game.exe"] {}
+    /// whileAttached {
+    ///     let scene = unity.scenes.active() else return
+    ///     let world = scene.find("World") else return
+    ///     let camera = world.find("Player/Camera") else return
+    ///     print(camera.name() else "Unknown")
+    /// }
+    /// ```
+    @mustUse("The discovered Unity GameObject is otherwise discarded.")
+    fn find(
+        /// Exact slash-separated child path to resolve.
+        path: String,
+    ) -> UnityGameObject! {
+        let parts = path.split("/")?
+        if parts.isEmpty() {
+            throw "Unity GameObject path is empty"
+        }
+
+        let object = self
+        for part in parts {
+            if part.isEmpty() {
+                throw "Unity GameObject path contains an empty segment"
+            }
+            object = object.child(part)?
+        }
+        return Ok(object)
+    }
+
+    // Returns the live managed object whose runtime header matches a declared
+    // schema class. The public component<T>() operation supplies the cached
+    // backend-neutral header resolved during provider preparation.
+    private fn componentAddress(expectedHeader: address) -> address! {
+        let gameObjectOffset: u64 = match self.scenes.pointerSize {
+            PointerSize.Bit32 => 0x1c,
+            PointerSize.Bit64 => 0x30,
+        }
+        let componentObjectOffset: u64 = match self.scenes.pointerSize {
+            PointerSize.Bit32 => 0x18,
+            PointerSize.Bit64 => 0x28,
+        }
+        let pointerBytes: u64 = match self.scenes.pointerSize {
+            PointerSize.Bit32 => 4,
+            PointerSize.Bit64 => 8,
+        }
+        let gameObject = self.scenes.pointer(self.transformAddress.add(gameObjectOffset))?
+        let components = self.scenes.pointer(gameObject.add(gameObjectOffset))?
+        let count: u64 = match self.scenes.pointerSize {
+            PointerSize.Bit32 => process.read<u32>(gameObject.add(gameObjectOffset + 8))? as u64,
+            PointerSize.Bit64 => process.read<u64>(gameObject.add(gameObjectOffset + 16))?,
+        }
+        if count > 128 {
+            throw "Unity component traversal exceeded its safety limit"
+        }
+
+        for index in 1..<count {
+            let slot = components.add(index * pointerBytes * 2 + pointerBytes)
+            let nativeComponent = match self.scenes.pointer(slot) {
+                Ok(value) => value,
+                Err(_) => continue,
+            }
+            let managedObject = match self.scenes.pointer(nativeComponent.add(componentObjectOffset)) {
+                Ok(value) => value,
+                Err(_) => continue,
+            }
+            let header = match self.scenes.pointer(managedObject) {
+                Ok(value) => value,
+                Err(_) => continue,
+            }
+            if header == expectedHeader {
+                return Ok(managedObject)
+            }
+        }
+        throw "Unity managed component was not found"
+    }
 }
 
 /// Describes an attached Unity IL2CPP runtime.

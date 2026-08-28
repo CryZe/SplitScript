@@ -312,6 +312,11 @@ fn definition_for_resolution(
                         .get(SourceDefinitionId::ManagedClass(*class))
                         .cloned()
                         .map(DefinitionTarget::Source),
+                    ResolvedCall::ManagedComponent { .. } => {
+                        Some(DefinitionTarget::StandardLibrarySymbol(
+                            StdlibSymbolId::Type(crate::stdlib::StdlibTypeId::UnityGameObject),
+                        ))
+                    }
                     ResolvedCall::ManagedInstances { class } => definitions
                         .get(SourceDefinitionId::ManagedClass(*class))
                         .cloned()
@@ -325,6 +330,7 @@ fn definition_for_resolution(
             match call {
                 ResolvedCall::UserMethod { receiver, .. }
                 | ResolvedCall::ManagedSnapshot { receiver, .. }
+                | ResolvedCall::ManagedComponent { receiver, .. }
                 | ResolvedCall::StandardLibrary {
                     receiver: Some(receiver),
                     ..
@@ -441,6 +447,7 @@ fn source_definition_for_resolution(
                     }
                     ResolvedCall::StandardLibrary { .. }
                     | ResolvedCall::ManagedSnapshot { .. }
+                    | ResolvedCall::ManagedComponent { .. }
                     | ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
                     | ResolvedCall::IteratorItem { .. }
@@ -451,6 +458,7 @@ fn source_definition_for_resolution(
             match call {
                 ResolvedCall::UserMethod { receiver, .. }
                 | ResolvedCall::ManagedSnapshot { receiver, .. }
+                | ResolvedCall::ManagedComponent { receiver, .. }
                 | ResolvedCall::StandardLibrary {
                     receiver: Some(receiver),
                     ..

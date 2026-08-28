@@ -182,6 +182,33 @@ fn reachable_managed_snapshot_types_have_gc_layouts() {
 }
 
 #[test]
+fn unity_hierarchy_components_produce_typed_live_references() {
+    let source = r#"
+        image "Assembly-CSharp" {
+            class PlayerController {
+                u32 score;
+            }
+        }
+
+        state Unity ["game.exe"] {
+            player = unity.scenes.active()?
+                .find("World/Player")?
+                .component<PlayerController>()?
+                .snapshot();
+        }
+
+        whileAttached {
+            print(current.player.score)
+        }
+    "#;
+
+    let wasm = splitscript::compile(source).expect("typed Unity component lookup should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("typed Unity component lookup should produce valid WebAssembly GC");
+}
+
+#[test]
 fn managed_reference_snapshot_reads_the_complete_layout_refined_shape() {
     use splitscript::{BuildProfile, CompilerOptions};
 

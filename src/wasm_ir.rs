@@ -265,6 +265,14 @@ pub enum CallTarget {
         receiver: ResolvedReceiver,
         receiver_type: TypeId,
     },
+    ManagedComponent {
+        class: ManagedClassId,
+        result: ResultTypeId,
+        receiver: ResolvedReceiver,
+        receiver_type: TypeId,
+        helper: FunctionInstance,
+        helper_result: TypeId,
+    },
     ManagedInstances {
         class: ManagedClassId,
     },
@@ -1487,6 +1495,33 @@ fn lower_call_target(
             receiver: receiver.clone(),
             receiver_type: *receiver_type,
         },
+        ResolvedCall::ManagedComponent {
+            class,
+            result,
+            receiver,
+            receiver_type,
+        } => {
+            let function = typed_hir
+                .library_function(crate::stdlib::StdlibItemId::UnityGameObjectComponentAddress)
+                .expect("Unity component lookup has a source-defined traversal helper");
+            let helper_result = semantics
+                .function_result(function)
+                .expect("checked Unity component helper has a result type");
+            let signature = semantics
+                .function_parameter_types(function)
+                .iter()
+                .copied()
+                .chain([helper_result])
+                .collect();
+            CallTarget::ManagedComponent {
+                class: *class,
+                result: *result,
+                receiver: receiver.clone(),
+                receiver_type: *receiver_type,
+                helper: semantics.function_instance(function, signature),
+                helper_result,
+            }
+        }
         ResolvedCall::ManagedInstances { class } => CallTarget::ManagedInstances { class: *class },
         ResolvedCall::ResultError { result } => CallTarget::ResultError { result: *result },
         ResolvedCall::OptionSome { option } => CallTarget::OptionSome { option: *option },
@@ -4846,6 +4881,19 @@ impl Visitor for LocalPlanner<'_> {
         }
 
         walk_expression(self, expression, program);
+        if let ExpressionKind::Call {
+            target: CallTarget::ManagedComponent { helper_result, .. },
+            ..
+        } = &expression.kind
+        {
+            self.push(
+                *helper_result,
+                LocalPurpose::IntrinsicScratch {
+                    expression: expression.id,
+                    slot: 0,
+                },
+            );
+        }
         let intrinsic = match &expression.kind {
             ExpressionKind::Call {
                 target:

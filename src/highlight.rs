@@ -578,6 +578,9 @@ impl HighlightCollector<'_> {
                     ResolvedCall::ManagedSnapshot { receiver, .. } => {
                         receiver.path().map(|(root, _)| root)
                     }
+                    ResolvedCall::ManagedComponent { receiver, .. } => {
+                        receiver.path().map(|(root, _)| root)
+                    }
                     ResolvedCall::UserFunction { .. }
                     | ResolvedCall::ManagedInstances { .. }
                     | ResolvedCall::OptionSome { .. }
@@ -682,7 +685,9 @@ impl HighlightCollector<'_> {
         // a suffix because roots such as `current.field` can consume more than
         // one written path segment before ordinary record/standard fields.
         let resolved_receiver = resolution.and_then(|call| match call {
-            ResolvedCall::UserMethod { receiver, .. } => Some(receiver),
+            ResolvedCall::UserMethod { receiver, .. }
+            | ResolvedCall::ManagedSnapshot { receiver, .. }
+            | ResolvedCall::ManagedComponent { receiver, .. } => Some(receiver),
             ResolvedCall::StandardLibrary {
                 receiver: Some(receiver),
                 ..

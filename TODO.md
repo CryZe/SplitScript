@@ -268,10 +268,13 @@ to inference or code generation.
   the ordinary symbol graph, prepared once per attachment only when referenced,
   and available wherever the provider's process value is available. The old
   public `Unity.sceneManager()` workflow is private implementation detail.
-- [ ] Add typed scene hierarchy lookup and `.component<T>()`, with an explicitly
-  dynamic escape hatch when no schema is declared. Cache or cooperatively
-  traverse hierarchy data so ticks remain responsive, and build it on the
-  provider-context architecture rather than introducing scene-specific roots.
+- [x] Add exact, bounded scene hierarchy lookup through `UnityScene.find`,
+  `UnityGameObject.find`, and `UnityGameObject.child`, plus schema-derived
+  `UnityGameObject.component<T>() -> T.Ref!`. Native traversal lives in
+  privileged SplitScript standard-library source, while the compiler supplies
+  only the declared class's backend-neutral runtime header and nominal result
+  type. A tiny class schema is the typed escape for otherwise-unknown
+  components; defer any raw dynamic API until a real port proves it necessary.
 - [ ] Expose Unity global managers such as `unity.time.frameCount` and
   `unity.time.timeScale` through reachable source-defined declarations rather
   than bespoke compiler names.

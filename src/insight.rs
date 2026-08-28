@@ -146,6 +146,25 @@ pub(crate) fn hover(
             )),
         }));
     }
+    if matches!(&token.kind, TokenKind::Ident(name) if name == "component")
+        && let Some(analysis) = database.analysis_at(offset)?
+        && let Some(ExpressionResolution::Call(ResolvedCall::ManagedComponent { class, .. })) =
+            analysis.resolution
+        && let Some(context) = semantic_context(database)
+        && let Some(class) = context.syntax().managed_class(class)
+    {
+        return Ok(Some(HoverInfo {
+            span: token.span,
+            markdown: format!(
+                "```splitscript\nUnityGameObject.component<{}>() -> {}\u{2e}Ref!\n```\n\nFinds the managed component whose runtime class matches the declared Unity schema class `{}`. The returned live reference can be read field by field or converted into one transactional immutable snapshot with `.snapshot()`.",
+                class.name, class.name, class.name
+            ),
+            documentation_uri: Some(symbol_uri(
+                StdlibSymbolId::Type(crate::stdlib::StdlibTypeId::UnityGameObject),
+                &standard_library,
+            )),
+        }));
+    }
     let target = database.definition_at_query_offset(offset)?;
     if target.is_none()
         && let Some(analysis) = database.analysis_at(offset)?
@@ -2554,6 +2573,40 @@ onAttach {
             Some(DefinitionTarget::Source(definition))
                 if matches!(definition.id, SourceDefinitionId::ManagedClass(_))
                     && definition.name == "Enemy"
+        ));
+    }
+
+    #[test]
+    fn managed_component_hover_uses_the_selected_schema_class() {
+        let source = r#"
+image "Assembly-CSharp" {
+    class PlayerController {
+        i32 health;
+    }
+}
+state Unity ["game.exe"] {}
+whileAttached {
+    let scene = unity.scenes.active() else return
+    let object = scene.find("World/Player") else return
+    let player = object.component<PlayerController>() else return
+    print(player.health else 0)
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        database.check().expect("managed component hover fixture");
+        let offset = source.rfind("component").unwrap() + 1;
+        let hover = database.hover(offset).unwrap().expect("component hover");
+        assert!(
+            hover
+                .markdown
+                .contains("UnityGameObject.component<PlayerController>() -> PlayerController.Ref!")
+        );
+        assert!(hover.markdown.contains("runtime class"));
+        assert!(matches!(
+            database.definition_at(offset).unwrap(),
+            Some(DefinitionTarget::StandardLibrarySymbol(
+                StdlibSymbolId::Type(crate::stdlib::StdlibTypeId::UnityGameObject)
+            ))
         ));
     }
 

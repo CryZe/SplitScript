@@ -668,7 +668,9 @@ impl<'a> Evaluator<'a> {
             ResolvedCall::UserFunction { function, .. }
             | ResolvedCall::UserMethod { function, .. } => Some(*function),
             ResolvedCall::StandardLibrary { item, .. } => self.program.library_function(*item),
-            ResolvedCall::ManagedSnapshot { .. } | ResolvedCall::ManagedInstances { .. } => None,
+            ResolvedCall::ManagedSnapshot { .. }
+            | ResolvedCall::ManagedComponent { .. }
+            | ResolvedCall::ManagedInstances { .. } => None,
             ResolvedCall::ResultError { .. }
             | ResolvedCall::OptionSome { .. }
             | ResolvedCall::IteratorItem { .. }
@@ -861,8 +863,11 @@ fn intrinsic_operation(
         accumulator.availability(metadata.availability);
     } else if matches!(
         call,
-        ResolvedCall::ManagedSnapshot { .. } | ResolvedCall::ManagedInstances { .. }
+        ResolvedCall::ManagedSnapshot { .. }
+            | ResolvedCall::ManagedComponent { .. }
+            | ResolvedCall::ManagedInstances { .. }
     ) {
+        accumulator.effect(Effect::ReadsProcess);
         accumulator.effect(Effect::RequiresAttachedProcess);
     }
     accumulator.finish()

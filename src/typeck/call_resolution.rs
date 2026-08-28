@@ -672,6 +672,24 @@ impl Checker {
                     span,
                 );
             }
+            if method == "component"
+                && self.standard_type_id(receiver_type) == Some(StdlibTypeId::UnityGameObject)
+            {
+                return self.managed_component_call(
+                    MethodReceiver {
+                        ty: receiver_type,
+                        value: ResolvedReceiver::Path {
+                            root: receiver_value,
+                            members: receiver_members,
+                        },
+                    },
+                    type_arguments,
+                    args,
+                    expected,
+                    expression,
+                    span,
+                );
+            }
             let method_candidates = if self.is_library_function() {
                 standard_library.method_candidates_including_private(method)
             } else {
@@ -831,6 +849,18 @@ impl Checker {
         {
             return self.managed_snapshot_call(
                 *class,
+                method_receiver,
+                type_arguments,
+                args,
+                expected,
+                expression,
+                span,
+            );
+        }
+        if method == "component"
+            && self.standard_type_id(receiver_type) == Some(StdlibTypeId::UnityGameObject)
+        {
+            return self.managed_component_call(
                 method_receiver,
                 type_arguments,
                 args,
@@ -1038,6 +1068,80 @@ impl Checker {
         let result = self.expect_expression(expression, future, expected, span)?;
         self.semantics
             .resolve_call(expression, PendingResolvedCall::ManagedInstances { class });
+        Some(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn managed_component_call(
+        &mut self,
+        receiver: MethodReceiver,
+        type_arguments: &[crate::ast::TypeRef],
+        args: &[Expr],
+        expected: Option<Type>,
+        expression: ExprId,
+        span: Span,
+    ) -> Option<Type> {
+        if !self.managed_provider_available() {
+            self.errors.push(
+                Diagnostic::type_error(
+                    "Unity component lookup requires a Unity state provider",
+                    span,
+                )
+                .with_primary_label("declare the state as `state Unity [\"game.exe\"] { ... }`"),
+            );
+            return None;
+        }
+        let [type_argument] = type_arguments else {
+            self.error(
+                format!(
+                    "`component` expects 1 managed class type argument, found {}",
+                    type_arguments.len()
+                ),
+                span,
+            );
+            return None;
+        };
+        if !args.is_empty() {
+            self.error(
+                format!("`component` expects 0 arguments, found {}", args.len()),
+                span,
+            );
+            for argument in args {
+                self.expr(argument, None);
+            }
+            return None;
+        }
+        let selected = self.syntax_type(*type_argument);
+        let Type::Known(selected) = self.shallow_type(selected) else {
+            self.error(
+                "`component<T>` requires a declared managed class for `T`",
+                span,
+            );
+            return None;
+        };
+        let TypeKind::ManagedClass(class) = self.inference.type_store().kind(selected) else {
+            self.error(
+                "`component<T>` requires a declared managed class for `T`",
+                span,
+            );
+            return None;
+        };
+        let class = *class;
+        let reference = Type::Known(self.inference.type_store().id_for_managed_reference(class));
+        let result = Type::Result(self.inference.result_type(reference));
+        let result = self.expect_expression(expression, result, expected, span)?;
+        let Type::Result(result_id) = result else {
+            unreachable!("managed component calls produce Result values")
+        };
+        self.semantics.resolve_call(
+            expression,
+            PendingResolvedCall::ManagedComponent {
+                class,
+                result: result_id,
+                receiver: receiver.value,
+                receiver_type: receiver.ty,
+            },
+        );
         Some(result)
     }
 

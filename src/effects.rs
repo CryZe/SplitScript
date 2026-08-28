@@ -271,6 +271,12 @@ impl OperationAnalysis {
                         function: None,
                         standard_library_name: Some("snapshot"),
                     }),
+                    ResolvedCall::ManagedComponent { .. } => Some(AttachedProcessViolation {
+                        action: self.action,
+                        expression_span: span,
+                        function: None,
+                        standard_library_name: Some("component"),
+                    }),
                     ResolvedCall::ManagedInstances { .. } => Some(AttachedProcessViolation {
                         action: self.action,
                         expression_span: span,
@@ -413,6 +419,7 @@ impl OperationAnalysis {
                     | ResolvedCall::IteratorItem { .. }
                     | ResolvedCall::ResultSuccess { .. }
                     | ResolvedCall::ManagedSnapshot { .. }
+                    | ResolvedCall::ManagedComponent { .. }
                     | ResolvedCall::ManagedInstances { .. } => (false, None, None),
                 };
                 requires_state_snapshots.then_some(StateSnapshotViolation {
@@ -530,6 +537,7 @@ fn call_identity(
             | ResolvedCall::ResultSuccess { .. },
         ) => (None, None),
         Some(ResolvedCall::ManagedSnapshot { .. }) => (None, Some("snapshot")),
+        Some(ResolvedCall::ManagedComponent { .. }) => (None, Some("component")),
         Some(ResolvedCall::ManagedInstances { .. }) => (None, Some("instances")),
         None => (None, Some(dynamic_name)),
     }

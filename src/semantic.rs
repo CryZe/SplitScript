@@ -110,6 +110,16 @@ pub enum ResolvedCall {
         receiver: ResolvedReceiver,
         receiver_type: TypeId,
     },
+    /// Schema-derived lookup of one declared managed class on a native Unity
+    /// GameObject. Native hierarchy traversal remains source-defined; this
+    /// call supplies the class's bound runtime header and nominal `T.Ref!`
+    /// result type.
+    ManagedComponent {
+        class: ManagedClassId,
+        result: crate::ast::ResultTypeId,
+        receiver: ResolvedReceiver,
+        receiver_type: TypeId,
+    },
     /// Compiler-provided cooperative discovery of every live instance of a
     /// declared managed class.
     ManagedInstances {
@@ -237,7 +247,9 @@ impl ResolvedCall {
         match self {
             Self::UserMethod { receiver, .. } => Some(receiver),
             Self::StandardLibrary { receiver, .. } => receiver.as_ref(),
-            Self::ManagedSnapshot { receiver, .. } => Some(receiver),
+            Self::ManagedSnapshot { receiver, .. } | Self::ManagedComponent { receiver, .. } => {
+                Some(receiver)
+            }
             Self::UserFunction { .. }
             | Self::ManagedInstances { .. }
             | Self::ResultError { .. }
@@ -1264,6 +1276,12 @@ pub(crate) enum PendingResolvedCall {
         receiver: ResolvedReceiver,
         receiver_type: Type,
     },
+    ManagedComponent {
+        class: ManagedClassId,
+        result: crate::ast::ResultTypeId,
+        receiver: ResolvedReceiver,
+        receiver_type: Type,
+    },
     ManagedInstances {
         class: ManagedClassId,
     },
@@ -1368,7 +1386,8 @@ impl SemanticBuilder {
                 | PendingResolvedCall::OptionSome { .. }
                 | PendingResolvedCall::IteratorItem { .. }
                 | PendingResolvedCall::ResultSuccess { .. }
-                | PendingResolvedCall::ManagedSnapshot { .. },
+                | PendingResolvedCall::ManagedSnapshot { .. }
+                | PendingResolvedCall::ManagedComponent { .. },
             )
             | None => false,
         }
@@ -1650,6 +1669,7 @@ impl SemanticBuilder {
             PendingResolvedCall::UserFunction { .. }
             | PendingResolvedCall::UserMethod { .. }
             | PendingResolvedCall::ManagedSnapshot { .. }
+            | PendingResolvedCall::ManagedComponent { .. }
             | PendingResolvedCall::ManagedInstances { .. }
             | PendingResolvedCall::ResultError { .. }
             | PendingResolvedCall::OptionSome { .. }
@@ -1804,6 +1824,17 @@ impl SemanticBuilder {
                     receiver,
                     receiver_type,
                 } => ResolvedCall::ManagedSnapshot {
+                    class,
+                    result: resolved_result_layout(resolve(Type::Result(result)), &types),
+                    receiver,
+                    receiver_type: types.intern_inferred(resolve(receiver_type), constructed),
+                },
+                PendingResolvedCall::ManagedComponent {
+                    class,
+                    result,
+                    receiver,
+                    receiver_type,
+                } => ResolvedCall::ManagedComponent {
                     class,
                     result: resolved_result_layout(resolve(Type::Result(result)), &types),
                     receiver,

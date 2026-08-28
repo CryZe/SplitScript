@@ -27,7 +27,7 @@ use crate::{
     semantic::ResolvedCall,
     stdlib::{
         ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibItemId, StdlibNamespace,
-        StdlibSymbolId, StdlibTypeConstructorId, TypeRef,
+        StdlibSymbolId, StdlibTypeConstructorId, StdlibTypeId, TypeRef,
     },
     stdlib_semantic::StandardLibrarySemanticExt,
     types::TypeKind,
@@ -2012,6 +2012,23 @@ fn add_inferred_methods(
     generic_constraints: &[StdlibCapabilityId],
     standard_library: &StandardLibrary,
 ) {
+    if matches!(receiver, TypeKind::Standard(StdlibTypeId::UnityGameObject)) {
+        builder.add(CompletionItem {
+            label: "component".to_owned(),
+            kind: CompletionKind::Method,
+            detail: Some("UnityGameObject.component<T>() -> T.Ref!".to_owned()),
+            documentation: Some(
+                "Finds the managed component whose runtime class matches the declared Unity schema class `T`."
+                    .to_owned(),
+            ),
+            documentation_uri: Some(symbol_uri(
+                StdlibSymbolId::Type(StdlibTypeId::UnityGameObject),
+                standard_library,
+            )),
+            insert_text: "component<${1:Class}>()".to_owned(),
+            is_snippet: true,
+        });
+    }
     let methods = standard_library
         .methods_for_type(receiver)
         .into_iter()
@@ -2982,6 +2999,37 @@ onAttach {
                 .as_deref()
                 .is_some_and(|documentation| documentation.contains("Cooperatively"))
         );
+    }
+
+    #[test]
+    fn completes_typed_components_on_unity_game_objects() {
+        let source = r#"
+image "Assembly-CSharp" {
+    class PlayerController {
+        i32 health;
+    }
+}
+state Unity ["game.exe"] {}
+whileAttached {
+    let scene = unity.scenes.active() else return
+    let player = scene.find("World/Player") else return
+    player.comp
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let offset = source.find("player.comp").unwrap() + "player.comp".len();
+        let completions = database.completions(offset).unwrap();
+        let component = completions
+            .items
+            .iter()
+            .find(|item| item.label == "component")
+            .expect("Unity GameObjects should complete `component<T>()`");
+        assert_eq!(component.kind, CompletionKind::Method);
+        assert_eq!(
+            component.detail.as_deref(),
+            Some("UnityGameObject.component<T>() -> T.Ref!")
+        );
+        assert_eq!(component.insert_text, "component<${1:Class}>()");
     }
 
     #[test]

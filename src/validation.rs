@@ -507,6 +507,7 @@ fn validate_async_recursion(
                         }
                     }
                     ResolvedCall::ManagedSnapshot { .. }
+                    | ResolvedCall::ManagedComponent { .. }
                     | ResolvedCall::ManagedInstances { .. } => {}
                     ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
@@ -781,7 +782,7 @@ fn validate_suspending_calls(
                     .unwrap_or_else(|| "function".to_owned());
                 Some((effects.function(*function).suspension, name))
             }
-            ResolvedCall::ManagedSnapshot { .. } => None,
+            ResolvedCall::ManagedSnapshot { .. } | ResolvedCall::ManagedComponent { .. } => None,
             ResolvedCall::ManagedInstances { .. } => Some((
                 crate::stdlib::SuspensionKind::Suspends,
                 "instances".to_owned(),
@@ -800,7 +801,7 @@ fn validate_suspending_calls(
         match call {
             ResolvedCall::UserFunction { .. } | ResolvedCall::UserMethod { .. } => true,
             ResolvedCall::StandardLibrary { .. } => true,
-            ResolvedCall::ManagedSnapshot { .. } => false,
+            ResolvedCall::ManagedSnapshot { .. } | ResolvedCall::ManagedComponent { .. } => false,
             ResolvedCall::ManagedInstances { .. } => true,
             ResolvedCall::ResultError { .. }
             | ResolvedCall::OptionSome { .. }
@@ -1977,6 +1978,7 @@ fn validate_function_instances(
         }),
         ResolvedCall::StandardLibrary { .. }
         | ResolvedCall::ManagedSnapshot { .. }
+        | ResolvedCall::ManagedComponent { .. }
         | ResolvedCall::ManagedInstances { .. }
         | ResolvedCall::ResultError { .. }
         | ResolvedCall::OptionSome { .. }

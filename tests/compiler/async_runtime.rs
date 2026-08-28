@@ -922,11 +922,12 @@ fn unity_context_discovers_and_snapshots_scenes() {
             activeScene = unity.scenes.active();
             loadedScenes = unity.scenes.loaded();
             persistentScene = unity.scenes.persistent();
+            playerName = unity.scenes.active()?.find("World/Player")?.name();
         }
 
         whileAttached {
             if !current.loadedScenes.isEmpty() {
-                print(`{current.activeScene.index}:{current.activeScene.name}:{current.loadedScenes[0].name}:{current.persistentScene.name}`)
+                print(`{current.activeScene.index}:{current.activeScene.name}:{current.loadedScenes[0].name}:{current.persistentScene.name}:{current.playerName}`)
             }
         }
     "#;
@@ -950,6 +951,16 @@ fn unity_context_discovers_and_snapshots_scenes() {
     let loaded_scene_table = 0x4000u64;
     let scene_path = 0x5000u64;
     let persistent_path = 0x5100u64;
+    let root_node = 0x5200u64;
+    let world_transform = 0x5300u64;
+    let world_object = 0x5400u64;
+    let world_native_name = 0x5500u64;
+    let world_name = 0x5600u64;
+    let children = 0x5700u64;
+    let player_transform = 0x5800u64;
+    let player_object = 0x5900u64;
+    let player_native_name = 0x5a00u64;
+    let player_name = 0x5b00u64;
     let mut manager = vec![0; 0x120];
     manager[0x18..0x1c].copy_from_slice(&1u32.to_le_bytes());
     manager[0x28..0x30].copy_from_slice(&loaded_scene_table.to_le_bytes());
@@ -959,12 +970,31 @@ fn unity_context_discovers_and_snapshots_scenes() {
     let mut scene = vec![0; 0xa0];
     scene[0x10..0x18].copy_from_slice(&scene_path.to_le_bytes());
     scene[0x98..0x9c].copy_from_slice(&(-1i32).to_le_bytes());
+    scene.resize(0xb8, 0);
+    scene[0xb0..0xb8].copy_from_slice(&root_node.to_le_bytes());
     let mut path = vec![0; 128];
     let path_text = b"Assets/Scenes/Forest.unity";
     path[..path_text.len()].copy_from_slice(path_text);
     let mut persistent_path_bytes = vec![0; 128];
     let persistent_path_text = b"Assets/Scenes/DontDestroyOnLoad.unity";
     persistent_path_bytes[..persistent_path_text.len()].copy_from_slice(persistent_path_text);
+    let mut root_node_bytes = vec![0; 24];
+    root_node_bytes[..8].copy_from_slice(&root_node.to_le_bytes());
+    root_node_bytes[16..24].copy_from_slice(&world_transform.to_le_bytes());
+    let mut world_transform_bytes = vec![0; 0x88];
+    world_transform_bytes[0x30..0x38].copy_from_slice(&world_object.to_le_bytes());
+    world_transform_bytes[0x70..0x78].copy_from_slice(&children.to_le_bytes());
+    world_transform_bytes[0x80..0x88].copy_from_slice(&1u64.to_le_bytes());
+    let mut world_object_bytes = vec![0; 0x68];
+    world_object_bytes[0x60..0x68].copy_from_slice(&world_native_name.to_le_bytes());
+    let mut player_transform_bytes = vec![0; 0x88];
+    player_transform_bytes[0x30..0x38].copy_from_slice(&player_object.to_le_bytes());
+    let mut player_object_bytes = vec![0; 0x68];
+    player_object_bytes[0x60..0x68].copy_from_slice(&player_native_name.to_le_bytes());
+    let mut world_name_bytes = vec![0; 128];
+    world_name_bytes[..5].copy_from_slice(b"World");
+    let mut player_name_bytes = vec![0; 128];
+    player_name_bytes[..6].copy_from_slice(b"Player");
 
     store.data_mut().memory_regions = vec![
         (0x1000, unity_player),
@@ -974,6 +1004,16 @@ fn unity_context_discovers_and_snapshots_scenes() {
         (loaded_scene_table, active_scene.to_le_bytes().to_vec()),
         (scene_path, path),
         (persistent_path, persistent_path_bytes),
+        (root_node, root_node_bytes),
+        (world_transform, world_transform_bytes),
+        (world_object, world_object_bytes),
+        (world_native_name, world_name.to_le_bytes().to_vec()),
+        (world_name, world_name_bytes),
+        (children, player_transform.to_le_bytes().to_vec()),
+        (player_transform, player_transform_bytes),
+        (player_object, player_object_bytes),
+        (player_native_name, player_name.to_le_bytes().to_vec()),
+        (player_name, player_name_bytes),
     ];
 
     let update = instance
@@ -988,7 +1028,7 @@ fn unity_context_discovers_and_snapshots_scenes() {
             .data()
             .messages
             .iter()
-            .any(|message| message == "-1:Forest:Forest:DontDestroyOnLoad"),
+            .any(|message| message == "-1:Forest:Forest:DontDestroyOnLoad:Player"),
         "scene snapshots should preserve signed indices and derived names: {:?}",
         store.data().messages,
     );

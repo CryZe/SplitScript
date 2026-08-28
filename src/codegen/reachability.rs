@@ -301,6 +301,7 @@ impl Reachability {
                 let function = match target {
                     wasm_ir::CallTarget::UserFunction { function }
                     | wasm_ir::CallTarget::UserMethod { function, .. } => Some(function.clone()),
+                    wasm_ir::CallTarget::ManagedComponent { helper, .. } => Some(helper.clone()),
                     wasm_ir::CallTarget::LibraryOverload { .. } => {
                         wasm_ir::resolve_library_overload(
                             target,
@@ -524,6 +525,14 @@ impl Reachability {
                         }
                         wasm_ir::CallTarget::ManagedSnapshot { receiver_type, .. } => {
                             type_roots.push(specialize(*receiver_type));
+                        }
+                        wasm_ir::CallTarget::ManagedComponent {
+                            receiver_type,
+                            helper_result,
+                            ..
+                        } => {
+                            type_roots.push(specialize(*receiver_type));
+                            type_roots.push(specialize(*helper_result));
                         }
                         wasm_ir::CallTarget::UserFunction { .. }
                         | wasm_ir::CallTarget::ManagedInstances { .. }
@@ -1036,6 +1045,7 @@ fn constant_roots(
         wasm_ir::ExpressionKind::Call { target, .. } => match target {
             wasm_ir::CallTarget::UserMethod { receiver, .. }
             | wasm_ir::CallTarget::ManagedSnapshot { receiver, .. }
+            | wasm_ir::CallTarget::ManagedComponent { receiver, .. }
             | wasm_ir::CallTarget::CapabilityRequirement { receiver, .. }
             | wasm_ir::CallTarget::DefaultDisplay { receiver, .. } => Some(receiver),
             wasm_ir::CallTarget::Intrinsic { receiver, .. }

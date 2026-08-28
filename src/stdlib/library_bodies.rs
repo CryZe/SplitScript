@@ -520,6 +520,7 @@ pub(crate) fn provider_context_field_name(context: usize) -> String {
 fn managed_instance_classes(program: &Program) -> std::collections::HashSet<ManagedClassId> {
     struct Collector<'a> {
         classes: &'a [ManagedClassDecl],
+        program: &'a Program,
         found: std::collections::HashSet<ManagedClassId>,
     }
 
@@ -527,14 +528,28 @@ fn managed_instance_classes(program: &Program) -> std::collections::HashSet<Mana
         fn visit_expr(&mut self, expression: &'ast Expr) {
             if let ExprKind::Call {
                 callee,
-                receiver: None,
+                receiver,
+                type_arguments,
                 ..
             } = &expression.kind
-                && let [class_name, method] = callee.as_slice()
-                && method == "instances"
-                && let Some(class) = self.classes.iter().find(|class| class.name == *class_name)
             {
-                self.found.insert(class.id);
+                if receiver.is_none()
+                    && let [class_name, method] = callee.as_slice()
+                    && method == "instances"
+                    && let Some(class) = self.classes.iter().find(|class| class.name == *class_name)
+                {
+                    self.found.insert(class.id);
+                }
+                if (receiver.is_some() || callee.len() > 1)
+                    && callee.last().is_some_and(|method| method == "component")
+                    && let [crate::ast::TypeRef::Named(name)] = type_arguments.as_slice()
+                    && let Some(class) = self
+                        .classes
+                        .iter()
+                        .find(|class| class.name == self.program.type_name(*name))
+                {
+                    self.found.insert(class.id);
+                }
             }
             visit::walk_expr(self, expression);
         }
@@ -547,6 +562,7 @@ fn managed_instance_classes(program: &Program) -> std::collections::HashSet<Mana
         .collect::<Vec<_>>();
     let mut collector = Collector {
         classes: &classes,
+        program,
         found: std::collections::HashSet::new(),
     };
     collector.visit_program(program);
@@ -793,6 +809,38 @@ mod tests {
         assert!(source.contains("let __provider_context_0 = await __prepare_unity_context()"));
         assert!(source.contains("__provider_context_0: UnityContext"));
         assert!(source.contains(MANAGED_POINTER_SIZE_FIELD));
+    }
+
+    #[test]
+    fn typed_scene_components_prepare_only_the_selected_class_header() {
+        let program = crate::parse(
+            r#"
+                image "Assembly-CSharp" {
+                    class Player {}
+                    class Enemy {}
+                }
+                state Unity ["game.exe"] {}
+                fn player(object: UnityGameObject) {
+                    return object.component<Player>()
+                }
+            "#,
+        )
+        .expect("the typed component fixture should parse")
+        .into_syntax();
+
+        let source = managed_preparation_source(&program, "__prepare", "", None, &[]);
+        let classes = program.managed_class_declarations();
+        let player = classes
+            .iter()
+            .find(|class| class.name == "Player")
+            .expect("Player class");
+        let enemy = classes
+            .iter()
+            .find(|class| class.name == "Enemy")
+            .expect("Enemy class");
+
+        assert!(source.contains(&managed_instance_header_name(player.id.index())));
+        assert!(!source.contains(&managed_instance_header_name(enemy.id.index())));
     }
 
     #[test]

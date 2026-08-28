@@ -34,10 +34,12 @@ whileAttached {
 ```
 
 The native provider uses an identity attachment: the host's attached-process
-handle already is the `Process` representation. Transformed providers such as
-GBA instead name an ordinary standard-library function that asynchronously
-constructs a different nominal value. This distinction is catalog metadata,
-not a provider-name switch in the parser, checker, or runtime lifecycle.
+handle already is the `Process` representation. Emulator-backed providers
+instead name an ordinary standard-library function that asynchronously
+constructs a different nominal value. The available providers are [`GBA`],
+[`PS1`], [`PS2`], [`SMS`], [`Genesis`], [`GCN`], and [`Wii`]. This distinction
+is catalog metadata, not a provider-name switch in the parser, checker, or
+runtime lifecycle.
 
 ## GBA emulator support
 
@@ -108,7 +110,7 @@ state PS2 {
 Emulator translation is selected by the direct-read intrinsic's central
 provider contract. Ordinary method calls and generated state polling consume
 that same contract, so adding an emulator no longer requires a provider-name or
-GBA-specific branch in either code-generation path. Only the target address
+provider-specific branch in either code-generation path. Only the target address
 translation remains a Rust runtime helper; attachment and discovery policy stay
 in `stdlib/standard.split` as ordinary checked SplitScript source.
 

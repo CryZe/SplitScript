@@ -2514,6 +2514,60 @@ mod tests {
                 "{query}"
             );
         }
+
+        for (query, expected_provider_uris) in [
+            (
+                "Dolphin",
+                &[
+                    "/stdlib/state-providers/GCN.md",
+                    "/stdlib/state-providers/Wii.md",
+                ][..],
+            ),
+            (
+                "Fusion",
+                &[
+                    "/stdlib/state-providers/SMS.md",
+                    "/stdlib/state-providers/Genesis.md",
+                ][..],
+            ),
+            ("PCSX2", &["/stdlib/state-providers/PS2.md"][..]),
+            ("DuckStation", &["/stdlib/state-providers/PS1.md"][..]),
+            ("mGBA", &["/stdlib/state-providers/GBA.md"][..]),
+            (
+                "RetroArch",
+                &[
+                    "/stdlib/state-providers/GBA.md",
+                    "/stdlib/state-providers/PS1.md",
+                    "/stdlib/state-providers/PS2.md",
+                    "/stdlib/state-providers/SMS.md",
+                    "/stdlib/state-providers/Genesis.md",
+                    "/stdlib/state-providers/GCN.md",
+                    "/stdlib/state-providers/Wii.md",
+                ][..],
+            ),
+            (
+                "DeepPointer",
+                &[
+                    "/stdlib/state-providers/GBA.md",
+                    "/stdlib/state-providers/PS1.md",
+                    "/stdlib/state-providers/PS2.md",
+                    "/stdlib/state-providers/SMS.md",
+                    "/stdlib/state-providers/Genesis.md",
+                    "/stdlib/state-providers/GCN.md",
+                    "/stdlib/state-providers/Wii.md",
+                ][..],
+            ),
+        ] {
+            let results = reference.search(query);
+            for expected_uri in expected_provider_uris {
+                assert!(
+                    results
+                        .iter()
+                        .any(|entry| entry.uri.as_str() == *expected_uri),
+                    "`{query}` did not surface `{expected_uri}`; got {results:#?}"
+                );
+            }
+        }
     }
 
     #[test]

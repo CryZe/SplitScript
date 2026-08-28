@@ -40,14 +40,26 @@ contains alternate names for one attachment, not several processes to attach
 to concurrently. Build-specific addresses belong in named layouts selected
 from [`onAttach`], rather than in multiple ASL-style state blocks.
 
-Typed emulator support replaces the native process root. For example, a GBA
-autosplitter declares `state GBA` and reads emulated addresses through `gba`:
+Typed emulator support replaces the native process root. Choose the provider
+for the emulated console: [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`],
+[`GCN`], or [`Wii`]. Each provider owns the supported emulator process names,
+memory discovery, guest-address translation, byte order, and attachment
+lifecycle. State fields therefore use original console addresses instead of
+ASL `DeepPointer` mappings or host-memory byte swapping. The provider also
+introduces a matching read root (`gba`, `ps1`, `ps2`, `sms`, `genesis`, `gcn`,
+or `wii`) for dynamically computed addresses.
+
+For example, a GBA autosplitter reads original GBA hardware addresses directly:
 
 ```splitscript
 state GBA {
     room: u8 at 0x03000010;
 }
 ```
+
+Search the reference for the console or emulator name, such as `Dolphin`,
+`Fusion`, `mGBA`, `PCSX2`, or `RetroArch`, to find the corresponding provider
+and its exact supported hosts.
 
 The state declaration also defines the transactional snapshots. After the
 first complete poll, [`current`] contains the latest accepted values and [`old`]

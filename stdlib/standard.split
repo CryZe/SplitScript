@@ -117,6 +117,9 @@ stateProvider Unity as process {
 ///
 /// The provider discovers emulated EWRAM and IWRAM and exposes original GBA
 /// hardware addresses through the read-only value introduced by [`GBA`].
+/// It owns discovery for VisualBoyAdvance and VBA-M, mGBA, NO$GBA, Mednafen,
+/// supported RetroArch cores, and mGBA-based BizHawk. Declare guest addresses
+/// directly instead of recreating emulator-specific `DeepPointer` mappings.
 ///
 /// # Example
 ///
@@ -146,6 +149,8 @@ stateProvider GBA as gba {
 /// The provider discovers the emulator's main RAM mapping and exposes original
 /// PS2 addresses through the read-only `ps2` value of type [`PS2Emulator`].
 /// PCSX2 and 64-bit RetroArch using `pcsx2_libretro.dll` are supported.
+/// Declare guest addresses directly instead of recreating emulator-specific
+/// `DeepPointer` mappings.
 ///
 /// # Example
 ///
@@ -172,6 +177,9 @@ stateProvider PS2 as ps2 {
 ///
 /// The provider discovers emulated main RAM and exposes original PlayStation
 /// addresses through the read-only `ps1` value of type [`PS1Emulator`].
+/// It owns discovery for ePSXe, pSX, DuckStation, Mednafen, PCSX-Redux, XEBRA,
+/// and supported RetroArch cores. Declare guest addresses directly instead of
+/// recreating emulator-specific `DeepPointer` mappings.
 ///
 /// # Example
 ///
@@ -200,6 +208,9 @@ stateProvider PS1 as ps1 {
 ///
 /// The provider exposes original 16-bit console addresses through the read-only
 /// `sms` value of type [`SMSEmulator`].
+/// It owns discovery for Fusion, BlastEm, Mednafen, and supported RetroArch
+/// cores. Declare guest addresses directly instead of recreating
+/// emulator-specific `DeepPointer` mappings.
 ///
 /// # Example
 ///
@@ -226,6 +237,10 @@ stateProvider SMS as sms {
 /// Genesis offsets through the read-only `genesis` value of type
 /// [`GenesisEmulator`]. It normalizes the word-swapped storage used by several
 /// emulators before decoding values in the console's big-endian byte order.
+/// It owns discovery for Fusion, Gens, BlastEm, Sega Game Room, Sega Genesis
+/// Classics, and supported RetroArch cores. Declare guest offsets directly
+/// instead of recreating emulator-specific `DeepPointer` mappings or manual
+/// byte-order correction.
 ///
 /// # Example
 ///
@@ -254,6 +269,9 @@ stateProvider Genesis as genesis {
 /// original GameCube addresses through the read-only `gcn` value of type
 /// [`GCNEmulator`]. Multi-byte values are decoded using the console's
 /// big-endian byte order.
+/// It owns discovery for Dolphin and 64-bit RetroArch using
+/// `dolphin_libretro.dll`. Declare guest addresses directly instead of
+/// recreating Dolphin mappings, `DeepPointer` chains, or byte swapping.
 ///
 /// # Example
 ///
@@ -277,6 +295,10 @@ stateProvider GCN as gcn {
 /// The provider discovers MEM1 and MEM2 and exposes original Wii addresses
 /// through the read-only `wii` value of type [`WiiEmulator`]. Multi-byte
 /// values use the console's big-endian byte order.
+/// It owns discovery for Dolphin and 64-bit RetroArch using
+/// `dolphin_libretro.dll`. Declare MEM1 or MEM2 guest addresses directly
+/// instead of recreating Dolphin mappings, `DeepPointer` chains, or byte
+/// swapping.
 ///
 /// # Example
 ///

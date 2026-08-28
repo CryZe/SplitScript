@@ -329,15 +329,17 @@ or assumptions tied to one generated corpus.
 - [ ] Add a higher-level bounded managed-string declaration after its source
   design is approved. Keep examples and diagnostics synchronized with that
   facility rather than documenting raw traversal as a workaround.
-- [ ] Make emulator providers equally difficult to miss. The latest exercise
-  manually searched Dolphin mappings and byte-swapped GameCube values, manually
-  followed Fusion RAM, and kept only one RetroArch layout even though `state
-  GCN`, `state Wii`, `state Genesis`, `state SMS`, `state PS1`, and `state PS2`
-  own those concerns. Add an ASL-emulator migration index keyed by emulator,
-  console, core, and legacy helper names; make searches such as `Dolphin`,
-  `Fusion`, `RetroArch`, and `DeepPointer` surface provider declarations, not
-  merely their backing record types. Decide with the user whether native states
-  matching known provider processes merit a non-noisy contextual suggestion.
+- [x] Make emulator providers equally difficult to miss. General state and
+  porting documentation now links all seven typed providers instead of using
+  GBA as the whole model. Provider pages own their emulator, core, address,
+  byte-order, and legacy-`DeepPointer` vocabulary; the ASL/Rust migration index
+  covers every provider; and reference-search tests require `Dolphin`, `Fusion`,
+  `RetroArch`, `PCSX2`, `DuckStation`, `mGBA`, and `DeepPointer` to surface the
+  corresponding provider declarations rather than only backing record types.
+- [ ] Decide with the user whether a native state whose process candidates all
+  match a known typed emulator provider merits a non-noisy contextual
+  suggestion. Do not turn cross-platform executable naming into a warning, and
+  do not prescribe a diagnostic until its false-positive policy is agreed.
 - [x] Make `setTickRate` document the complete polling policy in its own page:
   the default 120 Hz attached and 1 Hz detached rates, when those lifecycle
   values are applied, how a top-level `tickRate` declaration overrides either

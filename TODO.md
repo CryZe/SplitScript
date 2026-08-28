@@ -338,7 +338,7 @@ or assumptions tied to one generated corpus.
   `Fusion`, `RetroArch`, and `DeepPointer` surface provider declarations, not
   merely their backing record types. Decide with the user whether native states
   matching known provider processes merit a non-noisy contextual suggestion.
-- [ ] Make `setTickRate` document the complete polling policy in its own page:
+- [x] Make `setTickRate` document the complete polling policy in its own page:
   the default 120 Hz attached and 1 Hz detached rates, when those lifecycle
   values are applied, how a top-level `tickRate` declaration overrides either
   default, and how a dynamic call persists only until another call or the next

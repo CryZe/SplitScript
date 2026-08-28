@@ -2248,6 +2248,27 @@ split { return layout == StateLayout.Steam }
     }
 
     #[test]
+    fn dynamic_tick_rate_hover_explains_the_declarative_lifecycle_policy() {
+        let source = "state \"game.exe\" {}\nonAttach { setTickRate(30) }";
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(source.find("setTickRate").unwrap() + 2)
+            .unwrap()
+            .expect("setTickRate hover");
+
+        assert!(
+            hover
+                .markdown
+                .contains("120 Hz immediately after attaching")
+        );
+        assert!(hover.markdown.contains("1 Hz during module startup"));
+        assert!(hover.markdown.contains("top-level `tickRate` declaration"));
+        assert!(hover.markdown.contains("next attachment transition"));
+        assert!(hover.markdown.contains("setTickRate(30)"));
+        assert!(hover.documentation_uri.is_some());
+    }
+
+    #[test]
     fn timer_lifecycle_hover_describes_detached_sampling() {
         let source = "state \"game.exe\" {}\nonStart {}\nonReset {}";
         let mut database = CompilerDatabase::new(source);

@@ -348,18 +348,26 @@ root {
 
     /// Changes the autosplitter tick rate.
     ///
-    /// The value is a frequency in updates per second. It takes effect for the
-    /// wait after the current update and remains active until another call or
-    /// attachment-state transition. Prefer the top-level [`tickRate`] policy for
-    /// stable attached and detached rates; this function is for temporary
-    /// dynamic changes.
+    /// The value is a frequency in updates per second. SplitScript normally
+    /// applies 120 Hz immediately after attaching, before [`onAttach`], and 1
+    /// Hz during module startup and immediately after detaching, before
+    /// [`onDetach`]. A top-level [`tickRate`] declaration changes those
+    /// lifecycle-owned defaults.
+    ///
+    /// This function instead changes the wait after the current update. Its
+    /// rate persists until another call or the next attachment transition,
+    /// when the corresponding declarative rate is reapplied. Use it only for a
+    /// genuinely temporary dynamic adjustment.
     ///
     /// # Example
     ///
-    /// Poll more frequently
+    /// Temporarily reduce polling during module discovery
     ///
     /// ```splitscript
+    /// setTickRate(30)
+    /// let assets = await process.module("assets.dll")
     /// setTickRate(120)
+    /// print(`Assets loaded at {assets.address}`)
     /// ```
     @intrinsic(RuntimeSetTickRate)
     fn setTickRate<T: Numeric>(

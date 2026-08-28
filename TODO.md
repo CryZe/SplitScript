@@ -20,6 +20,9 @@ General rules:
 - Drive language and standard-library growth from reviewed, faithful ports.
 - Prefer one reusable typed abstraction over compatibility aliases or
   game-specific compiler branches.
+- Bring language syntax, semantics, and public standard-library API choices to
+  the user before implementation. Porting evidence should frame the decision
+  and possible designs, not silently choose one.
 - Keep ordinary library behavior in `stdlib/standard.split`; reserve Rust for
   representations, validated intrinsics, runtime helpers, and ABI boundaries.
 - Add compiler, runtime, formatter, and editor coverage in the same change when
@@ -147,7 +150,11 @@ to inference or code generation.
   generate high-level bindings and reads from the source schema. Replace the
   public split between `UnityModule`/`UnityClass` and
   `MonoModule`/`MonoClass` where it no longer expresses a real semantic
-  difference; retain a deliberately low-level dynamic escape hatch.
+  difference. Make the existing manual runtime/image/class/offset traversal
+  private when it is needed to implement providers and generated bindings, and
+  remove it when it is unused. Do not preserve a public dynamic escape hatch by
+  default: introduce one only after a representative schema limitation proves
+  its need and its source design has been approved.
 - [x] Make Unity an attachment/state provider with an automatic form and
   explicit backend/version forms, including `state Unity [...]`,
   `state Unity.il2cpp(2020) [...]`, and `state Unity.mono(...) [...]`.
@@ -241,223 +248,107 @@ to inference or code generation.
 - [ ] Generate complete Unity reference documentation and migration guidance,
   including schema declarations, layout refinement, live references versus
   snapshots, failure behavior, allocation behavior, Mono/IL2CPP selection, and
-  the low-level escape hatch.
+  the private implementation boundary. Public documentation must not present
+  backend metadata traversal as an alternative workflow.
 
 ## P0 — make docs-first ASL porting semantically reliable
 
-The fresh docs-only campaign at compiler revision `87d3650` produced 75
-compiling `.split` files across 39 entries marked ported and 34 marked
-ported-limited, plus 20 blocked and 3 source-missing entries. A clean compile
-did not establish a faithful port: every native output used an extensionless
-Windows process name, none used named state layouts, and several reports
-declared existing APIs missing. Treat this campaign as discoverability and
-semantic-review evidence, not as a conformance corpus.
+The latest clean-folder exercise had only the current compiler and legacy ASL
+inputs. It produced 52 compiler-valid ports or partial ports across 53 reviewed
+scripts and learned the language exclusively through `splitc docs`. Exact
+Windows executable names and named layouts were found this time, demonstrating
+that the earlier documentation work helped. Compilation still hid substantial
+semantic drift: every Unity port combined `state Unity` with manual runtime and
+metadata discovery, and emulator ports manually rediscovered mappings and byte
+order despite matching typed providers. Treat these silent canonical-API misses
+as higher-risk evidence than an explicit compile error. The external exercise
+directory is disposable evidence, not a durable roadmap dependency; retain the
+actionable conclusions and minimized in-tree regression cases instead of paths
+or assumptions tied to one generated corpus.
 
 ### Turn every reported blocker into an actionable product outcome
 
-- [x] Extend the campaign behavior ledger with the first high-risk tranche
-  against the ASL sources.
-  [`docs/PORTING_CAMPAIGN_AUDIT.md`](docs/PORTING_CAMPAIGN_AUDIT.md)
-  records exact-name attachment, alternate process names, named layouts,
-  polling rate, timer state, managed strings, changed timer accumulation, and
-  the remaining Unity scene and lifecycle questions for Arietta of Spirits,
-  TUNIC, A Proof of Concept, Aim Climb, and 25 To Life. The audit confirmed the
-  existing facilities together with a compiler probe; it did not treat clean
-  compilation as fidelity or choose APIs for unresolved gaps.
-- [x] Reclassify AoE2DE's aggregate blocker using its source. PE file versions,
-  named layouts, timer state, and optional split index already cover most of
-  the script. The residual host requirements are configured segment count and
-  exact ordered reset notification; unknown-version fallback remains an
-  explicit port policy choice rather than a compiler limitation.
-- [x] Turn campaign feedback into targeted, minimized reproducers rather than
-  exhaustively auditing every generated port. Classify each reported friction
-  point as a discoverability or guidance failure around an existing facility, a
-  compiler or diagnostic bug, a genuine language/library gap, or a host-runtime
-  gap. An existing implementation does not invalidate the report: record why
-  the intended route was missed and improve documentation, search, completion,
-  diagnostics, or API ergonomics as appropriate. Inspect the corresponding ASL
-  and `.split` files only when the report does not establish the intended
-  behavior or when a clean compile may hide a semantic mismatch. The known
-  high-risk examples include omitted
-  `.exe` identities and named layouts, dropped `refreshRate`, incorrect
-  `ulong` narrowing, missed fixed/growable array operations, and manual managed
-  string decoding. The focused audit now records exact-name attachment and
-  named layouts as discoverability failures, maps `refreshRate` to `tickRate`,
-  preserves `ulong` state reads as `u64` while isolating the exact Duration
-  conversion question, validates fixed and growable array patterns, and
-  separates managed-string decoding from the genuine managed-collection gap.
-- [ ] Follow through on entries reported as blocked before designing adjacent
-  host work, using a focused source comparison and compiler probe rather than a
-  full-file audit. Every report must produce a concrete product outcome even
-  when the required feature already exists: strengthen its canonical docs and
-  search path, add contextual editor/compiler guidance, improve the API, or
-  record a genuine language/runtime boundary. Do not close an item merely by
-  relabeling the porter's conclusion as incorrect.
-  `timer.state()`, `timer.currentSplitIndex()`, game-time pause/resume,
-  `Module.fileVersion()` / `productVersion()`, process-name arrays, named
-  layouts, settings families, growable `[T]`, and Mono static-singleton paths
-  already cover parts of AoE2DE, Borderlands, TUNIC, and other reported
-  blockers. Their omission is evidence that those facilities were not led to
-  strongly enough. AER's report demonstrates that raw `MemoryPath` polling,
-  explicit `SetZeroOrNull` fallback, one `tickRate` declaration, and automatic
-  attachment cancellation cover its timer-critical loading behavior without a
-  managed-object bridge or dynamic watcher registration; its auxiliary sound
-  and modal UI remain fidelity-ledger omissions. Bzzzt's report likewise shows
-  that partitioned compile-time settings families preserve its 51
-  bounded keys and exceptional defaults, while `staticFieldPath` plus
-  `dereference` follows its replaceable `Main.instance` fields. Its family is
-  verbose under the current uniform-default rule, but it does not require
-  runtime settings registration. Assemble with Care's base/derived metadata is
-  also composable through `staticTable`, `field`, and `MemoryPath`; only its
-  loading-scene snapshot remains a timer-critical provider gap.
-  Crazy Machines exposed weak discovery of process-name arrays, named layouts,
-  `process.name()`, and `tickRate`; the generated state and layout documentation
-  now presents that complete composition, while live validation of the legacy
-  identities and offsets remains. Hades exposed both a guidance gap around an
-  address cursor plus `while` and a genuine ergonomic gap in retrying a group of
-  known module alternatives. Its two module names now compose through
-  `loadedModule` and the implemented whole-expression retry boundary, while
-  arbitrary future prefix matches remain a narrower host enumeration question.
-- [ ] Promote a small corrected subset to reviewed fixtures: one exact-name
-  native process, one process-name array, one multi-version named layout, one
-  timer-state/split-index script, one `tickRate` script, one managed-string or
-  Mono singleton path, and one genuinely unsupported host case. The first audit
-  tranche and AoE2DE review identify candidates across all of these categories;
-  correct and runtime-test them before promotion. Require an explicit behavior
-  ledger and live runtime test where the game is available.
+- [ ] Make managed schemas the one canonical public Unity workflow. Move
+  `Unity.mono`, `Unity.il2cpp`, `MonoModule` / `MonoImage` / `MonoClass`,
+  `UnityModule` / `UnityImage` / `UnityClass`, and raw managed field/static-table
+  traversal behind the trusted standard library where generated providers and
+  schema binders still need them; delete unused surface rather than keeping
+  compatibility aliases. Before retaining any public low-level escape hatch,
+  bring a concrete schema limitation and proposed source API back for approval.
+  A script using `state Unity` must not be led toward discovering the same
+  runtime again in `onAttach`.
+- [ ] Rebuild the Unity documentation journey around one complete schema-first
+  port: `state Unity`, `image`, namespace/class declarations, static and
+  instance roots, managed strings, layout dimensions, fallible paths, and
+  snapshots. Exact searches for `UnityASL`, `mono.Make<T>`, `mono.MakeString`,
+  `Unity.mono`, and conceptual queries such as “managed field” must reach this
+  workflow rather than a low-level class API. Add contextual migration
+  diagnostics for old helper spellings and for redundant manual discovery in a
+  Unity-provider script, with fixes only where the rewrite is mechanically
+  sound.
+- [ ] Make emulator providers equally difficult to miss. The latest exercise
+  manually searched Dolphin mappings and byte-swapped GameCube values, manually
+  followed Fusion RAM, and kept only one RetroArch layout even though `state
+  GCN`, `state Wii`, `state Genesis`, `state SMS`, `state PS1`, and `state PS2`
+  own those concerns. Add an ASL-emulator migration index keyed by emulator,
+  console, core, and legacy helper names; make searches such as `Dolphin`,
+  `Fusion`, `RetroArch`, and `DeepPointer` surface provider declarations, not
+  merely their backing record types. Decide with the user whether native states
+  matching known provider processes merit a non-noisy contextual suggestion.
+- [ ] Make `setTickRate` document the complete polling policy in its own page:
+  the default 120 Hz attached and 1 Hz detached rates, when those lifecycle
+  values are applied, how a top-level `tickRate` declaration overrides either
+  default, and how a dynamic call persists only until another call or the next
+  attachment transition. Link both directions and replace the misleading
+  `setTickRate(120)` example with one that demonstrates a genuinely temporary
+  dynamic adjustment. Keep `refreshRate` migration guidance pointed at the
+  declarative block.
+- [ ] Fix the confirmed unused bare-global inference failure. The current tree
+  still reports `cannot infer type variable ?76` at an unrelated `settings`
+  block for an unused `let pausedPath`. Anchor the primary diagnostic at the
+  declaration and preserve originating constraint/use sites as secondary
+  labels. Cover attachment- and attempt-scoped globals, unused declarations,
+  and dynamic `MemoryPath` values.
+- [ ] Give reserved keywords used as identifiers a focused parser diagnostic.
+  The exercise's `let loop = ...` reported a missing block brace later in the
+  file. Point at `loop`, explain that it is reserved, and offer a safe rename;
+  audit the other declaration positions and contextual keywords with the same
+  recovery path.
+- [ ] Convert the remaining campaign boundaries into focused decisions rather
+  than preserving workarounds as recommendations:
+  - Decide whether pure source-defined constructors such as
+    `Duration.fromSeconds(...)` should be constant-evaluable in module globals,
+    or whether lifecycle initialization remains intentional; then align the
+    diagnostic and docs.
+  - Decide whether bounded string lengths should accept any `Integer` and
+    perform one checked conversion, instead of requiring authors to discover a
+    `u32` suffix for ordinary positive constants.
+  - Decide whether sibling state-field references are desirable. If so, define
+    dependency order, cycles, failure retention, and shared-prefix evaluation;
+    otherwise explain the transactional independence and lead authors to one
+    supported helper/path pattern.
+  - Add `String.isBlank()` or an approved equivalent only after confirming the
+    intended Unicode whitespace semantics; several ports silently replaced
+    C# `IsNullOrWhiteSpace` with an empty-string test.
+- [ ] Recheck clean-compiling omissions against facilities added before or
+  during the exercise. In particular, `timer.currentSplitIndex()` was omitted
+  from a route-index port, attempt-scoped globals were manually reset from
+  polling code, generic numeric `Duration` constructors were surrounded by
+  unnecessary casts, and finite settings families were flattened or reduced.
+  Improve exact search terms, examples, hover links, completion, and migration
+  diagnostics before proposing duplicate features.
 
-### Make the existing model discoverable from `splitc docs`
+### Prevent clean-compiling semantic drift
 
-- [x] Put the current attachment-name contract in the generated `state`,
-  Native-provider, and ASL-porting pages: state strings are exact host process
-  identities, and a Windows executable candidate currently includes `.exe`.
-  Show a process-name array next to the single-name form and explain that it
-  handles alternate executable names in one autosplitter. Keep the separate
-  cross-platform identity design deferred; documentation must describe the
-  runtime that exists today without implying extension inference.
-- [x] Front-load a complete multi-version example in the generated `state` and
-  `layout` documentation and the ASL guide. It must show two named layouts,
-  attach-time evidence, returning `StateLayout.*`, the common field interface,
-  layout-specific refinement, and the unsupported-build
-  `await process.closed()` path. The fact that none of the campaign outputs used
-  layouts despite many multi-state sources proves that the current isolated
-  `layout Name { ... }` example is insufficient.
-- [x] Make `splitc docs QUERY` resolve exact canonical names and unambiguous
-  foreign spellings directly, then render ranked results for broader queries
-  instead of silently choosing one. Multiword queries do not need quoting. The
-  compiler-owned ranking is also used by the editor and covers symbol names,
-  summaries, details, migration diagnostics, and foreign spellings. Queries
-  such as `timer.CurrentPhase`, `TimeSpan.FromMilliseconds`, `modules.First`,
-  `refreshRate`, `multiple processes`, and `.exe` lead to the relevant
-  canonical topics without requiring their SplitScript names first.
-- [x] Give `splitc docs` a real terminal renderer instead of printing the
-  Markdown/HTML representation used by the editor preview. Render headings,
-  paragraphs, lists, borderless aligned tables, signatures, and examples as
-  readable terminal text; collapse intra-document links to their visible labels
-  because virtual reference paths are not useful in a terminal. Apply ANSI
-  styling and SplitScript code highlighting only when stdout is a TTY, using
-  the CLI's shared automatic color policy; redirected output must be stable
-  plain text with no escape sequences or HTML tags. Keep this as another
-  renderer over the compiler-owned documentation graph rather than parsing or
-  maintaining a second documentation source.
-- [x] Turn the first repeated legacy spellings from the docs-only campaign into
-  exact documentation journeys and contextual source diagnostics.
-  `MemoryWatcherList` and `Task.Run` now lead to focused compiler-owned
-  migration pages instead of a broad guide or generic unknown-name error;
-  arbitrary ASL `stringN` widths normalize to the bounded-native-string topic.
-  `settings[key]` and `settings.ContainsKey(key)` offer machine-applicable
-  rewrites to `settings.enabled(key)` and `settings.contains(key)`. Keep the
-  semantic distinction visible: settings lookup is a direct migration,
-  `Task.Run` requires intent-specific cooperative control flow, and
-  `MemoryWatcherList` depends on how it is populated. Do not publish
-  placeholder migration pages whose only useful answer is that ergonomic Mono
-  value/string paths are unavailable; prioritize implementing those provider
-  features instead, then document their real API. Unity scene migration now
-  points to the implemented typed snapshot API.
-
-### Close feedback loops without papering over language design
-
-- [x] Design and implement whole-expression retry before prescribing
-  the Hades module-discovery recipe. Generalize the existing `retry expression`
-  so its operand establishes a local failure boundary; a value block is then
-  the ergonomic `retry { ... }` form rather than a separate hard-coded grammar.
-  Any postfix `?` reaching that boundary ends the current attempt, suspends, and
-  starts the complete operand again on the next attached tick. Ordinary success
-  yields `T`, so the retry expression has type `T` and makes its containing
-  function `async T`; it does not create a storable `async T` value. Give
-  propagation targets a boundary identity instead of only a result type so
-  code generation can distinguish function return, state-field rejection, and
-  retry restart without guessing from syntax. Preserve process-lifetime
-  cancellation. The operand is one synchronous attempt: reject an [`await`] or
-  another [`retry`] evaluated anywhere inside it, whether it is a parenthesized
-  expression, conditional, match, or value block. Calling an async function is
-  still synchronous future construction and remains valid; only polling that
-  value with [`await`] violates the boundary. This is the dual of [`await`]:
-  `await` consumes an already-asynchronous value, while `retry` repeatedly
-  evaluates synchronous fallible work and is itself the suspension point.
-  Explicit `Err` and `throw` reaching the boundary both retry;
-  `return`/`break`/`continue` keep their ordinary explicit lexical transfers
-  out of the attempt. The accepted model is documented in the language reference
-  and keyword hover, with examples for a direct fallible expression, a
-  multi-step block, alternative fallible operations, and an explicit
-  retry-triggering error. Add focused contrasts to the ASL, C#, JavaScript, and
-  Rust guides, especially that Rust-style `?` normally targets a function while
-  this construct deliberately creates a local retry boundary. Explain that
-  every attempt runs within one tick and must remain bounded; intrinsically
-  asynchronous discovery belongs outside the attempt behind [`await`]. A
-  general value-producing [`loop`] remains the lower-level escape hatch, not
-  the canonical retry transaction. Keep [`retry`] at the same prefix
-  precedence as [`await`] and fallback [`else`] at its existing low
-  precedence. Because adjacent `retry value else fallback` admits two
-  materially different retry boundaries, emit a warning whenever neither
-  interpretation is parenthesized and offer fixes for both `(retry value) else
-  fallback` and `retry (value else fallback)`.
-- [x] Make fallback [`else`] take one ordinary expression instead of encoding
-  a private list of value/return/break/continue branches. Represent [`return`],
-  [`break`], [`continue`], and [`throw`] as first-class [`Never`]-typed
-  expressions throughout syntax, inference, typed HIR, async lowering,
-  codegen, formatting, refactoring, and editor traversal. This lets chained
-  fallible operations end in `else throw ...` and makes the same control-flow
-  forms work consistently in every expression position.
-- [x] Close the reported state-field propagation journey after general value
-  blocks made the intended form directly expressible. A state expression can
-  discover an address in local steps, use postfix [`?`] on any intermediate
-  [`T!`], and finish with another fallible read; all failures target the one
-  transactional field boundary, so a helper function is unnecessary. The
-  generated [`state`] and [`?`] reference pages now show this exact composition,
-  and their compiler-checked example prevents the older rejection from
-  returning unnoticed.
-- [ ] Design semantic lints from failures that compiled cleanly.
-  - [x] Warn when a statically named value setting is never read by reachable
-    behavior (the campaign declared `allSkullsMode` but read an unrelated
-    always-false global). Direct current/old access and exact literal runtime
-    keys count as reads; computed keys conservatively suppress the warning;
-    headings and generated family members are excluded. The machine-applicable
-    `_` suppression fix preserves the setting's host-visible key.
-  - [x] Guide literal dynamic setting lookups toward their static meaning.
-    `settings.enabled("key")` and `oldSettings.enabled("key")` receive a
-    machine-applicable typed-member rewrite when the declared boolean has a
-    source-visible name. A known `contains("key")` is diagnosed as always true
-    with a semantics-preserving `true` rewrite; boolean declarations also offer
-    a maybe-incorrect typed-value rewrite, while choice and file declarations
-    identify their typed member without changing the surrounding boolean
-    expression. Computed keys and generated family entries remain dynamic.
-  - [ ] Decide whether and how to diagnose state fields that never influence
-    reachable behavior. Intentional display-only state and host observation
-    need explicit semantics before enabling that warning by default.
-- [x] Add first-class integer ranges with explicit `start..<end` and
-  `start..=end` operators and matching `T..<T` / `T..=T` type syntax. Bare
-  `..` is a focused diagnostic with fixes for both endpoint policies. Runtime
-  `for` evaluates stored ranges once, preserves them across suspension, treats
-  reversed ascending ranges as empty, and handles an inclusive maximum without
-  overflowing. Direct range loops keep scalar bounds in compiler-owned locals
-  and allocate no GC range object; settings-family ranges remain a compile-time
-  DSL.
-  - [x] Expose immutable `.start` and `.end` fields plus source-defined
-    `.contains(value)` and `.isEmpty()` methods. Generic type constructors can
-    now declare fields in standard-library source, and the shared catalog
-    drives inference, completion, hover, documentation, and member identity;
-    only physical Wasm GC layout remains a backend concern.
+- [ ] Decide whether and how to diagnose state fields that never influence
+  reachable behavior. Intentional display-only state and host observation need
+  explicit semantics before enabling that warning by default.
+- [ ] Add a review checklist and compiler-query fixture for ports that compile
+  while bypassing a canonical provider. Check process identity, selected build,
+  provider choice, byte order, lifecycle ownership, settings reachability,
+  integer width, failure behavior, and deliberately omitted source branches.
+  The fixture should assert documentation journeys and diagnostics, not bundle
+  disposable full-script outputs.
 
 ## P0 — unblock the next representative native ports
 
@@ -626,45 +517,33 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Engine and emulator providers
 
+- [ ] Propose a typed SNES provider from the Super Metroid evidence before
+  implementing it. Compare ASR's higan, bsnes, Snes9x, BizHawk, RetroArch, and
+  lsnes-bsnes discovery, moving mappings, address normalization, byte order,
+  region/timing differences, and core-unload behavior. The public shape should
+  match the existing `state GCN` / `state Genesis` provider model unless a
+  concrete SNES constraint justifies a change; bring that proposal to the user
+  first. A manual RetroArch memory root is an interim port, not the canonical
+  endpoint.
 - [ ] Decide the source-defined provider refresh lifecycle before claiming
   parity for emulator cores that unload without their host process exiting.
   `state PS2` validates RetroArch's core mapping on every read and fails safely
   after unload, but attachment discovery currently reruns only after process
   detach. Compare a general provider refresh hook with lifecycle-level
   reattachment; discuss the public model before adding either one.
-
-- [ ] Design an ergonomic, source-defined Unity Mono value-path surface for
-  the repeated `mono.Make<T>` and `mono.MakeString` porting pattern before
-  prescribing lower-level pointer work as the canonical migration. The public
-  operation should retain the helper's useful shape: select a target-family
-  layout explicitly, name static or singleton roots and managed fields, infer
-  or state the final read type, compose with `state` polling, and decode managed
-  strings without exposing object-header arithmetic at each call site. Compare
-  methods on `MonoClass` / `MemoryPath`, a typed watcher/path value, and narrow
-  state-field sugar with representative Beeny-style scalar and string reads;
-  discuss the source syntax before choosing one. Intrinsics may supply metadata
-  discovery, but traversal and high-level composition belong in the
-  source-defined standard library. Until that design lands, diagnostics and
-  migration pages must identify the ergonomic gap honestly: existing
-  `staticFieldPath`, `field`, and `readManagedString` primitives can explain
-  what is possible, but a porter should not be told that manually rebuilding
-  every helper chain is the finished API.
-- [x] Treat Unity scene snapshots as a now-proven provider gap. TUNIC,
-  Anemoiapolis, Building 71, Cannibal Abduction, Chop Goblins, Assemble with
-  Care, and Beeny need active/loaded scene names or indices and well-defined
-  previous/current/loading semantics. `Unity.sceneManager()` now discovers the
-  ASR-supported UnityPlayer layouts cooperatively in source-defined standard
-  library code. `activeScene()` and `loadedScenes()` return immutable
-  `UnityScene` snapshots with address, signed index, path, and name; failed
-  reads retain accepted state values instead of exposing live handles or a
-  partial collection. The ASL porting guide documents the direct helper
-  translation rather than reproducing `asl-help` callbacks.
-- [ ] Extend Unity Mono managed collections after the typed value-path design,
-  using corpus-proven residual needs: add managed list/dictionary traversal for
-  Alba and A Short Hike, and
-  represent A Short Hike's dynamic typed tag values. Separate stable
-  singleton/field chains
-  already expressible through `staticFieldPath` and `field` from collection
+- [ ] Finish the schema-first Unity value surface rather than adding another
+  public Mono path API. Bounded managed strings, scalar values, singleton and
+  static roots, and nested references should all be expressible in `image` /
+  `class` declarations and consumable by ordinary state snapshots. Use the
+  campaign's `mono.Make<T>` and `mono.MakeString` cases to test the schema, its
+  diagnostics, and its documentation; keep `staticFieldPath`, raw field offsets,
+  object-header arithmetic, and backend-specific target-family traversal
+  private implementation tools. Bring any schema shape that still cannot
+  represent a real port back as a design question before adding public syntax.
+- [ ] Extend Unity managed collections after the schema value/snapshot design,
+  using the corpus-proven residual needs: managed list/dictionary traversal for
+  Alba and A Short Hike, plus A Short Hike's dynamic typed tag values. Separate
+  stable singleton/field chains handled by declarations from collection
   enumeration that genuinely needs new library/runtime support. Alba does not
   require runtime-created state fields: growable arrays can retain discovered
   task addresses, names, required values, and previous readings once typed
@@ -1028,23 +907,30 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Correct the current attachment-name, process-array, named-layout, timer,
-   tick-rate, numeric, array, managed-string, and Unity object-path
-   discoverability failures in compiler-owned documentation.
-2. Choose the CLI documentation-search interaction and terminal renderer, then
-   make foreign ASL/C# spellings and conceptual queries reach the same canonical
-   graph as VS Code without printing Markdown, HTML, or virtual intra-doc links.
-3. Semantically audit the fresh campaign and promote a small corrected,
-   runtime-tested subset instead of treating all compiler-clean outputs as a
-   corpus.
-4. Reclassify blocked ports after subtracting existing features, then design
-   the proven Unity managed-collection and remaining timer host surfaces; use
-   the implemented scene snapshots when reevaluating Unity ports.
-5. Harden and publish the bundled VSIX and native releases, then evaluate the
-   hosted Code OSS workbench.
-6. Resume source-debugging work only after the JavaScript debugger, native
-   Wasmtime/DWARF path, and typed-IR interpreter have been compared against the
-   same GC and async fixtures.
-7. Keep physical `None` aggregate specialization and sandbox-sensitive host
+1. Make managed schemas the sole canonical public Unity route, hide competing
+   backend metadata traversal, and make `UnityASL` / `mono.Make*` searches and
+   diagnostics lead to one complete schema-first example.
+2. Repair polling-policy discovery: make `setTickRate` explain the defaults,
+   lifecycle reapplication, declarative `tickRate` block, and its own narrow
+   dynamic role.
+3. Fix the two concrete compiler-quality regressions from the latest exercise:
+   misplaced bare-global inference errors and misleading diagnostics when a
+   reserved keyword such as `loop` is used as an identifier.
+4. Make the existing emulator providers discoverable by host, core, console,
+   and legacy ASL vocabulary, then review the clean-compiling Dolphin, Fusion,
+   and RetroArch ports for semantic replacement by those providers.
+5. Bring the global-constructor, bounded-length integer, sibling-state, and
+   whitespace-string questions to the user with concrete source proposals;
+   implement only the approved ergonomics.
+6. Recheck missed existing facilities such as attempt-scoped state,
+   `timer.currentSplitIndex`, settings families, and generic numeric duration
+   constructors. Preserve small minimized regressions rather than the disposable
+   generated campaign.
+7. Complete Unity snapshots, managed collections, and runtime diagnostics, then
+   promote a small corrected and runtime-tested port set.
+8. Harden and publish the bundled VSIX and native releases, then evaluate the
+   hosted Code OSS workbench. Resume source-debugging only after choosing among
+   the JavaScript debugger, native Wasmtime/DWARF, and typed-IR interpreter.
+9. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

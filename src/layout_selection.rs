@@ -77,26 +77,39 @@ pub(crate) struct LayoutSelectionCandidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LayoutSelectionFailureReport {
     pub header: String,
+    pub observed_present: String,
+    pub observed_absent: String,
+    pub expected_present: String,
+    pub expected_absent: String,
     pub evidence: Vec<LayoutSelectionEvidenceReport>,
-    pub candidates: Vec<String>,
+    pub candidates: Vec<LayoutSelectionCandidateReport>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LayoutSelectionEvidenceReport {
     pub field: ManagedFieldId,
-    pub present: String,
-    pub absent: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LayoutSelectionCandidateReport {
+    pub label: String,
+    pub present_fields: Vec<ManagedFieldId>,
 }
 
 impl LayoutSelectionFailureReport {
     pub(crate) fn messages(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.header.as_str())
+            .chain(std::iter::once(self.observed_present.as_str()))
+            .chain(std::iter::once(self.observed_absent.as_str()))
+            .chain(std::iter::once(self.expected_present.as_str()))
+            .chain(std::iter::once(self.expected_absent.as_str()))
+            .chain(self.evidence.iter().map(|evidence| evidence.label.as_str()))
             .chain(
-                self.evidence
+                self.candidates
                     .iter()
-                    .flat_map(|evidence| [evidence.present.as_str(), evidence.absent.as_str()]),
+                    .map(|candidate| candidate.label.as_str()),
             )
-            .chain(self.candidates.iter().map(String::as_str))
     }
 }
 
@@ -116,8 +129,7 @@ impl LayoutSelectionPlan {
                 let label = managed_field_label(program, *field);
                 LayoutSelectionEvidenceReport {
                     field: *field,
-                    present: format!("Observed managed field `{label}`: present"),
-                    absent: format!("Observed managed field `{label}`: absent"),
+                    label,
                 }
             })
             .collect();
@@ -153,27 +165,18 @@ impl LayoutSelectionPlan {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                let present = self
-                    .evidence_fields
-                    .iter()
-                    .filter(|field| candidate.present_fields.contains(field))
-                    .map(|field| managed_field_label(program, *field))
-                    .collect::<Vec<_>>();
-                let absent = self
-                    .evidence_fields
-                    .iter()
-                    .filter(|field| !candidate.present_fields.contains(field))
-                    .map(|field| managed_field_label(program, *field))
-                    .collect::<Vec<_>>();
-                format!(
-                    "Expected `Layout {{ {layout} }}` with present [{}] and absent [{}]",
-                    present.join(", "),
-                    absent.join(", ")
-                )
+                LayoutSelectionCandidateReport {
+                    label: format!("Expected `Layout {{ {layout} }}`"),
+                    present_fields: candidate.present_fields.clone(),
+                }
             })
             .collect();
         LayoutSelectionFailureReport {
             header: "Could not select an attachment layout: managed metadata did not match any declared layout".to_owned(),
+            observed_present: "Observed present managed fields:".to_owned(),
+            observed_absent: "Observed absent managed fields:".to_owned(),
+            expected_present: "  Expected present fields:".to_owned(),
+            expected_absent: "  Expected absent fields:".to_owned(),
             evidence,
             candidates,
         }

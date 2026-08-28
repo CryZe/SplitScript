@@ -736,32 +736,78 @@ fn emit_automatic_layout_failure_report(
         .iter()
         .find(|record| record.name == crate::stdlib::MANAGED_BINDINGS_TYPE)
         .expect("managed layout evidence has generated bindings");
+    emit_runtime_message(function, strings, &report.observed_present, lowering.abi);
     for evidence in &report.evidence {
-        let name = crate::stdlib::managed_field_presence_name(evidence.field.index());
-        let (field_index, declaration) = bindings
-            .fields
-            .iter()
-            .enumerate()
-            .find(|(_, candidate)| candidate.name == name)
-            .expect("layout evidence has generated presence storage");
-        let field_type = record_field_type(declaration.id, lowering.semantics);
-        function
-            .instruction(&Instruction::GlobalGet(bindings_global))
-            .instruction(&Instruction::RefAsNonNull);
-        emit_typed_struct_get(
+        emit_layout_evidence_condition(
             function,
-            lowering.gc.index(Type::Record(bindings.id)),
-            field_index as u32,
-            field_type,
+            bindings_global,
+            bindings,
+            evidence.field,
+            true,
+            lowering,
         );
         function.instruction(&Instruction::If(BlockType::Empty));
-        emit_runtime_message(function, strings, &evidence.present, lowering.abi);
-        function.instruction(&Instruction::Else);
-        emit_runtime_message(function, strings, &evidence.absent, lowering.abi);
+        emit_runtime_message(function, strings, &evidence.label, lowering.abi);
+        function.instruction(&Instruction::End);
+    }
+    emit_runtime_message(function, strings, &report.observed_absent, lowering.abi);
+    for evidence in &report.evidence {
+        emit_layout_evidence_condition(
+            function,
+            bindings_global,
+            bindings,
+            evidence.field,
+            false,
+            lowering,
+        );
+        function.instruction(&Instruction::If(BlockType::Empty));
+        emit_runtime_message(function, strings, &evidence.label, lowering.abi);
         function.instruction(&Instruction::End);
     }
     for candidate in &report.candidates {
-        emit_runtime_message(function, strings, candidate, lowering.abi);
+        emit_runtime_message(function, strings, &candidate.label, lowering.abi);
+        emit_runtime_message(function, strings, &report.expected_present, lowering.abi);
+        for evidence in &report.evidence {
+            if candidate.present_fields.contains(&evidence.field) {
+                emit_runtime_message(function, strings, &evidence.label, lowering.abi);
+            }
+        }
+        emit_runtime_message(function, strings, &report.expected_absent, lowering.abi);
+        for evidence in &report.evidence {
+            if !candidate.present_fields.contains(&evidence.field) {
+                emit_runtime_message(function, strings, &evidence.label, lowering.abi);
+            }
+        }
+    }
+}
+
+fn emit_layout_evidence_condition(
+    function: &mut Function,
+    bindings_global: u32,
+    bindings: &crate::ast::RecordDecl,
+    field: crate::ast::ManagedFieldId,
+    expected_present: bool,
+    lowering: &UpdateContext<'_>,
+) {
+    let name = crate::stdlib::managed_field_presence_name(field.index());
+    let (field_index, declaration) = bindings
+        .fields
+        .iter()
+        .enumerate()
+        .find(|(_, candidate)| candidate.name == name)
+        .expect("layout evidence has generated presence storage");
+    let field_type = record_field_type(declaration.id, lowering.semantics);
+    function
+        .instruction(&Instruction::GlobalGet(bindings_global))
+        .instruction(&Instruction::RefAsNonNull);
+    emit_typed_struct_get(
+        function,
+        lowering.gc.index(Type::Record(bindings.id)),
+        field_index as u32,
+        field_type,
+    );
+    if !expected_present {
+        function.instruction(&Instruction::I32Eqz);
     }
 }
 

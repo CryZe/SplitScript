@@ -160,6 +160,12 @@ to inference or code generation.
   internal split between `UnityModule`/`UnityClass` and
   `MonoModule`/`MonoClass` where it no longer expresses a real backend
   difference.
+  - [x] Route automatically detected runtimes through one private,
+    source-defined runtime/image/class adapter before generated binding begins.
+    The adapter owns backend dispatch while generated schemas use one common
+    image, class, field, static-table, and pointer-width path. Keep explicit
+    backend selectors specialized for now so release reachability can still
+    prune the unused traversal implementation.
   - [x] Make manual runtime/image/class/offset traversal and all of its backend
     record types private to the trusted standard library. Remove them from
     public lookup, completion, hover, navigation, and generated documentation;

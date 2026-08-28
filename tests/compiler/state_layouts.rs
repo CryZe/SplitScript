@@ -123,18 +123,12 @@ fn automatic_layout_failure_report_names_observations_and_source_candidates() {
     assert!(contains(
         "Could not select an attachment layout: managed metadata did not match any declared layout"
     ));
-    assert!(contains(
-        "Observed managed field `Assembly-CSharp::GameManager.level`: present"
-    ));
-    assert!(contains(
-        "Observed managed field `Assembly-CSharp::GameManager.scene`: absent"
-    ));
-    assert!(contains(
-        "Expected `Layout { edition: Edition.Base }` with present [Assembly-CSharp::GameManager.level] and absent [Assembly-CSharp::GameManager.scene]"
-    ));
-    assert!(contains(
-        "Expected `Layout { edition: Edition.Demo }` with present [Assembly-CSharp::GameManager.scene] and absent [Assembly-CSharp::GameManager.level]"
-    ));
+    assert!(contains("Observed present managed fields:"));
+    assert!(contains("Observed absent managed fields:"));
+    assert!(contains("Assembly-CSharp::GameManager.level"));
+    assert!(contains("Assembly-CSharp::GameManager.scene"));
+    assert!(contains("Expected `Layout { edition: Edition.Base }`"));
+    assert!(contains("Expected `Layout { edition: Edition.Demo }`"));
 }
 
 #[test]

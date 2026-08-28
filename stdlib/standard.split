@@ -1373,6 +1373,160 @@ private struct UnityRuntime {
     ///
     /// IL2CPP contexts leave this value absent.
     private mono: MonoModule?,
+
+    // Returns the native pointer width through the backend-neutral schema
+    // adapter used by compiler-generated metadata binding.
+    private fn pointerBytes() -> u32 {
+        return match self.backend {
+            UnityRuntimeBackend.Il2cpp => {
+                let runtime = self.il2cpp else return 0
+                runtime.pointerSize
+            },
+            UnityRuntimeBackend.Mono => {
+                let runtime = self.mono else return 0
+                match runtime.pointerSize {
+                    PointerSize.Bit32 => 4,
+                    PointerSize.Bit64 => 8,
+                }
+            },
+        }
+    }
+
+    // Finds an image without exposing which managed backend owns it.
+    private fn image(name: String) -> async UnityMetadataImage {
+        return match self.backend {
+            UnityRuntimeBackend.Il2cpp => {
+                let runtime = self.il2cpp else await process.closed()
+                UnityMetadataImage {
+                    backend: self.backend,
+                    il2cpp: await runtime.image(name),
+                    mono: None,
+                }
+            },
+            UnityRuntimeBackend.Mono => {
+                let runtime = self.mono else await process.closed()
+                UnityMetadataImage {
+                    backend: self.backend,
+                    il2cpp: None,
+                    mono: await runtime.image(name),
+                }
+            },
+        }
+    }
+}
+
+/// Backend-neutral image used only by generated Unity schema binding.
+///
+/// # Example
+///
+/// Bind a source image through automatic Unity discovery
+///
+/// ```splitscript
+/// image "Assembly-CSharp" {
+///     class GameManager {}
+/// }
+/// state Unity ["game.exe"] {}
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(localVariable)
+private struct UnityMetadataImage {
+    /// Identifies the populated backend image.
+    private backend: UnityRuntimeBackend,
+
+    /// Contains the image when the runtime uses IL2CPP.
+    private il2cpp: UnityImage?,
+
+    /// Contains the image when the runtime uses Mono.
+    private mono: MonoImage?,
+
+    // Finds exactly one source-declared class through the selected backend.
+    private fn classAny(names: [String]) -> async UnityMetadataClass {
+        return match self.backend {
+            UnityRuntimeBackend.Il2cpp => {
+                let image = self.il2cpp else await process.closed()
+                UnityMetadataClass {
+                    backend: self.backend,
+                    il2cpp: await image.classAny(names),
+                    mono: None,
+                }
+            },
+            UnityRuntimeBackend.Mono => {
+                let image = self.mono else await process.closed()
+                UnityMetadataClass {
+                    backend: self.backend,
+                    il2cpp: None,
+                    mono: await image.classAny(names),
+                }
+            },
+        }
+    }
+}
+
+/// Backend-neutral class used only by generated Unity schema binding.
+///
+/// # Example
+///
+/// Bind a source class through automatic Unity discovery
+///
+/// ```splitscript
+/// image "Assembly-CSharp" {
+///     class Player {}
+/// }
+/// state Unity ["game.exe"] {}
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(localVariable)
+private struct UnityMetadataClass {
+    /// Identifies the populated backend class.
+    private backend: UnityRuntimeBackend,
+
+    /// Contains the class when the runtime uses IL2CPP.
+    private il2cpp: UnityClass?,
+
+    /// Contains the class when the runtime uses Mono.
+    private mono: MonoClass?,
+
+    // Resolves one required source field through the selected backend.
+    private fn fieldAny(names: [String]) -> async UnityField {
+        return match self.backend {
+            UnityRuntimeBackend.Il2cpp => {
+                let class = self.il2cpp else await process.closed()
+                await class.fieldAny(names)
+            },
+            UnityRuntimeBackend.Mono => {
+                let class = self.mono else await process.closed()
+                await class.fieldAny(names)
+            },
+        }
+    }
+
+    // Probes one conditional source field through the selected backend.
+    private fn probeFieldAny(names: [String]) -> async UnityField? {
+        return match self.backend {
+            UnityRuntimeBackend.Il2cpp => {
+                let class = self.il2cpp else await process.closed()
+                await class.probeFieldAny(names)
+            },
+            UnityRuntimeBackend.Mono => {
+                let class = self.mono else await process.closed()
+                await class.probeFieldAny(names)
+            },
+        }
+    }
+
+    // Finds the selected class's static storage through either backend.
+    private fn staticTable() -> async address {
+        return match self.backend {
+            UnityRuntimeBackend.Il2cpp => {
+                let class = self.il2cpp else await process.closed()
+                await class.staticTable()
+            },
+            UnityRuntimeBackend.Mono => {
+                let class = self.mono else await process.closed()
+                await class.staticTable()
+            },
+        }
+    }
 }
 
 /// Supports ordered numeric operations.

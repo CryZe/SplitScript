@@ -240,26 +240,13 @@ fn managed_preparation_source(
             source.push_str("    }\n");
         }
         None => {
-            source.push_str("    return match __runtime.backend {\n");
-            source.push_str("        UnityRuntimeBackend.Il2cpp => {\n");
-            source.push_str(
-                "            let __module = __runtime.il2cpp else await process.closed()\n",
-            );
+            source.push_str("    return {\n");
             source.push_str(&managed_backend_binding_source(
                 &classes,
-                "__module",
-                "__module.pointerSize",
+                "__runtime",
+                "__runtime.pointerBytes()",
             ));
-            source.push_str("        },\n        UnityRuntimeBackend.Mono => {\n");
-            source.push_str(
-                "            let __module = __runtime.mono else await process.closed()\n",
-            );
-            source.push_str(&managed_backend_binding_source(
-                &classes,
-                "__module",
-                "match __module.pointerSize { PointerSize.Bit32 => 4, PointerSize.Bit64 => 8 }",
-            ));
-            source.push_str("        },\n    }\n");
+            source.push_str("    }\n");
         }
     }
     source.push_str("}\n");
@@ -539,5 +526,54 @@ mod tests {
                 });
             }
         });
+    }
+
+    #[test]
+    fn automatic_unity_schema_binding_targets_only_the_backend_neutral_adapter() {
+        let program = crate::parse(
+            r#"
+                image "Assembly-CSharp" {
+                    class GameManager {
+                        static GameManager instance;
+                        u32 state;
+                    }
+                }
+                state Unity ["game.exe"] {}
+            "#,
+        )
+        .expect("the schema fixture should parse")
+        .into_syntax();
+
+        let source = managed_preparation_source(&program, "__prepare", "", None);
+        assert!(source.contains("await __runtime.image(\"Assembly-CSharp\")"));
+        assert!(source.contains("await __image_0.classAny([\"GameManager\"])"));
+        assert!(source.contains("__runtime.pointerBytes()"));
+        assert!(!source.contains("__runtime.il2cpp"));
+        assert!(!source.contains("__runtime.mono"));
+        assert!(!source.contains("UnityRuntimeBackend"));
+    }
+
+    #[test]
+    fn explicit_unity_schema_binding_keeps_its_prunable_concrete_backend() {
+        let program = crate::parse(
+            r#"
+                image "Assembly-CSharp" {
+                    class GameManager { u32 state; }
+                }
+                state Unity.il2cpp(2020) ["game.exe"] {}
+            "#,
+        )
+        .expect("the schema fixture should parse")
+        .into_syntax();
+
+        let source = managed_preparation_source(
+            &program,
+            "__prepare",
+            "2020",
+            Some(ManagedRuntimeBackend::Il2Cpp),
+        );
+        assert!(source.contains("let __module = __runtime.il2cpp"));
+        assert!(source.contains("await __module.image(\"Assembly-CSharp\")"));
+        assert!(!source.contains("__runtime.mono"));
     }
 }

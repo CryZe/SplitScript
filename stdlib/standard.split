@@ -60,6 +60,23 @@ stateProvider Native as process {}
 @prepare(UnityProviderAuto)
 @directRead(ProcessRead)
 stateProvider Unity as process {
+    /// Provides attachment-scoped Unity engine facilities.
+    ///
+    /// The value is available wherever the attached [`process`] is available.
+    /// Its members are discovered once before user [`onAttach`] code runs.
+    ///
+    /// # Example
+    ///
+    /// Track the active native Unity scene
+    ///
+    /// ```splitscript
+    /// state Unity ["game.exe"] {
+    ///     scene = unity.scenes.active();
+    /// }
+    /// ```
+    @prepare(UnityProviderContext)
+    context unity: UnityContext,
+
     /// Selects a known IL2CPP metadata layout.
     ///
     /// This bypasses Unity-version detection while retaining cooperative
@@ -1088,13 +1105,12 @@ namespace timer {
 ///
 /// # Example
 ///
-/// Prepare native Unity scene discovery
+/// Read the active native Unity scene
 ///
 /// ```splitscript
-/// # state "game.exe" {}
+/// # state Unity ["game.exe"] {}
 /// onAttach {
-///     let scenes = await Unity.sceneManager()
-///     let active = scenes.activeScene() else return
+///     let active = unity.scenes.active() else return
 ///     print(active.name)
 /// }
 /// ```
@@ -1141,6 +1157,14 @@ namespace Unity {
             backend: UnityRuntimeBackend.Mono,
             il2cpp: None,
             mono: Some(runtime),
+        }
+    }
+
+    // Constructs the public attachment-scoped Unity facilities. This is
+    // emitted only when the provider context is referenced by user code.
+    private fn providerContext() -> async UnityContext {
+        return UnityContext {
+            scenes: await Unity.sceneManager(),
         }
     }
 
@@ -1226,26 +1250,8 @@ namespace Unity {
         return await MonoModule.discover(version)
     }
 
-    /// Discovers Unity's native scene manager.
-    ///
-    /// The discovery supports 32-bit and 64-bit Windows players and the
-    /// 64-bit Linux and macOS players supported by ASR. Signature scanning is
-    /// cooperative, so large UnityPlayer modules continue yielding to the
-    /// runtime while attachment is in progress.
-    ///
-    /// # Example
-    ///
-    /// Discover scene snapshots during attachment
-    ///
-    /// ```splitscript
-    /// # let sceneManager
-    /// # state "game.exe" { scene = sceneManager.activeScene(); }
-    /// onAttach {
-    ///     sceneManager = await Unity.sceneManager()
-    /// }
-    /// ```
-    @mustUse("The discovered scene manager is otherwise discarded.")
-    fn sceneManager() -> async UnitySceneManager {
+    // Discovers Unity's native scene manager for the provider context.
+    private fn sceneManager() -> async UnityScenes {
         let unityPlayer = retry {
             process.loadedModule("UnityPlayer.dll")
                 else process.loadedModule("UnityPlayer.so")
@@ -1295,7 +1301,7 @@ namespace Unity {
             address
         }
 
-        return UnitySceneManager {
+        return UnityScenes {
             address: managerAddress,
             pointerSize: pointerSize,
         }
@@ -5954,28 +5960,63 @@ enum TimerState {
     Unknown,
 }
 
+/// Attachment-scoped Unity engine facilities.
+///
+/// The [`Unity`] state provider exposes one read-only value named `unity`.
+/// Context members are bound once per process attachment before [`onAttach`]
+/// runs and remain available in attached lifecycle blocks and state reads.
+///
+/// # Example
+///
+/// Read the active scene through the Unity context
+///
+/// ```splitscript
+/// # state Unity ["game.exe"] {}
+/// whileAttached {
+///     let active = unity.scenes.active() else return
+///     print(active.name)
+/// }
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+struct UnityContext {
+    /// Accesses native Unity scene snapshots and hierarchy roots.
+    ///
+    /// Discovery is performed once per process attachment and only when the
+    /// `unity` context is referenced by the script.
+    ///
+    /// # Example
+    ///
+    /// Read every loaded scene
+    ///
+    /// ```splitscript
+    /// state Unity ["game.exe"] {
+    ///     scenes = unity.scenes.loaded();
+    /// }
+    /// ```
+    scenes: UnityScenes,
+}
+
 /// Reads immutable snapshots from Unity's native scene manager.
 ///
-/// A manager is discovered once in [`onAttach`] and can then populate ordinary
-/// [`state`] fields. Scene reads return errors rather than partial values, so a
-/// transient process-memory failure participates in the state's normal
-/// transactional update behavior.
+/// The [`unity`](provider@Unity) context discovers this facility once before
+/// [`onAttach`] and can then populate ordinary [`state`] fields. Scene reads
+/// return errors rather than partial values, so a transient process-memory
+/// failure participates in the state's normal transactional update behavior.
 ///
 /// # Example
 ///
 /// Track active and loaded Unity scenes
 ///
 /// ```splitscript
-/// # let sceneManager
-/// # state "game.exe" { scene = sceneManager.activeScene(); }
-/// # onAttach { sceneManager = await Unity.sceneManager() }
+/// # state Unity ["game.exe"] { scene = unity.scenes.active(); }
 /// whileAttached {
 ///     print(current.scene.name)
 /// }
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
-struct UnitySceneManager {
+struct UnityScenes {
     /// Address of Unity's native scene-manager state.
     private address: address,
 
@@ -6034,15 +6075,13 @@ struct UnitySceneManager {
     /// Poll the active scene
     ///
     /// ```splitscript
-    /// # let sceneManager
-    /// # state "game.exe" { activeScene = sceneManager.activeScene(); }
-    /// # onAttach { sceneManager = await Unity.sceneManager() }
+    /// # state Unity ["game.exe"] { activeScene = unity.scenes.active(); }
     /// split {
     ///     return old.activeScene.name != current.activeScene.name
     /// }
     /// ```
     @mustUse("The active scene snapshot is otherwise discarded.")
-    fn activeScene() -> UnityScene! {
+    fn active() -> UnityScene! {
         let activeSceneOffset: u64 = match self.pointerSize {
             PointerSize.Bit32 => 0x28,
             PointerSize.Bit64 => 0x48,
@@ -6065,12 +6104,10 @@ struct UnitySceneManager {
     /// Compare the active scene with Unity's first loaded scene
     ///
     /// ```splitscript
-    /// # let sceneManager
-    /// # state "game.exe" {
-    /// #     activeScene = sceneManager.activeScene();
-    /// #     loadedScenes = sceneManager.loadedScenes();
+    /// # state Unity ["game.exe"] {
+    /// #     activeScene = unity.scenes.active();
+    /// #     loadedScenes = unity.scenes.loaded();
     /// # }
-    /// # onAttach { sceneManager = await Unity.sceneManager() }
     /// isLoading {
     ///     if current.loadedScenes.isEmpty() {
     ///         return None
@@ -6080,7 +6117,7 @@ struct UnitySceneManager {
     /// }
     /// ```
     @mustUse("The loaded scene snapshots are otherwise discarded.")
-    fn loadedScenes() -> [UnityScene]! {
+    fn loaded() -> [UnityScene]! {
         let sceneCountOffset: u64 = match self.pointerSize {
             PointerSize.Bit32 => 0x10,
             PointerSize.Bit64 => 0x18,
@@ -6108,6 +6145,30 @@ struct UnitySceneManager {
         }
         return Ok(scenes)
     }
+
+    /// Reads Unity's persistent `DontDestroyOnLoad` scene.
+    ///
+    /// Unity keeps objects that survive ordinary scene transitions in this
+    /// special scene. The result is an immutable snapshot with the same
+    /// identity and metadata fields as [`active`](method@UnityScenes.active).
+    ///
+    /// # Example
+    ///
+    /// Inspect the persistent scene
+    ///
+    /// ```splitscript
+    /// state Unity ["game.exe"] {
+    ///     persistentScene = unity.scenes.persistent();
+    /// }
+    /// ```
+    @mustUse("The persistent scene snapshot is otherwise discarded.")
+    fn persistent() -> UnityScene! {
+        let sceneOffset: u64 = match self.pointerSize {
+            PointerSize.Bit32 => 0x40,
+            PointerSize.Bit64 => 0x70,
+        }
+        return self.snapshot(self.address.add(sceneOffset))
+    }
 }
 
 /// Captures one Unity scene at a particular polling update.
@@ -6121,9 +6182,7 @@ struct UnitySceneManager {
 /// Inspect a scene transition
 ///
 /// ```splitscript
-/// # let sceneManager
-/// # state "game.exe" { scene = sceneManager.activeScene(); }
-/// # onAttach { sceneManager = await Unity.sceneManager() }
+/// # state Unity ["game.exe"] { scene = unity.scenes.active(); }
 /// split {
 ///     return old.scene.index != current.scene.index
 /// }
@@ -6141,9 +6200,7 @@ struct UnityScene {
     /// Inspect a scene's native identity
     ///
     /// ```splitscript
-    /// # let sceneManager
-    /// # state "game.exe" { scene = sceneManager.activeScene(); }
-    /// # onAttach { sceneManager = await Unity.sceneManager() }
+    /// # state Unity ["game.exe"] { scene = unity.scenes.active(); }
     /// whileAttached {
     ///     debug print(current.scene.address)
     /// }
@@ -6160,9 +6217,7 @@ struct UnityScene {
     /// Start on the first configured scene
     ///
     /// ```splitscript
-    /// # let sceneManager
-    /// # state "game.exe" { scene = sceneManager.activeScene(); }
-    /// # onAttach { sceneManager = await Unity.sceneManager() }
+    /// # state Unity ["game.exe"] { scene = unity.scenes.active(); }
     /// start {
     ///     return current.scene.index == 0
     /// }
@@ -6179,9 +6234,7 @@ struct UnityScene {
     /// Detect a scene stored under the menu directory
     ///
     /// ```splitscript
-    /// # let sceneManager
-    /// # state "game.exe" { scene = sceneManager.activeScene(); }
-    /// # onAttach { sceneManager = await Unity.sceneManager() }
+    /// # state Unity ["game.exe"] { scene = unity.scenes.active(); }
     /// split {
     ///     return current.scene.path.startsWith("Assets/Scenes/Menu/")
     /// }
@@ -6199,9 +6252,7 @@ struct UnityScene {
     /// Split when the credits scene becomes active
     ///
     /// ```splitscript
-    /// # let sceneManager
-    /// # state "game.exe" { scene = sceneManager.activeScene(); }
-    /// # onAttach { sceneManager = await Unity.sceneManager() }
+    /// # state Unity ["game.exe"] { scene = unity.scenes.active(); }
     /// split {
     ///     return old.scene.name != "Credits" && current.scene.name == "Credits"
     /// }

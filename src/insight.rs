@@ -251,12 +251,48 @@ pub(crate) fn hover(
                     documentation_uri: None,
                 }));
             }
-            if definition.id == SourceDefinitionId::State
-                && let Some(provider) = database
-                    .analysis_at(offset)?
-                    .as_ref()
-                    .and_then(provider_value_for_resolution)
-            {
+            if definition.id == SourceDefinitionId::State {
+                let analysis = database.analysis_at(offset)?;
+                if let Some((provider, context_index)) =
+                    analysis.as_ref().and_then(provider_context_for_resolution)
+                {
+                    let context =
+                        &standard_library.state_provider(provider).contexts[context_index];
+                    let ty = standard_library.type_decl(context.ty);
+                    let prose = crate::documentation::prose_markdown(
+                        context.documentation.summary,
+                        context.documentation.details,
+                    );
+                    let mut markdown = format!(
+                        "```splitscript\n{}: {}\n```\n\n{}",
+                        context.name,
+                        ty.name,
+                        crate::documentation::strip_intra_doc_links(&prose),
+                    );
+                    append_examples(&mut markdown, context.documentation.examples);
+                    return Ok(Some(HoverInfo {
+                        span: token.span,
+                        markdown,
+                        documentation_uri: Some(symbol_uri(
+                            StdlibSymbolId::Type(context.ty),
+                            &standard_library,
+                        )),
+                    }));
+                }
+                let Some(provider) = analysis.as_ref().and_then(provider_value_for_resolution)
+                else {
+                    let Some(context) = semantic_context(database) else {
+                        return Ok(None);
+                    };
+                    let Some(markdown) = render_source_hover(&definition, &context) else {
+                        return Ok(None);
+                    };
+                    return Ok(Some(HoverInfo {
+                        span: token.span,
+                        markdown,
+                        documentation_uri: None,
+                    }));
+                };
                 return Ok(Some(HoverInfo {
                     span: token.span,
                     markdown: render_stdlib_symbol_hover(
@@ -322,6 +358,7 @@ fn provider_value_for_resolution(
     match root_value_for_resolution(analysis)? {
         crate::semantic::ResolvedValue::StandardLibraryConstant(_) => None,
         crate::semantic::ResolvedValue::ProviderValue(provider) => Some(provider),
+        crate::semantic::ResolvedValue::ProviderContext { provider, .. } => Some(provider),
         crate::semantic::ResolvedValue::ManagedStatic { .. } => None,
         crate::semantic::ResolvedValue::Variable(_)
         | crate::semantic::ResolvedValue::CurrentSnapshot
@@ -332,6 +369,17 @@ fn provider_value_for_resolution(
         | crate::semantic::ResolvedValue::OldState(_)
         | crate::semantic::ResolvedValue::Setting(_)
         | crate::semantic::ResolvedValue::OldSetting(_) => None,
+    }
+}
+
+fn provider_context_for_resolution(
+    analysis: &crate::database::PositionAnalysis,
+) -> Option<(crate::stdlib::StdlibStateProviderId, usize)> {
+    match root_value_for_resolution(analysis)? {
+        crate::semantic::ResolvedValue::ProviderContext { provider, context } => {
+            Some((provider, context as usize))
+        }
+        _ => None,
     }
 }
 
@@ -1985,6 +2033,33 @@ fn ranges() {
         assert!(hover.markdown.contains("state \"game.exe\" { ... }"));
         assert!(hover.markdown.contains("process: Process"));
         assert!(hover.markdown.contains("has type `Process`"));
+    }
+
+    #[test]
+    fn provider_context_hover_is_typed_documented_and_navigates_to_state() {
+        let source = "state Unity [\"game.exe\"] {}\nwhileAttached { let scenes = unity.scenes }";
+        let offset = source.rfind("unity").unwrap() + 1;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(offset)
+            .unwrap()
+            .expect("Unity provider-context hover");
+        assert!(hover.markdown.contains("unity: UnityContext"));
+        assert!(
+            hover
+                .markdown
+                .contains("attachment-scoped Unity engine facilities")
+        );
+        assert_eq!(
+            hover.documentation_uri.as_deref(),
+            Some("/stdlib/types/UnityContext/index.md")
+        );
+
+        assert!(matches!(
+            database.definition_at(offset).unwrap(),
+            Some(crate::database::DefinitionTarget::Source(definition))
+                if definition.id == crate::database::SourceDefinitionId::State
+        ));
     }
 
     #[test]

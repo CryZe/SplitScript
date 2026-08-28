@@ -52,7 +52,18 @@ pub struct StdlibStateProvider {
     /// available and before the user's `onAttach` action runs.
     pub preparation: Option<StdlibItemId>,
     pub direct_read: StdlibItemId,
+    pub contexts: &'static [StateProviderContext],
     pub selectors: &'static [StateProviderSelector],
+    pub documentation: Documentation<StdlibSymbolId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StateProviderContext {
+    pub name: &'static str,
+    pub ty: StdlibTypeId,
+    /// Parameterless asynchronous source function that constructs the value
+    /// once for each process attachment where the context is referenced.
+    pub preparation: StdlibItemId,
     pub documentation: Documentation<StdlibSymbolId>,
 }
 

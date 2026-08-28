@@ -19,8 +19,14 @@ use super::{
 pub(crate) const RESERVED_FUNCTION_PREFIX: &str = "__splitscript_stdlib_";
 pub(crate) const PROVIDER_PREPARATION_FUNCTION: &str =
     "__splitscript_stdlib_selected_provider_preparation";
-pub(crate) const MANAGED_BINDINGS_TYPE: &str = "__splitscript_stdlib_managed_bindings";
+pub(crate) const PROVIDER_BINDINGS_TYPE: &str = "__splitscript_stdlib_provider_bindings";
 pub(crate) const MANAGED_POINTER_SIZE_FIELD: &str = "__pointer_size";
+
+struct SelectedProviderContext {
+    index: usize,
+    ty: &'static str,
+    function_name: &'static str,
+}
 
 fn body_source(
     item: &StdlibItem,
@@ -127,6 +133,7 @@ pub(crate) fn augment_program_with_library_bodies(
             selected.function_name,
             &selected.arguments.join(", "),
             selected.managed_backend,
+            &selected.contexts,
         );
         let start = combined.len();
         combined.push_str(&source);
@@ -180,17 +187,27 @@ fn managed_preparation_source(
     preparation: &str,
     arguments: &str,
     managed_backend: Option<ManagedRuntimeBackend>,
+    contexts: &[SelectedProviderContext],
 ) -> String {
     let classes = schema_classes(program);
     let instance_classes = managed_instance_classes(program);
-    if classes.is_empty() {
+    if classes.is_empty() && contexts.is_empty() {
         return format!(
             "fn {PROVIDER_PREPARATION_FUNCTION}() {{ return await {preparation}({arguments}) }}"
         );
     }
 
-    let mut source = format!("record {MANAGED_BINDINGS_TYPE} {{\n");
-    source.push_str(&format!("    {MANAGED_POINTER_SIZE_FIELD}: u32,\n"));
+    let mut source = format!("record {PROVIDER_BINDINGS_TYPE} {{\n");
+    if !classes.is_empty() {
+        source.push_str(&format!("    {MANAGED_POINTER_SIZE_FIELD}: u32,\n"));
+    }
+    for context in contexts {
+        source.push_str(&format!(
+            "    {}: {},\n",
+            provider_context_field_name(context.index),
+            context.ty
+        ));
+    }
     for class in &classes {
         if instance_classes.contains(&class.class.id) {
             source.push_str(&format!(
@@ -223,9 +240,26 @@ fn managed_preparation_source(
         }
     }
     source.push_str("}\n");
-    source.push_str(&format!(
-        "fn {PROVIDER_PREPARATION_FUNCTION}() {{\n    let __runtime = await {preparation}({arguments})\n"
-    ));
+    source.push_str(&format!("fn {PROVIDER_PREPARATION_FUNCTION}() {{\n"));
+    if !classes.is_empty() {
+        source.push_str(&format!(
+            "    let __runtime = await {preparation}({arguments})\n"
+        ));
+    }
+    for context in contexts {
+        source.push_str(&format!(
+            "    let {} = await {}()\n",
+            provider_context_field_name(context.index),
+            context.function_name,
+        ));
+    }
+    if classes.is_empty() {
+        source.push_str(&format!("    return {PROVIDER_BINDINGS_TYPE} {{\n"));
+        push_provider_context_initializers(&mut source, contexts, "        ");
+        source.push_str("    }\n");
+        source.push_str("}\n");
+        return source;
+    }
     match managed_backend {
         Some(ManagedRuntimeBackend::Il2Cpp) => {
             source.push_str("    let __module = __runtime.il2cpp else await process.closed()\n");
@@ -236,6 +270,7 @@ fn managed_preparation_source(
                 "__module",
                 "__module.pointerSize",
                 false,
+                contexts,
             ));
             source.push_str("    }\n");
         }
@@ -248,6 +283,7 @@ fn managed_preparation_source(
                 "__module",
                 "match __module.pointerSize { PointerSize.Bit32 => 4, PointerSize.Bit64 => 8 }",
                 true,
+                contexts,
             ));
             source.push_str("    }\n");
         }
@@ -259,6 +295,7 @@ fn managed_preparation_source(
                 "__runtime",
                 "__runtime.pointerBytes()",
                 true,
+                contexts,
             ));
             source.push_str("    }\n");
         }
@@ -273,6 +310,7 @@ fn managed_backend_binding_source(
     module: &str,
     pointer_size: &str,
     instance_header_is_async: bool,
+    contexts: &[SelectedProviderContext],
 ) -> String {
     let mut source = String::new();
     source.push_str(&format!(
@@ -336,7 +374,8 @@ fn managed_backend_binding_source(
             }
         }
     }
-    source.push_str(&format!("            {MANAGED_BINDINGS_TYPE} {{\n"));
+    source.push_str(&format!("            {PROVIDER_BINDINGS_TYPE} {{\n"));
+    push_provider_context_initializers(&mut source, contexts, "                ");
     source.push_str(&format!(
         "                {MANAGED_POINTER_SIZE_FIELD}: {MANAGED_POINTER_SIZE_FIELD},\n"
     ));
@@ -365,6 +404,17 @@ fn managed_backend_binding_source(
     }
     source.push_str("            }\n");
     source
+}
+
+fn push_provider_context_initializers(
+    source: &mut String,
+    contexts: &[SelectedProviderContext],
+    indentation: &str,
+) {
+    for context in contexts {
+        let name = provider_context_field_name(context.index);
+        source.push_str(&format!("{indentation}{name}: {name},\n"));
+    }
 }
 
 fn managed_field_candidates(field: &crate::ast::ManagedFieldDecl) -> String {
@@ -463,6 +513,10 @@ pub(crate) fn managed_instance_header_name(class: usize) -> String {
     format!("__class_{class}_instance_header")
 }
 
+pub(crate) fn provider_context_field_name(context: usize) -> String {
+    format!("__provider_context_{context}")
+}
+
 fn managed_instance_classes(program: &Program) -> std::collections::HashSet<ManagedClassId> {
     struct Collector<'a> {
         classes: &'a [ManagedClassDecl],
@@ -503,6 +557,7 @@ struct SelectedProviderPreparation<'source> {
     function_name: &'static str,
     arguments: Vec<&'source str>,
     managed_backend: Option<ManagedRuntimeBackend>,
+    contexts: Vec<SelectedProviderContext>,
 }
 
 fn selected_provider_preparation<'source>(
@@ -545,11 +600,72 @@ fn selected_provider_preparation<'source>(
     let Implementation::LibraryBody { function_name, .. } = item.implementation else {
         return None;
     };
+    let referenced_contexts = provider_contexts_used(user_program, provider);
+    let contexts = provider
+        .contexts
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| referenced_contexts.contains(index))
+        .map(|(index, context)| {
+            let item = library.item(context.preparation);
+            let Implementation::LibraryBody { function_name, .. } = item.implementation else {
+                unreachable!("validated provider context preparations have source bodies")
+            };
+            SelectedProviderContext {
+                index,
+                ty: library.type_decl(context.ty).name,
+                function_name,
+            }
+        })
+        .collect();
     Some(SelectedProviderPreparation {
         function_name,
         arguments,
         managed_backend,
+        contexts,
     })
+}
+
+fn provider_contexts_used(
+    program: &Program,
+    provider: &crate::stdlib::StdlibStateProvider,
+) -> std::collections::HashSet<usize> {
+    struct Collector<'a> {
+        provider: &'a crate::stdlib::StdlibStateProvider,
+        found: std::collections::HashSet<usize>,
+    }
+
+    impl<'ast> Visitor<'ast> for Collector<'_> {
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            let root = match &expression.kind {
+                ExprKind::Path(path) => path.first(),
+                ExprKind::Call {
+                    callee,
+                    receiver: None,
+                    ..
+                } => callee.first(),
+                _ => None,
+            };
+            if let Some(root) = root
+                && let Some((index, _)) = self
+                    .provider
+                    .contexts
+                    .iter()
+                    .enumerate()
+                    .find(|(_, context)| context.name == root)
+            {
+                self.found.insert(index);
+            }
+            visit::walk_expr(self, expression);
+        }
+    }
+
+    let mut collector = Collector {
+        provider,
+        found: std::collections::HashSet::new(),
+    };
+    collector.visit_program(program);
+    collector.found
 }
 
 #[cfg(test)]
@@ -615,13 +731,68 @@ mod tests {
         .expect("the schema fixture should parse")
         .into_syntax();
 
-        let source = managed_preparation_source(&program, "__prepare", "", None);
+        let source = managed_preparation_source(&program, "__prepare", "", None, &[]);
         assert!(source.contains("await __runtime.image(\"Assembly-CSharp\")"));
         assert!(source.contains("await __image_0.classAny([\"GameManager\"])"));
         assert!(source.contains("__runtime.pointerBytes()"));
         assert!(!source.contains("__runtime.il2cpp"));
         assert!(!source.contains("__runtime.mono"));
         assert!(!source.contains("UnityRuntimeBackend"));
+    }
+
+    #[test]
+    fn provider_context_preparation_is_demand_driven_without_managed_discovery() {
+        let program = crate::parse(
+            r#"
+                state Unity ["game.exe"] {
+                    scene = unity.scenes.active();
+                }
+            "#,
+        )
+        .expect("the provider-context fixture should parse")
+        .into_syntax();
+        let contexts = [SelectedProviderContext {
+            index: 0,
+            ty: "UnityContext",
+            function_name: "__prepare_unity_context",
+        }];
+
+        let source =
+            managed_preparation_source(&program, "__prepare_managed_runtime", "", None, &contexts);
+
+        assert!(source.contains("let __provider_context_0 = await __prepare_unity_context()"));
+        assert!(source.contains("__provider_context_0: UnityContext"));
+        assert!(!source.contains("__prepare_managed_runtime"));
+        assert!(!source.contains("let __runtime"));
+    }
+
+    #[test]
+    fn provider_context_and_managed_schema_share_one_attachment_record() {
+        let program = crate::parse(
+            r#"
+                image "Assembly-CSharp" {
+                    class GameManager { u32 state; }
+                }
+                state Unity ["game.exe"] {
+                    scene = unity.scenes.active();
+                }
+            "#,
+        )
+        .expect("the mixed Unity fixture should parse")
+        .into_syntax();
+        let contexts = [SelectedProviderContext {
+            index: 0,
+            ty: "UnityContext",
+            function_name: "__prepare_unity_context",
+        }];
+
+        let source =
+            managed_preparation_source(&program, "__prepare_managed_runtime", "", None, &contexts);
+
+        assert!(source.contains("let __runtime = await __prepare_managed_runtime()"));
+        assert!(source.contains("let __provider_context_0 = await __prepare_unity_context()"));
+        assert!(source.contains("__provider_context_0: UnityContext"));
+        assert!(source.contains(MANAGED_POINTER_SIZE_FIELD));
     }
 
     #[test]
@@ -642,6 +813,7 @@ mod tests {
             "__prepare",
             "2020",
             Some(ManagedRuntimeBackend::Il2Cpp),
+            &[],
         );
         assert!(source.contains("let __module = __runtime.il2cpp"));
         assert!(source.contains("await __module.image(\"Assembly-CSharp\")"));

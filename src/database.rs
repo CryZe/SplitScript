@@ -566,7 +566,7 @@ fn source_definition_for_value_path(
     }
     let root_segment = match root {
         ResolvedValue::StandardLibraryConstant(_) => unreachable!(),
-        ResolvedValue::ProviderValue(_) => 0,
+        ResolvedValue::ProviderValue(_) | ResolvedValue::ProviderContext { .. } => 0,
         ResolvedValue::Variable(_) => 0,
         ResolvedValue::ManagedStatic { .. } => unreachable!(),
         ResolvedValue::CurrentSnapshot
@@ -587,6 +587,7 @@ fn source_definition_for_value_path(
                 Some(SourceDefinitionId::Settings)
             }
             ResolvedValue::ProviderValue(_)
+            | ResolvedValue::ProviderContext { .. }
             | ResolvedValue::StandardLibraryConstant(_)
             | ResolvedValue::ManagedStatic { .. }
             | ResolvedValue::Variable(_)
@@ -597,7 +598,10 @@ fn source_definition_for_value_path(
         };
     }
     if segment == root_segment {
-        if matches!(root, ResolvedValue::ProviderValue(_)) {
+        if matches!(
+            root,
+            ResolvedValue::ProviderValue(_) | ResolvedValue::ProviderContext { .. }
+        ) {
             return Some(SourceDefinitionId::State);
         }
         return root.source_value().map(SourceDefinitionId::Value);
@@ -676,7 +680,7 @@ fn definition_for_value_path(
     }
     let root_segment = match root {
         ResolvedValue::StandardLibraryConstant(_) => unreachable!(),
-        ResolvedValue::ProviderValue(_) => 0,
+        ResolvedValue::ProviderValue(_) | ResolvedValue::ProviderContext { .. } => 0,
         ResolvedValue::Variable(_) => 0,
         ResolvedValue::ManagedStatic { .. } => unreachable!(),
         ResolvedValue::CurrentSnapshot
@@ -697,6 +701,7 @@ fn definition_for_value_path(
                 SourceDefinitionId::Settings
             }
             ResolvedValue::ProviderValue(_)
+            | ResolvedValue::ProviderContext { .. }
             | ResolvedValue::StandardLibraryConstant(_)
             | ResolvedValue::ManagedStatic { .. }
             | ResolvedValue::Variable(_)
@@ -711,7 +716,10 @@ fn definition_for_value_path(
             .map(DefinitionTarget::Source);
     }
     if segment == root_segment {
-        if matches!(root, ResolvedValue::ProviderValue(_)) {
+        if matches!(
+            root,
+            ResolvedValue::ProviderValue(_) | ResolvedValue::ProviderContext { .. }
+        ) {
             return definitions
                 .get(SourceDefinitionId::State)
                 .cloned()

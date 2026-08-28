@@ -91,6 +91,18 @@ list. Each name is attempted once per tick until one attaches.
 state ["game.exe", "game-demo.exe"] {}
 ```
 
+A typed state provider may introduce additional read-only attachment context
+beside its process value. For example, [`state Unity`](provider@Unity) exposes
+`unity: UnityContext` wherever `process` is available. Context preparation is
+demand-driven and runs once before [`onAttach`], so merely selecting a provider
+does not discover facilities the script never references:
+
+```splitscript
+state Unity ["game.exe"] {
+    scene = unity.scenes.active();
+}
+```
+
 With a module name, the first signed `i64` offset is added to the module base.
 Every remaining signed offset follows a 64-bit pointer, adds the offset, and
 continues. Without a module name, the first value is a full-width unsigned

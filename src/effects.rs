@@ -174,8 +174,40 @@ impl OperationAnalysis {
             capabilities: &'a crate::capabilities::CapabilityAnalysis,
             action: ActionKind,
             violations: Vec<AttachedProcessViolation>,
+            direct_value_violations: Vec<AttachedProcessViolation>,
         }
         impl Validator<'_> {
+            fn direct_value_violation(
+                &self,
+                expression: &TypedExpression,
+                program: &TypedProgram,
+            ) -> Option<AttachedProcessViolation> {
+                let (root, _) = program.value_path(expression.id)?;
+                let name = match root? {
+                    crate::semantic::ResolvedValue::ProviderValue(provider) => {
+                        program
+                            .standard_library()
+                            .state_provider(provider)
+                            .value_name
+                    }
+                    crate::semantic::ResolvedValue::ProviderContext { provider, context } => {
+                        program
+                            .standard_library()
+                            .state_provider(provider)
+                            .contexts
+                            .get(context as usize)?
+                            .name
+                    }
+                    _ => return None,
+                };
+                Some(AttachedProcessViolation {
+                    action: self.action,
+                    expression_span: expression.span,
+                    function: None,
+                    standard_library_name: Some(name),
+                })
+            }
+
             fn call_site_violation(
                 &self,
                 expression: &TypedExpression,
@@ -274,6 +306,9 @@ impl OperationAnalysis {
                 if let Some(violation) = violation {
                     self.violations.push(violation);
                 }
+                if let Some(violation) = self.direct_value_violation(expression, program) {
+                    self.direct_value_violations.push(violation);
+                }
                 hir::walk_typed_expression(self, expression, program);
             }
 
@@ -305,9 +340,17 @@ impl OperationAnalysis {
                 capabilities,
                 action: action.action,
                 violations: Vec::new(),
+                direct_value_violations: Vec::new(),
             };
             validator.visit_block(&action.body, program);
+            validator.direct_value_violations.retain(|direct| {
+                !validator.violations.iter().any(|call| {
+                    call.expression_span.start <= direct.expression_span.start
+                        && direct.expression_span.end <= call.expression_span.end
+                })
+            });
             violations.extend(validator.violations);
+            violations.extend(validator.direct_value_violations);
         }
         violations
     }

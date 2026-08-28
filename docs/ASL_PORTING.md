@@ -1162,19 +1162,14 @@ deliberately PE-specific; ELF and Mach-O symbols need their own proven parser or
 a future portable host contract rather than being mislabeled as PE exports.
 
 When an ASL helper enables `LoadSceneManager` and reads `Scenes.Active` or
-`Scenes.Loaded`, discover SplitScript's typed scene manager once during
-attachment and poll immutable snapshots through the state block:
+`Scenes.Loaded`, select the [`Unity`] state provider and read immutable scene
+snapshots through its attachment-scoped `unity` context:
 
 ```splitscript
-let sceneManager
-
-state "game.exe" {
-    activeScene = sceneManager.activeScene();
-    loadedScenes = sceneManager.loadedScenes();
-}
-
-onAttach {
-    sceneManager = await Unity.sceneManager()
+state Unity ["game.exe"] {
+    activeScene = unity.scenes.active();
+    loadedScenes = unity.scenes.loaded();
+    persistentScene = unity.scenes.persistent();
 }
 
 isLoading {
@@ -1186,16 +1181,19 @@ isLoading {
 }
 ```
 
-[`Unity.sceneManager`](fn@Unity.sceneManager) supports the UnityPlayer layouts
-covered by ASR: 32-bit and 64-bit Windows players and 64-bit Linux and macOS
-players. [`UnitySceneManager.activeScene`](method@UnitySceneManager.activeScene)
-and [`UnitySceneManager.loadedScenes`](method@UnitySceneManager.loadedScenes)
-copy each scene's native address, signed build index, asset path, and name. This
-is intentionally a snapshot rather than a live scene handle: [`old`] remains
-stable even after Unity unloads or reuses the original native object. Failed or
-incomplete reads reject that state field update and retain its preceding value;
-they do not publish a partially populated loaded-scene array. The signed index
-preserves Unity's initialization value of `-1`.
+The provider discovers and caches [`UnityScenes`] once per attachment, but only
+when the script references `unity`; a managed-schema-only port does not pay for
+native scene discovery. [`UnityScenes.active`](method@UnityScenes.active),
+[`UnityScenes.loaded`](method@UnityScenes.loaded), and
+[`UnityScenes.persistent`](method@UnityScenes.persistent) support the
+UnityPlayer layouts covered by ASR: 32-bit and 64-bit Windows players and
+64-bit Linux and macOS players. Each operation copies the native address,
+signed build index, asset path, and name. This is intentionally a snapshot
+rather than a live scene handle: [`old`] remains stable even after Unity unloads
+or reuses the original native object. Failed or incomplete reads reject that
+state field update and retain its preceding value; they do not publish a
+partially populated loaded-scene array. The signed index preserves Unity's
+initialization value of `-1`.
 
 ## UnityASL and managed metadata
 

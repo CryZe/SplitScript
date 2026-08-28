@@ -127,8 +127,25 @@ impl<'a> CatalogGenerator<'a> {
                     })
                     .collect::<Vec<_>>()
                     .join(",");
+                let contexts = provider
+                    .contexts
+                    .iter()
+                    .map(|context| {
+                        let ty = match &context.ty {
+                            crate::Type::Name(name) => ident(name),
+                            _ => unreachable!("provider context types are validated as nominal types"),
+                        };
+                        let preparation = attribute_name(&context.attributes, "prepare");
+                        format!(
+                            "StateProviderContext {{ name: {}, ty: StdlibTypeId::{ty}, preparation: StdlibItemId::{preparation}, documentation: {} }}",
+                            quote(&context.name),
+                            self.documentation(&context.documentation),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
                 output.push_str(&format!(
-                    "StdlibStateProvider {{ id: StdlibStateProviderId::{}, name: {}, value_name: {}, processes: {}, default: {default}, process_type: StdlibTypeId::{}, attachment: {}, preparation: {preparation}, direct_read: StdlibItemId::{}, selectors: &[{selectors}], documentation: {} }},\n",
+                    "StdlibStateProvider {{ id: StdlibStateProviderId::{}, name: {}, value_name: {}, processes: {}, default: {default}, process_type: StdlibTypeId::{}, attachment: {}, preparation: {preparation}, direct_read: StdlibItemId::{}, contexts: &[{contexts}], selectors: &[{selectors}], documentation: {} }},\n",
                     ident(&provider.name),
                     quote(&provider.name),
                     quote(&provider.value_name),

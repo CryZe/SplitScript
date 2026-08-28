@@ -611,7 +611,7 @@ impl HighlightCollector<'_> {
                         );
                     }
                 }
-                ResolvedValue::ProviderValue(_) => {
+                ResolvedValue::ProviderValue(_) | ResolvedValue::ProviderContext { .. } => {
                     self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
                 }
                 ResolvedValue::ManagedStatic { .. } => {
@@ -2175,6 +2175,30 @@ whileAttached {
                 MODIFIER_READONLY
             ));
         }
+    }
+
+    #[test]
+    fn highlights_provider_contexts_as_read_only_values() {
+        let source = r#"state Unity ["game.exe"] {}
+whileAttached {
+    let scenes = unity.scenes
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let highlights = database.semantic_highlights().unwrap();
+        assert!(contains(
+            source,
+            &highlights,
+            "unity",
+            SemanticTokenKind::Variable,
+            MODIFIER_READONLY
+        ));
+        assert!(contains(
+            source,
+            &highlights,
+            "scenes",
+            SemanticTokenKind::Property,
+            MODIFIER_READONLY
+        ));
     }
 
     #[test]

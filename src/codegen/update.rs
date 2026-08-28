@@ -734,7 +734,7 @@ fn emit_automatic_layout_failure_report(
     let bindings = program
         .records
         .iter()
-        .find(|record| record.name == crate::stdlib::MANAGED_BINDINGS_TYPE)
+        .find(|record| record.name == crate::stdlib::PROVIDER_BINDINGS_TYPE)
         .expect("managed layout evidence has generated bindings");
     emit_runtime_message(function, strings, &report.observed_present, lowering.abi);
     for evidence in &report.evidence {
@@ -1006,7 +1006,7 @@ fn emit_managed_field_presence_validation(
     program: &Program,
     lowering: &UpdateContext<'_>,
 ) {
-    use crate::stdlib::{MANAGED_BINDINGS_TYPE, managed_field_presence_name};
+    use crate::stdlib::{PROVIDER_BINDINGS_TYPE, managed_field_presence_name};
 
     let Some(bindings_global) = lowering.runtime_globals.provider_preparation_value else {
         return;
@@ -1014,7 +1014,7 @@ fn emit_managed_field_presence_validation(
     let Some(bindings) = program
         .records
         .iter()
-        .find(|record| record.name == MANAGED_BINDINGS_TYPE)
+        .find(|record| record.name == PROVIDER_BINDINGS_TYPE)
     else {
         return;
     };
@@ -1069,7 +1069,7 @@ fn emit_automatic_layout_selection(
     plan: &crate::layout_selection::LayoutSelectionPlan,
     lowering: &UpdateContext<'_>,
 ) {
-    use crate::stdlib::{MANAGED_BINDINGS_TYPE, managed_field_presence_name};
+    use crate::stdlib::{PROVIDER_BINDINGS_TYPE, managed_field_presence_name};
 
     let bindings = (!plan.evidence_fields.is_empty()).then(|| {
         let global = lowering
@@ -1079,7 +1079,7 @@ fn emit_automatic_layout_selection(
         let record = program
             .records
             .iter()
-            .find(|record| record.name == MANAGED_BINDINGS_TYPE)
+            .find(|record| record.name == PROVIDER_BINDINGS_TYPE)
             .expect("managed layout evidence has generated bindings");
         (global, record)
     });

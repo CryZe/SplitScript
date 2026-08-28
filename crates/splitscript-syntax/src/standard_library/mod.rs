@@ -34,9 +34,19 @@ pub struct StateProviderDeclaration {
     pub name: String,
     pub value_name: String,
     pub processes: Vec<String>,
+    /// Additional attachment-scoped values exposed by this provider.
+    pub contexts: Vec<StateProviderContextDeclaration>,
     /// Qualified configurations accepted after the provider name, such as
     /// `Unity.il2cpp(2020)`.
     pub selectors: Vec<StateProviderSelectorDeclaration>,
+    pub documentation: Documentation,
+    pub attributes: Vec<Attribute>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateProviderContextDeclaration {
+    pub name: String,
+    pub ty: Type,
     pub documentation: Documentation,
     pub attributes: Vec<Attribute>,
 }

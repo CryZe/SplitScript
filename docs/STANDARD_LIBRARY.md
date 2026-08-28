@@ -584,6 +584,25 @@ An exact known target may select `Unity.mono(MonoVersion.V2)`,
 `Unity.il2cpp(2020)` in the state header. These selectors configure the provider;
 they are not callable discovery functions.
 
+The same provider exposes `unity: UnityContext` as a read-only,
+attachment-scoped value. Its [`UnityContext.scenes`](field@UnityContext.scenes)
+facility is prepared once only when referenced and snapshots Unity's native
+active, loaded, and persistent `DontDestroyOnLoad` scenes:
+
+```splitscript
+state Unity ["game.exe"] {
+    activeScene = unity.scenes.active();
+    loadedScenes = unity.scenes.loaded();
+    persistentScene = unity.scenes.persistent();
+}
+```
+
+Scene operations are fallible and participate in the ordinary state-field
+retention boundary. The resulting [`UnityScene`] values are immutable local
+snapshots, so `old` remains stable if Unity later unloads or reuses the native
+scene address. Native scene discovery does not also trigger managed-runtime
+metadata discovery unless a managed schema is reachable.
+
 `from "name"` supplies an exact metadata name and `from ["first", "second"]`
 supplies ordered alternatives. Instance fields without `from` also recognize
 the conventional C# automatic-property backing-field spelling. Class-typed

@@ -508,6 +508,21 @@ fn complete_root(
             insert_text: provider.value_name.to_owned(),
             is_snippet: false,
         });
+        for context in provider.contexts {
+            let ty = standard_library.type_decl(context.ty);
+            builder.add(CompletionItem {
+                label: context.name.to_owned(),
+                kind: CompletionKind::Variable,
+                detail: Some(ty.name.to_owned()),
+                documentation: Some(render_documentation(&context.documentation)),
+                documentation_uri: Some(symbol_uri(
+                    StdlibSymbolId::Type(context.ty),
+                    &standard_library,
+                )),
+                insert_text: context.name.to_owned(),
+                is_snippet: false,
+            });
+        }
     }
     add_source_declarations(
         &mut builder,
@@ -677,6 +692,29 @@ fn complete_member(
                     &mut builder,
                     syntax,
                     &TypeKind::Standard(provider.process_type),
+                    &[],
+                    &standard_library,
+                );
+            }
+            if let Some(context) =
+                selected_provider(syntax, &standard_library).and_then(|provider| {
+                    provider
+                        .contexts
+                        .iter()
+                        .find(|context| context.name == *name)
+                })
+            {
+                add_inferred_fields(
+                    &mut builder,
+                    syntax,
+                    &TypeKind::Standard(context.ty),
+                    &standard_library,
+                    &active_layout_facts,
+                );
+                add_inferred_methods(
+                    &mut builder,
+                    syntax,
+                    &TypeKind::Standard(context.ty),
                     &[],
                     &standard_library,
                 );
@@ -3298,6 +3336,34 @@ fn relay() {
         let all = database.completions(empty_prefix).unwrap();
         assert!(all.items.iter().any(|item| item.label == "whileAttached"));
         assert!(all.items.iter().all(|item| item.label != "utf8"));
+    }
+
+    #[test]
+    fn provider_context_completion_follows_attachment_availability_and_type() {
+        let mut database = CompilerDatabase::new("state Unity [\"game.exe\"] {}\nonAttach { uni }");
+        let attached = labels(&mut database, "uni }");
+        assert!(attached.contains(&"unity".to_owned()), "{attached:#?}");
+
+        let mut database =
+            CompilerDatabase::new("state Unity [\"game.exe\"] {}\nonAttach { unity. }");
+        let context = labels(&mut database, "unity.");
+        assert!(context.contains(&"scenes".to_owned()), "{context:#?}");
+
+        let mut database =
+            CompilerDatabase::new("state Unity [\"game.exe\"] {}\nonAttach { unity.scenes. }");
+        let scenes = labels(&mut database, "unity.scenes.");
+        for method in ["active", "loaded", "persistent"] {
+            assert!(
+                scenes.contains(&method.to_owned()),
+                "missing `{method}`: {scenes:#?}"
+            );
+        }
+
+        let source = "state Unity [\"game.exe\"] {}\nonDetach { uni }";
+        let mut database = CompilerDatabase::new(source);
+        let detached_offset = source.rfind("uni }").unwrap() + "uni".len();
+        let detached = database.completions(detached_offset).unwrap();
+        assert!(detached.items.iter().all(|item| item.label != "unity"));
     }
 
     #[test]

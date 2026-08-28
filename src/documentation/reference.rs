@@ -8,7 +8,7 @@ use crate::{
     migration::{MigrationCatalog, MigrationConcept, MigrationConceptId, MigrationTarget},
     stdlib::{
         CoreTypeId, FieldVisibility, ItemKind, StandardLibrary, StdlibOwner, StdlibSymbolId,
-        StdlibTypeKind,
+        StdlibTypeKind, TypeRef,
     },
 };
 
@@ -298,6 +298,18 @@ impl DocumentationReference {
             }
         }));
         entries.extend(self.library.state_providers().iter().map(|provider| {
+            let contexts = provider
+                .contexts
+                .iter()
+                .flat_map(|context| {
+                    [
+                        context.name,
+                        context.documentation.summary,
+                        context.documentation.details,
+                    ]
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
             DocumentationIndexEntry {
                 uri: symbol_uri(StdlibSymbolId::StateProvider(provider.id), &self.library),
                 title: provider.name.to_owned(),
@@ -305,8 +317,8 @@ impl DocumentationReference {
                 summary: compact_prose(provider.documentation.summary),
                 raw_summary: provider.documentation.summary,
                 search_text: format!(
-                    "{} {}",
-                    provider.documentation.summary, provider.documentation.details
+                    "{} {} {contexts}",
+                    provider.documentation.summary, provider.documentation.details,
                 ),
                 signature: Some(format!("state {}", provider.name)),
             }
@@ -693,7 +705,7 @@ impl DocumentationReference {
                         symbol_uri(StdlibSymbolId::StateProvider(value.id), &self.library) == uri
                     })
                     .map(|value| {
-                        self.declaration_page(
+                        let mut page = self.declaration_page(
                             StdlibSymbolId::StateProvider(value.id),
                             value.name.to_owned(),
                             "state provider",
@@ -703,7 +715,9 @@ impl DocumentationReference {
                                 "Value type",
                                 [StdlibSymbolId::Type(value.process_type)],
                             )],
-                        )
+                        );
+                        self.append_state_provider_contexts(&mut page.markdown, &page.uri, value);
+                        page
                     })
             })
             .or_else(|| {
@@ -942,6 +956,33 @@ impl DocumentationReference {
             }
             markdown.push_str(&format!("\n\n## {}\n", group.title));
             append_member_table(markdown, uri, &group.members, &self.library);
+        }
+    }
+
+    fn append_state_provider_contexts(
+        &self,
+        markdown: &mut String,
+        uri: &str,
+        provider: &crate::stdlib::StdlibStateProvider,
+    ) {
+        if provider.contexts.is_empty() {
+            return;
+        }
+
+        markdown.push_str("\n\n## Contextual values\n");
+        append_reference_table_header(markdown, &["Value", "Description"]);
+        for context in provider.contexts {
+            let ty_uri = symbol_uri(StdlibSymbolId::Type(context.ty), &self.library);
+            let ty = self.library.render_type(TypeRef::Standard(context.ty));
+            let value = format!(
+                "`{}`: [`{ty}`]({})",
+                context.name,
+                relative_document_link(uri, &ty_uri),
+            );
+            markdown.push_str(&format!(
+                "\n| {value} | {} |",
+                table_prose(context.documentation.summary, uri, &self.library),
+            ));
         }
     }
 
@@ -2396,6 +2437,26 @@ mod tests {
         let native = reference.page(&native.uri).expect("Native has a page");
         assert!(native.markdown.contains("Windows candidates must"));
         assert!(native.markdown.contains("Try alternate executable names"));
+    }
+
+    #[test]
+    fn state_provider_pages_expose_contextual_values() {
+        let reference = DocumentationReference::default();
+        let unity = reference
+            .index()
+            .into_iter()
+            .find(|entry| entry.title == "Unity" && entry.kind == "state provider")
+            .expect("Unity state provider is indexed");
+        let unity = reference.page(&unity.uri).expect("Unity has a page");
+
+        assert!(unity.markdown.contains("## Contextual values"));
+        assert!(unity.markdown.contains("`unity`:"));
+        assert!(unity.markdown.contains("`UnityContext`"));
+        assert!(
+            unity
+                .markdown
+                .contains("Provides attachment-scoped Unity engine facilities")
+        );
     }
 
     #[test]

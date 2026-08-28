@@ -1976,6 +1976,35 @@ impl Checker {
                 })
             }
             [name, fields @ ..]
+                if self.provider_value.is_some_and(|(provider, _)| {
+                    self.standard_library
+                        .state_provider(provider)
+                        .contexts
+                        .iter()
+                        .any(|context| context.name == name)
+                }) =>
+            {
+                let (provider, _) = self.provider_value.unwrap();
+                let declaration = self.standard_library.state_provider(provider);
+                let (context, context_declaration) = declaration
+                    .contexts
+                    .iter()
+                    .enumerate()
+                    .find(|(_, context)| context.name == name)
+                    .expect("provider context name was discovered above");
+                let context_type = self.standard_type(context_declaration.ty);
+                let (ty, members) =
+                    self.resolve_members_or_defer(context_type, fields, span, expression)?;
+                Some(PathResolution {
+                    ty,
+                    value: Some(ResolvedValue::ProviderContext {
+                        provider,
+                        context: context as u32,
+                    }),
+                    members,
+                })
+            }
+            [name, fields @ ..]
                 if matches!(
                     self.callable,
                     CallableContext::LibraryFunction(_) | CallableContext::CompilerGenerated

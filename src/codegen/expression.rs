@@ -14,9 +14,9 @@ use crate::{
         ResolvedRecordId, ResolvedValue, SemanticModel, ValueConversionKind,
     },
     stdlib::{
-        IntrinsicId, MANAGED_BINDINGS_TYPE, MANAGED_POINTER_SIZE_FIELD, RuntimeRepresentation,
+        IntrinsicId, MANAGED_POINTER_SIZE_FIELD, PROVIDER_BINDINGS_TYPE, RuntimeRepresentation,
         StandardLibrary, StdlibFieldId, StdlibOwner, StdlibTypeConstructorId, StdlibTypeId,
-        managed_field_offset_name, managed_static_table_name,
+        managed_field_offset_name, managed_static_table_name, provider_context_field_name,
     },
     types::{EnumTypeId, ResolvedArrayType, TypeId},
     wasm_ir::{self, TemporaryId},
@@ -1495,6 +1495,45 @@ fn compile_resolved_path(
             }
             Type::Standard(declaration.process_type)
         }
+        ResolvedValue::ProviderContext {
+            provider,
+            context: context_index,
+        } => {
+            let declaration = context.wasm_ir.standard_library().state_provider(provider);
+            let context_declaration = declaration
+                .contexts
+                .get(context_index as usize)
+                .expect("resolved provider contexts use catalog indices");
+            let record = context
+                .records
+                .iter()
+                .find(|record| record.name == PROVIDER_BINDINGS_TYPE)
+                .expect("reachable provider contexts generate a binding record");
+            let name = provider_context_field_name(context_index as usize);
+            let (field_index, field) = record
+                .fields
+                .iter()
+                .enumerate()
+                .find(|(_, field)| field.name == name)
+                .expect("provider binding records contain every reachable context");
+            let field_type = record_field_type(field.id, context.semantics);
+            function
+                .instruction(&Instruction::GlobalGet(
+                    context
+                        .runtime_globals
+                        .provider_preparation_value
+                        .expect("provider contexts require preparation storage"),
+                ))
+                .instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(
+                function,
+                context.gc.index(Type::Record(record.id)),
+                field_index as u32,
+                field_type,
+            );
+            debug_assert_eq!(field_type, Type::Standard(context_declaration.ty));
+            field_type
+        }
         ResolvedValue::ManagedStatic { class, field } => {
             emit_managed_static_read(function, class, field, context)
         }
@@ -2394,6 +2433,7 @@ fn resolved_value_type_id(value: ResolvedValue, context: &ExprContext<'_>) -> Op
         }
         ResolvedValue::StandardLibraryConstant(_)
         | ResolvedValue::ProviderValue(_)
+        | ResolvedValue::ProviderContext { .. }
         | ResolvedValue::ManagedStatic { .. }
         | ResolvedValue::CurrentSnapshot
         | ResolvedValue::OldSnapshot
@@ -2647,7 +2687,7 @@ pub(super) fn emit_managed_binding_field(
     let record = context
         .records
         .iter()
-        .find(|record| record.name == MANAGED_BINDINGS_TYPE)
+        .find(|record| record.name == PROVIDER_BINDINGS_TYPE)
         .expect("managed schemas generate an attachment binding record");
     let (field_index, field) = record
         .fields

@@ -27,10 +27,10 @@ pub use schema::{
 pub use declarations::{
     CapabilityBehavior, CoreType, CoreTypeId, DeclaredTypeRef, FieldVisibility,
     ManagedRuntimeBackend, RuntimeRepresentation, ScalarMemoryLayout, StateProviderAttachment,
-    StateProviderProcesses, StdlibAssociatedType, StdlibAssociatedTypeDefinition, StdlibCapability,
-    StdlibField, StdlibNamespace, StdlibOwner, StdlibStateProvider, StdlibSymbolId, StdlibType,
-    StdlibTypeConstructor, StdlibTypeKind, StdlibVariant, TypeConstructorSyntax, TypeVisibility,
-    ValueUsage,
+    StateProviderContext, StateProviderProcesses, StdlibAssociatedType,
+    StdlibAssociatedTypeDefinition, StdlibCapability, StdlibField, StdlibNamespace, StdlibOwner,
+    StdlibStateProvider, StdlibSymbolId, StdlibType, StdlibTypeConstructor, StdlibTypeKind,
+    StdlibVariant, TypeConstructorSyntax, TypeVisibility, ValueUsage,
 };
 
 use catalog::{
@@ -39,9 +39,10 @@ use catalog::{
 use declarations::CORE_TYPES;
 pub(crate) use declarations::with_core_types;
 pub(crate) use library_bodies::{
-    MANAGED_BINDINGS_TYPE, MANAGED_POINTER_SIZE_FIELD, PROVIDER_PREPARATION_FUNCTION,
+    MANAGED_POINTER_SIZE_FIELD, PROVIDER_BINDINGS_TYPE, PROVIDER_PREPARATION_FUNCTION,
     RESERVED_FUNCTION_PREFIX, augment_program_with_library_bodies, managed_field_offset_name,
     managed_field_presence_name, managed_instance_header_name, managed_static_table_name,
+    provider_context_field_name,
 };
 
 use std::{collections::HashSet, sync::Arc};
@@ -968,6 +969,74 @@ impl StandardLibrary {
                 }
                 if default_state_provider.replace(provider.name).is_some() {
                     errors.push("multiple default state providers are declared".to_owned());
+                }
+            }
+            let mut context_names = HashSet::new();
+            for context in provider.contexts {
+                let qualified = format!("{}.{}", provider.name, context.name);
+                if context.name.trim().is_empty() {
+                    errors.push(format!(
+                        "state provider `{}` has an empty context value name",
+                        provider.name
+                    ));
+                } else if context.name == provider.value_name {
+                    errors.push(format!(
+                        "state provider `{}` uses `{}` for both its primary and context value",
+                        provider.name, context.name
+                    ));
+                } else if !context_names.insert(context.name) {
+                    errors.push(format!(
+                        "state provider `{}` repeats context value `{}`",
+                        provider.name, context.name
+                    ));
+                }
+                if context.documentation.summary.trim().is_empty()
+                    || context.documentation.details.trim().is_empty()
+                    || context.documentation.examples.is_empty()
+                {
+                    errors.push(format!(
+                        "state-provider context `{qualified}` has incomplete documentation"
+                    ));
+                }
+                record_example_sources(
+                    "state-provider context",
+                    &qualified,
+                    context.documentation,
+                    &mut example_sources,
+                    &mut errors,
+                );
+                if self.type_decl(context.ty).visibility != TypeVisibility::Public {
+                    errors.push(format!(
+                        "state-provider context `{qualified}` exposes private type `{}`",
+                        self.type_decl(context.ty).name
+                    ));
+                }
+                let preparation = self.item(context.preparation);
+                if preparation.kind != ItemKind::Function
+                    || !preparation.signature.type_parameters.is_empty()
+                    || !preparation.signature.parameters.is_empty()
+                    || !preparation.signature.result_is_async
+                    || preparation.signature.result != TypeRef::Standard(context.ty)
+                    || !matches!(
+                        preparation.implementation,
+                        Implementation::LibraryBody { .. }
+                    )
+                {
+                    errors.push(format!(
+                        "state-provider context `{qualified}` has incompatible preparation callable `{:?}`",
+                        context.preparation
+                    ));
+                }
+                if self.source_body_operations_are_initialized() {
+                    let operation = self.operation_metadata(context.preparation);
+                    if !operation.effects.contains(&Effect::Suspends)
+                        || !operation.effects.contains(&Effect::RequiresAttachedProcess)
+                    {
+                        errors.push(format!(
+                            "state-provider context `{qualified}` preparation `{}` must suspend and require an attached process",
+                            preparation.qualified_name
+                        ));
+                    }
                 }
             }
             let mut selector_names = HashSet::new();

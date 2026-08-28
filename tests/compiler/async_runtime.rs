@@ -916,22 +916,17 @@ fn async_closure_bodies_use_typed_continuation_frames() {
 }
 
 #[test]
-fn source_defined_unity_scene_manager_discovers_and_snapshots_scenes() {
+fn unity_context_discovers_and_snapshots_scenes() {
     let source = r#"
-        let sceneManager
-
-        state "game.exe" {
-            activeScene = sceneManager.activeScene();
-            loadedScenes = sceneManager.loadedScenes();
-        }
-
-        onAttach {
-            sceneManager = await Unity.sceneManager()
+        state Unity ["game.exe"] {
+            activeScene = unity.scenes.active();
+            loadedScenes = unity.scenes.loaded();
+            persistentScene = unity.scenes.persistent();
         }
 
         whileAttached {
             if !current.loadedScenes.isEmpty() {
-                print(`{current.activeScene.index}:{current.activeScene.name}:{current.loadedScenes[0].name}`)
+                print(`{current.activeScene.index}:{current.activeScene.name}:{current.loadedScenes[0].name}:{current.persistentScene.name}`)
             }
         }
     "#;
@@ -954,16 +949,22 @@ fn source_defined_unity_scene_manager_discovers_and_snapshots_scenes() {
     let active_scene = 0x3000u64;
     let loaded_scene_table = 0x4000u64;
     let scene_path = 0x5000u64;
-    let mut manager = vec![0; 0x80];
+    let persistent_path = 0x5100u64;
+    let mut manager = vec![0; 0x120];
     manager[0x18..0x1c].copy_from_slice(&1u32.to_le_bytes());
     manager[0x28..0x30].copy_from_slice(&loaded_scene_table.to_le_bytes());
     manager[0x48..0x50].copy_from_slice(&active_scene.to_le_bytes());
+    manager[0x80..0x88].copy_from_slice(&persistent_path.to_le_bytes());
+    manager[0x108..0x10c].copy_from_slice(&(-1i32).to_le_bytes());
     let mut scene = vec![0; 0xa0];
     scene[0x10..0x18].copy_from_slice(&scene_path.to_le_bytes());
     scene[0x98..0x9c].copy_from_slice(&(-1i32).to_le_bytes());
     let mut path = vec![0; 128];
     let path_text = b"Assets/Scenes/Forest.unity";
     path[..path_text.len()].copy_from_slice(path_text);
+    let mut persistent_path_bytes = vec![0; 128];
+    let persistent_path_text = b"Assets/Scenes/DontDestroyOnLoad.unity";
+    persistent_path_bytes[..persistent_path_text.len()].copy_from_slice(persistent_path_text);
 
     store.data_mut().memory_regions = vec![
         (0x1000, unity_player),
@@ -972,6 +973,7 @@ fn source_defined_unity_scene_manager_discovers_and_snapshots_scenes() {
         (active_scene, scene),
         (loaded_scene_table, active_scene.to_le_bytes().to_vec()),
         (scene_path, path),
+        (persistent_path, persistent_path_bytes),
     ];
 
     let update = instance
@@ -986,7 +988,7 @@ fn source_defined_unity_scene_manager_discovers_and_snapshots_scenes() {
             .data()
             .messages
             .iter()
-            .any(|message| message == "-1:Forest:Forest"),
+            .any(|message| message == "-1:Forest:Forest:DontDestroyOnLoad"),
         "scene snapshots should preserve signed indices and derived names: {:?}",
         store.data().messages,
     );

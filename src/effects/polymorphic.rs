@@ -582,6 +582,12 @@ impl<'a> Evaluator<'a> {
             {
                 self.accumulator.effect(Effect::RequiresAttachedProcess);
             }
+            if matches!(
+                root,
+                Some(ResolvedValue::ProviderValue(_) | ResolvedValue::ProviderContext { .. })
+            ) {
+                self.accumulator.effect(Effect::RequiresAttachedProcess);
+            }
         }
     }
 
@@ -610,6 +616,13 @@ impl<'a> Evaluator<'a> {
             .and_then(ResolvedValue::source_value)
             .is_some_and(|value| self.scoped_globals.is_attachment_global(value))
         {
+            self.accumulator.effect(Effect::RequiresAttachedProcess);
+        }
+        if matches!(
+            call.receiver()
+                .and_then(|receiver| receiver.path().map(|(root, _)| root)),
+            Some(ResolvedValue::ProviderContext { .. })
+        ) {
             self.accumulator.effect(Effect::RequiresAttachedProcess);
         }
 

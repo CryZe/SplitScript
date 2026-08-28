@@ -1019,6 +1019,46 @@ impl<'a> Validator<'a> {
                 value.name
             ));
         }
+        let mut context_names = HashSet::new();
+        for context in &value.contexts {
+            let qualified = format!("{}.{}", value.name, context.name);
+            self.validate_documentation(&qualified, &context.documentation, true, true);
+            self.validate_attributes(&qualified, &context.attributes, &["prepare"]);
+            if !context_names.insert(context.name.as_str()) {
+                self.error(format!(
+                    "state provider `{}` declares context value `{}` more than once",
+                    value.name, context.name
+                ));
+            }
+            if context.name == value.value_name {
+                self.error(format!(
+                    "state provider `{}` uses `{}` for both its primary and context value",
+                    value.name, context.name
+                ));
+            }
+            match &context.ty {
+                crate::Type::Name(name) if self.types.contains(name.as_str()) => {}
+                crate::Type::Name(name) => self.error(format!(
+                    "state-provider context `{qualified}` has unknown type `{name}`"
+                )),
+                _ => self.error(format!(
+                    "state-provider context `{qualified}` must use a nominal standard-library type"
+                )),
+            }
+            if let Some(preparation) =
+                self.optional_name_attribute(&qualified, &context.attributes, "prepare")
+            {
+                if !self.generated_items.contains(preparation) {
+                    self.error(format!(
+                        "state-provider context `{qualified}` has invalid `@prepare({preparation})`"
+                    ));
+                }
+            } else {
+                self.error(format!(
+                    "state-provider context `{qualified}` is missing `@prepare(...)`"
+                ));
+            }
+        }
         let mut selector_names = HashSet::new();
         for selector in &value.selectors {
             let qualified = format!("{}.{}", value.name, selector.name);

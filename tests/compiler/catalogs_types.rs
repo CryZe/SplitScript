@@ -43,10 +43,12 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::AddressOffset,
         StdlibItemId::ModulePeOptionalHeader,
         StdlibItemId::UnityIl2Cpp,
+        StdlibItemId::UnityProviderContext,
         StdlibItemId::UnitySceneManager,
-        StdlibItemId::UnitySceneManagerSnapshot,
-        StdlibItemId::UnitySceneManagerActiveScene,
-        StdlibItemId::UnitySceneManagerLoadedScenes,
+        StdlibItemId::UnityScenesSnapshot,
+        StdlibItemId::UnityScenesActive,
+        StdlibItemId::UnityScenesLoaded,
+        StdlibItemId::UnityScenesPersistent,
         StdlibItemId::GBAEmulatorResolve64BitMemoryPointer,
         StdlibItemId::MonoLayoutForVersion,
         StdlibItemId::GBAEmulatorDiscover,
@@ -99,17 +101,12 @@ fn growable_arrays_store_non_null_standard_library_gc_values() {
 }
 
 #[test]
-fn unity_scene_manager_exposes_immutable_state_snapshots() {
+fn unity_context_exposes_immutable_scene_snapshots() {
     let source = r#"
-        let sceneManager
-
-        state ["game.exe", "game-demo.exe"] {
-            activeScene = sceneManager.activeScene();
-            loadedScenes = sceneManager.loadedScenes();
-        }
-
-        onAttach {
-            sceneManager = await Unity.sceneManager()
+        state Unity ["game.exe", "game-demo.exe"] {
+            activeScene = unity.scenes.active();
+            loadedScenes = unity.scenes.loaded();
+            persistentScene = unity.scenes.persistent();
         }
 
         whileAttached {
@@ -117,12 +114,28 @@ fn unity_scene_manager_exposes_immutable_state_snapshots() {
             print(current.activeScene.index)
             print(current.activeScene.address)
             print(current.loadedScenes.length())
+            print(current.persistentScene.address)
         }
     "#;
 
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::compile(source).unwrap())
         .expect("source-defined Unity scene snapshots should produce valid Wasm GC");
+
+    let diagnostics = splitscript::compile(
+        r#"
+            state Unity ["game.exe"] {}
+            onDetach { let scenes = unity.scenes }
+        "#,
+    )
+    .expect_err("the Unity context must not escape its process attachment");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("requires an attached process")
+                && diagnostic.message.contains("onDetach")
+        }),
+        "{diagnostics:#?}"
+    );
 }
 
 #[test]
@@ -154,10 +167,7 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
             StdlibItemId::ModulePeOptionalHeader,
             "Module.peOptionalHeader",
         ),
-        (
-            StdlibItemId::UnitySceneManagerSnapshot,
-            "UnitySceneManager.snapshot",
-        ),
+        (StdlibItemId::UnityScenesSnapshot, "UnityScenes.snapshot"),
         (
             StdlibItemId::GBAEmulatorResolve64BitMemoryPointer,
             "GBAEmulator.resolve64BitMemoryPointer",
@@ -198,9 +208,9 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
     }
     assert!(
         library
-            .methods_for_type(&TypeKind::Standard(StdlibTypeId::UnitySceneManager))
+            .methods_for_type(&TypeKind::Standard(StdlibTypeId::UnityScenes))
             .into_iter()
-            .all(|item| item.id != StdlibItemId::UnitySceneManagerSnapshot)
+            .all(|item| item.id != StdlibItemId::UnityScenesSnapshot)
     );
     assert!(
         library
@@ -228,11 +238,9 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
 
     let diagnostics = splitscript::compile(
         r#"
-            let sceneManager
-            state "game.exe" {}
+            state Unity ["game.exe"] {}
             onAttach {
-                sceneManager = await Unity.sceneManager()
-                let scene = sceneManager.snapshot(0x1000)
+                let scene = unity.scenes.snapshot(0x1000)
             }
         "#,
     )
@@ -241,7 +249,7 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
         diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
-                .contains("type `UnitySceneManager` has no method `snapshot`")
+                .contains("type `UnityScenes` has no method `snapshot`")
                 && !diagnostic.message.contains("private")
         }),
         "{diagnostics:#?}"
@@ -1128,6 +1136,13 @@ fn unity_provider_preparation_is_selected_typed_and_lowered_before_attachment() 
     assert_eq!(unity.value_name, "process");
     assert_eq!(unity.process_type, StdlibTypeId::Process);
     assert_eq!(unity.preparation, Some(StdlibItemId::UnityProviderAuto));
+    assert_eq!(unity.contexts.len(), 1);
+    assert_eq!(unity.contexts[0].name, "unity");
+    assert_eq!(unity.contexts[0].ty, StdlibTypeId::UnityContext);
+    assert_eq!(
+        unity.contexts[0].preparation,
+        StdlibItemId::UnityProviderContext
+    );
     assert_eq!(unity.selectors.len(), 2);
     assert_eq!(
         unity.selectors[0].preparation,

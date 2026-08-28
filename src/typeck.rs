@@ -190,7 +190,9 @@ impl Checker {
 
     fn is_provider_value_name(&self, name: &str) -> bool {
         self.provider_value.is_some_and(|(provider, _)| {
-            self.standard_library.state_provider(provider).value_name == name
+            let provider = self.standard_library.state_provider(provider);
+            provider.value_name == name
+                || provider.contexts.iter().any(|context| context.name == name)
         })
     }
 

@@ -185,6 +185,12 @@ pub enum ResolvedValue {
     /// a source-level call.
     StandardLibraryConstant(StdlibItemId),
     ProviderValue(StdlibStateProviderId),
+    /// An additional attachment-scoped value declared by the selected state
+    /// provider. The index addresses the provider's catalog context list.
+    ProviderContext {
+        provider: StdlibStateProviderId,
+        context: u32,
+    },
     /// A live static managed field. Provider preparation caches its class
     /// storage table and metadata offset; evaluation performs the fallible
     /// process-memory read.
@@ -210,6 +216,7 @@ impl ResolvedValue {
         match self {
             Self::StandardLibraryConstant(_)
             | Self::ProviderValue(_)
+            | Self::ProviderContext { .. }
             | Self::ManagedStatic { .. }
             | Self::CurrentSnapshot
             | Self::OldSnapshot

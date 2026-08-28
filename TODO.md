@@ -262,11 +262,16 @@ to inference or code generation.
   leaf future, runtime scanner, completion, hover, navigation, highlighting,
   and Mono/IL2CPP runtime fixtures share the ordinary typed architecture rather
   than exposing raw vtable machinery.
-- [ ] Unify the existing scene snapshots under `unity.scenes`, including active,
-  loaded, and don't-destroy-on-load scenes. Add typed hierarchy lookup and
-  `.component<T>()`, with an explicitly dynamic escape hatch when no schema is
-  declared. Cache or cooperatively traverse hierarchy data so ticks remain
-  responsive.
+- [x] Unify native scene-manager discovery and immutable active, loaded, and
+  don't-destroy-on-load snapshots under the typed attachment context
+  `unity.scenes`. State-provider contexts are catalog-declared, resolved through
+  the ordinary symbol graph, prepared once per attachment only when referenced,
+  and available wherever the provider's process value is available. The old
+  public `Unity.sceneManager()` workflow is private implementation detail.
+- [ ] Add typed scene hierarchy lookup and `.component<T>()`, with an explicitly
+  dynamic escape hatch when no schema is declared. Cache or cooperatively
+  traverse hierarchy data so ticks remain responsive, and build it on the
+  provider-context architecture rather than introducing scene-specific roots.
 - [ ] Expose Unity global managers such as `unity.time.frameCount` and
   `unity.time.timeScale` through reachable source-defined declarations rather
   than bespoke compiler names.

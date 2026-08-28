@@ -1,8 +1,9 @@
 use super::{
     AssociatedTypeDeclaration, Attribute, AttributeArgument, CallableOwnerDeclaration, Declaration,
     Documentation, EnumDeclaration, Error, Example, FieldDeclaration, FunctionDeclaration, Library,
-    Parameter, StateProviderDeclaration, StateProviderSelectorDeclaration, StructDeclaration, Type,
-    TypeConstructorSyntax, TypeParameter, VariantDeclaration,
+    Parameter, StateProviderContextDeclaration, StateProviderDeclaration,
+    StateProviderSelectorDeclaration, StructDeclaration, Type, TypeConstructorSyntax,
+    TypeParameter, VariantDeclaration,
 };
 use crate::{SyntaxMode, Token, TokenCursor, TokenKind, lex, parser::parse_integer};
 
@@ -160,11 +161,25 @@ impl Parser<'_> {
             "expected `{` before the provider process names",
         )?;
         let mut processes = Vec::new();
+        let mut contexts = Vec::new();
         let mut selectors = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             let documentation = self.documentation()?;
             let attributes = self.attributes()?;
-            if self.eat_ident("selector") {
+            if self.eat_ident("context") {
+                let name = self.ident("expected a provider context value name")?;
+                self.expect(
+                    TokenKind::Colon,
+                    "expected `:` after the context value name",
+                )?;
+                let ty = self.ty()?;
+                contexts.push(StateProviderContextDeclaration {
+                    name,
+                    ty,
+                    documentation,
+                    attributes,
+                });
+            } else if self.eat_ident("selector") {
                 let name = self.ident("expected a state-provider selector name")?;
                 self.expect(
                     TokenKind::LParen,
@@ -197,16 +212,19 @@ impl Parser<'_> {
                 });
             } else {
                 if !documentation.summary.is_empty() || !documentation.details.is_empty() {
-                    return Err(self
-                        .error("documentation inside a state provider must describe a selector"));
+                    return Err(self.error(
+                        "documentation inside a state provider must describe a context or selector",
+                    ));
                 }
                 if !attributes.is_empty() {
-                    return Err(
-                        self.error("attributes inside a state provider must configure a selector")
-                    );
+                    return Err(self.error(
+                        "attributes inside a state provider must configure a context or selector",
+                    ));
                 }
                 let TokenKind::String(process) = self.current().kind.clone() else {
-                    return Err(self.error("expected a quoted process name or `selector`"));
+                    return Err(
+                        self.error("expected a quoted process name, `context`, or `selector`")
+                    );
                 };
                 self.bump();
                 processes.push(process);
@@ -220,6 +238,7 @@ impl Parser<'_> {
             name,
             value_name,
             processes,
+            contexts,
             selectors,
             documentation,
             attributes,
@@ -1544,6 +1563,11 @@ stateProvider GBA as gba { "mGBA.exe", "mGBA" }
 @attachment(identity)
 @directRead(ProcessRead)
 stateProvider Unity as process {
+    /// Provides Unity facilities.
+    ///
+    /// Lives for one attachment.
+    @prepare(Print)
+    context unity: UnityContext,
     /// Selects IL2CPP metadata explicitly.
     ///
     /// Skips runtime-version auto-detection.
@@ -1583,6 +1607,9 @@ stateProvider Unity as process {
             panic!("expected the Unity state provider")
         };
         assert!(provider.processes.is_empty());
+        assert_eq!(provider.contexts.len(), 1);
+        assert_eq!(provider.contexts[0].name, "unity");
+        assert_eq!(provider.contexts[0].ty.to_string(), "UnityContext");
         assert_eq!(provider.selectors.len(), 2);
         assert_eq!(provider.selectors[0].name, "il2cpp");
         assert_eq!(provider.selectors[0].attributes[0].name, "prepare");

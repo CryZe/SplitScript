@@ -506,6 +506,7 @@ fn validate_async_recursion(
                             self.values.insert(function);
                         }
                     }
+                    ResolvedCall::ManagedSnapshot { .. } => {}
                     ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
                     | ResolvedCall::IteratorItem { .. }
@@ -779,6 +780,7 @@ fn validate_suspending_calls(
                     .unwrap_or_else(|| "function".to_owned());
                 Some((effects.function(*function).suspension, name))
             }
+            ResolvedCall::ManagedSnapshot { .. } => None,
             ResolvedCall::ResultError { .. }
             | ResolvedCall::OptionSome { .. }
             | ResolvedCall::IteratorItem { .. }
@@ -793,6 +795,7 @@ fn validate_suspending_calls(
         match call {
             ResolvedCall::UserFunction { .. } | ResolvedCall::UserMethod { .. } => true,
             ResolvedCall::StandardLibrary { .. } => true,
+            ResolvedCall::ManagedSnapshot { .. } => false,
             ResolvedCall::ResultError { .. }
             | ResolvedCall::OptionSome { .. }
             | ResolvedCall::IteratorItem { .. }
@@ -1967,6 +1970,7 @@ fn validate_function_instances(
             signature: signature.clone(),
         }),
         ResolvedCall::StandardLibrary { .. }
+        | ResolvedCall::ManagedSnapshot { .. }
         | ResolvedCall::ResultError { .. }
         | ResolvedCall::OptionSome { .. }
         | ResolvedCall::IteratorItem { .. }

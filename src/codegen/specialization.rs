@@ -192,6 +192,7 @@ fn called_function(
                 }
                 wasm_ir::CallTarget::Intrinsic { .. }
                 | wasm_ir::CallTarget::DefaultDisplay { .. }
+                | wasm_ir::CallTarget::ManagedSnapshot { .. }
                 | wasm_ir::CallTarget::ResultError { .. }
                 | wasm_ir::CallTarget::OptionSome { .. }
                 | wasm_ir::CallTarget::IteratorItem { .. }
@@ -203,6 +204,7 @@ fn called_function(
         }
         wasm_ir::CallTarget::Intrinsic { .. }
         | wasm_ir::CallTarget::DefaultDisplay { .. }
+        | wasm_ir::CallTarget::ManagedSnapshot { .. }
         | wasm_ir::CallTarget::ResultError { .. }
         | wasm_ir::CallTarget::OptionSome { .. }
         | wasm_ir::CallTarget::IteratorItem { .. }
@@ -267,6 +269,9 @@ fn materialize_expression_types(
                 }
             }
             wasm_ir::CallTarget::DefaultDisplay { receiver_type, .. } => {
+                materialize_type(semantics, instance, *receiver_type, ids, constructed);
+            }
+            wasm_ir::CallTarget::ManagedSnapshot { receiver_type, .. } => {
                 materialize_type(semantics, instance, *receiver_type, ids, constructed);
             }
             wasm_ir::CallTarget::UserFunction { .. }

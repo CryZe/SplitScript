@@ -1445,10 +1445,28 @@ fn add_inferred_fields(
                     let mut completion = simple_completion(
                         &field.name,
                         CompletionKind::Property,
-                        "managed snapshot field",
+                        if matches!(receiver, TypeKind::ManagedReference(_)) {
+                            "fallible live managed field"
+                        } else {
+                            "managed snapshot field"
+                        },
                     );
                     completion.documentation = field.documentation.clone();
                     builder.add(completion);
+                }
+                if matches!(receiver, TypeKind::ManagedReference(_)) {
+                    builder.add(CompletionItem {
+                        label: "snapshot".to_owned(),
+                        kind: CompletionKind::Method,
+                        detail: Some(format!("{}.Ref.snapshot() -> {}!", class.name, class.name)),
+                        documentation: Some(
+                            "Reads every active instance field transactionally and returns one immutable local snapshot. If any field read fails, no partial snapshot is exposed."
+                                .to_owned(),
+                        ),
+                        documentation_uri: None,
+                        insert_text: "snapshot()".to_owned(),
+                        is_snippet: false,
+                    });
                 }
             }
         }
@@ -2839,6 +2857,42 @@ state "game.exe" {
         assert!(
             labels(&mut database, "selectedLayout().isLoading.resolve")
                 .contains(&"resolve".to_owned())
+        );
+    }
+
+    #[test]
+    fn completes_transactional_snapshots_on_live_managed_references() {
+        let source = r#"
+image "Assembly-CSharp" {
+    class GameManager {
+        static GameManager instance;
+        i32 points;
+    }
+}
+state Unity ["game.exe"] {}
+fn capture(manager: GameManager.Ref) {
+    manager.snap
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let offset = source.find("manager.snap").unwrap() + "manager.snap".len();
+        let completions = database.completions(offset).unwrap();
+        let snapshot = completions
+            .items
+            .iter()
+            .find(|item| item.label == "snapshot")
+            .expect("live managed references should complete `snapshot`");
+        assert_eq!(snapshot.kind, CompletionKind::Method);
+        assert_eq!(
+            snapshot.detail.as_deref(),
+            Some("GameManager.Ref.snapshot() -> GameManager!")
+        );
+        assert_eq!(snapshot.insert_text, "snapshot()");
+        assert!(
+            snapshot
+                .documentation
+                .as_deref()
+                .is_some_and(|documentation| documentation.contains("transactionally"))
         );
     }
 

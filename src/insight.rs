@@ -216,6 +216,24 @@ pub(crate) fn hover(
             )
         }
         DefinitionTarget::Source(definition) => {
+            if matches!(&token.kind, TokenKind::Ident(name) if name == "snapshot")
+                && let Some(analysis) = database.analysis_at(offset)?
+                && let Some(ExpressionResolution::Call(ResolvedCall::ManagedSnapshot {
+                    class, ..
+                })) = analysis.resolution
+                && definition.id == SourceDefinitionId::ManagedClass(class)
+                && let Some(context) = semantic_context(database)
+                && let Some(class) = context.syntax().managed_class(class)
+            {
+                return Ok(Some(HoverInfo {
+                    span: token.span,
+                    markdown: format!(
+                        "```splitscript\n{}.Ref.snapshot() -> {}!\n```\n\nReads every active instance field transactionally into one immutable local `{}` value. If any field read fails, the operation returns that error and exposes no partial snapshot.",
+                        class.name, class.name, class.name
+                    ),
+                    documentation_uri: None,
+                }));
+            }
             if definition.id == SourceDefinitionId::State
                 && let Some(provider) = database
                     .analysis_at(offset)?
@@ -2369,6 +2387,39 @@ let player: Player.Ref? = None
             .unwrap()
             .expect("managed reference hover");
         assert!(reference.markdown.contains("let player: Player.Ref?"));
+    }
+
+    #[test]
+    fn managed_snapshot_hover_explains_the_transaction_and_navigates_to_its_class() {
+        use crate::database::{DefinitionTarget, SourceDefinitionId};
+
+        let source = r#"
+image "Assembly-CSharp" {
+    class GameManager {
+        static GameManager instance;
+        i32 points;
+    }
+}
+state Unity ["game.exe"] {
+    manager: GameManager = GameManager.instance?.snapshot()?;
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        database.check().expect("managed snapshot hover fixture");
+        let offset = source.rfind("snapshot").unwrap() + 1;
+        let hover = database.hover(offset).unwrap().expect("snapshot hover");
+        assert!(
+            hover
+                .markdown
+                .contains("GameManager.Ref.snapshot() -> GameManager!")
+        );
+        assert!(hover.markdown.contains("no partial snapshot"));
+        assert!(matches!(
+            database.definition_at(offset).unwrap(),
+            Some(DefinitionTarget::Source(definition))
+                if matches!(definition.id, SourceDefinitionId::ManagedClass(_))
+                    && definition.name == "GameManager"
+        ));
     }
 
     #[test]

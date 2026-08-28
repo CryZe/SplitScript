@@ -52,18 +52,11 @@ state Unity.il2cpp(2020) ["Lunistice.exe", "Lunistice-Demo.exe"] {
         edition: Edition,
     }
 
-    gameState: i32 = GameManager.instance?.gameState?;
-    points: u32 = GameManager.instance?.points?;
-    deaths: u32 = GameManager.instance?.deaths?;
-    if layout.edition == Edition.BaseGame {
-        level: i32 = GameManager.instance?.level?;
-    } else {
+    gameManager: GameManager = GameManager.instance?.snapshot()?;
+    timer: Timer = Timer.instance?.snapshot()?;
+    if layout.edition == Edition.DlcDemo {
         scene: String = process.readManagedString(GameManager.instance?.scene?, 16)?;
     }
-    levelTime: f32 = Timer.instance?.levelTime?;
-    levelTimeParts: LevelTimeParts = Timer.instance?.levelTimeParts?;
-    timerStopped: bool = Timer.instance?.stopped?;
-    character: u32 = Timer.instance?.character?;
 }
 
 let runTimeSeconds
@@ -115,42 +108,42 @@ fn characterName(character, dlcDemo) {
 }
 
 whileAttached {
-    setVariable("Points", current.points)
-    setVariable("Resets", current.deaths)
-    setVariable("Level Time", current.levelTimeParts)
+    setVariable("Points", current.gameManager.points)
+    setVariable("Resets", current.gameManager.deaths)
+    setVariable("Level Time", current.timer.levelTimeParts)
     if layout.edition == Edition.BaseGame {
-        setVariable("Level", levelText(current.level))
+        setVariable("Level", levelText(current.gameManager.level))
     } else {
         setVariable("Scene", current.scene)
     }
     setVariable(
         "Character",
-        characterName(current.character, layout.edition == Edition.DlcDemo),
+        characterName(current.timer.character, layout.edition == Edition.DlcDemo),
     )
 }
 
 start {
     let isFirstLevel = if layout.edition == Edition.BaseGame {
-        current.level == 0
+        current.gameManager.level == 0
     } else {
         current.scene == "Shrine01"
     }
-    if old.timerStopped != current.timerStopped && !current.timerStopped && isFirstLevel {
+    if old.timer.stopped != current.timer.stopped && !current.timer.stopped && isFirstLevel {
         return true
     }
 }
 
 reset {
-    if current.levelTime < old.levelTime && !beyondFirstLevel {
+    if current.timer.levelTime < old.timer.levelTime && !beyondFirstLevel {
         return true
     }
 }
 
 split {
-    let enteredResults = old.gameState != 6 && current.gameState == 6
+    let enteredResults = old.gameManager.gameState != 6 && current.gameManager.gameState == 6
     let creditsTransition = layout.edition == Edition.BaseGame
-        && old.level >= 13
-        && current.level == 2
+        && old.gameManager.level >= 13
+        && current.gameManager.level == 2
 
     if enteredResults || creditsTransition {
         beyondFirstLevel = true
@@ -165,8 +158,8 @@ isLoading {
 }
 
 gameTime {
-    if current.levelTime < old.levelTime && beyondFirstLevel {
-        runTimeSeconds += old.levelTime
+    if current.timer.levelTime < old.timer.levelTime && beyondFirstLevel {
+        runTimeSeconds += old.timer.levelTime
     }
-    return Duration.fromSeconds(runTimeSeconds + current.levelTime)
+    return Duration.fromSeconds(runTimeSeconds + current.timer.levelTime)
 }

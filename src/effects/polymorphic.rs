@@ -655,6 +655,7 @@ impl<'a> Evaluator<'a> {
             ResolvedCall::UserFunction { function, .. }
             | ResolvedCall::UserMethod { function, .. } => Some(*function),
             ResolvedCall::StandardLibrary { item, .. } => self.program.library_function(*item),
+            ResolvedCall::ManagedSnapshot { .. } => None,
             ResolvedCall::ResultError { .. }
             | ResolvedCall::OptionSome { .. }
             | ResolvedCall::IteratorItem { .. }
@@ -845,6 +846,8 @@ fn intrinsic_operation(
             accumulator.effects.extend(metadata.effects.iter().copied());
         }
         accumulator.availability(metadata.availability);
+    } else if matches!(call, ResolvedCall::ManagedSnapshot { .. }) {
+        accumulator.effect(Effect::RequiresAttachedProcess);
     }
     accumulator.finish()
 }

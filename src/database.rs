@@ -308,6 +308,10 @@ fn definition_for_resolution(
                     ResolvedCall::StandardLibrary { item, .. } => {
                         Some(DefinitionTarget::StandardLibrary(*item))
                     }
+                    ResolvedCall::ManagedSnapshot { class, .. } => definitions
+                        .get(SourceDefinitionId::ManagedClass(*class))
+                        .cloned()
+                        .map(DefinitionTarget::Source),
                     ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
                     | ResolvedCall::IteratorItem { .. }
@@ -316,6 +320,7 @@ fn definition_for_resolution(
             }
             match call {
                 ResolvedCall::UserMethod { receiver, .. }
+                | ResolvedCall::ManagedSnapshot { receiver, .. }
                 | ResolvedCall::StandardLibrary {
                     receiver: Some(receiver),
                     ..
@@ -426,6 +431,7 @@ fn source_definition_for_resolution(
                         Some(SourceDefinitionId::Function(*function))
                     }
                     ResolvedCall::StandardLibrary { .. }
+                    | ResolvedCall::ManagedSnapshot { .. }
                     | ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
                     | ResolvedCall::IteratorItem { .. }
@@ -434,6 +440,7 @@ fn source_definition_for_resolution(
             }
             match call {
                 ResolvedCall::UserMethod { receiver, .. }
+                | ResolvedCall::ManagedSnapshot { receiver, .. }
                 | ResolvedCall::StandardLibrary {
                     receiver: Some(receiver),
                     ..

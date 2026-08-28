@@ -152,6 +152,7 @@ impl wasm_ir::Visitor for ManagedStaticCollector {
         if let wasm_ir::ExpressionKind::Call { target, .. } = &expression.kind {
             let receiver = match target {
                 wasm_ir::CallTarget::UserMethod { receiver, .. }
+                | wasm_ir::CallTarget::ManagedSnapshot { receiver, .. }
                 | wasm_ir::CallTarget::CapabilityRequirement { receiver, .. }
                 | wasm_ir::CallTarget::DefaultDisplay { receiver, .. } => Some(receiver),
                 wasm_ir::CallTarget::Intrinsic { receiver, .. }

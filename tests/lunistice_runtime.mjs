@@ -229,10 +229,10 @@ if (attachedRateScanReads !== 0) {
     throw new Error(`attached tick rate was applied after scanning began: ${attachedRateScanReads}`);
 }
 
-// Every state field is emitted as its own fallible reader, but managed static
-// roots belong to the snapshot transaction rather than to an individual
-// field. Reading each singleton once avoids multiplying host calls while
-// still observing replacement singleton objects on the next tick.
+// Managed class snapshots and the remaining derived scene read share static
+// roots across the surrounding state transaction. Reading each singleton once
+// avoids multiplying host calls while still observing replacement singleton
+// objects on the next tick.
 countSnapshotRoots = true;
 const replacementGameManager = 0x9200;
 const replacementTimer = 0x9300;

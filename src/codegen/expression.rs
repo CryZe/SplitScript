@@ -120,6 +120,7 @@ pub(super) struct ExprContext<'a> {
     /// helpers to share roots without affecting ordinary lifecycle calls.
     pub managed_state_reads: &'a ManagedStateReadCache,
     pub managed_state_read_functions: &'a HashMap<crate::ast::ManagedFieldId, u32>,
+    pub managed_snapshot_functions: &'a HashMap<crate::ast::ManagedClassId, u32>,
     pub enums: &'a [EnumDecl],
     pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,
@@ -169,7 +170,61 @@ pub(super) struct IntrinsicCapture<'a> {
     pub layout: &'a IntrinsicFutureLayout,
 }
 
-impl ExprContext<'_> {
+impl<'a> ExprContext<'a> {
+    pub(super) fn compiler_generated(
+        lowering: &'a super::context::EmissionContext<'a>,
+        values: &'a HashMap<ValueId, (u32, Type)>,
+        temporaries: &'a HashMap<TemporaryId, (u32, Type)>,
+        matches: &'a MatchLayout,
+    ) -> Self {
+        Self {
+            standard_library: lowering.standard_library,
+            reachability: lowering.reachability,
+            abi: lowering.abi,
+            state: lowering.state,
+            locals: LocalStorage::Wasm {
+                values,
+                temporaries,
+            },
+            globals: lowering.globals,
+            global_types: lowering.global_types,
+            settings: lowering.settings,
+            runtime_globals: lowering.runtime_globals,
+            runtime_helpers: lowering.runtime_helpers,
+            functions: lowering.functions,
+            closures: lowering.closures,
+            function_values: lowering.function_values,
+            closure_polls: lowering.closure_polls,
+            closure_environment: None,
+            intrinsic_futures: lowering.intrinsic_futures,
+            display_functions: lowering.display_functions,
+            equality_functions: lowering.equality_functions,
+            array_functions: lowering.array_functions,
+            set_functions: lowering.set_functions,
+            records: lowering.records,
+            managed: lowering.managed,
+            managed_state_reads: lowering.managed_state_reads,
+            managed_state_read_functions: lowering.managed_state_read_functions,
+            managed_snapshot_functions: lowering.managed_snapshot_functions,
+            enums: lowering.enums,
+            arrays: lowering.arrays,
+            memory: lowering.memory,
+            abi_read: lowering.abi_read,
+            signatures: lowering.signatures,
+            matches,
+            semantics: lowering.semantics,
+            wasm_ir: lowering.wasm_ir,
+            gc: lowering.gc,
+            async_frames: lowering.async_frames,
+            intrinsic_capture: None,
+            debug: None,
+            function_instance: None,
+            loop_control: None,
+            bare_return: BareReturn::None,
+            materialize_none: true,
+        }
+    }
+
     pub(super) fn erasing_none(&self) -> Self {
         let mut context = *self;
         context.materialize_none = false;
@@ -1343,6 +1398,11 @@ fn resolved_receiver<'a>(
             receiver,
             receiver_type,
         } => (receiver, *receiver_type),
+        wasm_ir::CallTarget::ManagedSnapshot {
+            receiver,
+            receiver_type,
+            ..
+        } => (receiver, *receiver_type),
         _ => unreachable!("only method calls have receivers"),
     };
     (receiver, context.ty(receiver_type))
@@ -2296,8 +2356,7 @@ fn emit_path_fields(
                     .iter()
                     .find_map(|class| {
                         class
-                            .fields
-                            .iter()
+                            .all_fields()
                             .filter(|candidate| {
                                 candidate.kind == crate::managed::ManagedFieldKind::Instance
                             })
@@ -2393,51 +2452,7 @@ pub(super) fn compile_managed_static_read(
     let values = HashMap::new();
     let temporaries = HashMap::new();
     let matches = MatchLayout::default();
-    let context = ExprContext {
-        standard_library: lowering.standard_library,
-        reachability: lowering.reachability,
-        abi: lowering.abi,
-        state: lowering.state,
-        locals: LocalStorage::Wasm {
-            values: &values,
-            temporaries: &temporaries,
-        },
-        globals: lowering.globals,
-        global_types: lowering.global_types,
-        settings: lowering.settings,
-        runtime_globals: lowering.runtime_globals,
-        runtime_helpers: lowering.runtime_helpers,
-        functions: lowering.functions,
-        closures: lowering.closures,
-        function_values: lowering.function_values,
-        closure_polls: lowering.closure_polls,
-        closure_environment: None,
-        intrinsic_futures: lowering.intrinsic_futures,
-        display_functions: lowering.display_functions,
-        equality_functions: lowering.equality_functions,
-        array_functions: lowering.array_functions,
-        set_functions: lowering.set_functions,
-        records: lowering.records,
-        managed: lowering.managed,
-        managed_state_reads: lowering.managed_state_reads,
-        managed_state_read_functions: lowering.managed_state_read_functions,
-        enums: lowering.enums,
-        arrays: lowering.arrays,
-        memory: lowering.memory,
-        abi_read: lowering.abi_read,
-        signatures: lowering.signatures,
-        matches: &matches,
-        semantics: lowering.semantics,
-        wasm_ir: lowering.wasm_ir,
-        gc: lowering.gc,
-        async_frames: lowering.async_frames,
-        intrinsic_capture: None,
-        debug: None,
-        function_instance: None,
-        loop_control: None,
-        bare_return: BareReturn::None,
-        materialize_none: true,
-    };
+    let context = ExprContext::compiler_generated(lowering, &values, &temporaries, &matches);
     let mut function = Function::new([]);
     emit_cached_managed_static_read(&mut function, storage, &context);
     function.instruction(&Instruction::End);
@@ -2498,7 +2513,7 @@ fn emit_uncached_managed_static_read(
 /// Reads an instance field from a `T.Ref` address already on the stack after
 /// the attached process handle. Metadata lookup is absent here: the offset is
 /// loaded from the attachment-scoped binding record.
-fn emit_managed_field_read(
+pub(super) fn emit_managed_field_read(
     function: &mut Function,
     field: crate::ast::ManagedFieldId,
     context: &ExprContext<'_>,
@@ -3633,6 +3648,12 @@ fn compile_expr_unconverted(
                     context.type_id(*receiver_type),
                     context,
                 );
+            }
+            wasm_ir::CallTarget::ManagedSnapshot { class, .. } => {
+                compile_receiver(function, target, context);
+                function.instruction(&Instruction::Call(
+                    context.managed_snapshot_functions[class],
+                ));
             }
             wasm_ir::CallTarget::Intrinsic { .. } => {
                 unreachable!("standard-library implementations have intrinsic IDs")

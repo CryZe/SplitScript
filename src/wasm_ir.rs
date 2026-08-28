@@ -15,8 +15,8 @@ pub use visit::{
 
 use crate::{
     ast::{
-        ActionKind, BinaryOp, ExprId, OptionTypeId, PatternId, ResultTypeId, Span, SuspensionMode,
-        UnaryOp, ValueId,
+        ActionKind, BinaryOp, ExprId, ManagedClassId, OptionTypeId, PatternId, ResultTypeId, Span,
+        SuspensionMode, UnaryOp, ValueId,
     },
     effects::OperationAnalysis,
     hir::{
@@ -256,6 +256,12 @@ pub enum CallTarget {
     /// The compiler-provided fallback for `Display.toString`, selected after
     /// generic capability dispatch reaches a concrete primitive or aggregate.
     DefaultDisplay {
+        receiver: ResolvedReceiver,
+        receiver_type: TypeId,
+    },
+    ManagedSnapshot {
+        class: ManagedClassId,
+        result: ResultTypeId,
         receiver: ResolvedReceiver,
         receiver_type: TypeId,
     },
@@ -1466,6 +1472,17 @@ fn lower_call_target(
                     receiver_type: *receiver_type,
                 }
             }
+        },
+        ResolvedCall::ManagedSnapshot {
+            class,
+            result,
+            receiver,
+            receiver_type,
+        } => CallTarget::ManagedSnapshot {
+            class: *class,
+            result: *result,
+            receiver: receiver.clone(),
+            receiver_type: *receiver_type,
         },
         ResolvedCall::ResultError { result } => CallTarget::ResultError { result: *result },
         ResolvedCall::OptionSome { option } => CallTarget::OptionSome { option: *option },

@@ -28,6 +28,7 @@ pub(super) struct Reachability {
     string_equality: bool,
     gc_records: BTreeSet<RecordId>,
     gc_managed_classes: BTreeSet<ManagedClassId>,
+    managed_snapshots: BTreeSet<ManagedClassId>,
     gc_enums: BTreeSet<EnumId>,
     gc_arrays: BTreeSet<ArrayTypeId>,
     gc_array_storage: BTreeSet<ArrayTypeId>,
@@ -280,6 +281,9 @@ impl Reachability {
                     };
                     reachable.require_equality(*element, semantics, standard_library, capabilities);
                 }
+                if let wasm_ir::CallTarget::ManagedSnapshot { class, .. } = target {
+                    reachable.managed_snapshots.insert(*class);
+                }
                 let function = match target {
                     wasm_ir::CallTarget::UserFunction { function }
                     | wasm_ir::CallTarget::UserMethod { function, .. } => Some(function.clone()),
@@ -294,6 +298,7 @@ impl Reachability {
                     wasm_ir::CallTarget::Intrinsic { .. }
                     | wasm_ir::CallTarget::CapabilityRequirement { .. }
                     | wasm_ir::CallTarget::DefaultDisplay { .. }
+                    | wasm_ir::CallTarget::ManagedSnapshot { .. }
                     | wasm_ir::CallTarget::ResultError { .. }
                     | wasm_ir::CallTarget::OptionSome { .. }
                     | wasm_ir::CallTarget::IteratorItem { .. }
@@ -502,6 +507,9 @@ impl Reachability {
                         wasm_ir::CallTarget::DefaultDisplay { receiver_type, .. } => {
                             type_roots.push(specialize(*receiver_type));
                         }
+                        wasm_ir::CallTarget::ManagedSnapshot { receiver_type, .. } => {
+                            type_roots.push(specialize(*receiver_type));
+                        }
                         wasm_ir::CallTarget::UserFunction { .. }
                         | wasm_ir::CallTarget::CapabilityRequirement { .. }
                         | wasm_ir::CallTarget::ResultError { .. }
@@ -662,6 +670,10 @@ impl Reachability {
         self.gc_managed_classes.contains(&class)
     }
 
+    pub fn managed_snapshots(&self) -> impl Iterator<Item = ManagedClassId> + '_ {
+        self.managed_snapshots.iter().copied()
+    }
+
     pub fn contains_enum_type(&self, enumeration: EnumId) -> bool {
         self.gc_enums.contains(&enumeration)
     }
@@ -736,17 +748,25 @@ impl Reachability {
                     let declaration = program
                         .managed_class(*class)
                         .expect("semantic managed classes belong to source declarations");
-                    pending.extend(
-                        declaration
-                            .fields
-                            .iter()
-                            .filter(|field| !field.is_static)
-                            .map(|field| {
-                                semantics
-                                    .managed_field_value_type(field.id)
-                                    .expect("checked managed fields have semantic value types")
-                            }),
-                    );
+                    for field in declaration.all_fields().filter(|field| !field.is_static) {
+                        let value = semantics
+                            .managed_field_value_type(field.id)
+                            .expect("checked managed fields have semantic value types");
+                        pending.push(value);
+                        if self.managed_snapshots.contains(class) {
+                            let result = semantics
+                                .types()
+                                .iter()
+                                .find_map(|(id, kind)| match kind {
+                                    TypeKind::Result {
+                                        value: candidate, ..
+                                    } if *candidate == value => Some(id),
+                                    _ => None,
+                                })
+                                .expect("managed snapshot fields have Result types");
+                            pending.push(result);
+                        }
+                    }
                 }
                 TypeKind::StateSnapshot => {
                     pending.extend(
@@ -999,6 +1019,7 @@ fn constant_roots(
     let receiver = match expression {
         wasm_ir::ExpressionKind::Call { target, .. } => match target {
             wasm_ir::CallTarget::UserMethod { receiver, .. }
+            | wasm_ir::CallTarget::ManagedSnapshot { receiver, .. }
             | wasm_ir::CallTarget::CapabilityRequirement { receiver, .. }
             | wasm_ir::CallTarget::DefaultDisplay { receiver, .. } => Some(receiver),
             wasm_ir::CallTarget::Intrinsic { receiver, .. }

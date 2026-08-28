@@ -102,6 +102,14 @@ pub enum ResolvedCall {
         receiver: Option<ResolvedReceiver>,
         receiver_type: Option<TypeId>,
     },
+    /// Schema-derived transactional read of every instance field declared by
+    /// one live managed reference.
+    ManagedSnapshot {
+        class: ManagedClassId,
+        result: crate::ast::ResultTypeId,
+        receiver: ResolvedReceiver,
+        receiver_type: TypeId,
+    },
     ResultError {
         result: crate::ast::ResultTypeId,
     },
@@ -217,6 +225,7 @@ impl ResolvedCall {
         match self {
             Self::UserMethod { receiver, .. } => Some(receiver),
             Self::StandardLibrary { receiver, .. } => receiver.as_ref(),
+            Self::ManagedSnapshot { receiver, .. } => Some(receiver),
             Self::UserFunction { .. }
             | Self::ResultError { .. }
             | Self::OptionSome { .. }
@@ -1236,6 +1245,12 @@ pub(crate) enum PendingResolvedCall {
         receiver: Option<ResolvedReceiver>,
         receiver_type: Option<Type>,
     },
+    ManagedSnapshot {
+        class: ManagedClassId,
+        result: crate::ast::ResultTypeId,
+        receiver: ResolvedReceiver,
+        receiver_type: Type,
+    },
     ResultError {
         result: crate::ast::ResultTypeId,
     },
@@ -1334,7 +1349,8 @@ impl SemanticBuilder {
                 PendingResolvedCall::ResultError { .. }
                 | PendingResolvedCall::OptionSome { .. }
                 | PendingResolvedCall::IteratorItem { .. }
-                | PendingResolvedCall::ResultSuccess { .. },
+                | PendingResolvedCall::ResultSuccess { .. }
+                | PendingResolvedCall::ManagedSnapshot { .. },
             )
             | None => false,
         }
@@ -1615,6 +1631,7 @@ impl SemanticBuilder {
             PendingResolvedCall::StandardLibrary { item, .. } => Some(*item),
             PendingResolvedCall::UserFunction { .. }
             | PendingResolvedCall::UserMethod { .. }
+            | PendingResolvedCall::ManagedSnapshot { .. }
             | PendingResolvedCall::ResultError { .. }
             | PendingResolvedCall::OptionSome { .. }
             | PendingResolvedCall::IteratorItem { .. }
@@ -1761,6 +1778,17 @@ impl SemanticBuilder {
                     receiver,
                     receiver_type: receiver_type
                         .map(|ty| types.intern_inferred(resolve(ty), constructed)),
+                },
+                PendingResolvedCall::ManagedSnapshot {
+                    class,
+                    result,
+                    receiver,
+                    receiver_type,
+                } => ResolvedCall::ManagedSnapshot {
+                    class,
+                    result: resolved_result_layout(resolve(Type::Result(result)), &types),
+                    receiver,
+                    receiver_type: types.intern_inferred(resolve(receiver_type), constructed),
                 },
                 PendingResolvedCall::ResultError { result } => {
                     let result = resolved_result_layout(resolve(Type::Result(result)), &types);

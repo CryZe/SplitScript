@@ -37,6 +37,16 @@ pub(crate) struct ManagedClassBinding {
     pub conditional_fields: Vec<ManagedConditionalBinding>,
 }
 
+impl ManagedClassBinding {
+    pub fn all_fields(&self) -> impl Iterator<Item = &ManagedFieldBinding> {
+        self.fields.iter().chain(
+            self.conditional_fields
+                .iter()
+                .flat_map(|group| &group.fields),
+        )
+    }
+}
+
 /// Managed fields guarded by attachment-wide layout facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ManagedConditionalBinding {

@@ -37,6 +37,7 @@ mod gc_layout;
 mod gc_types;
 mod global_plan;
 mod imports;
+mod managed_snapshots;
 mod managed_state_reads;
 mod memory_plan;
 mod module_assembly;
@@ -461,6 +462,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         intrinsic_futures,
         displays: display_functions,
         managed_state_reads: managed_state_read_functions,
+        managed_snapshots: managed_snapshot_functions,
         reads: read_functions,
         transforms: transform_functions,
         actions: action_functions,
@@ -501,6 +503,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     );
     let explicit_layout_selection = crate::layout_selection::has_explicit_layout_return(program);
     let lowering = EmissionContext {
+        program,
         standard_library: &standard_library,
         reachability: &reachability,
         capabilities,
@@ -524,6 +527,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         managed: &managed,
         managed_state_reads: &managed_state_reads,
         managed_state_read_functions: &managed_state_read_functions,
+        managed_snapshot_functions: &managed_snapshot_functions,
         enums,
         arrays: array_types,
         memory: memory_layouts,
@@ -680,6 +684,10 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     }
     for storage in managed_state_reads.entries() {
         let body = expression::compile_managed_static_read(storage, &lowering);
+        codes.push(&body);
+    }
+    for class in reachability.managed_snapshots() {
+        let body = managed_snapshots::compile(class, &lowering);
         codes.push(&body);
     }
     for instance in reachability.functions() {
@@ -845,6 +853,7 @@ fn resolved_intrinsic(target: &wasm_ir::CallTarget) -> Option<IntrinsicId> {
         | wasm_ir::CallTarget::LibraryOverload { .. }
         | wasm_ir::CallTarget::CapabilityRequirement { .. }
         | wasm_ir::CallTarget::DefaultDisplay { .. }
+        | wasm_ir::CallTarget::ManagedSnapshot { .. }
         | wasm_ir::CallTarget::ResultError { .. }
         | wasm_ir::CallTarget::OptionSome { .. }
         | wasm_ir::CallTarget::IteratorItem { .. }

@@ -62,7 +62,7 @@ to inference or code generation.
   completion, hover, semantic highlighting, selection ranges, documentation,
   and unused analysis. Do not teach those consumers unrelated lists of Unity
   names.
-- [ ] Define the backend-independent class model: `T.Ref` is a live remote
+- [x] Define the backend-independent class model: `T.Ref` is a live remote
   managed reference; `T` is an immutable local snapshot. Class-typed managed
   fields produce references, terminal value fields produce fallible values,
   and `.snapshot()` reads the declared value shape transactionally. Generate
@@ -78,8 +78,12 @@ to inference or code generation.
     ordinary `T!`, so paths such as `GameManager.instance?.player?.score?`
     expose each possible failure through the language's existing propagation
     model. Cached metadata is shared while object pointers are re-read live.
-  - [ ] Generate reachable transactional `.snapshot()` readers through the
-    same binding plan.
+  - [x] Generate reachable transactional `.snapshot()` readers through the
+    same binding plan. Each reader evaluates every active instance field into
+    temporary fallible results before constructing the immutable GC value,
+    propagates the first failure without exposing a partial object, preserves
+    stable slots for layout-conditional fields, and is emitted only when a
+    checked call can reach it.
 - [ ] Specify deterministic metadata-name resolution. A missing `from` uses the
   source member name, `from "name"` names one exact metadata member, and
   `from ["first", "second"]` names explicit alternatives. C# automatic-property
@@ -204,7 +208,12 @@ to inference or code generation.
   compiler-internal "snapshot-stable" operation contract and an effect-aware
   common-subexpression pass over Wasm IR. Do not describe arbitrary process
   reads as pure: the host process can mutate concurrently, so sharing is valid
-  only where a compiler-created snapshot transaction promises it.
+  only where a compiler-created snapshot transaction promises it. Immutable
+  managed-snapshot field projections are now concrete evidence for this pass:
+  the transactional Lunistice source is 31,838 bytes versus the former 28,529
+  byte flat-state module because repeated `current.manager.field` projections
+  are lowered independently. Optimize those local GC projections without
+  weakening live process-read ordering.
 - [x] Extend the attachment cache with managed field offsets and presence
   evidence used to validate the attachment-wide layout. Strings, arrays, and
   explicit snapshots may still allocate their returned values.
@@ -219,7 +228,9 @@ to inference or code generation.
   fields, base-game and DLC-demo layouts, alternative singleton names,
   `LevelTimeParts`, and the bounded DLC scene string.
 - [x] Port `examples/lunistice.split` from manual class/instance/offset globals
-  and raw `process.read` calls to generated references or snapshots. Preserve
+  and raw `process.read` calls to generated transactional `GameManager` and
+  `Timer` snapshots, retaining a live bounded-string read only for the DLC
+  scene until managed strings gain declaration syntax. Preserve
   all existing autosplitter behavior and keep the user's current local example
   edits out of intermediate mechanical rewrites.
 - [ ] Add synthetic runtime coverage for both base and DLC metadata layouts,

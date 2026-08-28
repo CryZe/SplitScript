@@ -7,6 +7,7 @@ use wasm_encoder::{BlockType, Function, HeapType, Instruction, RefType, ValType}
 use crate::{
     abi::AbiImportId,
     ast::{ActionKind, Program, ValueId},
+    semantic::SemanticModel,
     stdlib::{CoreTypeId, RuntimeRepresentation, StdlibFieldId, StdlibTypeId},
     wasm_ir,
 };
@@ -484,7 +485,14 @@ pub(super) fn compile_update(
         for (read_index, field) in all_fields.iter().enumerate() {
             let predicate = semantics.state_field_layout_predicate(field.id);
             if let Some(predicate) = predicate {
-                emit_layout_predicate(&mut function, program, predicate, lowering);
+                emit_layout_predicate(
+                    &mut function,
+                    program,
+                    predicate,
+                    lowering.runtime_globals.selected_layout,
+                    lowering.semantics,
+                    lowering.gc,
+                );
                 function.instruction(&Instruction::If(BlockType::Empty));
             }
             emit_state_field_poll(
@@ -793,14 +801,23 @@ fn emit_timer_lifecycle_events(
         .instruction(&Instruction::End);
 }
 
-fn emit_layout_predicate(
+pub(super) fn emit_layout_predicate(
     function: &mut Function,
     program: &Program,
     predicate: &crate::semantic::ResolvedLayoutPredicate,
-    lowering: &UpdateContext<'_>,
+    selected_layout: Option<u32>,
+    semantics: &SemanticModel,
+    gc: &GcLayout,
 ) {
     for (alternative_index, alternative) in predicate.alternatives.iter().enumerate() {
-        emit_layout_constraints(function, program, alternative, lowering);
+        emit_layout_constraints(
+            function,
+            program,
+            alternative,
+            selected_layout,
+            semantics,
+            gc,
+        );
         if alternative_index != 0 {
             function.instruction(&Instruction::I32Or);
         }
@@ -814,7 +831,9 @@ fn emit_layout_constraints(
     function: &mut Function,
     program: &Program,
     constraints: &[crate::semantic::ResolvedLayoutConstraint],
-    lowering: &UpdateContext<'_>,
+    selected_layout: Option<u32>,
+    semantics: &SemanticModel,
+    gc: &GcLayout,
 ) {
     let state = program
         .state
@@ -828,10 +847,7 @@ fn emit_layout_constraints(
         .records
         .get(layout.record.index())
         .expect("attachment Layout is an ordinary record");
-    let selected = lowering
-        .runtime_globals
-        .selected_layout
-        .expect("conditional fields have selected-layout storage");
+    let selected = selected_layout.expect("conditional fields have selected-layout storage");
     for (index, constraint) in constraints.iter().enumerate() {
         let field_index = record
             .fields
@@ -839,11 +855,10 @@ fn emit_layout_constraints(
             .position(|field| field.id == constraint.dimension)
             .expect("layout constraints refer to Layout fields") as u32;
         let field_type = semantic_type(
-            lowering
-                .semantics
+            semantics
                 .record_field_type(constraint.dimension)
                 .expect("layout dimensions have checked enum types"),
-            lowering.semantics,
+            semantics,
         );
         let Type::Enum(enumeration) = field_type else {
             unreachable!("validated layout dimensions are source enums")
@@ -864,14 +879,14 @@ fn emit_layout_constraints(
             .instruction(&Instruction::RefAsNonNull);
         emit_typed_struct_get(
             function,
-            lowering.gc.index(Type::Record(layout.record)),
+            gc.index(Type::Record(layout.record)),
             field_index,
             field_type,
         );
         function
             .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
-                struct_type_index: lowering.gc.index(field_type),
+                struct_type_index: gc.index(field_type),
                 field_index: 0,
             })
             .instruction(&Instruction::I32Const(variant_index))
@@ -902,7 +917,14 @@ fn emit_managed_field_presence_validation(
 
     for class in &lowering.managed.classes {
         for group in &class.conditional_fields {
-            emit_layout_predicate(function, program, &group.predicate, lowering);
+            emit_layout_predicate(
+                function,
+                program,
+                &group.predicate,
+                lowering.runtime_globals.selected_layout,
+                lowering.semantics,
+                lowering.gc,
+            );
             function.instruction(&Instruction::If(BlockType::Empty));
             for field in &group.fields {
                 let name = managed_field_presence_name(field.id.index());

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{EnumDecl, ManagedFieldId, RecordDecl, ValueId},
+    ast::{EnumDecl, ManagedClassId, ManagedFieldId, RecordDecl, ValueId},
     managed::ManagedBindingPlan,
     memory::MemoryLayouts,
     semantic::{FunctionInstance, SemanticModel},
@@ -29,6 +29,7 @@ use super::{
 /// memory, helper, and GC plans are complete. Individual emitters should take
 /// a narrower input when they do not need this complete view.
 pub(super) struct EmissionContext<'a> {
+    pub program: &'a crate::ast::Program,
     pub standard_library: &'a StandardLibrary,
     pub reachability: &'a super::reachability::Reachability,
     pub capabilities: &'a crate::capabilities::CapabilityAnalysis,
@@ -52,6 +53,7 @@ pub(super) struct EmissionContext<'a> {
     pub managed: &'a ManagedBindingPlan,
     pub managed_state_reads: &'a ManagedStateReadCache,
     pub managed_state_read_functions: &'a HashMap<ManagedFieldId, u32>,
+    pub managed_snapshot_functions: &'a HashMap<ManagedClassId, u32>,
     pub enums: &'a [EnumDecl],
     pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,

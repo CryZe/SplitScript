@@ -182,6 +182,92 @@ fn reachable_managed_snapshot_types_have_gc_layouts() {
 }
 
 #[test]
+fn managed_reference_snapshot_reads_the_complete_layout_refined_shape() {
+    use splitscript::{BuildProfile, CompilerOptions};
+
+    let source = r#"
+        enum Edition { Base, Demo }
+
+        image "Assembly-CSharp" {
+            class Player {
+                f32 health;
+            }
+            class GameManager {
+                static GameManager instance;
+                Player player;
+                i32 points;
+                if layout.edition == Edition.Base {
+                    i32 level;
+                } else {
+                    address scene;
+                }
+            }
+        }
+
+        state Unity.il2cpp(2020) ["game.exe"] {
+            layout { edition: Edition }
+            manager: GameManager = GameManager.instance?.snapshot()?;
+        }
+
+        onAttach { return Layout { edition: Edition.Base } }
+
+        whileAttached {
+            print(current.manager.points)
+            let player = current.manager.player
+            let health = player.health else 0.0
+            print(health)
+            if layout.edition == Edition.Base {
+                print(current.manager.level)
+            } else {
+                print(current.manager.scene)
+            }
+        }
+    "#;
+
+    let wasm = splitscript::compile_with_options(
+        source,
+        CompilerOptions {
+            profile: BuildProfile::Debug,
+            ..CompilerOptions::default()
+        },
+    )
+    .expect("managed snapshots should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("transactional managed snapshot readers should validate");
+    let (_, names) = debug_function_names(&wasm).expect("debug names should exist");
+    assert!(
+        names
+            .iter()
+            .any(|(_, name)| { name == "__splitscript::managed::GameManager::snapshot" })
+    );
+
+    let unused = splitscript::compile_with_options(
+        r#"
+            image "Assembly-CSharp" {
+                class GameManager {
+                    static GameManager instance;
+                    i32 points;
+                }
+            }
+            state Unity.il2cpp(2020) ["game.exe"] {
+                points: i32 = GameManager.instance?.points?;
+            }
+        "#,
+        CompilerOptions {
+            profile: BuildProfile::Debug,
+            ..CompilerOptions::default()
+        },
+    )
+    .expect("unused snapshot readers should not be required");
+    let (_, names) = debug_function_names(&unused).expect("debug names should exist");
+    assert!(
+        names.iter().all(|(_, name)| !name.ends_with("::snapshot")),
+        "snapshot readers must be generated only when reachable: {names:#?}"
+    );
+}
+
+#[test]
 fn explicit_unity_backends_prune_the_unreachable_schema_binder() {
     use splitscript::{BuildProfile, CompilerOptions};
 

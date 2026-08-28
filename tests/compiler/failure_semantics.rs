@@ -1327,6 +1327,30 @@ fn process_operations_reject_detach_lifecycle_use() {
 }
 
 #[test]
+fn managed_snapshot_reads_require_an_attached_process() {
+    let diagnostics = splitscript::compile(
+        r#"
+            image "Assembly-CSharp" {
+                class GameManager {
+                    static GameManager instance;
+                    i32 points;
+                }
+            }
+            state Unity ["game.exe"] {}
+            setup {
+                let manager = GameManager.instance else return
+                manager.snapshot()
+            }
+        "#,
+    )
+    .expect_err("managed snapshots must not read a process during setup");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message
+            == "`snapshot` requires an attached process and is unavailable in `setup`"
+    }));
+}
+
+#[test]
 fn detach_does_not_expose_a_closed_process_or_uninitialized_snapshots() {
     let process_errors = splitscript::compile(
         r#"

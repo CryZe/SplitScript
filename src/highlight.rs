@@ -575,6 +575,9 @@ impl HighlightCollector<'_> {
                     ResolvedCall::UserMethod { receiver, .. } => {
                         receiver.path().map(|(root, _)| root)
                     }
+                    ResolvedCall::ManagedSnapshot { receiver, .. } => {
+                        receiver.path().map(|(root, _)| root)
+                    }
                     ResolvedCall::UserFunction { .. }
                     | ResolvedCall::OptionSome { .. }
                     | ResolvedCall::IteratorItem { .. }

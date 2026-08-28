@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use wasm_encoder::{FunctionSection, HeapType, RefType, TypeSection, ValType};
 
 use crate::{
-    ast::{ActionKind, EnumDecl, ManagedFieldId, Program},
+    ast::{ActionKind, EnumDecl, ManagedClassId, ManagedFieldId, Program},
     equality::EqualityCapabilities,
     semantic::{ClosureInstance, FunctionInstance, FunctionValueInstance, SemanticModel},
     stdlib::{RuntimeRepresentation, StandardLibrary},
@@ -36,6 +36,7 @@ pub(super) struct FunctionPlan<'a> {
     pub intrinsic_futures: HashMap<IntrinsicFutureInstance, u32>,
     pub displays: DisplayFunctions,
     pub managed_state_reads: HashMap<ManagedFieldId, u32>,
+    pub managed_snapshots: HashMap<ManagedClassId, u32>,
     pub reads: Vec<u32>,
     pub transforms: Vec<Option<u32>>,
     pub actions: HashMap<ActionKind, u32>,
@@ -338,6 +339,34 @@ pub(super) fn encode<'a>(
         );
     }
 
+    let mut managed_snapshot_functions = HashMap::new();
+    for class in reachability.managed_snapshots() {
+        let class_name = program
+            .managed_class(class)
+            .expect("reachable managed snapshot classes have declarations")
+            .name
+            .as_str();
+        let snapshot = semantics.types().id_for_managed_class(class);
+        let result = semantics
+            .types()
+            .iter()
+            .find_map(|(_, kind)| match kind {
+                crate::types::TypeKind::Result { layout, value } if *value == snapshot => {
+                    Some(*layout)
+                }
+                _ => None,
+            })
+            .expect("reachable managed snapshot calls have Result layouts");
+        managed_snapshot_functions.insert(
+            class,
+            declare(
+                format!("__splitscript::managed::{class_name}::snapshot"),
+                vec![ValType::I64],
+                vec![gc.val_type(Type::Result(result))],
+            ),
+        );
+    }
+
     let mut users = HashMap::new();
     for instance in reachability.functions() {
         let function = program
@@ -580,6 +609,7 @@ pub(super) fn encode<'a>(
         intrinsic_futures,
         displays,
         managed_state_reads: managed_state_read_functions,
+        managed_snapshots: managed_snapshot_functions,
         reads,
         transforms,
         actions,

@@ -632,6 +632,27 @@ impl Checker {
                 .members
                 .expect("method receiver types must be known while resolving a call");
             let receiver_type = self.shallow_type(receiver.ty);
+            if method == "snapshot"
+                && let Type::Known(receiver_id) = receiver_type
+                && let TypeKind::ManagedReference(class) =
+                    self.inference.type_store().kind(receiver_id)
+            {
+                return self.managed_snapshot_call(
+                    *class,
+                    MethodReceiver {
+                        ty: receiver_type,
+                        value: ResolvedReceiver::Path {
+                            root: receiver_value,
+                            members: receiver_members,
+                        },
+                    },
+                    type_arguments,
+                    args,
+                    expected,
+                    expression,
+                    span,
+                );
+            }
             let method_candidates = if self.is_library_function() {
                 standard_library.method_candidates_including_private(method)
             } else {
@@ -785,6 +806,20 @@ impl Checker {
                 members: receiver_members,
             },
         };
+        if method == "snapshot"
+            && let Type::Known(receiver_id) = receiver_type
+            && let TypeKind::ManagedReference(class) = self.inference.type_store().kind(receiver_id)
+        {
+            return self.managed_snapshot_call(
+                *class,
+                method_receiver,
+                type_arguments,
+                args,
+                expected,
+                expression,
+                span,
+            );
+        }
         let method_candidates = if self.is_library_function() {
             standard_library.method_candidates_including_private(method)
         } else {
@@ -885,6 +920,60 @@ impl Checker {
                 signature: concrete_signature,
                 receiver: method_receiver.value,
                 receiver_type,
+            },
+        );
+        Some(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn managed_snapshot_call(
+        &mut self,
+        class: crate::ast::ManagedClassId,
+        receiver: MethodReceiver,
+        type_arguments: &[crate::ast::TypeRef],
+        args: &[Expr],
+        expected: Option<Type>,
+        expression: ExprId,
+        span: Span,
+    ) -> Option<Type> {
+        if !type_arguments.is_empty() {
+            self.error("`snapshot` does not accept type arguments", span);
+            return None;
+        }
+        if !args.is_empty() {
+            self.error(
+                format!("`snapshot` expects 0 arguments, found {}", args.len()),
+                span,
+            );
+            for argument in args {
+                self.expr(argument, None);
+            }
+            return None;
+        }
+        let declaration = self
+            .declarations
+            .managed_classes
+            .iter()
+            .find(|candidate| candidate.id == class)
+            .cloned()
+            .expect("managed snapshot receivers have class declarations");
+        for field in declaration.all_fields().filter(|field| !field.is_static) {
+            let value = self.managed_read_value_type(field.ty);
+            self.inference.result_type(value);
+        }
+        let snapshot = Type::Known(self.inference.type_store().id_for_managed_class(class));
+        let result = Type::Result(self.inference.result_type(snapshot));
+        let result = self.expect_expression(expression, result, expected, span)?;
+        let Type::Result(result_id) = result else {
+            unreachable!("managed snapshot calls produce Result values")
+        };
+        self.semantics.resolve_call(
+            expression,
+            PendingResolvedCall::ManagedSnapshot {
+                class,
+                result: result_id,
+                receiver: receiver.value,
+                receiver_type: receiver.ty,
             },
         );
         Some(result)

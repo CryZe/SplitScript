@@ -221,8 +221,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                 (
                     CompositeInnerType::Struct(StructType {
                         fields: class
-                            .fields
-                            .iter()
+                            .all_fields()
                             .filter(|field| !field.is_static)
                             .map(|field| FieldType {
                                 element_type: layout

@@ -346,12 +346,13 @@ or assumptions tied to one generated corpus.
   `setTickRate(120)` example with one that demonstrates a genuinely temporary
   dynamic adjustment. Keep `refreshRate` migration guidance pointed at the
   declarative block.
-- [ ] Fix the confirmed unused bare-global inference failure. The current tree
-  still reports `cannot infer type variable ?76` at an unrelated `settings`
-  block for an unused `let pausedPath`. Anchor the primary diagnostic at the
-  declaration and preserve originating constraint/use sites as secondary
-  labels. Cover attachment- and attempt-scoped globals, unused declarations,
-  and dynamic `MemoryPath` values.
+- [x] Fix the confirmed unused bare-global inference failure. Ambiguous global
+  types are now recovered at the shared inference-finalization boundary with a
+  source-facing diagnostic anchored at the declaration and secondary labels on
+  non-concrete assignments and uses; internal inference-variable names no
+  longer leak at an unrelated declaration. Attachment- and attempt-scoped
+  inference remains shared, and a concrete `MemoryPath` initialization/use
+  regression verifies that valid attachment state still infers normally.
 - [ ] Give reserved keywords used as identifiers a focused parser diagnostic.
   The exercise's `let loop = ...` reported a missing block brace later in the
   file. Point at `loop`, explain that it is reserved, and offer a safe rename;

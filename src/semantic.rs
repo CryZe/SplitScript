@@ -1352,6 +1352,14 @@ pub(crate) struct SemanticBuilder {
 }
 
 impl SemanticBuilder {
+    pub(crate) fn resolved_value(&self, expression: ExprId) -> Option<ResolvedValue> {
+        self.values.get(&expression).copied()
+    }
+
+    pub(crate) fn resolved_assignment(&self, assignment: AssignmentId) -> Option<ValueId> {
+        self.assignments.get(&assignment).copied()
+    }
+
     pub(crate) fn inferred_expression_type(&self, expression: ExprId) -> Option<Type> {
         self.expression_types.get(&expression).copied()
     }

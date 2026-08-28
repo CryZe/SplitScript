@@ -4,15 +4,16 @@ use std::collections::HashMap;
 
 use crate::{
     Diagnostic,
-    ast::{Expr, ExprKind, FunctionId, Program, Span, StateSource},
+    ast::{Expr, ExprKind, FunctionId, Program, Span, StateSource, Stmt, ValueId},
     inference::Type,
+    semantic::{ResolvedValue, SemanticBuilder},
     stdlib::CoreTypeId,
     types::{
         ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType, ResolvedCallableType,
         ResolvedConstructedTypes, ResolvedOptionType, ResolvedRangeType, ResolvedResultType,
         ResolvedSetType, TypeKind,
     },
-    visit::{Visitor, walk_expr},
+    visit::{Visitor, walk_expr, walk_stmt},
 };
 
 use super::{CheckOutput, Checker, RecoveringCheckOutput};
@@ -348,6 +349,7 @@ impl Checker {
     }
 
     pub(super) fn default_inference_variables(&mut self, program: &Program) {
+        self.diagnose_ambiguous_globals(program);
         for field in program
             .state
             .as_ref()
@@ -383,6 +385,50 @@ impl Checker {
         }
     }
 
+    fn diagnose_ambiguous_globals(&mut self, program: &Program) {
+        for global in &program.globals {
+            if global.annotation.is_some() {
+                continue;
+            }
+            let ty = self.declarations.globals[&global.name].ty;
+            if !self.inference.is_unbound_without_default(ty) {
+                continue;
+            }
+
+            let qualifier = global
+                .value
+                .is_none()
+                .then_some("bare ")
+                .unwrap_or_default();
+            let mut diagnostic = Diagnostic::type_error(
+                format!(
+                    "cannot infer the type of {qualifier}global `{}`",
+                    global.name
+                ),
+                global.name_span,
+            )
+            .with_primary_label("this declaration needs one concrete type")
+            .with_note(
+                "add an explicit type annotation or constrain the value with a concrete assignment or use",
+            );
+            let (assignments, uses) = ambiguous_global_sites(program, &self.semantics, global.id);
+            for span in assignments.into_iter().take(3) {
+                diagnostic = diagnostic.with_secondary_label(
+                    span,
+                    "this assignment still does not determine one concrete type",
+                );
+            }
+            for span in uses.into_iter().take(3) {
+                diagnostic = diagnostic.with_secondary_label(
+                    span,
+                    "this use still does not determine one concrete type",
+                );
+            }
+            self.errors.push(diagnostic);
+            self.inference.recover_unbound_type(ty);
+        }
+    }
+
     pub(super) fn diagnose_ambiguous_process_reads(&mut self) {
         let reads = self.inferred_process_reads.clone();
         let generalized = self
@@ -413,4 +459,52 @@ impl Checker {
     pub(super) fn finalize_array_types(&mut self) {
         self.inference.finalize_arrays();
     }
+}
+
+fn ambiguous_global_sites(
+    program: &Program,
+    semantics: &SemanticBuilder,
+    target: ValueId,
+) -> (Vec<Span>, Vec<Span>) {
+    struct Collector<'a> {
+        semantics: &'a SemanticBuilder,
+        target: ValueId,
+        assignments: Vec<Span>,
+        uses: Vec<Span>,
+    }
+
+    impl<'ast> Visitor<'ast> for Collector<'_> {
+        fn visit_stmt(&mut self, statement: &'ast Stmt) {
+            if let Stmt::Assign { id, span, .. } = statement
+                && self.semantics.resolved_assignment(*id) == Some(self.target)
+            {
+                self.assignments.push(*span);
+            }
+            walk_stmt(self, statement);
+        }
+
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if self.semantics.resolved_value(expression.id)
+                == Some(ResolvedValue::Variable(self.target))
+            {
+                self.uses.push(expression.span);
+            }
+            walk_expr(self, expression);
+        }
+    }
+
+    let mut collector = Collector {
+        semantics,
+        target,
+        assignments: Vec::new(),
+        uses: Vec::new(),
+    };
+    collector.visit_program(program);
+    collector
+        .assignments
+        .sort_by_key(|span| (span.start, span.end));
+    collector.assignments.dedup();
+    collector.uses.sort_by_key(|span| (span.start, span.end));
+    collector.uses.dedup();
+    (collector.assignments, collector.uses)
 }

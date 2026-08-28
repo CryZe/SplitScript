@@ -649,6 +649,87 @@ fn global_types_are_inferred_from_uses_and_assignments() {
 }
 
 #[test]
+fn ambiguous_bare_globals_are_diagnosed_at_their_declaration() {
+    let source = r#"
+        settings {
+            "Probe" => probe: false,
+        }
+
+        let pausedPath
+        state "game.exe" {}
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("an unused bare global has no type-producing context");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("bare global `pausedPath`"))
+        .expect("the declaration should receive a focused inference diagnostic");
+    let start = source.find("pausedPath").unwrap();
+    assert_eq!(
+        diagnostic.span,
+        splitscript::compiler::ast::Span {
+            start,
+            end: start + 10
+        }
+    );
+    assert!(!diagnostic.message.contains("type variable"));
+}
+
+#[test]
+fn ambiguous_global_diagnostics_retain_non_concrete_use_sites() {
+    let source = r#"
+        let value
+        state "game.exe" {}
+        onAttach {
+            print(value)
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("Display alone cannot select a concrete global type");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("bare global `value`"))
+        .expect("the global declaration should own the inference diagnostic");
+    let use_start = source.rfind("value").unwrap();
+    assert!(diagnostic.labels.iter().any(|label| {
+        label.span
+            == splitscript::compiler::ast::Span {
+                start: use_start,
+                end: use_start + 5,
+            }
+            && label
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("this use"))
+    }));
+}
+
+#[test]
+fn attachment_scoped_memory_paths_still_infer_from_initialization_and_use() {
+    let source = r#"
+        let roomPath
+
+        state "game.exe" {
+            room: u16 = process.read<u16>(roomPath.resolve()?)?;
+        }
+
+        onAttach {
+            let executable = await process.mainModule()
+            roomPath = executable.address.memoryPath(
+                [0x5eab88],
+                0x56e183,
+                PointerSize.Bit32,
+            )
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("a concrete attachment assignment and use should infer MemoryPath");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("the inferred attachment-scoped MemoryPath should lower to valid Wasm GC");
+}
+
+#[test]
 fn none_initialized_globals_infer_options_from_later_assignments() {
     let source = r#"
         let pending = None

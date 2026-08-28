@@ -92,6 +92,82 @@ fn managed_metadata_can_select_multiple_attachment_dimensions_automatically() {
 }
 
 #[test]
+fn automatic_layout_failure_report_names_observations_and_source_candidates() {
+    let source = r#"
+        enum Edition { Base, Demo }
+
+        image "Assembly-CSharp" {
+            class GameManager {
+                if layout.edition == Edition.Base {
+                    u32 level;
+                } else {
+                    u32 scene;
+                }
+            }
+        }
+
+        state Unity ["game.exe"] {
+            layout { edition: Edition }
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("a metadata-selected layout should compile with a failure report");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("the attachment report should emit valid Wasm GC");
+    let contains = |needle: &str| {
+        wasm.windows(needle.len())
+            .any(|window| window == needle.as_bytes())
+    };
+    assert!(contains(
+        "Could not select an attachment layout: managed metadata did not match any declared layout"
+    ));
+    assert!(contains(
+        "Observed managed field `Assembly-CSharp::GameManager.level`: present"
+    ));
+    assert!(contains(
+        "Observed managed field `Assembly-CSharp::GameManager.scene`: absent"
+    ));
+    assert!(contains(
+        "Expected `Layout { edition: Edition.Base }` with present [Assembly-CSharp::GameManager.level] and absent [Assembly-CSharp::GameManager.scene]"
+    ));
+    assert!(contains(
+        "Expected `Layout { edition: Edition.Demo }` with present [Assembly-CSharp::GameManager.scene] and absent [Assembly-CSharp::GameManager.level]"
+    ));
+}
+
+#[test]
+fn explicit_layout_selection_does_not_embed_the_automatic_failure_report() {
+    let source = r#"
+        enum Edition { Base, Demo }
+
+        image "Assembly-CSharp" {
+            class GameManager {
+                if layout.edition == Edition.Base { u32 level; }
+                else { u32 scene; }
+            }
+        }
+
+        state Unity ["game.exe"] {
+            layout { edition: Edition }
+        }
+
+        onAttach {
+            return Layout { edition: Edition.Base }
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("explicit layout selection should bypass the automatic report");
+    assert!(
+        !wasm
+            .windows("Could not select an attachment layout".len())
+            .any(|window| window == "Could not select an attachment layout".as_bytes())
+    );
+}
+
+#[test]
 fn automatic_layout_selection_requires_distinguishable_metadata_evidence() {
     let source = r#"
         enum Edition { Base, Demo }

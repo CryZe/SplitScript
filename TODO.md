@@ -84,7 +84,7 @@ to inference or code generation.
     propagates the first failure without exposing a partial object, preserves
     stable slots for layout-conditional fields, and is emitted only when a
     checked call can reach it.
-- [ ] Specify deterministic metadata-name resolution. A missing `from` uses the
+- [x] Specify deterministic metadata-name resolution. A missing `from` uses the
   source member name, `from "name"` names one exact metadata member, and
   `from ["first", "second"]` names explicit alternatives. C# automatic-property
   backing fields participate in the same canonical lookup. Ambiguity is an
@@ -146,8 +146,11 @@ to inference or code generation.
     attachment binding probes complete alternatives without adding a public
     lookup API or duplicating the metadata scanner. Reuse this mechanism as
     the low-level evidence source for global layout constraints.
-  - [ ] Replace the temporary inert zero/multiple-match behavior with a focused
-    attachment diagnostic carrying labels for the responsible layouts.
+  - [x] Replace the temporary inert zero-match behavior with a focused runtime
+    attachment report naming every observed conditional managed field and the
+    expected presence pattern of each responsible source `Layout`. Distinct
+    exact patterns make multiple runtime matches impossible; indistinguishable
+    patterns remain a compile-time error.
 
 ### P0.2 — bind schemas once per attachment
 

@@ -49,6 +49,7 @@ impl StaticData {
     pub fn collect(
         program: &Program,
         process_names: &[&str],
+        automatic_layout: Option<&crate::layout_selection::LayoutSelectionPlan>,
         wasm_ir: &wasm_ir::Program,
         reachability: &Reachability,
         memory: &MemoryLayouts,
@@ -58,6 +59,12 @@ impl StaticData {
         let mut strings = StringPool::new();
         for process in process_names {
             strings.intern(process);
+        }
+        if let Some(plan) = automatic_layout {
+            let report = plan.failure_report(program);
+            for message in report.messages() {
+                strings.intern(message);
+            }
         }
         for field in state.all_fields() {
             if let StateSource::Pointer(path) = &field.source

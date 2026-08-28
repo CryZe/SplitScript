@@ -400,7 +400,9 @@ pub(super) fn compile_update(
                     .expect("automatic layout selection has global storage"),
             ))
             .instruction(&Instruction::RefIsNull)
-            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::If(BlockType::Empty));
+        emit_automatic_layout_failure_report(&mut function, strings, program, plan, lowering);
+        function
             .instruction(&Instruction::I32Const(ATTACH_REJECTED))
             .instruction(&Instruction::GlobalSet(globals.attach_ready))
             .instruction(&Instruction::Return)
@@ -715,6 +717,62 @@ pub(super) fn compile_update(
 
     function.instruction(&Instruction::End);
     function
+}
+
+fn emit_automatic_layout_failure_report(
+    function: &mut Function,
+    strings: &StringPool,
+    program: &Program,
+    plan: &crate::layout_selection::LayoutSelectionPlan,
+    lowering: &UpdateContext<'_>,
+) {
+    let report = plan.failure_report(program);
+    emit_runtime_message(function, strings, &report.header, lowering.abi);
+    let Some(bindings_global) = lowering.runtime_globals.provider_preparation_value else {
+        return;
+    };
+    let bindings = program
+        .records
+        .iter()
+        .find(|record| record.name == crate::stdlib::MANAGED_BINDINGS_TYPE)
+        .expect("managed layout evidence has generated bindings");
+    for evidence in &report.evidence {
+        let name = crate::stdlib::managed_field_presence_name(evidence.field.index());
+        let (field_index, declaration) = bindings
+            .fields
+            .iter()
+            .enumerate()
+            .find(|(_, candidate)| candidate.name == name)
+            .expect("layout evidence has generated presence storage");
+        let field_type = record_field_type(declaration.id, lowering.semantics);
+        function
+            .instruction(&Instruction::GlobalGet(bindings_global))
+            .instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(
+            function,
+            lowering.gc.index(Type::Record(bindings.id)),
+            field_index as u32,
+            field_type,
+        );
+        function.instruction(&Instruction::If(BlockType::Empty));
+        emit_runtime_message(function, strings, &evidence.present, lowering.abi);
+        function.instruction(&Instruction::Else);
+        emit_runtime_message(function, strings, &evidence.absent, lowering.abi);
+        function.instruction(&Instruction::End);
+    }
+    for candidate in &report.candidates {
+        emit_runtime_message(function, strings, candidate, lowering.abi);
+    }
+}
+
+fn emit_runtime_message(function: &mut Function, strings: &StringPool, message: &str, abi: &Abi) {
+    let (pointer, length) = strings.get(message);
+    function
+        .instruction(&Instruction::I32Const(pointer as i32))
+        .instruction(&Instruction::I32Const(length as i32))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::RuntimePrintMessage),
+        ));
 }
 
 fn emit_timer_lifecycle_events(

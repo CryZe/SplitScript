@@ -74,6 +74,151 @@ pub(crate) struct LayoutSelectionCandidate {
     pub present_fields: Vec<ManagedFieldId>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LayoutSelectionFailureReport {
+    pub header: String,
+    pub evidence: Vec<LayoutSelectionEvidenceReport>,
+    pub candidates: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LayoutSelectionEvidenceReport {
+    pub field: ManagedFieldId,
+    pub present: String,
+    pub absent: String,
+}
+
+impl LayoutSelectionFailureReport {
+    pub(crate) fn messages(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.header.as_str())
+            .chain(
+                self.evidence
+                    .iter()
+                    .flat_map(|evidence| [evidence.present.as_str(), evidence.absent.as_str()]),
+            )
+            .chain(self.candidates.iter().map(String::as_str))
+    }
+}
+
+impl LayoutSelectionPlan {
+    /// Builds the source-facing report used when the runtime metadata presence
+    /// vector does not equal any statically valid layout pattern.
+    ///
+    /// The selector itself remains a compact bit-vector comparison. Keeping
+    /// human-readable labels here gives static-data planning and failure
+    /// emission one canonical description without making diagnostics part of
+    /// either managed backend.
+    pub(crate) fn failure_report(&self, program: &Program) -> LayoutSelectionFailureReport {
+        let evidence = self
+            .evidence_fields
+            .iter()
+            .map(|field| {
+                let label = managed_field_label(program, *field);
+                LayoutSelectionEvidenceReport {
+                    field: *field,
+                    present: format!("Observed managed field `{label}`: present"),
+                    absent: format!("Observed managed field `{label}`: absent"),
+                }
+            })
+            .collect();
+        let candidates = self
+            .candidates
+            .iter()
+            .map(|candidate| {
+                let layout = self
+                    .dimensions
+                    .iter()
+                    .zip(&candidate.variants)
+                    .map(|(dimension, variant)| {
+                        let field = program.records[program
+                            .state
+                            .as_ref()
+                            .and_then(|state| state.layout.as_ref())
+                            .expect("layout selection plans have a layout record")
+                            .record
+                            .index()]
+                        .fields
+                        .iter()
+                        .find(|field| field.id == dimension.field)
+                        .expect("layout dimensions use fields from the layout record");
+                        let enumeration = program
+                            .enum_declaration(dimension.enumeration)
+                            .expect("layout dimensions use source enums");
+                        let variant = enumeration
+                            .variants
+                            .iter()
+                            .find(|declaration| declaration.id == *variant)
+                            .expect("layout candidates use declared variants");
+                        format!("{}: {}.{}", field.name, enumeration.name, variant.name)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let present = self
+                    .evidence_fields
+                    .iter()
+                    .filter(|field| candidate.present_fields.contains(field))
+                    .map(|field| managed_field_label(program, *field))
+                    .collect::<Vec<_>>();
+                let absent = self
+                    .evidence_fields
+                    .iter()
+                    .filter(|field| !candidate.present_fields.contains(field))
+                    .map(|field| managed_field_label(program, *field))
+                    .collect::<Vec<_>>();
+                format!(
+                    "Expected `Layout {{ {layout} }}` with present [{}] and absent [{}]",
+                    present.join(", "),
+                    absent.join(", ")
+                )
+            })
+            .collect();
+        LayoutSelectionFailureReport {
+            header: "Could not select an attachment layout: managed metadata did not match any declared layout".to_owned(),
+            evidence,
+            candidates,
+        }
+    }
+}
+
+fn managed_field_label(program: &Program, target: ManagedFieldId) -> String {
+    fn find(
+        items: &[crate::ast::ManagedItemDecl],
+        namespace: &[&str],
+        target: ManagedFieldId,
+    ) -> Option<String> {
+        for item in items {
+            match item {
+                crate::ast::ManagedItemDecl::Namespace(declaration) => {
+                    let mut nested = namespace.to_vec();
+                    nested.push(&declaration.name);
+                    if let Some(label) = find(&declaration.items, &nested, target) {
+                        return Some(label);
+                    }
+                }
+                crate::ast::ManagedItemDecl::Class(class) => {
+                    if let Some(field) = class.all_fields().find(|field| field.id == target) {
+                        let owner = namespace
+                            .iter()
+                            .copied()
+                            .chain(std::iter::once(class.name.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(".");
+                        return Some(format!("{owner}.{}", field.name));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    for image in &program.managed_images {
+        if let Some(field) = find(&image.items, &[], target) {
+            return format!("{}::{field}", image.name);
+        }
+    }
+    unreachable!("layout evidence belongs to a managed source field")
+}
+
 struct ManagedEvidenceGroup {
     alternatives: Vec<Vec<(RecordFieldId, EnumVariantId)>>,
     fields: Vec<ManagedFieldId>,

@@ -387,11 +387,23 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let async_frames =
         AsyncFrameLayouts::plan(on_attach, program, wasm_ir, semantics, &reachability);
     let async_layout = async_frames.attach.as_ref();
-    let dependencies = BackendDependencies::analyze(program, semantics, wasm_ir, &reachability);
+    let managed = crate::managed::ManagedBindingPlan::build(program, semantics);
+    let explicit_layout_selection = crate::layout_selection::has_explicit_layout_return(program);
+    let automatic_layout = if explicit_layout_selection {
+        None
+    } else {
+        managed.automatic_layout.as_ref().filter(|plan| {
+            plan.evidence_fields.is_empty()
+                || semantics.state_provider() == Some(crate::stdlib::StdlibStateProviderId::Unity)
+        })
+    };
+    let dependencies =
+        BackendDependencies::analyze(program, semantics, wasm_ir, &reachability, automatic_layout);
     reachability.require_runtime_helper_types(&dependencies, array_types, semantics);
     let static_data = StaticData::collect(
         program,
         &process_names,
+        automatic_layout,
         wasm_ir,
         &reachability,
         memory_layouts,
@@ -429,7 +441,6 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         next_type_index,
     } = imports::encode(&mut types, first_import_type, &dependencies);
 
-    let managed = crate::managed::ManagedBindingPlan::build(program, semantics);
     let pointer_prefixes =
         pointer_prefixes::PointerPrefixPlan::build(program, semantics, &standard_library);
     let global_plan::GlobalPlan {
@@ -501,7 +512,6 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         function_debug_names.len(),
         debug_recorder.as_ref(),
     );
-    let explicit_layout_selection = crate::layout_selection::has_explicit_layout_return(program);
     let lowering = EmissionContext {
         program,
         standard_library: &standard_library,

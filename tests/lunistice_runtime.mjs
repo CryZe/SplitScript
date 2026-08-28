@@ -10,6 +10,8 @@ const missingClass = process.argv.includes("--missing-class");
 const ambiguousField = process.argv.includes("--ambiguous-field");
 const missingField = process.argv.includes("--missing-field");
 const transientBindingRead = process.argv.includes("--transient-binding-read");
+const mixedLayout = process.argv.includes("--mixed-layout");
+const inheritedField = process.argv.includes("--inherited-field");
 const decoder = new TextDecoder();
 const base = 0x1000n;
 const memoryImage = new Uint8Array(0x2800000);
@@ -104,8 +106,8 @@ pointer(0x2080, 0x5000);
 pointer(0x20b8, 0x7000);
 pointer(0xd010, 0xf000);
 pointer(0xd018, 0xf040);
-string(0xe000, "MonoBehaviour");
-string(0xe040, "UnityEngine");
+string(0xe000, inheritedField ? "BaseManager" : "MonoBehaviour");
+string(0xe040, inheritedField ? "" : "UnityEngine");
 view.setUint16(0xd120, 1, true);
 // Real IL2CPP classes may expose unreadable field slots after their usable
 // metadata entries. Field discovery must skip those slots instead of retrying
@@ -114,15 +116,29 @@ view.setUint16(0x2120, 119, true);
 const gameFieldNames = [
     "<Instance>k__BackingField",
     dlc ? "<GameState>k__BackingField" : "gameState",
-    missingField ? "unrelatedPoints" : "_points",
     "_deaths",
-    dlc ? "_currentScene" : "currentLevel",
+    ...(inheritedField ? [] : [missingField ? "unrelatedPoints" : "_points"]),
+    ...(mixedLayout ? ["currentLevel", "_currentScene"] : [dlc ? "_currentScene" : "currentLevel"]),
 ];
-const gameFieldOffsets = [0x20, 0x30, 0x34, 0x38, 0x3c];
+const gameFieldOffsets = gameFieldNames.map(name => ({
+    "<Instance>k__BackingField": 0x20,
+    "<GameState>k__BackingField": 0x30,
+    gameState: 0x30,
+    unrelatedPoints: 0x34,
+    _points: 0x34,
+    _deaths: 0x38,
+    currentLevel: 0x3c,
+    _currentScene: mixedLayout ? 0x48 : 0x3c,
+}[name]));
 for (let index = 0; index < gameFieldNames.length; index += 1) {
     const relative = 0xa100 + index * 0x30;
     string(relative, gameFieldNames[index]);
     field(0x4000, index, absolute(relative), gameFieldOffsets[index]);
+}
+if (inheritedField) {
+    pointer(0xd080, 0x5400);
+    string(0xa600, "_points");
+    field(0x4400, 0, absolute(0xa600), 0x34);
 }
 if (ambiguousField) {
     string(0xa1f0, "_points");
@@ -247,6 +263,8 @@ const expectedBindingFailure = ambiguousClass
             ? "multiple Unity fields match metadata names"
             : missingField
                 ? "no Unity field matches metadata names"
+                : mixedLayout
+                    ? "Could not select an attachment layout"
                 : undefined;
 if (expectedBindingFailure !== undefined) {
     if (variableWrites !== 0) {
@@ -254,6 +272,18 @@ if (expectedBindingFailure !== undefined) {
     }
     if (!messages.some(message => message.includes(expectedBindingFailure))) {
         throw new Error(`missing binding diagnostic ${JSON.stringify(expectedBindingFailure)}: ${JSON.stringify(messages)}`);
+    }
+    if (mixedLayout) {
+        for (const expected of [
+            "Assembly-CSharp::GameManager.level",
+            "Assembly-CSharp::GameManager.scene",
+            "Expected `Layout { edition: Edition.BaseGame }`",
+            "Expected `Layout { edition: Edition.DlcDemo }`",
+        ]) {
+            if (!messages.some(message => message.includes(expected))) {
+                throw new Error(`layout report omitted ${JSON.stringify(expected)}: ${JSON.stringify(messages)}`);
+            }
+        }
     }
     console.log(JSON.stringify({ messages, variableWrites, tickRates }));
     process.exit(0);
@@ -321,7 +351,7 @@ if (variableWrites !== writesBeforeFailure + 5 || gameTimes.length !== timesBefo
 }
 if (variables.get("Points") !== "12") throw new Error("failed snapshot leaked partial state");
 
-// Simulate a runner manually starting LiveSplit after accumulated time exists.
+// Simulate a runner manually starting the timer after accumulated time exists.
 // The NotRunning -> Running transition must clear accumulation, and a level
 // clock rollback before the first completed level must reset the timer.
 setGame({ state: 0, points: 12, level: 0 });

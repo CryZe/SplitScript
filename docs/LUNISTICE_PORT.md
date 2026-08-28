@@ -26,7 +26,7 @@ The authoritative source for this port is
 | Game-time accumulation across level-clock rollovers | `runTimeSeconds` is updated and consumed inside `gameTime`, plus `Duration.fromSeconds` |
 | Reset on a rollover before leaving the first level | `reset` action |
 | Results and final-level-to-credits splits | `split` action with both original predicates |
-| Permanently paused LiveSplit game time with explicit game time | `isLoading { return true }` plus `gameTime` |
+| Permanently paused timer game time with explicit game time | `isLoading { return true }` plus `gameTime` |
 | Base and DLC character labels | `characterName` mapping with all Rust variants |
 | No user-configurable settings in the Rust splitter | No settings declared; the separate `examples/lso_desktop_settings.split` port exercises the complete live settings API |
 
@@ -40,13 +40,17 @@ selected before scanning starts. It executes the generated WebAssembly GC module
 DLC configurations and verifies:
 
 - base-game/DLC schema and executable fallback selection;
+- inherited managed-field discovery across a game-defined base class;
+- focused rejection of a mixed metadata shape that matches no declared layout;
+- deterministic missing and ambiguous class and field diagnostics;
+- singleton replacement without duplicating static-root reads;
 - automatic and runner-initiated starts;
 - Results and credits splits;
 - first-level rollback reset;
 - accumulated game time after a level-time rollover;
 - all runtime variable values and character/level formatting;
 - 1/120/1 Hz detached, attached, and process-close tick-rate changes;
-- atomic suppression of a deliberately torn process-read tick.
+- retention of the last accepted snapshot across a deliberately failed read;
 - a single 12-byte host read for the three adjacent level-time components.
 
 Run the complete verification with:

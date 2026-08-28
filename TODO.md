@@ -244,7 +244,7 @@ to inference or code generation.
   scene until managed strings gain declaration syntax. Preserve
   all existing autosplitter behavior and keep the user's current local example
   edits out of intermediate mechanical rewrites.
-- [ ] Add synthetic runtime coverage for both base and DLC metadata layouts,
+- [x] Add synthetic runtime coverage for both base and DLC metadata layouts,
   singleton replacement, backing-field lookup, inherited fields, failed reads,
   and ambiguous layouts. Compare the resulting script structure and behavior
   with `C:\Projekte\lunistice-auto-splitter`.

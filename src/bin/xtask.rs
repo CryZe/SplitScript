@@ -290,6 +290,20 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &["--transient-binding-read"],
     },
     RuntimeFixture {
+        source: "examples/lunistice.split",
+        output: "lunistice.debug.wasm",
+        profile: "debug",
+        harness: "tests/lunistice_runtime.mjs",
+        extra_arguments: &["--mixed-layout"],
+    },
+    RuntimeFixture {
+        source: "examples/lunistice.split",
+        output: "lunistice.debug.wasm",
+        profile: "debug",
+        harness: "tests/lunistice_runtime.mjs",
+        extra_arguments: &["--inherited-field"],
+    },
+    RuntimeFixture {
         source: "examples/lso_desktop_settings.split",
         output: "settings.wasm",
         profile: "release",

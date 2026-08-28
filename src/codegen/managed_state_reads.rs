@@ -158,6 +158,7 @@ impl wasm_ir::Visitor for ManagedStaticCollector {
                 wasm_ir::CallTarget::Intrinsic { receiver, .. }
                 | wasm_ir::CallTarget::LibraryOverload { receiver, .. } => receiver.as_ref(),
                 wasm_ir::CallTarget::UserFunction { .. }
+                | wasm_ir::CallTarget::ManagedInstances { .. }
                 | wasm_ir::CallTarget::ResultError { .. }
                 | wasm_ir::CallTarget::OptionSome { .. }
                 | wasm_ir::CallTarget::IteratorItem { .. }

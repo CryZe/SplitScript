@@ -254,9 +254,14 @@ to inference or code generation.
 
 ### P1 — complete the Unity object model on the same foundation
 
-- [ ] Add cooperative `T.instances()` scanning by managed class/vtable. Bound
-  work per poll and preserve process cancellation; never hide an unbounded
-  synchronous process scan behind an ordinary-looking method.
+- [x] Add cooperative `T.instances()` scanning by managed class/vtable. It
+  returns a completed `[T.Ref]` snapshot, scans only readable and writable
+  non-executable ranges at natural pointer alignment, bounds bytes and matches
+  per poll, preserves process cancellation, and binds the backend-specific
+  IL2CPP class pointer or Mono vtable once per attachment. Its compiler-provided
+  leaf future, runtime scanner, completion, hover, navigation, highlighting,
+  and Mono/IL2CPP runtime fixtures share the ordinary typed architecture rather
+  than exposing raw vtable machinery.
 - [ ] Unify the existing scene snapshots under `unity.scenes`, including active,
   loaded, and don't-destroy-on-load scenes. Add typed hierarchy lookup and
   `.component<T>()`, with an explicitly dynamic escape hatch when no schema is

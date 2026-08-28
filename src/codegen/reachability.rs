@@ -29,6 +29,7 @@ pub(super) struct Reachability {
     gc_records: BTreeSet<RecordId>,
     gc_managed_classes: BTreeSet<ManagedClassId>,
     managed_snapshots: BTreeSet<ManagedClassId>,
+    managed_instances: BTreeSet<ManagedClassId>,
     gc_enums: BTreeSet<EnumId>,
     gc_arrays: BTreeSet<ArrayTypeId>,
     gc_array_storage: BTreeSet<ArrayTypeId>,
@@ -284,6 +285,19 @@ impl Reachability {
                 if let wasm_ir::CallTarget::ManagedSnapshot { class, .. } = target {
                     reachable.managed_snapshots.insert(*class);
                 }
+                if let wasm_ir::CallTarget::ManagedInstances { class } = target {
+                    reachable.managed_instances.insert(*class);
+                    let future = owner.as_ref().map_or(expression.ty, |owner| {
+                        semantics.specialize_type(owner, expression.ty)
+                    });
+                    let TypeKind::Async { value, .. } = semantics.types().kind(future) else {
+                        unreachable!("managed instances calls produce async arrays")
+                    };
+                    let TypeKind::Array { layout, .. } = semantics.types().kind(*value) else {
+                        unreachable!("managed instances futures complete with arrays")
+                    };
+                    reachable.array_pushes.insert(*layout);
+                }
                 let function = match target {
                     wasm_ir::CallTarget::UserFunction { function }
                     | wasm_ir::CallTarget::UserMethod { function, .. } => Some(function.clone()),
@@ -299,6 +313,7 @@ impl Reachability {
                     | wasm_ir::CallTarget::CapabilityRequirement { .. }
                     | wasm_ir::CallTarget::DefaultDisplay { .. }
                     | wasm_ir::CallTarget::ManagedSnapshot { .. }
+                    | wasm_ir::CallTarget::ManagedInstances { .. }
                     | wasm_ir::CallTarget::ResultError { .. }
                     | wasm_ir::CallTarget::OptionSome { .. }
                     | wasm_ir::CallTarget::IteratorItem { .. }
@@ -511,6 +526,7 @@ impl Reachability {
                             type_roots.push(specialize(*receiver_type));
                         }
                         wasm_ir::CallTarget::UserFunction { .. }
+                        | wasm_ir::CallTarget::ManagedInstances { .. }
                         | wasm_ir::CallTarget::CapabilityRequirement { .. }
                         | wasm_ir::CallTarget::ResultError { .. }
                         | wasm_ir::CallTarget::OptionSome { .. }
@@ -1025,6 +1041,7 @@ fn constant_roots(
             wasm_ir::CallTarget::Intrinsic { receiver, .. }
             | wasm_ir::CallTarget::LibraryOverload { receiver, .. } => receiver.as_ref(),
             wasm_ir::CallTarget::UserFunction { .. }
+            | wasm_ir::CallTarget::ManagedInstances { .. }
             | wasm_ir::CallTarget::ResultError { .. }
             | wasm_ir::CallTarget::OptionSome { .. }
             | wasm_ir::CallTarget::IteratorItem { .. }

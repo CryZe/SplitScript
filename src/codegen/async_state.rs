@@ -9,7 +9,10 @@ use crate::{
     abi::AbiImportId,
     ast::{Action, ExprId, SuspensionMode, ValueId},
     intrinsic_registry::RuntimeHelperId,
-    stdlib::{IntrinsicId, StdlibFieldId, StdlibTypeId},
+    stdlib::{
+        IntrinsicId, MANAGED_POINTER_SIZE_FIELD, StdlibFieldId, StdlibTypeId,
+        managed_instance_header_name,
+    },
     types::TypeKind,
     wasm_ir::{self, BodyOwner},
 };
@@ -17,8 +20,7 @@ use crate::{
 use super::{
     LocalPlanOptions, MemoryByteOrder, Type,
     async_frame::{
-        AsyncFrameLayout, AsyncFrameRef, AsyncFrameSource, IntrinsicFutureInstance,
-        IntrinsicFutureLayout,
+        AsyncFrameLayout, AsyncFrameRef, AsyncFrameSource, LeafFutureInstance, LeafFutureLayout,
     },
     call_target,
     context::AttachContext,
@@ -28,7 +30,7 @@ use super::{
         BareReturn, ExprContext, IntrinsicCapture, LocalStorage, LoopControl, MatchLayout,
         compile_assignment, compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
         compile_for_has_next, compile_for_init, compile_receiver, compile_statement_pattern,
-        compile_temporary_set, store_match_binding,
+        compile_temporary_set, emit_managed_binding_field, store_match_binding,
     },
     imports::Abi,
     memarg, plan_wasm_locals, resolved_intrinsic, semantic_type, unity_layout,
@@ -144,17 +146,17 @@ pub(super) fn compile_async_closure_poll(
     )
 }
 
-pub(super) fn compile_intrinsic_future_poll(
-    instance: &IntrinsicFutureInstance,
+pub(super) fn compile_leaf_future_poll(
+    instance: &LeafFutureInstance,
     function_index: u32,
-    layout: &IntrinsicFutureLayout,
+    layout: &LeafFutureLayout,
     runtime: &AttachContext<'_>,
 ) -> Function {
     let frame = AsyncFrameRef {
-        struct_type: runtime.lowering.gc.intrinsic_frame_index(instance),
+        struct_type: runtime.lowering.gc.leaf_frame_index(instance),
         source: AsyncFrameSource::Local(0),
     };
-    let planned = wasm_ir::intrinsic_future_locals(
+    let planned = wasm_ir::leaf_future_locals(
         instance.expression,
         runtime.lowering.wasm_ir,
         runtime.lowering.semantics,
@@ -178,6 +180,23 @@ pub(super) fn compile_intrinsic_future_poll(
             include_values: false,
         },
     );
+    let managed_instances = matches!(
+        call_target(runtime.lowering.wasm_ir, instance.expression),
+        Some(wasm_ir::CallTarget::ManagedInstances { .. })
+    );
+    if managed_instances {
+        debug_assert!(local_types.is_empty());
+        local_types.extend([
+            ValType::I64,
+            ValType::I64,
+            ValType::I64,
+            ValType::I64,
+            ValType::I64,
+            ValType::I64,
+            ValType::I32,
+            ValType::I32,
+        ]);
+    }
     let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
     let empty_values = HashMap::new();
     let empty_temporaries = HashMap::new();
@@ -203,7 +222,7 @@ pub(super) fn compile_intrinsic_future_poll(
         function_values: runtime.lowering.function_values,
         closure_polls: runtime.lowering.closure_polls,
         closure_environment: None,
-        intrinsic_futures: runtime.lowering.intrinsic_futures,
+        leaf_futures: runtime.lowering.leaf_futures,
         display_functions: runtime.lowering.display_functions,
         equality_functions: runtime.lowering.equality_functions,
         array_functions: runtime.lowering.array_functions,
@@ -343,7 +362,7 @@ fn compile_async_body(
         function_values: runtime.lowering.function_values,
         closure_polls: runtime.lowering.closure_polls,
         closure_environment: None,
-        intrinsic_futures: runtime.lowering.intrinsic_futures,
+        leaf_futures: runtime.lowering.leaf_futures,
         display_functions: runtime.lowering.display_functions,
         equality_functions: runtime.lowering.equality_functions,
         array_functions: runtime.lowering.array_functions,
@@ -1493,6 +1512,273 @@ fn emit_cooperative_process_scan_any(
     emit_intrinsic_state_set_zero(function, context, 4);
 }
 
+/// Polls one bounded window while discovering live instances of a managed
+/// class. The attachment preparation has already resolved the runtime-specific
+/// object-header discriminator, so this path is backend-neutral.
+fn emit_managed_instances_poll(
+    function: &mut Function,
+    class: crate::ast::ManagedClassId,
+    destination: wasm_ir::SuspensionDestination,
+    layout: &AsyncFrameLayout,
+    abi: &Abi,
+    context: &ExprContext<'_>,
+) {
+    const MATCH_LIMIT_PER_POLL: i32 = 1024;
+    let cursor = 1;
+    let range_address = 2;
+    let range_size = 3;
+    let search_address = 4;
+    let remaining = 5;
+    let matched = 6;
+    let pointer_size = 7;
+    let match_count = 8;
+
+    let (_, _, Type::Array(array)) = intrinsic_state(context, 2) else {
+        unreachable!("managed instance discovery stores its result array in leaf state")
+    };
+    let storage = super::array_value::storage_id(array, context.arrays, context.semantics);
+
+    // A zero cursor is the uninitialized state. Store count + 1 so an empty
+    // process map remains distinguishable from an uninitialized scan.
+    emit_intrinsic_state_get(function, context, 0);
+    function
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    let (frame, array_field, _) = intrinsic_state(context, 2);
+    frame.emit(function);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::ArrayNewDefault(
+            context.gc.index(Type::ArrayStorage(storage)),
+        ));
+    super::array_value::emit_wrap(function, context.gc, array, 0);
+    function.instruction(&Instruction::StructSet {
+        struct_type_index: frame.struct_type,
+        field_index: array_field,
+    });
+    function
+        .instruction(&Instruction::GlobalGet(context.runtime_globals.process))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetMemoryRangeCount),
+        ))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalSet(cursor));
+    emit_intrinsic_state_set_local(function, context, 0, cursor);
+    function.instruction(&Instruction::End);
+
+    // Cursor 1 means every range has been consumed and the snapshot is ready.
+    emit_intrinsic_state_get(function, context, 0);
+    function
+        .instruction(&Instruction::LocalTee(cursor))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Eq)
+        .instruction(&Instruction::If(BlockType::Empty));
+    if let Some((destination_field, destination_type)) = layout.field(destination) {
+        debug_assert_eq!(destination_type, Type::Array(array));
+        context.locals.frame().emit(function);
+        emit_intrinsic_state_get(function, context, 2);
+        function.instruction(&Instruction::StructSet {
+            struct_type_index: context.locals.frame().struct_type,
+            field_index: destination_field,
+        });
+    }
+    emit_intrinsic_state_set_zero(function, context, 0);
+    emit_intrinsic_state_set_zero(function, context, 1);
+    let (state_frame, state_field, state_type) = intrinsic_state(context, 2);
+    state_frame.emit(function);
+    emit_default(function, state_type, context.gc);
+    function.instruction(&Instruction::StructSet {
+        struct_type_index: state_frame.struct_type,
+        field_index: state_field,
+    });
+    mark_future_complete(function, context.bare_return);
+    function
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+
+    // The reverse cursor maps count + 1 to the next zero-based range index.
+    function
+        .instruction(&Instruction::LocalGet(cursor))
+        .instruction(&Instruction::I64Const(2))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalSet(cursor));
+    function
+        .instruction(&Instruction::GlobalGet(context.runtime_globals.process))
+        .instruction(&Instruction::LocalGet(cursor))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetMemoryRangeAddress),
+        ))
+        .instruction(&Instruction::LocalSet(range_address))
+        .instruction(&Instruction::GlobalGet(context.runtime_globals.process))
+        .instruction(&Instruction::LocalGet(cursor))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetMemoryRangeSize),
+        ))
+        .instruction(&Instruction::LocalSet(range_size))
+        .instruction(&Instruction::GlobalGet(context.runtime_globals.process))
+        .instruction(&Instruction::LocalGet(cursor))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetMemoryRangeFlags),
+        ))
+        .instruction(&Instruction::LocalSet(matched));
+    emit_managed_binding_field(function, MANAGED_POINTER_SIZE_FIELD, context);
+    function.instruction(&Instruction::LocalSet(pointer_size));
+
+    // Heap objects live in writable data ranges. Excluding executable pages
+    // removes code-address coincidences without assuming a platform layout.
+    function
+        .instruction(&Instruction::LocalGet(range_address))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::LocalGet(range_size))
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::I64GeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::LocalGet(matched))
+        .instruction(&Instruction::I64Const(6))
+        .instruction(&Instruction::I64And)
+        .instruction(&Instruction::I64Const(6))
+        .instruction(&Instruction::I64Eq)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::LocalGet(matched))
+        .instruction(&Instruction::I64Const(8))
+        .instruction(&Instruction::I64And)
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Empty));
+
+    emit_intrinsic_state_get(function, context, 1);
+    function
+        .instruction(&Instruction::LocalTee(search_address))
+        .instruction(&Instruction::LocalGet(range_size))
+        .instruction(&Instruction::I64GeU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_intrinsic_state_get(function, context, 0);
+    function
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalSet(cursor));
+    emit_intrinsic_state_set_local(function, context, 0, cursor);
+    emit_intrinsic_state_set_zero(function, context, 1);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+
+    function
+        .instruction(&Instruction::LocalGet(range_address))
+        .instruction(&Instruction::LocalGet(search_address))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalSet(search_address))
+        .instruction(&Instruction::LocalGet(range_size));
+    emit_intrinsic_state_get(function, context, 1);
+    function
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::I64Const(SIGNATURE_SCAN_CANDIDATES_PER_POLL))
+        .instruction(&Instruction::I64LeU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::LocalGet(range_size));
+    emit_intrinsic_state_get(function, context, 1);
+    function
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I64Const(SIGNATURE_SCAN_CANDIDATES_PER_POLL))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalSet(remaining))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalSet(match_count))
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::LocalSet(matched))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(match_count))
+        .instruction(&Instruction::I32Const(MATCH_LIMIT_PER_POLL))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::GlobalGet(context.runtime_globals.process))
+        .instruction(&Instruction::LocalGet(search_address))
+        .instruction(&Instruction::LocalGet(remaining));
+    emit_managed_binding_field(
+        function,
+        &managed_instance_header_name(class.index()),
+        context,
+    );
+    function
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::Call(
+            context
+                .runtime_helpers
+                .function(RuntimeHelperId::ScanAlignedPointerRange),
+        ))
+        .instruction(&Instruction::LocalTee(matched))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::BrIf(1));
+
+    emit_intrinsic_state_get(function, context, 2);
+    function
+        .instruction(&Instruction::LocalGet(matched))
+        .instruction(&Instruction::Call(context.array_functions.push(array)))
+        // Advance past this header before asking for the next match.
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::LocalGet(matched))
+        .instruction(&Instruction::LocalGet(search_address))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalSet(remaining))
+        .instruction(&Instruction::LocalGet(matched))
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalSet(search_address))
+        .instruction(&Instruction::LocalGet(match_count))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(match_count))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+
+    // Exhausting a window consumes its remaining bytes. Hitting the match cap
+    // instead resumes immediately after the last returned object header.
+    function
+        .instruction(&Instruction::LocalGet(search_address))
+        .instruction(&Instruction::LocalGet(matched))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalGet(range_address))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalSet(search_address));
+    emit_intrinsic_state_set_local(function, context, 1, search_address);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::Else);
+
+    // Skip non-data ranges without ever scanning them.
+    emit_intrinsic_state_get(function, context, 0);
+    function
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalSet(cursor));
+    emit_intrinsic_state_set_local(function, context, 0, cursor);
+    emit_intrinsic_state_set_zero(function, context, 1);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compile_suspension_poll(
     function: &mut Function,
@@ -1512,22 +1798,27 @@ fn compile_suspension_poll(
         .wasm_ir
         .expression(value)
         .expect("await value belongs to Wasm IR");
-    let stateful_intrinsic = match &value_expression.kind {
+    let stateful_leaf = match &value_expression.kind {
         wasm_ir::ExpressionKind::Call {
             target: wasm_ir::CallTarget::Intrinsic { intrinsic, .. },
             ..
         } => crate::intrinsic_registry::contract(*intrinsic)
             .async_state
             .is_some(),
+        wasm_ir::ExpressionKind::Call {
+            target: wasm_ir::CallTarget::ManagedInstances { .. },
+            ..
+        } => true,
         _ => false,
     };
     if !matches!(
         &value_expression.kind,
         wasm_ir::ExpressionKind::Call {
-            target: wasm_ir::CallTarget::Intrinsic { .. },
+            target: wasm_ir::CallTarget::Intrinsic { .. }
+                | wasm_ir::CallTarget::ManagedInstances { .. },
             ..
         }
-    ) || (stateful_intrinsic && context.intrinsic_capture.is_none())
+    ) || (stateful_leaf && context.intrinsic_capture.is_none())
     {
         compile_source_future_poll(function, destination, value, layout, context);
         return;
@@ -1551,6 +1842,10 @@ fn compile_suspension_poll(
     let unity_image_local = primary_scratch;
     let unity_class_local = primary_scratch;
     let unity_field_local = primary_scratch;
+    if let wasm_ir::CallTarget::ManagedInstances { class } = target {
+        emit_managed_instances_poll(function, *class, destination, layout, abi, context);
+        return;
+    }
     match resolved_intrinsic(target) {
         Some(IntrinsicId::NextTick) => {}
         Some(IntrinsicId::ProcessClosed) => {
@@ -2210,15 +2505,15 @@ fn compile_source_future_poll(
             semantic_type(*result, context.semantics) == child_type
         })
         .collect::<Vec<_>>();
-    let intrinsic_candidates = context
+    let leaf_candidates = context
         .async_frames
-        .intrinsics()
+        .leaves()
         .filter(|(_, layout)| layout.future == child_type)
         .collect::<Vec<_>>();
     assert!(
         !source_candidates.is_empty()
             || !closure_candidates.is_empty()
-            || !intrinsic_candidates.is_empty(),
+            || !leaf_candidates.is_empty(),
         "reachable future values have at least one concrete producer"
     );
     function.instruction(&Instruction::Block(BlockType::Empty));
@@ -2322,8 +2617,8 @@ fn compile_source_future_poll(
             .instruction(&Instruction::Br(1))
             .instruction(&Instruction::End);
     }
-    for (child, child_layout) in intrinsic_candidates {
-        let child_frame = context.gc.intrinsic_frame_index(child);
+    for (child, child_layout) in leaf_candidates {
+        let child_frame = context.gc.leaf_frame_index(child);
         parent.emit(function);
         function
             .instruction(&Instruction::StructGet {
@@ -2336,13 +2631,13 @@ fn compile_source_future_poll(
                 field_index: 1,
             })
             .instruction(&Instruction::I32Const(
-                context.gc.intrinsic_frame_tag(child) as i32,
+                context.gc.leaf_frame_tag(child) as i32
             ))
             .instruction(&Instruction::I32Eq)
             .instruction(&Instruction::If(BlockType::Empty));
         emit_child_frame(function, parent, child_field, child_frame);
         function
-            .instruction(&Instruction::Call(context.intrinsic_futures[child]))
+            .instruction(&Instruction::Call(context.leaf_futures[child]))
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::I32Const(0))

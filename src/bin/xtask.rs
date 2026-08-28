@@ -591,6 +591,20 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/managed_instances_runtime.split",
+        output: "managed_instances_runtime.wasm",
+        profile: "release",
+        harness: "tests/managed_instances_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
+        source: "tests/managed_instances_mono_runtime.split",
+        output: "managed_instances_mono_runtime.wasm",
+        profile: "release",
+        harness: "tests/managed_instances_mono_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/postfix_calls.split",
         output: "postfix_calls.wasm",
         profile: "release",

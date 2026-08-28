@@ -223,6 +223,17 @@ whileAttached {
 }
 ```
 
+The same class declaration also provides cooperative live-instance discovery.
+`await T.instances()` produces a completed `[T.Ref]` snapshot without blocking
+one update on an unbounded process scan:
+
+```splitscript
+onAttach {
+    let managers = await GameManager.instances()
+    print(managers.length())
+}
+```
+
 If conditional managed fields give each possible dimension combination a
 unique presence pattern, attachment selects `layout` automatically before user
 [`onAttach`] code runs. In that case `onAttach` need not return a `Layout` and

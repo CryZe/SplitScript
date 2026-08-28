@@ -252,6 +252,10 @@ pub(super) fn build_scan_process_range(inputs: &RuntimeHelperInputs<'_>) -> Func
     process::compile_scan_process_range(inputs.abi, inputs.memory.scratch().scan)
 }
 
+pub(super) fn build_scan_aligned_pointer_range(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    process::compile_scan_aligned_pointer_range(inputs.abi, inputs.memory.scratch().scan)
+}
+
 pub(super) fn build_scan_relative32_target_range(inputs: &RuntimeHelperInputs<'_>) -> Function {
     process::compile_scan_relative32_target_range(
         inputs.plan.function(RuntimeHelperId::ScanProcessRange),

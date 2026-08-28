@@ -3639,3 +3639,62 @@ fn unreachable_gc_layouts_are_pruned_and_live_layouts_are_remapped() {
         "unreachable records, enums, arrays, Options, and Results should emit no indexed types"
     );
 }
+#[test]
+fn managed_instances_compile_as_a_cooperative_typed_future() {
+    let source = r#"
+image "Assembly-CSharp" {
+    class Enemy {
+        i32 health;
+    }
+}
+
+state Unity ["game.exe"] {}
+
+onAttach {
+    let enemies: [Enemy.Ref] = await Enemy.instances()
+    print(enemies.length())
+}
+"#;
+
+    let wasm = splitscript::compile(source).expect("managed instance discovery should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("managed instance discovery should produce valid WebAssembly");
+}
+
+#[test]
+fn managed_instances_require_a_unity_provider_and_zero_arguments() {
+    let native = r#"
+image "Assembly-CSharp" {
+    class Enemy {}
+}
+state "game.exe" {}
+onAttach {
+    let enemies = await Enemy.instances()
+}
+"#;
+    let errors = splitscript::compile(native)
+        .expect_err("managed instance discovery needs a prepared Unity runtime");
+    assert!(errors.iter().any(|error| {
+        error
+            .message
+            .contains("managed instance discovery requires a Unity state provider")
+    }));
+
+    let argument = r#"
+image "Assembly-CSharp" {
+    class Enemy {}
+}
+state Unity ["game.exe"] {}
+onAttach {
+    let enemies = await Enemy.instances(1)
+}
+"#;
+    let errors = splitscript::compile(argument)
+        .expect_err("managed instance discovery has no runtime arguments");
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("`instances` expects 0 arguments"))
+    );
+}

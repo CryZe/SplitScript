@@ -1,0 +1,10 @@
+image "Assembly-CSharp" {
+    class Enemy {}
+}
+
+state Unity.il2cpp(2020) ["game.exe"] {}
+
+onAttach {
+    let enemies = await Enemy.instances()
+    print(enemies.length())
+}

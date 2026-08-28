@@ -57,7 +57,7 @@ use self::array_functions::ArrayFunctions;
 use self::async_frame::AsyncFrameLayouts;
 use self::async_state::{
     compile_async_attach, compile_async_closure_poll, compile_async_function_poll,
-    compile_intrinsic_future_poll,
+    compile_leaf_future_poll,
 };
 use self::backend_type::Type;
 use self::context::{AttachContext, EmissionContext};
@@ -470,7 +470,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         closures: closure_functions,
         function_values: function_value_functions,
         closure_polls,
-        intrinsic_futures,
+        leaf_futures,
         displays: display_functions,
         managed_state_reads: managed_state_read_functions,
         managed_snapshots: managed_snapshot_functions,
@@ -528,7 +528,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         closures: &closure_functions,
         function_values: &function_value_functions,
         closure_polls: &closure_polls,
-        intrinsic_futures: &intrinsic_futures,
+        leaf_futures: &leaf_futures,
         display_functions: &display_functions,
         equality_functions: &equality_functions,
         array_functions: &array_functions,
@@ -725,9 +725,9 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             codes.push(&body);
         }
     }
-    for (instance, layout) in async_frames.intrinsics() {
-        let function_index = intrinsic_futures[instance];
-        let body = compile_intrinsic_future_poll(instance, function_index, layout, &runtime);
+    for (instance, layout) in async_frames.leaves() {
+        let function_index = leaf_futures[instance];
+        let body = compile_leaf_future_poll(instance, function_index, layout, &runtime);
         codes.push(&body);
     }
     for (field_index, field) in state.all_fields().enumerate() {
@@ -864,6 +864,7 @@ fn resolved_intrinsic(target: &wasm_ir::CallTarget) -> Option<IntrinsicId> {
         | wasm_ir::CallTarget::CapabilityRequirement { .. }
         | wasm_ir::CallTarget::DefaultDisplay { .. }
         | wasm_ir::CallTarget::ManagedSnapshot { .. }
+        | wasm_ir::CallTarget::ManagedInstances { .. }
         | wasm_ir::CallTarget::ResultError { .. }
         | wasm_ir::CallTarget::OptionSome { .. }
         | wasm_ir::CallTarget::IteratorItem { .. }

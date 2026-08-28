@@ -216,6 +216,23 @@ pub(crate) fn hover(
             )
         }
         DefinitionTarget::Source(definition) => {
+            if matches!(&token.kind, TokenKind::Ident(name) if name == "instances")
+                && let Some(analysis) = database.analysis_at(offset)?
+                && let Some(ExpressionResolution::Call(ResolvedCall::ManagedInstances { class })) =
+                    analysis.resolution
+                && definition.id == SourceDefinitionId::ManagedClass(class)
+                && let Some(context) = semantic_context(database)
+                && let Some(class) = context.syntax().managed_class(class)
+            {
+                return Ok(Some(HoverInfo {
+                    span: token.span,
+                    markdown: format!(
+                        "```splitscript\n{}.instances() -> async [{}\u{2e}Ref]\n```\n\nCooperatively scans readable, writable, non-executable process memory and returns a completed snapshot of live references to `{}` objects. Scanning is bounded across ticks and stops automatically when the attached process closes.",
+                        class.name, class.name, class.name
+                    ),
+                    documentation_uri: None,
+                }));
+            }
             if matches!(&token.kind, TokenKind::Ident(name) if name == "snapshot")
                 && let Some(analysis) = database.analysis_at(offset)?
                 && let Some(ExpressionResolution::Call(ResolvedCall::ManagedSnapshot {
@@ -2419,6 +2436,49 @@ state Unity ["game.exe"] {
             Some(DefinitionTarget::Source(definition))
                 if matches!(definition.id, SourceDefinitionId::ManagedClass(_))
                     && definition.name == "GameManager"
+        ));
+    }
+
+    #[test]
+    fn managed_instances_hover_explains_cooperative_discovery() {
+        use crate::database::{DefinitionTarget, SourceDefinitionId};
+
+        let source = r#"
+image "Assembly-CSharp" {
+    class Enemy {
+        i32 health;
+    }
+}
+state Unity ["game.exe"] {}
+onAttach {
+    let enemies = await Enemy.instances()
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        database.check().expect("managed instance hover fixture");
+        let method_offset = source.rfind("instances").unwrap() + 1;
+        let hover = database
+            .hover(method_offset)
+            .unwrap()
+            .expect("instances hover");
+        assert!(
+            hover
+                .markdown
+                .contains("Enemy.instances() -> async [Enemy.Ref]")
+        );
+        assert!(hover.markdown.contains("bounded across ticks"));
+        assert!(matches!(
+            database.definition_at(method_offset).unwrap(),
+            Some(DefinitionTarget::Source(definition))
+                if matches!(definition.id, SourceDefinitionId::ManagedClass(_))
+                    && definition.name == "Enemy"
+        ));
+        let class_offset = source.rfind("Enemy.instances").unwrap() + 1;
+        assert!(matches!(
+            database.definition_at(class_offset).unwrap(),
+            Some(DefinitionTarget::Source(definition))
+                if matches!(definition.id, SourceDefinitionId::ManagedClass(_))
+                    && definition.name == "Enemy"
         ));
     }
 

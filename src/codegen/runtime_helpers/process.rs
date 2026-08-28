@@ -166,6 +166,134 @@ pub(super) fn compile_scan_process_range(abi: &Abi, scan: ScratchRegion) -> Func
     function
 }
 
+/// Finds the first naturally aligned pointer equal to `expected` in a bounded
+/// process-memory window. Reads happen a page at a time so one cooperative
+/// caller poll does not turn into one host call per candidate object header.
+pub(super) fn compile_scan_aligned_pointer_range(abi: &Abi, scan: ScratchRegion) -> Function {
+    let scan_start = scan.start();
+    let mut function = Function::new([(4, ValType::I64), (2, ValType::I32)]);
+    let process = 0;
+    let address = 1;
+    let size = 2;
+    let expected = 3;
+    let pointer_size = 4;
+    let offset = 5;
+    let remaining = 6;
+    let candidate = 7;
+    let read_value = 8;
+    let chunk = 9;
+    let index = 10;
+
+    // Begin at the first naturally aligned address in the supplied window.
+    function
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::I64And)
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::I64And)
+        .instruction(&Instruction::LocalSet(offset))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::LocalGet(size))
+        .instruction(&Instruction::I64GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(size))
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalTee(remaining))
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::I64LtU)
+        .instruction(&Instruction::BrIf(1))
+        // Read at most one 4096-byte page of candidates.
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I64Const(4096))
+        .instruction(&Instruction::I64LeU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I32WrapI64)
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(4096))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalSet(chunk))
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::I32Const(scan_start))
+        .instruction(&Instruction::LocalGet(chunk))
+        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalGet(chunk))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::I32Const(scan_start))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(scan_start))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I64Load(memarg()))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalSet(read_value))
+        .instruction(&Instruction::LocalGet(read_value))
+        .instruction(&Instruction::LocalGet(expected))
+        .instruction(&Instruction::I64Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalSet(candidate))
+        .instruction(&Instruction::LocalGet(candidate))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::I64Const(4096))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalSet(offset))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::End);
+    function
+}
+
 /// Finds the first signature whose rel32 operand resolves to `target`.
 /// The caller bounds `size` to one cooperative poll's byte budget, while this
 /// helper checks every matching instruction inside that window synchronously.

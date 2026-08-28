@@ -25,7 +25,7 @@ use crate::{
 use super::{
     DisplayFunctions, EqualityFunctions, GcLayout, MemoryByteOrder, RuntimeHelperPlan, STATE_TYPE,
     SetFunctions, SettingStorage, Type, application_type_argument, array_element_type,
-    async_frame::{AsyncFrameRef, IntrinsicFutureInstance, IntrinsicFutureLayout},
+    async_frame::{AsyncFrameRef, LeafFutureInstance, LeafFutureLayout},
     emit_array_get, emit_default, emit_failure_transfer, emit_int, emit_memory_value,
     emit_result_error, emit_result_success, emit_string_literal, emit_struct_get,
     emit_typed_struct_get, enum_variant_payload,
@@ -108,7 +108,7 @@ pub(super) struct ExprContext<'a> {
     pub function_values: &'a HashMap<crate::semantic::FunctionValueInstance, u32>,
     pub closure_polls: &'a HashMap<crate::semantic::ClosureInstance, u32>,
     pub closure_environment: Option<ClosureEnvironment<'a>>,
-    pub intrinsic_futures: &'a HashMap<IntrinsicFutureInstance, u32>,
+    pub leaf_futures: &'a HashMap<LeafFutureInstance, u32>,
     pub display_functions: &'a DisplayFunctions,
     pub equality_functions: &'a EqualityFunctions,
     pub array_functions: &'a super::ArrayFunctions,
@@ -167,7 +167,7 @@ fn emit_capture_cell_get(function: &mut Function, ty: Type, gc: &GcLayout) {
 #[derive(Clone, Copy)]
 pub(super) struct IntrinsicCapture<'a> {
     pub frame: AsyncFrameRef,
-    pub layout: &'a IntrinsicFutureLayout,
+    pub layout: &'a LeafFutureLayout,
 }
 
 impl<'a> ExprContext<'a> {
@@ -196,7 +196,7 @@ impl<'a> ExprContext<'a> {
             function_values: lowering.function_values,
             closure_polls: lowering.closure_polls,
             closure_environment: None,
-            intrinsic_futures: lowering.intrinsic_futures,
+            leaf_futures: lowering.leaf_futures,
             display_functions: lowering.display_functions,
             equality_functions: lowering.equality_functions,
             array_functions: lowering.array_functions,
@@ -2639,7 +2639,11 @@ fn emit_managed_pointer_from_scratch(function: &mut Function, context: &ExprCont
         .instruction(&Instruction::End);
 }
 
-fn emit_managed_binding_field(function: &mut Function, name: &str, context: &ExprContext<'_>) {
+pub(super) fn emit_managed_binding_field(
+    function: &mut Function,
+    name: &str,
+    context: &ExprContext<'_>,
+) {
     let record = context
         .records
         .iter()
@@ -3553,19 +3557,22 @@ fn compile_expr_unconverted(
         context
             .reachability
             .resolved_call_target(context.function_instance, expression, target);
-    if matches!(ty, Type::Async(_)) && resolved_intrinsic(target).is_some() {
-        let instance = IntrinsicFutureInstance {
+    if matches!(ty, Type::Async(_))
+        && (resolved_intrinsic(target).is_some()
+            || matches!(target, wasm_ir::CallTarget::ManagedInstances { .. }))
+    {
+        let instance = LeafFutureInstance {
             owner: context.function_instance.cloned(),
             expression,
         };
         let layout = context
             .async_frames
-            .intrinsic(&instance)
+            .leaf(&instance)
             .expect("reachable intrinsic async calls have frame layouts");
         function
             .instruction(&Instruction::I32Const(0))
             .instruction(&Instruction::I32Const(
-                context.gc.intrinsic_frame_tag(&instance) as i32,
+                context.gc.leaf_frame_tag(&instance) as i32
             ));
         if layout.receiver.is_some() {
             compile_receiver(function, target, context);
@@ -3582,7 +3589,7 @@ fn compile_expr_unconverted(
             emit_default(function, completion, context.gc);
         }
         function.instruction(&Instruction::StructNew(
-            context.gc.intrinsic_frame_index(&instance),
+            context.gc.leaf_frame_index(&instance),
         ));
         return;
     }
@@ -3654,6 +3661,9 @@ fn compile_expr_unconverted(
                 function.instruction(&Instruction::Call(
                     context.managed_snapshot_functions[class],
                 ));
+            }
+            wasm_ir::CallTarget::ManagedInstances { .. } => {
+                unreachable!("managed instance discovery is emitted as a leaf future")
             }
             wasm_ir::CallTarget::Intrinsic { .. } => {
                 unreachable!("standard-library implementations have intrinsic IDs")

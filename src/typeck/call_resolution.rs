@@ -532,6 +532,25 @@ impl Checker {
             );
         }
 
+        if let [class_name, method] = callee
+            && method == "instances"
+            && let Some(class) = self
+                .declarations
+                .managed_classes
+                .iter()
+                .find(|class| class.name == *class_name)
+                .cloned()
+        {
+            return self.managed_instances_call(
+                class.id,
+                type_arguments,
+                args,
+                expected,
+                expression,
+                span,
+            );
+        }
+
         let standard_library = self.standard_library.clone();
         let mut function_candidates = if self.is_library_function() {
             standard_library.function_candidates_including_private(callee)
@@ -976,6 +995,49 @@ impl Checker {
                 receiver_type: receiver.ty,
             },
         );
+        Some(result)
+    }
+
+    fn managed_instances_call(
+        &mut self,
+        class: crate::ast::ManagedClassId,
+        type_arguments: &[crate::ast::TypeRef],
+        args: &[Expr],
+        expected: Option<Type>,
+        expression: ExprId,
+        span: Span,
+    ) -> Option<Type> {
+        if !self.managed_provider_available() {
+            self.errors.push(
+                Diagnostic::type_error(
+                    "managed instance discovery requires a Unity state provider",
+                    span,
+                )
+                .with_primary_label("declare the state as `state Unity [\"game.exe\"] { ... }`"),
+            );
+            return None;
+        }
+        if !type_arguments.is_empty() {
+            self.error("`instances` does not accept type arguments", span);
+            return None;
+        }
+        if !args.is_empty() {
+            self.error(
+                format!("`instances` expects 0 arguments, found {}", args.len()),
+                span,
+            );
+            for argument in args {
+                self.expr(argument, None);
+            }
+            return None;
+        }
+
+        let reference = Type::Known(self.inference.type_store().id_for_managed_reference(class));
+        let array = Type::Array(self.inference.array_type(reference));
+        let future = Type::Async(self.inference.async_type(array));
+        let result = self.expect_expression(expression, future, expected, span)?;
+        self.semantics
+            .resolve_call(expression, PendingResolvedCall::ManagedInstances { class });
         Some(result)
     }
 

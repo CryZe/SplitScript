@@ -6,8 +6,9 @@
 
 use crate::{
     Diagnostic,
-    ast::{ManagedClassDecl, ManagedItemDecl, Program},
+    ast::{Expr, ExprKind, ManagedClassDecl, ManagedClassId, ManagedItemDecl, Program},
     lexer, parser,
+    visit::{self, Visitor},
 };
 
 use super::{
@@ -181,6 +182,7 @@ fn managed_preparation_source(
     managed_backend: Option<ManagedRuntimeBackend>,
 ) -> String {
     let classes = schema_classes(program);
+    let instance_classes = managed_instance_classes(program);
     if classes.is_empty() {
         return format!(
             "fn {PROVIDER_PREPARATION_FUNCTION}() {{ return await {preparation}({arguments}) }}"
@@ -190,6 +192,12 @@ fn managed_preparation_source(
     let mut source = format!("record {MANAGED_BINDINGS_TYPE} {{\n");
     source.push_str(&format!("    {MANAGED_POINTER_SIZE_FIELD}: u32,\n"));
     for class in &classes {
+        if instance_classes.contains(&class.class.id) {
+            source.push_str(&format!(
+                "    {}: address,\n",
+                managed_instance_header_name(class.class.id.index())
+            ));
+        }
         if class_fields(class.class).any(|field| field.is_static) {
             source.push_str(&format!(
                 "    {}: address,\n",
@@ -224,8 +232,10 @@ fn managed_preparation_source(
             source.push_str("    return {\n");
             source.push_str(&managed_backend_binding_source(
                 &classes,
+                &instance_classes,
                 "__module",
                 "__module.pointerSize",
+                false,
             ));
             source.push_str("    }\n");
         }
@@ -234,8 +244,10 @@ fn managed_preparation_source(
             source.push_str("    return {\n");
             source.push_str(&managed_backend_binding_source(
                 &classes,
+                &instance_classes,
                 "__module",
                 "match __module.pointerSize { PointerSize.Bit32 => 4, PointerSize.Bit64 => 8 }",
+                true,
             ));
             source.push_str("    }\n");
         }
@@ -243,8 +255,10 @@ fn managed_preparation_source(
             source.push_str("    return {\n");
             source.push_str(&managed_backend_binding_source(
                 &classes,
+                &instance_classes,
                 "__runtime",
                 "__runtime.pointerBytes()",
+                true,
             ));
             source.push_str("    }\n");
         }
@@ -255,8 +269,10 @@ fn managed_preparation_source(
 
 fn managed_backend_binding_source(
     classes: &[SchemaClass<'_>],
+    instance_classes: &std::collections::HashSet<ManagedClassId>,
     module: &str,
     pointer_size: &str,
+    instance_header_is_async: bool,
 ) -> String {
     let mut source = String::new();
     source.push_str(&format!(
@@ -294,6 +310,17 @@ fn managed_backend_binding_source(
         source.push_str(&format!(
             "            let {class_local} = await __image_{image_index}.classAny([{candidates}])\n"
         ));
+        if instance_classes.contains(&class.class.id) {
+            let await_prefix = if instance_header_is_async {
+                "await "
+            } else {
+                ""
+            };
+            source.push_str(&format!(
+                "            let {} = {await_prefix}{class_local}.instanceHeader()\n",
+                managed_instance_header_name(class.class.id.index())
+            ));
+        }
         if class_fields(class.class).any(|field| field.is_static) {
             source.push_str(&format!(
                 "            let {} = await {class_local}.staticTable()\n",
@@ -314,6 +341,10 @@ fn managed_backend_binding_source(
         "                {MANAGED_POINTER_SIZE_FIELD}: {MANAGED_POINTER_SIZE_FIELD},\n"
     ));
     for class in classes {
+        if instance_classes.contains(&class.class.id) {
+            let name = managed_instance_header_name(class.class.id.index());
+            source.push_str(&format!("                {name}: {name},\n"));
+        }
         if class_fields(class.class).any(|field| field.is_static) {
             let name = managed_static_table_name(class.class.id.index());
             source.push_str(&format!("                {name}: {name},\n"));
@@ -426,6 +457,46 @@ pub(crate) fn managed_field_presence_name(field: usize) -> String {
 
 pub(crate) fn managed_static_table_name(class: usize) -> String {
     format!("__class_{class}_static_table")
+}
+
+pub(crate) fn managed_instance_header_name(class: usize) -> String {
+    format!("__class_{class}_instance_header")
+}
+
+fn managed_instance_classes(program: &Program) -> std::collections::HashSet<ManagedClassId> {
+    struct Collector<'a> {
+        classes: &'a [ManagedClassDecl],
+        found: std::collections::HashSet<ManagedClassId>,
+    }
+
+    impl<'ast> Visitor<'ast> for Collector<'_> {
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if let ExprKind::Call {
+                callee,
+                receiver: None,
+                ..
+            } = &expression.kind
+                && let [class_name, method] = callee.as_slice()
+                && method == "instances"
+                && let Some(class) = self.classes.iter().find(|class| class.name == *class_name)
+            {
+                self.found.insert(class.id);
+            }
+            visit::walk_expr(self, expression);
+        }
+    }
+
+    let classes = program
+        .managed_class_declarations()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut collector = Collector {
+        classes: &classes,
+        found: std::collections::HashSet::new(),
+    };
+    collector.visit_program(program);
+    collector.found
 }
 
 struct SelectedProviderPreparation<'source> {

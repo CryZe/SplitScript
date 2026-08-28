@@ -506,7 +506,8 @@ fn validate_async_recursion(
                             self.values.insert(function);
                         }
                     }
-                    ResolvedCall::ManagedSnapshot { .. } => {}
+                    ResolvedCall::ManagedSnapshot { .. }
+                    | ResolvedCall::ManagedInstances { .. } => {}
                     ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
                     | ResolvedCall::IteratorItem { .. }
@@ -781,6 +782,10 @@ fn validate_suspending_calls(
                 Some((effects.function(*function).suspension, name))
             }
             ResolvedCall::ManagedSnapshot { .. } => None,
+            ResolvedCall::ManagedInstances { .. } => Some((
+                crate::stdlib::SuspensionKind::Suspends,
+                "instances".to_owned(),
+            )),
             ResolvedCall::ResultError { .. }
             | ResolvedCall::OptionSome { .. }
             | ResolvedCall::IteratorItem { .. }
@@ -796,6 +801,7 @@ fn validate_suspending_calls(
             ResolvedCall::UserFunction { .. } | ResolvedCall::UserMethod { .. } => true,
             ResolvedCall::StandardLibrary { .. } => true,
             ResolvedCall::ManagedSnapshot { .. } => false,
+            ResolvedCall::ManagedInstances { .. } => true,
             ResolvedCall::ResultError { .. }
             | ResolvedCall::OptionSome { .. }
             | ResolvedCall::IteratorItem { .. }
@@ -1971,6 +1977,7 @@ fn validate_function_instances(
         }),
         ResolvedCall::StandardLibrary { .. }
         | ResolvedCall::ManagedSnapshot { .. }
+        | ResolvedCall::ManagedInstances { .. }
         | ResolvedCall::ResultError { .. }
         | ResolvedCall::OptionSome { .. }
         | ResolvedCall::IteratorItem { .. }

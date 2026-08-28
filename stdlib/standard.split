@@ -1527,6 +1527,21 @@ private struct UnityMetadataClass {
             },
         }
     }
+
+    // Returns the object-header pointer used to identify live instances of
+    // this class while scanning process memory.
+    private fn instanceHeader() -> async address {
+        return match self.backend {
+            UnityRuntimeBackend.Il2cpp => {
+                let class = self.il2cpp else await process.closed()
+                class.instanceHeader()
+            },
+            UnityRuntimeBackend.Mono => {
+                let class = self.mono else await process.closed()
+                await class.instanceHeader()
+            },
+        }
+    }
 }
 
 /// Supports ordered numeric operations.
@@ -6387,6 +6402,11 @@ private struct UnityClass {
     /// Retains the owning Unity runtime.
     private module: UnityModule,
 
+    // IL2CPP object headers point directly at their Il2CppClass metadata.
+    private fn instanceHeader() -> address {
+        return self.address
+    }
+
     /// Finds a managed field offset.
     ///
     /// Searches the class hierarchy and recognizes backing fields.
@@ -6761,14 +6781,20 @@ private struct MonoModule {
         /// Target address containing the native pointer.
         address: address,
     ) -> address! {
-        let pointer: address = match self.pointerSize {
-            PointerSize.Bit32 => process.read<u32>(address)? as address,
-            PointerSize.Bit64 => process.read<u64>(address)? as address,
-        }
+        let pointer = self.readNullablePointer(address)?
         if pointer == 0 {
             throw "Mono metadata pointer is null"
         }
         return Ok(pointer)
+    }
+
+    // Reads a pointer without rejecting the null sentinel used by metadata
+    // linked lists and inheritance chains.
+    private fn readNullablePointer(address: address) -> address! {
+        return match self.pointerSize {
+            PointerSize.Bit32 => process.read<u32>(address)? as address,
+            PointerSize.Bit64 => process.read<u64>(address)? as address,
+        }
     }
 
     /// Returns the runtime's pointer width in bytes.
@@ -6818,10 +6844,7 @@ private struct MonoModule {
             }
             while link != 0 {
                 let assembly = retry self.readPointer(link)
-                let next = match self.readPointer(link.add(self.pointerBytes())) {
-                    Ok(address) => address,
-                    Err(_) => 0 as address,
-                }
+                let next = retry self.readNullablePointer(link.add(self.pointerBytes()))
                 let namePointer = retry self.readPointer(
                     assembly.add(self.layout.assemblyName),
                 )
@@ -6856,7 +6879,7 @@ private struct MonoModule {
                 let table = retry self.readPointer(cache.add(self.layout.hashTable))
                 let bucket: i32 = 0
                 while bucket < bucketCount {
-                    let classAddress = retry self.readPointer(
+                    let classAddress = retry self.readNullablePointer(
                         table.add((bucket as u64) * self.pointerBytes()),
                     )
                     while classAddress != 0 {
@@ -6896,7 +6919,7 @@ private struct MonoModule {
                             }
                             candidateIndex += 1
                         }
-                        classAddress = retry self.readPointer(
+                        classAddress = retry self.readNullablePointer(
                             classAddress.add(self.layout.classNextCache),
                         )
                     }
@@ -6978,7 +7001,7 @@ private struct MonoModule {
                     index += 1
                 }
             }
-            current = retry self.readPointer(current.add(self.layout.classParent))
+            current = retry self.readNullablePointer(current.add(self.layout.classParent))
         }
         if ambiguous {
             print(`multiple Unity fields match metadata names {names}`)
@@ -7037,6 +7060,21 @@ private struct MonoModule {
             }
             if table != 0 {
                 return table
+            }
+            await nextTick()
+        }
+        return 0
+    }
+
+    // Returns the active MonoVTable pointer stored in object headers.
+    private fn instanceHeaderForClass(classAddress: address) -> async address {
+        while true {
+            let runtimeInfo = retry self.readPointer(
+                classAddress.add(self.layout.classRuntimeInfo),
+            )
+            let vtable = retry self.readPointer(runtimeInfo.add(self.pointerBytes()))
+            if vtable != 0 {
+                return vtable
             }
             await nextTick()
         }
@@ -7160,6 +7198,11 @@ private struct MonoClass {
     /// let classPointerSize = classWithWidth.module.pointerSize
     /// ```
     module: MonoModule,
+
+    // Mono object headers point at the class's active MonoVTable.
+    private fn instanceHeader() -> async address {
+        return await self.module.instanceHeaderForClass(self.address)
+    }
 
     /// Finds a managed field, including C# auto-property backing fields.
     ///

@@ -14,7 +14,7 @@ use crate::{
 use super::{
     ArrayFunctions, DisplayFunctions, EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE,
     Type, action_result_val_type,
-    async_frame::IntrinsicFutureInstance,
+    async_frame::LeafFutureInstance,
     dependencies::BackendDependencies,
     reachability, runtime_helper_registry, semantic_type, set_element_type,
     set_functions::{SetFunctionPlan, SetFunctions},
@@ -33,7 +33,7 @@ pub(super) struct FunctionPlan<'a> {
     pub closures: HashMap<ClosureInstance, u32>,
     pub function_values: HashMap<FunctionValueInstance, u32>,
     pub closure_polls: HashMap<ClosureInstance, u32>,
-    pub intrinsic_futures: HashMap<IntrinsicFutureInstance, u32>,
+    pub leaf_futures: HashMap<LeafFutureInstance, u32>,
     pub displays: DisplayFunctions,
     pub managed_state_reads: HashMap<ManagedFieldId, u32>,
     pub managed_snapshots: HashMap<ManagedClassId, u32>,
@@ -440,13 +440,13 @@ pub(super) fn encode<'a>(
         users.insert(instance.clone(), plan);
     }
 
-    let mut intrinsic_futures = HashMap::new();
-    for (instance, _) in async_frames.intrinsics() {
+    let mut leaf_futures = HashMap::new();
+    for (instance, _) in async_frames.leaves() {
         let frame = ValType::Ref(RefType {
             nullable: false,
-            heap_type: HeapType::Concrete(gc.intrinsic_frame_index(instance)),
+            heap_type: HeapType::Concrete(gc.leaf_frame_index(instance)),
         });
-        intrinsic_futures.insert(
+        leaf_futures.insert(
             instance.clone(),
             declare(
                 format!(
@@ -606,7 +606,7 @@ pub(super) fn encode<'a>(
         closures,
         function_values,
         closure_polls,
-        intrinsic_futures,
+        leaf_futures,
         displays,
         managed_state_reads: managed_state_read_functions,
         managed_snapshots: managed_snapshot_functions,

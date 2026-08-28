@@ -62,6 +62,7 @@ pub(crate) enum RuntimeHelperId {
     StringTrimAsciiWhitespace,
     StringPad,
     ScanProcessRange,
+    ScanAlignedPointerRange,
     ReadRelative32,
     ScanRelative32TargetRange,
     StringFromMemory,

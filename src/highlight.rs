@@ -579,6 +579,7 @@ impl HighlightCollector<'_> {
                         receiver.path().map(|(root, _)| root)
                     }
                     ResolvedCall::UserFunction { .. }
+                    | ResolvedCall::ManagedInstances { .. }
                     | ResolvedCall::OptionSome { .. }
                     | ResolvedCall::IteratorItem { .. }
                     | ResolvedCall::ResultSuccess { .. }
@@ -586,6 +587,11 @@ impl HighlightCollector<'_> {
                 })
             })
         });
+        if matches!(resolution, Some(ResolvedCall::ManagedInstances { .. }))
+            && let Some(owner) = spans.first()
+        {
+            self.insert(*owner, SemanticTokenKind::Type, 0);
+        }
         let current_state_path = matches!(resolved_value, Some(ResolvedValue::CurrentState(_)));
         if let Some(value) = resolved_value {
             match value {
@@ -1679,6 +1685,35 @@ let player: Player.Ref? = None
             SemanticTokenKind::Property,
             MODIFIER_DECLARATION | MODIFIER_READONLY,
         ));
+    }
+
+    #[test]
+    fn highlights_managed_instance_discovery_as_a_type_method_call() {
+        let source = r#"
+image "Assembly-CSharp" {
+    class Enemy {
+        i32 health;
+    }
+}
+state Unity ["game.exe"] {}
+onAttach {
+    let enemies = await Enemy.instances()
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        database
+            .check()
+            .expect("managed instance highlighting fixture");
+        let highlights = database.semantic_highlights().unwrap();
+        let call_start = source.rfind("Enemy.instances").unwrap();
+        assert_eq!(
+            kind_at(&highlights, call_start),
+            Some(SemanticTokenKind::Type)
+        );
+        assert_eq!(
+            kind_at(&highlights, call_start + "Enemy.".len()),
+            Some(SemanticTokenKind::Method)
+        );
     }
 
     #[test]

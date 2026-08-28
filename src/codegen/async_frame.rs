@@ -318,17 +318,17 @@ pub(super) struct AsyncFrameLayouts {
     ordered_functions: Vec<FunctionInstance>,
     closures: HashMap<ClosureInstance, AsyncFrameLayout>,
     ordered_closures: Vec<ClosureInstance>,
-    intrinsics: HashMap<IntrinsicFutureInstance, IntrinsicFutureLayout>,
-    ordered_intrinsics: Vec<IntrinsicFutureInstance>,
+    leaves: HashMap<LeafFutureInstance, LeafFutureLayout>,
+    ordered_leaves: Vec<LeafFutureInstance>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct IntrinsicFutureInstance {
+pub(super) struct LeafFutureInstance {
     pub owner: Option<FunctionInstance>,
     pub expression: ExprId,
 }
 
-pub(super) struct IntrinsicFutureLayout {
+pub(super) struct LeafFutureLayout {
     pub future: Type,
     pub receiver: Option<(u32, Type)>,
     pub arguments: HashMap<ExprId, (u32, Type)>,
@@ -376,12 +376,12 @@ impl AsyncFrameLayouts {
                 AsyncFrameLayout::for_closure(instance, closure, wasm_ir, semantics),
             );
         }
-        let mut intrinsics = HashMap::new();
-        let mut ordered_intrinsics = Vec::new();
+        let mut leaves = HashMap::new();
+        let mut ordered_leaves = Vec::new();
         let mut directly_polled = HashSet::new();
         struct DirectIntrinsicPolls<'a> {
             owner: Option<&'a FunctionInstance>,
-            values: &'a mut HashSet<IntrinsicFutureInstance>,
+            values: &'a mut HashSet<LeafFutureInstance>,
         }
         impl wasm_ir::Visitor for DirectIntrinsicPolls<'_> {
             fn visit_terminator(
@@ -401,7 +401,7 @@ impl AsyncFrameLayouts {
                         } if crate::intrinsic_registry::contract(intrinsic).async_state.is_none()
                     )
                 {
-                    self.values.insert(IntrinsicFutureInstance {
+                    self.values.insert(LeafFutureInstance {
                         owner: self.owner.cloned(),
                         expression: *value,
                     });
@@ -455,15 +455,13 @@ impl AsyncFrameLayouts {
             let wasm_ir::ExpressionKind::Call { target, arguments } = &lowered.kind else {
                 continue;
             };
-            let wasm_ir::CallTarget::Intrinsic {
-                intrinsic,
-                receiver,
-                receiver_type,
-                ..
-            } = target
-            else {
+            if !matches!(
+                target,
+                wasm_ir::CallTarget::Intrinsic { .. }
+                    | wasm_ir::CallTarget::ManagedInstances { .. }
+            ) {
                 continue;
-            };
+            }
             let specialize = |ty| {
                 owner
                     .as_ref()
@@ -478,51 +476,85 @@ impl AsyncFrameLayouts {
                 unreachable!()
             };
             let mut types = Vec::new();
-            let receiver = receiver.as_ref().map(|_| {
-                let ty = semantic_type(
-                    specialize(receiver_type.expect("method receivers have semantic types")),
-                    semantics,
-                );
-                let field = 2 + types.len() as u32;
-                types.push(ty);
-                (field, ty)
-            });
-            let mut captured_arguments = HashMap::new();
-            for argument in arguments {
-                let argument_expression = wasm_ir
-                    .expression(*argument)
-                    .expect("intrinsic arguments belong to Wasm IR");
-                if matches!(
-                    argument_expression.kind,
-                    wasm_ir::ExpressionKind::String(_) | wasm_ir::ExpressionKind::Signature(_)
-                ) {
-                    continue;
-                }
-                let ty = semantic_type(specialize(argument_expression.ty), semantics);
-                let field = 2 + types.len() as u32;
-                types.push(ty);
-                captured_arguments.insert(*argument, (field, ty));
-            }
-            let mut state = Vec::new();
-            if let Some(policy) = crate::intrinsic_registry::contract(*intrinsic).async_state {
-                let ty = match policy.ty {
-                    crate::intrinsic_registry::ScratchType::Core(core) => {
-                        semantic_type(semantics.types().id_for_core(core), semantics)
-                    }
-                    crate::intrinsic_registry::ScratchType::Standard(standard) => {
-                        semantic_type(semantics.types().id_for_standard(standard), semantics)
-                    }
-                    crate::intrinsic_registry::ScratchType::Expression
-                    | crate::intrinsic_registry::ScratchType::ResultValue
-                    | crate::intrinsic_registry::ScratchType::Receiver => {
-                        unreachable!("intrinsic future state currently uses concrete core types")
-                    }
-                };
-                for _ in 0..policy.slots {
+            let receiver = match target {
+                wasm_ir::CallTarget::Intrinsic {
+                    receiver,
+                    receiver_type,
+                    ..
+                } => receiver.as_ref().map(|_| {
+                    let ty = semantic_type(
+                        specialize(receiver_type.expect("method receivers have semantic types")),
+                        semantics,
+                    );
                     let field = 2 + types.len() as u32;
                     types.push(ty);
-                    state.push((field, ty));
+                    (field, ty)
+                }),
+                wasm_ir::CallTarget::ManagedInstances { .. } => None,
+                _ => unreachable!(),
+            };
+            let mut captured_arguments = HashMap::new();
+            if matches!(target, wasm_ir::CallTarget::Intrinsic { .. }) {
+                for argument in arguments {
+                    let argument_expression = wasm_ir
+                        .expression(*argument)
+                        .expect("leaf-future arguments belong to Wasm IR");
+                    if matches!(
+                        argument_expression.kind,
+                        wasm_ir::ExpressionKind::String(_) | wasm_ir::ExpressionKind::Signature(_)
+                    ) {
+                        continue;
+                    }
+                    let ty = semantic_type(specialize(argument_expression.ty), semantics);
+                    let field = 2 + types.len() as u32;
+                    types.push(ty);
+                    captured_arguments.insert(*argument, (field, ty));
                 }
+            }
+            let mut state = Vec::new();
+            match target {
+                wasm_ir::CallTarget::Intrinsic { intrinsic, .. } => {
+                    if let Some(policy) =
+                        crate::intrinsic_registry::contract(*intrinsic).async_state
+                    {
+                        let ty = match policy.ty {
+                            crate::intrinsic_registry::ScratchType::Core(core) => {
+                                semantic_type(semantics.types().id_for_core(core), semantics)
+                            }
+                            crate::intrinsic_registry::ScratchType::Standard(standard) => {
+                                semantic_type(
+                                    semantics.types().id_for_standard(standard),
+                                    semantics,
+                                )
+                            }
+                            crate::intrinsic_registry::ScratchType::Expression
+                            | crate::intrinsic_registry::ScratchType::ResultValue
+                            | crate::intrinsic_registry::ScratchType::Receiver => {
+                                unreachable!("intrinsic future state currently uses concrete types")
+                            }
+                        };
+                        for _ in 0..policy.slots {
+                            let field = 2 + types.len() as u32;
+                            types.push(ty);
+                            state.push((field, ty));
+                        }
+                    }
+                }
+                wasm_ir::CallTarget::ManagedInstances { .. } => {
+                    let cursor = semantic_type(
+                        semantics
+                            .types()
+                            .id_for_core(crate::stdlib::CoreTypeId::U64),
+                        semantics,
+                    );
+                    let result = semantic_type(*value, semantics);
+                    for ty in [cursor, cursor, result] {
+                        let field = 2 + types.len() as u32;
+                        types.push(ty);
+                        state.push((field, ty));
+                    }
+                }
+                _ => unreachable!(),
             }
             let completion_type = semantic_type(specialize(*value), semantics);
             let completion = completion_type.has_runtime_value().then(|| {
@@ -530,20 +562,20 @@ impl AsyncFrameLayouts {
                 types.push(completion_type);
                 (field, completion_type)
             });
-            let instance = IntrinsicFutureInstance {
+            let instance = LeafFutureInstance {
                 owner: owner.clone(),
                 expression,
             };
             if directly_polled.contains(&instance) {
                 continue;
             }
-            if intrinsics.contains_key(&instance) {
+            if leaves.contains_key(&instance) {
                 continue;
             }
-            ordered_intrinsics.push(instance.clone());
-            intrinsics.insert(
+            ordered_leaves.push(instance.clone());
+            leaves.insert(
                 instance,
-                IntrinsicFutureLayout {
+                LeafFutureLayout {
                     future: semantic_type(future_id, semantics),
                     receiver,
                     arguments: captured_arguments,
@@ -559,8 +591,8 @@ impl AsyncFrameLayouts {
             ordered_functions,
             closures,
             ordered_closures,
-            intrinsics,
-            ordered_intrinsics,
+            leaves,
+            ordered_leaves,
         }
     }
 
@@ -588,18 +620,15 @@ impl AsyncFrameLayouts {
             .map(|instance| (instance, &self.closures[instance]))
     }
 
-    pub(super) fn intrinsic(
-        &self,
-        instance: &IntrinsicFutureInstance,
-    ) -> Option<&IntrinsicFutureLayout> {
-        self.intrinsics.get(instance)
+    pub(super) fn leaf(&self, instance: &LeafFutureInstance) -> Option<&LeafFutureLayout> {
+        self.leaves.get(instance)
     }
 
-    pub(super) fn intrinsics(
+    pub(super) fn leaves(
         &self,
-    ) -> impl ExactSizeIterator<Item = (&IntrinsicFutureInstance, &IntrinsicFutureLayout)> {
-        self.ordered_intrinsics
+    ) -> impl ExactSizeIterator<Item = (&LeafFutureInstance, &LeafFutureLayout)> {
+        self.ordered_leaves
             .iter()
-            .map(|instance| (instance, &self.intrinsics[instance]))
+            .map(|instance| (instance, &self.leaves[instance]))
     }
 }

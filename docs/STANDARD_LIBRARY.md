@@ -607,6 +607,19 @@ state Unity ["game.exe"] {
 }
 ```
 
+`await T.instances()` returns a completed `[T.Ref]` snapshot of live objects.
+The compiler binds the class's IL2CPP class pointer or active Mono vtable once
+per attachment, then cooperatively scans readable, writable, non-executable
+memory at the target's natural pointer alignment. Both byte work and matches
+are bounded per poll, and closing the process cancels the unfinished scan:
+
+```splitscript
+onAttach {
+    let enemies = await Enemy.instances()
+    print(enemies.length())
+}
+```
+
 The runtime traversal types and raw metadata offsets remain private to the
 trusted standard library and generated schema binder.
 

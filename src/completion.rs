@@ -686,6 +686,21 @@ fn complete_member(
                 .into_iter()
                 .find(|class| class.name == *name)
             {
+                builder.add(CompletionItem {
+                    label: "instances".to_owned(),
+                    kind: CompletionKind::Method,
+                    detail: Some(format!(
+                        "{}.instances() -> async [{}\u{2e}Ref]",
+                        class.name, class.name
+                    )),
+                    documentation: Some(
+                        "Cooperatively scans writable process memory and returns a completed snapshot of live references to this managed class."
+                            .to_owned(),
+                    ),
+                    documentation_uri: None,
+                    insert_text: "instances()".to_owned(),
+                    is_snippet: false,
+                });
                 for field in class.fields.iter().filter(|field| field.is_static) {
                     let mut completion = simple_completion(
                         &field.name,
@@ -2893,6 +2908,41 @@ fn capture(manager: GameManager.Ref) {
                 .documentation
                 .as_deref()
                 .is_some_and(|documentation| documentation.contains("transactionally"))
+        );
+    }
+
+    #[test]
+    fn completes_cooperative_instance_discovery_on_managed_classes() {
+        let source = r#"
+image "Assembly-CSharp" {
+    class Enemy {
+        i32 health;
+    }
+}
+state Unity ["game.exe"] {}
+onAttach {
+    let enemies = await Enemy.inst
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let offset = source.find("Enemy.inst").unwrap() + "Enemy.inst".len();
+        let completions = database.completions(offset).unwrap();
+        let instances = completions
+            .items
+            .iter()
+            .find(|item| item.label == "instances")
+            .expect("managed classes should complete `instances`");
+        assert_eq!(instances.kind, CompletionKind::Method);
+        assert_eq!(
+            instances.detail.as_deref(),
+            Some("Enemy.instances() -> async [Enemy.Ref]")
+        );
+        assert_eq!(instances.insert_text, "instances()");
+        assert!(
+            instances
+                .documentation
+                .as_deref()
+                .is_some_and(|documentation| documentation.contains("Cooperatively"))
         );
     }
 

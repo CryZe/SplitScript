@@ -1,0 +1,12 @@
+image "Assembly-CSharp" {
+    class Enemy {
+        i32 health;
+    }
+}
+
+state Unity.mono(MonoVersion.V2) ["game.exe"] {}
+
+onAttach {
+    let enemies = await Enemy.instances()
+    print(enemies.length())
+}

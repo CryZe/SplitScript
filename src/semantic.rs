@@ -110,6 +110,11 @@ pub enum ResolvedCall {
         receiver: ResolvedReceiver,
         receiver_type: TypeId,
     },
+    /// Compiler-provided cooperative discovery of every live instance of a
+    /// declared managed class.
+    ManagedInstances {
+        class: ManagedClassId,
+    },
     ResultError {
         result: crate::ast::ResultTypeId,
     },
@@ -227,6 +232,7 @@ impl ResolvedCall {
             Self::StandardLibrary { receiver, .. } => receiver.as_ref(),
             Self::ManagedSnapshot { receiver, .. } => Some(receiver),
             Self::UserFunction { .. }
+            | Self::ManagedInstances { .. }
             | Self::ResultError { .. }
             | Self::OptionSome { .. }
             | Self::IteratorItem { .. }
@@ -1251,6 +1257,9 @@ pub(crate) enum PendingResolvedCall {
         receiver: ResolvedReceiver,
         receiver_type: Type,
     },
+    ManagedInstances {
+        class: ManagedClassId,
+    },
     ResultError {
         result: crate::ast::ResultTypeId,
     },
@@ -1343,7 +1352,9 @@ impl SemanticBuilder {
             // checked. Accept the operand provisionally and let the
             // whole-program suspension validator reject synchronous callees.
             Some(
-                PendingResolvedCall::UserFunction { .. } | PendingResolvedCall::UserMethod { .. },
+                PendingResolvedCall::UserFunction { .. }
+                | PendingResolvedCall::UserMethod { .. }
+                | PendingResolvedCall::ManagedInstances { .. },
             ) => true,
             Some(
                 PendingResolvedCall::ResultError { .. }
@@ -1632,6 +1643,7 @@ impl SemanticBuilder {
             PendingResolvedCall::UserFunction { .. }
             | PendingResolvedCall::UserMethod { .. }
             | PendingResolvedCall::ManagedSnapshot { .. }
+            | PendingResolvedCall::ManagedInstances { .. }
             | PendingResolvedCall::ResultError { .. }
             | PendingResolvedCall::OptionSome { .. }
             | PendingResolvedCall::IteratorItem { .. }
@@ -1790,6 +1802,9 @@ impl SemanticBuilder {
                     receiver,
                     receiver_type: types.intern_inferred(resolve(receiver_type), constructed),
                 },
+                PendingResolvedCall::ManagedInstances { class } => {
+                    ResolvedCall::ManagedInstances { class }
+                }
                 PendingResolvedCall::ResultError { result } => {
                     let result = resolved_result_layout(resolve(Type::Result(result)), &types);
                     ResolvedCall::ResultError { result }

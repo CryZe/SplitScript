@@ -749,11 +749,11 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
             },
         });
     }
-    for (instance, frame) in async_frames.intrinsics() {
+    for (instance, frame) in async_frames.leaves() {
         let Type::Async(future) = frame.future else {
-            unreachable!("intrinsic future layouts have async value types")
+            unreachable!("leaf future layouts have async value types")
         };
-        let frame_index = layout.intrinsic_frame_index(instance);
+        let frame_index = layout.leaf_frame_index(instance);
         debug_assert_eq!(frame_index, recursive_types.len() as u32);
         recursive_types.push(SubType {
             is_final: true,

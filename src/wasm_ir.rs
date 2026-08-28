@@ -265,6 +265,9 @@ pub enum CallTarget {
         receiver: ResolvedReceiver,
         receiver_type: TypeId,
     },
+    ManagedInstances {
+        class: ManagedClassId,
+    },
     ResultError {
         result: ResultTypeId,
     },
@@ -1484,6 +1487,7 @@ fn lower_call_target(
             receiver: receiver.clone(),
             receiver_type: *receiver_type,
         },
+        ResolvedCall::ManagedInstances { class } => CallTarget::ManagedInstances { class: *class },
         ResolvedCall::ResultError { result } => CallTarget::ResultError { result: *result },
         ResolvedCall::OptionSome { option } => CallTarget::OptionSome { option: *option },
         ResolvedCall::IteratorItem { step } => CallTarget::IteratorItem { step: *step },
@@ -4588,7 +4592,7 @@ impl<'a> LocalPlanner<'a> {
 /// Plans the scratch locals required by one compiler-provided async operation's
 /// standalone poll function. Unlike a source body, this generated body has no
 /// syntax-owned locals of its own.
-pub(crate) fn intrinsic_future_locals(
+pub(crate) fn leaf_future_locals(
     expression: ExprId,
     program: &Program,
     semantics: &SemanticModel,
@@ -4596,12 +4600,11 @@ pub(crate) fn intrinsic_future_locals(
 ) -> Vec<Local> {
     let lowered = program
         .expression(expression)
-        .expect("intrinsic future expressions belong to Wasm IR");
-    let Some(intrinsic) = resolved_intrinsic(program, expression) else {
-        unreachable!("intrinsic future frames are only planned for intrinsic calls")
-    };
+        .expect("leaf future expressions belong to Wasm IR");
     let mut planner = LocalPlanner::new(semantics, capabilities);
-    if let Some(policy) = intrinsic_registry::contract(intrinsic).async_scratch {
+    if let Some(intrinsic) = resolved_intrinsic(program, expression)
+        && let Some(policy) = intrinsic_registry::contract(intrinsic).async_scratch
+    {
         let completion = planner.awaited_value_type(lowered.ty);
         planner.push_intrinsic_scratch(expression, completion, None, policy);
     }

@@ -312,6 +312,10 @@ fn definition_for_resolution(
                         .get(SourceDefinitionId::ManagedClass(*class))
                         .cloned()
                         .map(DefinitionTarget::Source),
+                    ResolvedCall::ManagedInstances { class } => definitions
+                        .get(SourceDefinitionId::ManagedClass(*class))
+                        .cloned()
+                        .map(DefinitionTarget::Source),
                     ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
                     | ResolvedCall::IteratorItem { .. }
@@ -347,6 +351,11 @@ fn definition_for_resolution(
                 | ResolvedCall::OptionSome { .. }
                 | ResolvedCall::IteratorItem { .. }
                 | ResolvedCall::ResultSuccess { .. } => None,
+                ResolvedCall::ManagedInstances { class } => (segment == 0)
+                    .then(|| definitions.get(SourceDefinitionId::ManagedClass(*class)))
+                    .flatten()
+                    .cloned()
+                    .map(DefinitionTarget::Source),
             }
         }
         ExpressionResolution::DynamicCall(callee) => match callee {
@@ -435,7 +444,8 @@ fn source_definition_for_resolution(
                     | ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
                     | ResolvedCall::IteratorItem { .. }
-                    | ResolvedCall::ResultSuccess { .. } => None,
+                    | ResolvedCall::ResultSuccess { .. }
+                    | ResolvedCall::ManagedInstances { .. } => None,
                 };
             }
             match call {
@@ -461,6 +471,9 @@ fn source_definition_for_resolution(
                 | ResolvedCall::OptionSome { .. }
                 | ResolvedCall::IteratorItem { .. }
                 | ResolvedCall::ResultSuccess { .. } => None,
+                ResolvedCall::ManagedInstances { class } => {
+                    (segment == 0).then_some(SourceDefinitionId::ManagedClass(*class))
+                }
             }
         }
         ExpressionResolution::DynamicCall(callee) => match callee {

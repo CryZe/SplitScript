@@ -122,6 +122,18 @@ impl BackendDependencies {
                 wasm_ir::ExpressionKind::Call { target, .. }
                     if matches!(
                         reachability.resolved_call_target(owner.as_ref(), expression.id, target),
+                        wasm_ir::CallTarget::ManagedInstances { .. }
+                    ) =>
+                {
+                    dependencies.require(RuntimeHelperId::ScanAlignedPointerRange);
+                    dependencies.require_import(AbiImportId::ProcessGetMemoryRangeCount);
+                    dependencies.require_import(AbiImportId::ProcessGetMemoryRangeAddress);
+                    dependencies.require_import(AbiImportId::ProcessGetMemoryRangeSize);
+                    dependencies.require_import(AbiImportId::ProcessGetMemoryRangeFlags);
+                }
+                wasm_ir::ExpressionKind::Call { target, .. }
+                    if matches!(
+                        reachability.resolved_call_target(owner.as_ref(), expression.id, target),
                         wasm_ir::CallTarget::DefaultDisplay { .. }
                     ) =>
                 {

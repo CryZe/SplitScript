@@ -41,11 +41,24 @@ stateProvider Native as process {}
 /// Automatic mode waits for either an IL2CPP `GameAssembly.dll` runtime or a
 /// modern `mono-2.0-bdwgc.dll` runtime. It derives the supported metadata
 /// layout from the loaded Unity player rather than guessing from schema names.
-/// Use an explicit selector when a known game needs to bypass detection.
+/// Use an explicit selector only when the target's exact metadata family is
+/// known and automatic detection is inappropriate.
 ///
 /// The read-only process value remains a native [`Process`] handle. Managed
-/// images and classes declared with [`image`] are bound once before
-/// [`onAttach`] runs.
+/// images and classes declared with [`image`] are the public managed-memory
+/// interface. Their reachable metadata is bound once before [`onAttach`] runs;
+/// scripts do not discover runtime images, classes, field offsets, or static
+/// tables themselves. The attachment-scoped [`unity`](provider@Unity) value
+/// separately exposes native scene and hierarchy facilities.
+///
+/// A declared class name such as `PlayerController` is an immutable local
+/// snapshot type. `PlayerController.Ref` is a live remote reference. Following
+/// a live static or instance field is fallible and rereads replaceable object
+/// pointers on every state poll. Calling `.snapshot()` reads all active fields
+/// transactionally. Scalar live reads allocate no GC objects; snapshots,
+/// strings, arrays, and instance-search results materialize owned values.
+/// Generated binders, readers, and runtime discovery are retained only when
+/// reachable from the script.
 ///
 /// # Example
 ///
@@ -53,6 +66,24 @@ stateProvider Native as process {}
 ///
 /// ```splitscript
 /// state Unity ["game.exe"] {}
+/// ```
+///
+/// # Example
+///
+/// Read one transactional managed snapshot
+///
+/// ```splitscript
+/// image "Assembly-CSharp" {
+///     class GameManager {
+///         static GameManager instance;
+///         u32 score;
+///         bool finished;
+///     }
+/// }
+///
+/// state Unity ["game.exe"] {
+///     manager: GameManager = GameManager.instance?.snapshot()?;
+/// }
 /// ```
 ///
 /// # Example

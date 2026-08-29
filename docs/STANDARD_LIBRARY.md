@@ -560,10 +560,12 @@ expressed as normal source code.
 
 ## Unity managed schemas
 
-Managed Mono and IL2CPP metadata is exposed through top-level schemas rather
-than public runtime, image, class, or field traversal objects. A script declares
-the managed names and types it consumes; `state Unity` discovers the backend,
-binds that schema once per attachment, and exposes live fallible references:
+Managed Mono and IL2CPP memory has one canonical public workflow: declare a
+top-level schema and use the [`Unity`] state provider. Scripts do not discover
+runtime images, classes, static tables, field offsets, or metadata pointers.
+They declare the managed names and types they consume; `state Unity` discovers
+the backend, binds the reachable part of that schema once per attachment, and
+exposes typed fallible references:
 
 ```splitscript
 image "Assembly-CSharp" {
@@ -581,10 +583,11 @@ state Unity ["game.exe"] {
 ```
 
 `state Unity` automatically distinguishes supported Mono and IL2CPP backends.
-An exact known target may select `Unity.mono(MonoVersion.V2)`,
-`Unity.mono(MonoVersion.V3)`, or an IL2CPP layout such as
-`Unity.il2cpp(2020)` in the state header. These selectors configure the provider;
-they are not callable discovery functions.
+Prefer this form unless the exact target layout is already known and automatic
+detection is inappropriate. Such a target may select
+`Unity.mono(MonoVersion.V2)`, `Unity.mono(MonoVersion.V3)`, or an IL2CPP layout
+such as `Unity.il2cpp(2020)` in the state header. These selectors configure the
+provider; they are not callable discovery functions.
 
 The same provider exposes `unity: UnityContext` as a read-only,
 attachment-scoped value. Its [`UnityContext.scenes`](field@UnityContext.scenes)
@@ -611,7 +614,8 @@ the conventional C# automatic-property backing-field spelling. Class-typed
 static and instance fields are live references: every state poll rereads the
 current singleton and following object pointers instead of caching a transient
 object address during attachment. Scalar leaves use their declared fixed-width
-type.
+type and do not allocate a new GC object. Strings, arrays, explicit class
+snapshots, and completed instance searches materialize owned values.
 
 The declared class name `T` is an immutable local snapshot, while `T.Ref` is a
 live remote object reference. Each instance-field hop from `T.Ref` is fallible.
@@ -642,7 +646,9 @@ onAttach {
 ```
 
 The runtime traversal types and raw metadata offsets remain private to the
-trusted standard library and generated schema binder.
+trusted standard library and generated schema binder. Generated backend
+discovery, metadata bindings, field readers, snapshot readers, and instance
+scanners are retained only when the checked script can reach them.
 
 The IL2CPP implementation supports the existing 64-bit base, 2019, 2020, and
 2022 layouts. The Mono implementation supports modern 64-bit Windows V2 and V3

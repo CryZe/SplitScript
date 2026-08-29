@@ -1209,12 +1209,13 @@ initialization value of `-1`.
 
 ## UnityASL and managed metadata
 
-Do not copy `UnityASL`, `mono.Make<T>`, `mono.MakeString`, image lookup, class
-lookup, or metadata-offset bookkeeping into a SplitScript port. Declare the
+Do not copy `UnityASL`, `mono.Make<T>`, image lookup, class lookup, static-table
+lookup, or metadata-offset bookkeeping into a SplitScript port. There is no
+public low-level metadata traversal workflow to choose instead. Declare the
 managed shape once with [`image`], [`namespace`], [`class`], [`static`], and
 [`from`]. The [`Unity`] state provider discovers the selected Mono or IL2CPP
-backend, binds the schema once per attachment, and exposes ordinary typed,
-fallible references:
+backend, binds the reachable schema once per attachment, and exposes ordinary
+typed, fallible references:
 
 ```splitscript
 image "Assembly-CSharp" {
@@ -1242,10 +1243,21 @@ automatic detection is inappropriate. [`MonoVersion.V3`] selects the Unity
 A class-typed field is a live managed reference. Every poll rereads the current
 static singleton and each following object pointer, so replacing a managed
 object does not leave an attachment-time address cached in the script. Scalar
-fields use their declared fixed-width type. A managed string field is currently
-declared as an [`address`] and decoded explicitly with
-[`Process.readManagedString`](method@Process.readManagedString), whose bound is
-the maximum UTF-16 code-unit length accepted from the target process.
+fields use their declared fixed-width type without allocating a new GC object.
+The class name `T` is an immutable local snapshot type and `T.Ref` is a live
+remote reference. Each live hop returns [`T!`]. Postfix [`?`] propagates a
+failure into the surrounding state field, function, or [`retry`] boundary.
+`reference.snapshot()` reads all active fields before constructing `T`, so a
+failed member never publishes a partially populated object. Snapshots, arrays,
+strings, and completed instance searches materialize owned values; generated
+support is retained only when reachable.
+
+A managed string leaf is currently declared as an [`address`] and decoded with
+the bounded
+[`Process.readManagedString`](method@Process.readManagedString) operation. The
+bound is the maximum UTF-16 code-unit length accepted from the target process.
+This is a temporary schema-value gap, not an invitation to reproduce managed
+object-header traversal or make the metadata API public.
 
 Use [`from`] for exact metadata names or ordered name alternatives. Without it,
 the source declaration name is used and instance fields also recognize the

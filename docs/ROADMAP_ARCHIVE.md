@@ -1,5 +1,22 @@
 # SplitScript roadmap
 
+## 2026-08-29: complete schema-first Unity documentation
+
+- Made the `Unity` provider page the canonical managed-memory entry point. It
+  now explains automatic and explicit backend selection, schema binding,
+  attachment-scoped scene access, live references, transactional snapshots,
+  allocation behavior, and demand-driven generated support together.
+- Expanded the `image`, `class`, `static`, and `from` language pages with the
+  runtime semantics that matter when designing a schema: reachable binding,
+  unambiguous aliases, live singleton replacement, fallible remote hops,
+  layout refinement, and the absence of partially populated snapshots.
+- Tightened the standard-library and ASL-porting guides around one public
+  schema workflow. Mono and IL2CPP metadata traversal stays private, while the
+  remaining bounded managed-string limitation is described as a schema-value
+  gap rather than a reason to reproduce backend internals.
+- Added reference regressions that require the Unity journey to retain its
+  identity, failure, layout, cost, and private-boundary explanations.
+
 ## 2026-08-29: stable managed-snapshot projection reuse
 
 - Added a conservative Wasm-IR local plan for managed snapshots projected from

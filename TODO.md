@@ -273,12 +273,6 @@ to inference or code generation.
   materialize as `[T]`; do not reintroduce a public `List<T>` value type.
   Dictionaries and dynamic typed values need a separately approved language
   design based on representative ports.
-- [ ] Generate complete Unity reference documentation and migration guidance,
-  including schema declarations, layout refinement, live references versus
-  snapshots, failure behavior, allocation behavior, Mono/IL2CPP selection, and
-  the private implementation boundary. Public documentation must not present
-  backend metadata traversal as an alternative workflow.
-
 ## P0 — make docs-first ASL porting semantically reliable
 
 The latest clean-folder exercise had only the current compiler and legacy ASL
@@ -945,30 +939,29 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Make managed schemas the sole canonical public Unity route, hide competing
-   backend metadata traversal, and make `UnityASL` / `mono.Make*` searches and
-   diagnostics lead to one complete schema-first example.
-2. Repair polling-policy discovery: make `setTickRate` explain the defaults,
-   lifecycle reapplication, declarative `tickRate` block, and its own narrow
-   dynamic role.
-3. Fix the two concrete compiler-quality regressions from the latest exercise:
-   misplaced bare-global inference errors and misleading diagnostics when a
-   reserved keyword such as `loop` is used as an identifier.
-4. Make the existing emulator providers discoverable by host, core, console,
-   and legacy ASL vocabulary, then review the clean-compiling Dolphin, Fusion,
-   and RetroArch ports for semantic replacement by those providers.
-5. Bring the global-constructor, bounded-length integer, sibling-state, and
-   whitespace-string questions to the user with concrete source proposals;
-   implement only the approved ergonomics.
-6. Recheck missed existing facilities such as attempt-scoped state,
-   `timer.currentSplitIndex`, settings families, and generic numeric duration
-   constructors. Preserve small minimized regressions rather than the disposable
-   generated campaign.
-7. Complete Unity snapshots, managed collections, and runtime diagnostics, then
-   promote a small corrected and runtime-tested port set.
-8. Harden and publish the bundled VSIX and native releases, then evaluate the
-   hosted Code OSS workbench. Resume source-debugging only after choosing among
+1. Bring the bounded managed-string schema design to the user, then implement
+   the approved form across binding, snapshots, diagnostics, tooling, and the
+   Unity migration journey. Do not make raw metadata traversal public while the
+   higher-level value shape is being completed.
+2. Propose the source-defined `unity.time` manager surface, including discovery,
+   lifetime, fallibility, and allocation behavior, before adding its public
+   names. Validate it against the ASR use cases rather than one game.
+3. Turn the remaining porting-campaign questions into focused decisions:
+   bounded integer arguments, sibling state-field references, Unicode blank
+   strings, and whether known emulator executable sets merit a contextual
+   provider suggestion.
+4. Add the compiler-query fixture and review checklist for clean-compiling
+   semantic drift, then apply it to a small corrected and runtime-tested native,
+   Unity, and emulator port set.
+5. Complete the remaining official host ABI as typed facilities and keep exact
+   `shutdown` / `onSplit` delivery in the runtime-evolution contract until the
+   host exposes the required events.
+6. Extend Unity managed collections only after strings and scalar snapshots are
+   complete, using the maintained Alba and A Short Hike requirements to shape
+   lists, dictionaries, and dynamic values.
+7. Harden and publish the bundled VSIX and native releases, then evaluate the
+   hosted Code OSS workbench. Resume source debugging only after choosing among
    the JavaScript debugger, native Wasmtime/DWARF, and typed-IR interpreter.
-9. Keep physical `None` aggregate specialization and sandbox-sensitive host
+8. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

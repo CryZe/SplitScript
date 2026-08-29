@@ -2457,6 +2457,63 @@ mod tests {
                 .markdown
                 .contains("Provides attachment-scoped Unity engine facilities")
         );
+        assert!(
+            unity
+                .markdown
+                .contains("scripts do not discover runtime images, classes, field offsets")
+        );
+        assert!(unity.markdown.contains("`PlayerController.Ref`"));
+        assert!(
+            unity
+                .markdown
+                .contains("Read one transactional managed snapshot")
+        );
+        assert!(
+            unity
+                .markdown
+                .contains("Scalar live reads allocate no GC objects")
+        );
+        assert!(!unity.markdown.contains("`MonoModule`"));
+        assert!(!unity.markdown.contains("`UnityClass`"));
+    }
+
+    #[test]
+    fn managed_schema_pages_explain_identity_failure_layout_and_cost() {
+        let reference = DocumentationReference::default();
+
+        let image = reference
+            .page("/language/image.md")
+            .expect("image has a language page");
+        assert!(
+            image
+                .markdown
+                .contains("reachable image and class metadata")
+        );
+        assert!(image.markdown.contains("private implementation detail"));
+
+        let class = reference
+            .page("/language/class.md")
+            .expect("class has a language page");
+        for expected in [
+            "`T.Ref` denotes a live remote object reference",
+            "no partially populated object escapes",
+            "without allocating a GC object",
+            "Conditional fields follow the refined attachment",
+            "retained only when used",
+            "metadata traversal remains private",
+        ] {
+            assert!(class.markdown.contains(expected), "{expected}");
+        }
+
+        let metadata_names = reference
+            .page("/language/from.md")
+            .expect("from has a language page");
+        assert!(metadata_names.markdown.contains("one unambiguous match"));
+        assert!(
+            metadata_names
+                .markdown
+                .contains("do not create a public layout")
+        );
     }
 
     #[test]

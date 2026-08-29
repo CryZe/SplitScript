@@ -415,12 +415,13 @@ concepts rather than maintaining a parallel inventory.
   documentation, requirements, limitations, and troubleshooting. Move npm,
   VSIX construction, web-host tests, workers, and Extension Development Host
   instructions to `editors/vscode/DEVELOPMENT.md`, linked once for contributors.
-- [ ] Restructure the repository README as an honest audience router. Lead with
+- [x] Restructure the repository README as an honest audience router. Lead with
   what an autosplitter author can accomplish, current project/host status, a
   minimal warning-free example, and paths for extension users, CLI users, ASL
-  porters, and compiler contributors. Move production-port evidence to an
-  examples/evidence index and keep backend, LSP, and debug-metadata inventories
-  in developer architecture documents.
+  porters, and compiler contributors. Route production-port evidence to durable
+  contributor documents and keep backend, LSP, and debug-metadata inventories
+  in developer architecture documents; do not make full examples part of the
+  user path.
 - [ ] Keep maintained port and conformance evidence discoverable for compiler
   contributors without making the `examples` directory part of the authoring
   path. User guides must remain self-contained and must not link to disposable

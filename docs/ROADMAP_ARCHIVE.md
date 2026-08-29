@@ -21,6 +21,16 @@
 - Moved npm setup, VSIX construction, worker architecture, extension-host
   launches, and browser-host testing into a contributor-only development guide.
 
+## 2026-08-30: repository entry point by audience
+
+- Replaced the implementation-inventory README with an honest entry point for
+  VS Code authors, native CLI users, ASL porters, and compiler contributors.
+- Led with current product and host status, a minimal native state/split
+  fragment, neighboring Wasm output, and the early distribution boundary.
+- Routed exact language, standard-library, ABI, architecture, conformance, and
+  measurement facts to their durable documents instead of duplicating stale
+  feature and backend inventories or promoting full ports as tutorials.
+
 ## 2026-08-29: managed-string bound ergonomics resolved by schema syntax
 
 - The earlier porting question about accepting arbitrary integer types for a

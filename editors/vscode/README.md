@@ -83,6 +83,3 @@ reported without losing the failing state.
 If a build targets the wrong file, make sure the intended `.split` editor is
 active when starting the command. Untitled files prompt for a save location;
 the resulting saved document is the one compiled.
-
-Contributor setup, packaging, worker architecture, and web-host testing live in
-the [extension development guide](https://github.com/CryZe/SplitScript/blob/master/editors/vscode/DEVELOPMENT.md).

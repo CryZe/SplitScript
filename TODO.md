@@ -419,6 +419,18 @@ or assumptions tied to one generated corpus.
 
 ### State layouts, discovery, and process identity
 
+- [ ] Make `process.findMemoryRange(size, access)` wait until a matching range
+  exists and return `async MemoryRange`, not `async MemoryRange?`. The current
+  optional result is a leftover from the old single-tick synchronous search:
+  after the operation became cooperative, resolving to `None` after one
+  bounded pass forces every caller to write an outer asynchronous retry loop
+  that the API should own. A poll should scan a bounded amount of metadata,
+  yield, refresh the range snapshot after a complete miss, and continue until
+  it finds a match or attachment cancellation ends the future. Make this a
+  direct breaking change without an optional compatibility form. Audit other
+  asynchronous discovery APIs for the same accidental “not found yet” option;
+  retain optionality only when absence is a meaningful completed result rather
+  than temporary discovery state.
 - [ ] Add layout sharing or overrides only if a maintained port proves that
   repeated pointer paths across many versions are materially unmaintainable.
   Keep the selected physical layout auditable.
@@ -765,6 +777,15 @@ remaining work is product hardening and distribution.
 
 ## P1 — remaining language and runtime breadth
 
+- [ ] Make unused analysis aware of debug erasure. When a retained local,
+  global, function, or other erasable declaration is reachable or referenced
+  only from `debug` code, warn that it is compiled into release builds despite
+  having no release consumer and suggest marking the declaration `debug`.
+  Compute this from one profile-aware use/reachability graph, including
+  transitive helper calls, rather than a second debug-only name scan. Offer a
+  machine-applicable modifier insertion only where erasing the whole
+  declaration is valid, keep genuinely release-reachable uses quiet, and test
+  both debug and release diagnostics plus release-Wasm elimination.
 - [ ] Add shorthand record field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename
@@ -967,26 +988,32 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Decide whether known emulator executable sets merit a non-noisy contextual
-   provider suggestion. Unicode blank strings now use the Unicode `White_Space`
-   property, while bounded managed-string lengths are already untyped compile-time
-   literals in schema
-   syntax and require no integer suffix or generic conversion API.
+1. Correct `process.findMemoryRange` so its cooperative future waits for and
+   returns a `MemoryRange` directly, then audit other asynchronous discovery
+   APIs for optional results that merely encode “not found yet.”
 2. Add the compiler-query fixture and review checklist for clean-compiling
    semantic drift, then apply it to a small corrected and runtime-tested native,
    Unity, and emulator port set.
-3. Complete the remaining official host ABI as typed facilities and keep exact
+3. Add profile-aware unused analysis for declarations whose only consumers are
+   erased `debug` code, with a safe quick fix to mark erasable declarations
+   `debug` before release emission retains them unnecessarily.
+4. Complete the remaining official host ABI as typed facilities and keep exact
    `shutdown` / `onSplit` delivery in the runtime-evolution contract until the
    host exposes the required events.
-4. Extend Unity managed collections only after strings and scalar snapshots are
+5. Extend Unity managed collections only after strings and scalar snapshots are
    complete, using the maintained Alba and A Short Hike requirements to shape
    lists, dictionaries, and dynamic values.
-5. Harden and publish the bundled VSIX and native releases, then evaluate the
+6. Harden and publish the bundled VSIX and native releases, then evaluate the
    hosted Code OSS workbench. Resume source debugging only after choosing among
    the JavaScript debugger, native Wasmtime/DWARF, and typed-IR interpreter.
-6. Revisit `unity.time` only after ASR has a tested implementation whose
+7. Decide whether known emulator executable sets merit a non-noisy contextual
+   provider suggestion. Unicode blank strings now use the Unicode `White_Space`
+   property, while bounded managed-string lengths are already untyped
+   compile-time literals in schema syntax and require no integer suffix or
+   generic conversion API.
+8. Revisit `unity.time` only after ASR has a tested implementation whose
    discovery, lifetime, fallibility, and allocation behavior can define the
    cross-language contract.
-7. Keep physical `None` aggregate specialization and sandbox-sensitive host
+9. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

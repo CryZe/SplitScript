@@ -50,7 +50,7 @@ infers the memory representation from its expected result type. Reads outside
 `0x02000000..0x02040000` and `0x03000000..0x03008000`, including reads that
 cross either region boundary, return an error.
 
-State fields with a fixed address should use the concise `at` syntax. The GBA
+State fields with a fixed address should use the concise [`at`](syntax@at) syntax. The GBA
 provider maps it through the same address translation and typed-read operation
 as `gba.read`; the explicit method remains available for addresses computed by
 the script.
@@ -94,7 +94,7 @@ the `pcsx2_libretro.dll` core. PCSX2 discovery prefers the exported `EEmem`
 symbol and retains signature fallbacks for older 32-bit and 64-bit builds;
 RetroArch resolves `retro_get_memory_data` from the loaded core.
 
-Both `ps2.read<T>(address)` and state-field `at` declarations use original PS2
+Both `ps2.read<T>(address)` and state-field [`at`](syntax@at) declarations use original PS2
 addresses. Reads must lie entirely within `0x00100000..=0x01ffffff`.
 Provider-relative pointer paths dereference 32-bit guest pointers through the
 same translation backend before applying each signed offset:
@@ -667,7 +667,7 @@ cross-platform symbol API, and malformed or absent exports remain ordinary
 An `address` supports generic `offset<T: Integer>` for displacements and
 `add(u64)` for unsigned full-width deltas. Signed arguments retain their sign;
 smaller integer widths are extended before addition. Both wrap modulo the 64-bit address space while
-keeping target pointers nominally distinct from numeric sizes. Static `at`
+keeping target pointers nominally distinct from numeric sizes. Static [`at`](syntax@at)
 paths keep their absolute root unsigned, but module-relative and
 post-dereference offsets are signed. `process.follow` accepts `[i64]`, and
 `MemoryPath` stores signed dereference and final offsets, so negative native
@@ -679,6 +679,12 @@ Expression-backed state fields form persistent watchers. Initialization waits
 for every required field to succeed in one poll and seeds `old == current`.
 Later, each successful `T!` advances that field and each error retains its last
 accepted value; actions see the resulting `current` and prior `old` objects.
+Fields may refer to siblings from the same active layout independent of source
+order. The compiler evaluates the resulting dependency graph in topological
+order and rejects cycles. A sibling can also be the dynamic base of an
+[`at`](syntax@at) pointer path. When a dependency fails, its
+dependents are skipped for that poll and retain their own accepted values,
+preventing a stale candidate address from being dereferenced.
 `process.read(address)` infers its
 `MemoryReadable` type from the field, annotation, or later usage. This includes
 fixed-width primitives and both source- and catalog-declared records containing

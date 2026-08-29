@@ -265,9 +265,12 @@ to inference or code generation.
   only the declared class's backend-neutral runtime header and nominal result
   type. A tiny class schema is the typed escape for otherwise-unknown
   components; defer any raw dynamic API until a real port proves it necessary.
-- [ ] Expose Unity global managers such as `unity.time.frameCount` and
-  `unity.time.timeScale` through reachable source-defined declarations rather
-  than bespoke compiler names.
+- [ ] After ASR has a tested implementation, align Unity global managers such
+  as `unity.time.frameCount` and `unity.time.timeScale` with it through
+  reachable source-defined declarations rather than independently inventing
+  native discovery or bespoke compiler names. Until then, keep this deferred;
+  the current ASR Unity support covers managed metadata and scenes but not the
+  native time manager.
 - [x] Add bounded managed-string fields as `String field maxLength N` and
   `String? field maxLength N`. The policy is binding-plan data shared by static,
   live, and snapshot reads; nullability is typed, overlong payloads fail rather
@@ -355,18 +358,16 @@ or assumptions tied to one generated corpus.
   limited to words that take over expression or statement grammar; contextual
   DSL words such as `at`, `from`, `key`, and `static` remain legal ordinary
   names away from their grammar positions.
-- [ ] Convert the remaining campaign boundaries into focused decisions rather
-  than preserving workarounds as recommendations:
-  - Decide whether bounded string lengths should accept any `Integer` and
-    perform one checked conversion, instead of requiring authors to discover a
-    `u32` suffix for ordinary positive constants.
-  - Decide whether sibling state-field references are desirable. If so, define
-    dependency order, cycles, failure retention, and shared-prefix evaluation;
-    otherwise explain the transactional independence and lead authors to one
-    supported helper/path pattern.
-  - Add `String.isBlank()` or an approved equivalent only after confirming the
-    intended Unicode whitespace semantics; several ports silently replaced
-    C# `IsNullOrWhiteSpace` with an empty-string test.
+- [x] Make sibling state-field references order-independent within each active
+  physical layout. Build and validate an explicit dependency graph, diagnose
+  cycles at every participating declaration, and evaluate dependencies before
+  their consumers. Expression-backed fields and dynamic `at` bases share the
+  same resolution path. A failed dependency skips its dependents for that poll
+  so no stale candidate address is dereferenced; every affected field retains
+  its own last accepted value.
+- [ ] Add `String.isBlank()` or an approved equivalent only after confirming
+  the intended Unicode whitespace semantics; several ports silently replaced
+  C# `IsNullOrWhiteSpace` with an empty-string test.
 - [x] Recheck clean-compiling omissions against facilities added before or
   during the exercise. `timer.currentSplitIndex()`, generic numeric `Duration`
   constructors, and finite settings families already surfaced through focused
@@ -964,25 +965,26 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Propose the source-defined `unity.time` manager surface, including discovery,
-   lifetime, fallibility, and allocation behavior, before adding its public
-   names. Validate it against the ASR use cases rather than one game.
-2. Turn the remaining porting-campaign questions into focused decisions:
-   bounded integer arguments, sibling state-field references, Unicode blank
-   strings, and whether known emulator executable sets merit a contextual
-   provider suggestion.
-3. Add the compiler-query fixture and review checklist for clean-compiling
+1. Turn the remaining porting-campaign questions into focused decisions:
+   Unicode blank strings and whether known emulator executable sets merit a
+   contextual provider suggestion. Bounded
+   managed-string lengths are already untyped compile-time literals in schema
+   syntax and require no integer suffix or generic conversion API.
+2. Add the compiler-query fixture and review checklist for clean-compiling
    semantic drift, then apply it to a small corrected and runtime-tested native,
    Unity, and emulator port set.
-4. Complete the remaining official host ABI as typed facilities and keep exact
+3. Complete the remaining official host ABI as typed facilities and keep exact
    `shutdown` / `onSplit` delivery in the runtime-evolution contract until the
    host exposes the required events.
-5. Extend Unity managed collections only after strings and scalar snapshots are
+4. Extend Unity managed collections only after strings and scalar snapshots are
    complete, using the maintained Alba and A Short Hike requirements to shape
    lists, dictionaries, and dynamic values.
-6. Harden and publish the bundled VSIX and native releases, then evaluate the
+5. Harden and publish the bundled VSIX and native releases, then evaluate the
    hosted Code OSS workbench. Resume source debugging only after choosing among
    the JavaScript debugger, native Wasmtime/DWARF, and typed-IR interpreter.
+6. Revisit `unity.time` only after ASR has a tested implementation whose
+   discovery, lifetime, fallibility, and allocation behavior can define the
+   cross-language contract.
 7. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

@@ -3494,6 +3494,43 @@ fn state_field_filters_retain_one_field_without_rejecting_the_snapshot() {
 }
 
 #[test]
+fn failed_state_dependencies_skip_dependents_and_retain_their_values() {
+    let source = r#"
+        state "game.exe" {
+            derived: i32 = {
+                print(`derive:{source}`)
+                source + 1
+            };
+            source: i32 at 0x7fff0000;
+        }
+
+        whileAttached {
+            print(`state:{current.source}:{current.derived}`)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["derive:1"]);
+
+    store.data_mut().raw_scene = 2;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["derive:1", "derive:2", "state:2:3"]);
+
+    store.data_mut().raw_scene = 7;
+    store.data_mut().fail_scene_read = true;
+    update.call(&mut store, ()).unwrap();
+    store.data_mut().fail_scene_read = false;
+    assert_eq!(
+        store.data().messages,
+        ["derive:1", "derive:2", "state:2:3", "state:2:3"]
+    );
+}
+
+#[test]
 fn state_initialization_requires_one_complete_poll_and_seeds_equal_snapshots() {
     let source = r#"
         state "game.exe" {

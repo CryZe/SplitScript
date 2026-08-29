@@ -28,6 +28,61 @@ fn compiler_context_identity_survives_every_pipeline_product() {
 }
 
 #[test]
+fn sibling_state_fields_are_navigable_and_complete_in_state_sources() {
+    use splitscript::{
+        compiler::semantic::ResolvedValue,
+        tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId},
+    };
+
+    let source = r#"
+        state "game.exe" {
+            dependent: u32 = source;
+            source: u32 at 0x1000;
+        }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    let checked = database
+        .check()
+        .expect("sibling state references should check");
+    let fields = checked
+        .syntax()
+        .state
+        .as_ref()
+        .unwrap()
+        .all_fields()
+        .collect::<Vec<_>>();
+    let source_field = fields.iter().find(|field| field.name == "source").unwrap();
+    let reference = source.find("= source").unwrap() + 2;
+    assert!(matches!(
+        database.analysis_at(reference).unwrap().unwrap().resolution,
+        Some(splitscript::compiler::hir::ExpressionResolution::ValuePath {
+            root: Some(ResolvedValue::StateCandidate(field)),
+            ..
+        }) if field == source_field.id
+    ));
+    assert!(matches!(
+        database.definition_at(reference).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if definition.id == SourceDefinitionId::Value(source_field.id)
+    ));
+    let hover = database
+        .hover(reference)
+        .unwrap()
+        .expect("sibling state references should retain field hover information");
+    assert!(hover.markdown.contains("current.source: u32"));
+    assert!(hover.markdown.contains("Transactional state field"));
+    let labels = database
+        .completions(reference)
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|item| item.label)
+        .collect::<Vec<_>>();
+    assert!(labels.contains(&"source".to_owned()));
+    assert!(labels.contains(&"dependent".to_owned()));
+}
+
+#[test]
 fn compiler_database_publishes_non_fatal_warnings() {
     use splitscript::{DiagnosticSeverity, tooling::database::CompilerDatabase};
 

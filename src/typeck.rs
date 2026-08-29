@@ -161,6 +161,9 @@ struct Checker {
     layout_value: Option<ValueId>,
     layout_available_in_on_attach: bool,
     active_state_layout: Option<crate::ast::EnumVariantId>,
+    /// Physical state field whose source or transform is currently checked.
+    /// Sibling references record graph edges against this declaration.
+    active_state_field: Option<ValueId>,
     active_layouts: Option<declarations::LayoutPredicate>,
     scopes: Vec<HashMap<String, Binding>>,
     return_ty: Type,
@@ -204,6 +207,13 @@ impl Checker {
         let previous = std::mem::replace(&mut self.active_state_layout, layout);
         let output = operation(self);
         self.active_state_layout = previous;
+        output
+    }
+
+    fn with_state_field<T>(&mut self, field: ValueId, operation: impl FnOnce(&mut Self) -> T) -> T {
+        let previous = self.active_state_field.replace(field);
+        let output = operation(self);
+        self.active_state_field = previous;
         output
     }
 

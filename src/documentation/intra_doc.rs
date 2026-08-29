@@ -233,7 +233,7 @@ fn disambiguated_target_uri(
             .filter(|item| item.kind == LanguageItemKind::Keyword)
             .map(|item| language_item_uri(item.id)),
         "syntax" => language
-            .item_for_source_token(name)
+            .item_by_name(name)
             .filter(|item| {
                 matches!(
                     item.kind,
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn resolves_explicit_targets_without_changing_the_visible_label() {
         let rendered = render_links(
-            "The [`*`](Numeric.multiply) operator, [`read`](method@Process.read) method, and [`wait`](keyword@await) keyword.",
+            "The [`*`](Numeric.multiply) operator, [`read`](method@Process.read) method, [`wait`](keyword@await) keyword, and [`pointer base`](syntax@at) syntax.",
             "/language/operators.md",
             &StandardLibrary::new(),
         );
@@ -352,6 +352,7 @@ mod tests {
             "{rendered}"
         );
         assert!(rendered.contains("[`wait`](await.md)"), "{rendered}");
+        assert!(rendered.contains("[`pointer base`](at.md)"), "{rendered}");
     }
 
     #[test]

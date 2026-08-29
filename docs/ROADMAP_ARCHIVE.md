@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-29: managed-string bound ergonomics resolved by schema syntax
+
+- The earlier porting question about accepting arbitrary integer types for a
+  managed-string length no longer applies. Managed strings are declared as
+  `String field maxLength N`; `N` is a positive, unsuffixed compile-time
+  numeric literal checked against the implementation bound rather than a
+  typed `u32` function argument. Removing the raw managed-string read API also
+  removed the suffix-discovery footgun without introducing a general implicit
+  integer conversion rule.
+
 ## 2026-08-29: bounded managed strings become schema values
 
 - Added `String field maxLength N` and `String? field maxLength N` to managed
@@ -4075,3 +4085,14 @@ language catalog document the refinement rule.
   host ABI and no approximate intermediate decimal conversion.
 - Covered signed zero, subnormals, finite boundaries, infinities, NaN, and
   deterministic sampled bit patterns against `zmij::Buffer` at runtime.
+
+# 2026-08-29: order-independent state dependencies
+
+- Made sibling state-field references resolve within the active physical
+  layout in both ordinary field expressions and dynamic `at` bases.
+- Added a compiler-owned dependency graph with stable topological evaluation
+  and multi-label cycle diagnostics, without making source declaration order
+  semantic.
+- Propagated failed dependencies at the candidate-snapshot boundary: dependent
+  fields are skipped and retain their accepted values instead of dereferencing
+  stale candidate addresses, while independent siblings still advance.

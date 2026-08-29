@@ -2133,6 +2133,30 @@ impl Checker {
                     members,
                 })
             }
+            [name, fields @ ..]
+                if self.expression_mode == ExpressionMode::StateSource
+                    && self
+                        .scopes
+                        .iter()
+                        .rev()
+                        .all(|scope| !scope.contains_key(name))
+                    && self.visible_state_source_field(name).is_some() =>
+            {
+                let (field, field_type) = self
+                    .visible_state_source_field(name)
+                    .expect("the sibling state field was found above");
+                let owner = self
+                    .active_state_field
+                    .expect("state-source expressions have an active field");
+                self.semantics.resolve_state_dependency(owner, field);
+                let (ty, members) =
+                    self.resolve_members_or_defer(field_type, fields, span, expression)?;
+                Some(PathResolution {
+                    ty,
+                    value: Some(ResolvedValue::StateCandidate(field)),
+                    members,
+                })
+            }
             [name, fields @ ..] => {
                 let Some(binding) = self.binding_for_use(name, span) else {
                     let spelling = path.join(".");
@@ -2657,6 +2681,32 @@ impl Checker {
                         .copied()
                 })
             })
+    }
+
+    /// Resolves a physical field while checking a state source. Named layouts
+    /// must select their own declaration even when the field is also part of
+    /// the canonical snapshot interface shared by every layout.
+    fn visible_state_source_field(&self, name: &str) -> Option<(crate::ast::ValueId, Type)> {
+        self.active_state_layout
+            .and_then(|layout| {
+                self.declarations
+                    .layout_state_fields
+                    .get(&layout)
+                    .and_then(|fields| fields.get(name))
+                    .copied()
+            })
+            .or_else(|| {
+                self.declarations
+                    .conditional_state_fields
+                    .get(name)
+                    .and_then(|candidates| {
+                        candidates
+                            .iter()
+                            .find(|(_, _, predicate)| self.layout_predicate_satisfied(predicate))
+                            .map(|(field, ty, _)| (*field, *ty))
+                    })
+            })
+            .or_else(|| self.declarations.state_fields.get(name).copied())
     }
 
     fn unknown_state_field(&mut self, name: &str, span: Span) {

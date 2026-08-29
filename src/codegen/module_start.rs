@@ -139,6 +139,7 @@ fn emit_runtime_global_initializers(
         global_types: lowering.global_types,
         settings: lowering.settings,
         runtime_globals: lowering.runtime_globals,
+        state_candidate: None,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
         closures: lowering.closures,

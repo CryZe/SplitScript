@@ -210,8 +210,13 @@ pub fn walk_state_field<'ast, V: Visitor<'ast>>(visitor: &mut V, field: &'ast St
     if let Some(annotation) = &field.annotation {
         visitor.visit_type_ref(annotation);
     }
-    if let StateSource::Expression(expression) = &field.source {
-        visitor.visit_expr(expression);
+    match &field.source {
+        StateSource::Expression(expression) => visitor.visit_expr(expression),
+        StateSource::Pointer(path) => {
+            if let PointerPathBase::Expression(expression) = &path.base {
+                visitor.visit_expr(expression);
+            }
+        }
     }
     if let Some(transform) = &field.transform {
         visitor.visit_expr(&transform.expression);
@@ -659,8 +664,13 @@ pub fn walk_state_field_mut<F: Folder>(folder: &mut F, field: &mut StateField) {
     if let Some(annotation) = &mut field.annotation {
         folder.fold_type_ref(annotation);
     }
-    if let StateSource::Expression(expression) = &mut field.source {
-        folder.fold_expr(expression);
+    match &mut field.source {
+        StateSource::Expression(expression) => folder.fold_expr(expression),
+        StateSource::Pointer(path) => {
+            if let PointerPathBase::Expression(expression) = &mut path.base {
+                folder.fold_expr(expression);
+            }
+        }
     }
     if let Some(transform) = &mut field.transform {
         folder.fold_expr(&mut transform.expression);

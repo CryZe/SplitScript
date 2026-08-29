@@ -1988,6 +1988,21 @@ whileAttached {
     }
 
     #[test]
+    fn formats_dynamic_state_pointer_bases() {
+        let source = r#"state "game.exe"{value:u32 at base,0x20;base:address=0x1000}"#;
+        let expected = r#"state "game.exe" {
+    value: u32 at base, 0x20;
+    base: address = 0x1000;
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        crate::compile(&formatted).expect("formatted dynamic state bases should compile");
+    }
+
+    #[test]
     fn formats_state_field_filters_as_part_of_the_field() {
         let source = r#"state "game.exe"{scene:i32 at 0x1000 if value==7||value==8{Err("transient")}else{value};entities:i32 at 0x2000}"#;
         let expected = r#"state "game.exe" {

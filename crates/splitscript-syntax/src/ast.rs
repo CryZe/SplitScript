@@ -1061,13 +1061,39 @@ pub struct PointerPath {
     pub decoder: Option<StateMemoryDecoder>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum PointerPathBase {
     /// An absolute target address. It retains the full unsigned address range.
     Absolute(u64),
     /// A module identity and a signed displacement from its load address.
     Module { name: String, offset: i64 },
+    /// An address supplied by another state field in the same active layout.
+    /// The type checker resolves the expression to that field's stable identity
+    /// and records the dependency used to order snapshot polling.
+    Expression(Expr),
 }
+
+impl PartialEq for PointerPathBase {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Absolute(left), Self::Absolute(right)) => left == right,
+            (
+                Self::Module {
+                    name: left_name,
+                    offset: left_offset,
+                },
+                Self::Module {
+                    name: right_name,
+                    offset: right_offset,
+                },
+            ) => left_name == right_name && left_offset == right_offset,
+            (Self::Expression(left), Self::Expression(right)) => left.id == right.id,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for PointerPathBase {}
 
 /// A bounded interpretation applied after resolving a state pointer path.
 ///

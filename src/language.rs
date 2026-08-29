@@ -1325,7 +1325,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "state \"game.exe\" { ... } | state [\"game.exe\", \"demo.exe\"] { ... } | state Provider { ... }",
         "Declares process attachment and persistent watched state.",
-        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. A named standard-library provider selects a typed memory model. [`Unity`] binds managed [`image`] schemas while [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`], [`GCN`], and [`Wii`] expose emulator-specific read roots and accept original console addresses in state fields. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. With attachment-wide layout dimensions, conditional state fields may use an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain; later branches cover the exact layout combinations left unmatched by earlier branches. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
+        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. A named standard-library provider selects a typed memory model. [`Unity`] binds managed [`image`] schemas while [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`], [`GCN`], and [`Wii`] expose emulator-specific read roots and accept original console addresses in state fields. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. With attachment-wide layout dimensions, conditional state fields may use an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain; later branches cover the exact layout combinations left unmatched by earlier branches. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. A field may use another field from the same active layout by name, including as the base of an [`at`](syntax@at) path. Declaration order is irrelevant: the compiler evaluates dependencies first and rejects cycles. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful independent fields advance; a dependent field is not evaluated when one of its dependencies fails. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
         STATE_DECL_EXAMPLES
     ),
     language_item!(
@@ -1363,11 +1363,11 @@ define_language_catalog! {
     ),
     language_item!(
         StatePointerField,
-        "state pointer field",
+        "at",
         LanguageItemKind::Syntax,
-        "field: T at module?, offset, ... | field: T? at module?, offset, ...",
+        "field: T at module-or-field, offset, ... | field: T? at module-or-field, offset, ...",
         "Reads a persistent state field through a pointer path.",
-        "The optional module name selects the pointer base and each following integer is an address offset. A required `T` field is a [`T!`] boundary: initialization waits for it, while a later failed read retains its last accepted value. An explicitly optional [`T?`] field instead accepts read failure as [`None`] and a successful read as [`Some`]`(T)`, so absence is observable in [`current`] and [`old`]. The exact memory representation must be explicit or inferred from an exact use; optional read semantics require the [`T?`] annotation.",
+        "A string selects a module-relative pointer base, an integer selects an absolute base, and a sibling field name uses that field's candidate value as a dynamic base. Each following integer is an address offset. Sibling references are independent of declaration order, must stay within the active named layout, and may also appear in expression-backed fields. The compiler evaluates their dependency graph in order and rejects cycles. If a dependency fails, the dependent read is skipped and retains its previous accepted value. A required `T` field is a [`T!`] boundary: initialization waits for it, while a later failed read retains its last accepted value. An explicitly optional [`T?`] field instead accepts its own read failure as [`None`] and a successful read as [`Some`]`(T)`, so absence is observable in [`current`] and [`old`]. The exact memory representation must be explicit or inferred from an exact use; optional read semantics require the [`T?`] annotation.",
         STATE_POINTER_EXAMPLE
     ),
     language_item!(
@@ -2007,19 +2007,21 @@ impl LanguageCatalog {
     /// Resolves an exact source token or a short syntax spelling to its
     /// canonical documentation item.
     pub fn item_for_source_token(self, token: &str) -> Option<&'static LanguageItem> {
-        self.item_by_name(token).or_else(|| {
-            let id = match token {
-                "Address" => LanguageItemId::BuiltinType(BuiltinType::Address),
-                "[" => LanguageItemId::ArrayType,
-                "..<" | "..=" => LanguageItemId::Range,
-                "?" => LanguageItemId::OptionType,
-                "!" => LanguageItemId::ResultType,
-                "///" => LanguageItemId::DocumentationComment,
-                "`" => LanguageItemId::TemplateString,
-                _ => return None,
-            };
-            Some(self.item(id))
-        })
+        self.item_by_name(token)
+            .filter(|item| item.id != LanguageItemId::StatePointerField)
+            .or_else(|| {
+                let id = match token {
+                    "Address" => LanguageItemId::BuiltinType(BuiltinType::Address),
+                    "[" => LanguageItemId::ArrayType,
+                    "..<" | "..=" => LanguageItemId::Range,
+                    "?" => LanguageItemId::OptionType,
+                    "!" => LanguageItemId::ResultType,
+                    "///" => LanguageItemId::DocumentationComment,
+                    "`" => LanguageItemId::TemplateString,
+                    _ => return None,
+                };
+                Some(self.item(id))
+            })
     }
 
     pub fn builtin_type(self, ty: BuiltinType) -> Option<&'static LanguageItem> {

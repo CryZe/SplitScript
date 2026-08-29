@@ -1,6 +1,114 @@
 use wasmparser::{Validator, WasmFeatures};
 
 #[test]
+fn state_fields_can_depend_on_later_siblings_and_dynamic_at_bases() {
+    let source = r#"
+        state "game.exe" {
+            value: u32 at base, 0x20;
+            copied: u32 = value;
+            base: address = 0x1000;
+        }
+
+        whileAttached {
+            print(current.copied)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("state dependencies should be independent of declaration order");
+    let fields = checked
+        .syntax()
+        .state
+        .as_ref()
+        .unwrap()
+        .all_fields()
+        .collect::<Vec<_>>();
+    let value = fields.iter().find(|field| field.name == "value").unwrap();
+    let copied = fields.iter().find(|field| field.name == "copied").unwrap();
+    let base = fields.iter().find(|field| field.name == "base").unwrap();
+    assert_eq!(checked.semantics().state_dependencies(value.id), [base.id]);
+    assert_eq!(
+        checked.semantics().state_dependencies(copied.id),
+        [value.id]
+    );
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("dependency-ordered dynamic state reads should emit valid Wasm GC");
+}
+
+#[test]
+fn state_dependency_cycles_point_to_every_participating_field() {
+    let source = r#"
+        state "game.exe" {
+            first: u32 = second;
+            second: u32 = third;
+            third: u32 = first;
+        }
+    "#;
+
+    let diagnostics = splitscript::check(splitscript::parse(source).unwrap())
+        .expect_err("cyclic state dependencies must be rejected");
+    let cycle = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("cyclically"))
+        .expect("the cycle should have a dedicated diagnostic");
+    assert_eq!(cycle.labels.len(), 3);
+}
+
+#[test]
+fn sibling_dependencies_resolve_within_each_named_layout() {
+    let source = r#"
+        state "game.exe" {
+            layout First {
+                copy: u32 = source;
+                source: u32 at 0x1000;
+            },
+            layout Second {
+                copy: u32 = source;
+                source: u32 at 0x2000;
+            },
+        }
+
+        onAttach { return StateLayout.First }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("each named layout should have an independent dependency graph");
+    let state = checked.syntax().state.as_ref().unwrap();
+    for layout in &state.layouts {
+        let copy = layout
+            .fields
+            .iter()
+            .find(|field| field.name == "copy")
+            .unwrap();
+        let source = layout
+            .fields
+            .iter()
+            .find(|field| field.name == "source")
+            .unwrap();
+        assert_eq!(checked.semantics().state_dependencies(copy.id), [source.id]);
+    }
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("layout-local dependency ordering should emit valid Wasm GC");
+}
+
+#[test]
+fn emulator_state_paths_accept_sibling_hardware_addresses() {
+    let source = r#"
+        state GBA {
+            value: u8 at base, 4;
+            base: u32 = 0x02000000;
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("emulator pointer paths should use their provider address type");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("dynamic emulator addresses should emit valid Wasm GC");
+}
+
+#[test]
 fn attachment_layout_dimensions_are_an_ordinary_typed_global_record() {
     let source = r#"
         enum Edition {

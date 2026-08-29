@@ -380,6 +380,7 @@ fn provider_value_for_resolution(
         crate::semantic::ResolvedValue::ProviderContext { provider, .. } => Some(provider),
         crate::semantic::ResolvedValue::ManagedStatic { .. } => None,
         crate::semantic::ResolvedValue::Variable(_)
+        | crate::semantic::ResolvedValue::StateCandidate(_)
         | crate::semantic::ResolvedValue::CurrentSnapshot
         | crate::semantic::ResolvedValue::OldSnapshot
         | crate::semantic::ResolvedValue::SettingsView

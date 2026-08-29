@@ -116,6 +116,12 @@ impl PointerPrefixPlan {
             let StateSource::Pointer(path) = &field.source else {
                 continue;
             };
+            if matches!(path.base, PointerPathBase::Expression(_)) {
+                // Dynamic candidate-state roots have no process-wide static
+                // prefix to intern. Their dependencies are shared through the
+                // candidate snapshot instead.
+                continue;
+            }
             let mut path_nodes = Vec::new();
             let mut current = match &path.base {
                 PointerPathBase::Absolute(address) => intern(
@@ -139,6 +145,7 @@ impl PointerPrefixPlan {
                         &mut canonical,
                     )
                 }
+                PointerPathBase::Expression(_) => unreachable!(),
             };
             for (offset_index, offset) in path.offsets.iter().copied().enumerate() {
                 let dereference = intern(
@@ -273,7 +280,7 @@ pub(super) struct PrefixEmissionContext<'a> {
 }
 
 impl PrefixLocals {
-    pub(super) fn emit_field_prefix(
+    pub(super) fn ensure_field_prefix(
         &self,
         function: &mut Function,
         field: FieldPrefix,
@@ -282,6 +289,9 @@ impl PrefixLocals {
         conditional: bool,
     ) {
         self.emit_ensure(function, field.prefix, context, emission, conditional);
+    }
+
+    pub(super) fn emit_field_prefix_values(&self, function: &mut Function, field: FieldPrefix) {
         let storage = self.storage[&field.prefix];
         function
             .instruction(&Instruction::LocalGet(storage.address))

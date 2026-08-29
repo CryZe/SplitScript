@@ -700,7 +700,8 @@ fn extraction_parameters(
             }
             ResolvedValue::ProviderValue(_)
             | ResolvedValue::ProviderContext { .. }
-            | ResolvedValue::Variable(_) => {}
+            | ResolvedValue::Variable(_)
+            | ResolvedValue::StateCandidate(_) => {}
             ResolvedValue::ManagedStatic { .. } => {}
             ResolvedValue::StandardLibraryConstant(_) => {}
         }
@@ -877,7 +878,8 @@ fn contextual_parameter_name(value: ResolvedValue, source: &str) -> String {
         ResolvedValue::OldSettingsView | ResolvedValue::OldSetting(_) => "oldSetting",
         ResolvedValue::ProviderValue(_)
         | ResolvedValue::ProviderContext { .. }
-        | ResolvedValue::Variable(_) => "value",
+        | ResolvedValue::Variable(_)
+        | ResolvedValue::StateCandidate(_) => "value",
         ResolvedValue::ManagedStatic { .. } => "value",
         ResolvedValue::StandardLibraryConstant(_) => {
             unreachable!("standard-library constants are not contextual values")

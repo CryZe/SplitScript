@@ -215,6 +215,10 @@ pub enum ResolvedValue {
     OldSettingsView,
     CurrentState(ValueId),
     OldState(ValueId),
+    /// A sibling state field read from the candidate snapshot currently being
+    /// assembled. Unlike `CurrentState`, this never falls back to the last
+    /// committed snapshot when its dependency fails.
+    StateCandidate(ValueId),
     Setting(ValueId),
     OldSetting(ValueId),
 }
@@ -235,6 +239,7 @@ impl ResolvedValue {
             Self::Variable(value)
             | Self::CurrentState(value)
             | Self::OldState(value)
+            | Self::StateCandidate(value)
             | Self::Setting(value)
             | Self::OldSetting(value) => Some(value),
         }
@@ -401,6 +406,7 @@ pub struct SemanticModel {
     conditional_state_fields: HashMap<ValueId, ResolvedLayoutPredicate>,
     conditional_managed_fields: HashMap<ManagedFieldId, ResolvedLayoutPredicate>,
     state_poll_results: HashMap<ValueId, TypeId>,
+    state_dependencies: HashMap<ValueId, Vec<ValueId>>,
     propagation_targets: HashMap<ExprId, TypeId>,
     propagation_retry_boundaries: HashMap<ExprId, ExprId>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
@@ -1171,6 +1177,15 @@ impl SemanticModel {
         self.state_poll_results.get(&field).copied()
     }
 
+    /// Direct candidate-state dependencies of one physical field declaration.
+    /// The order is stable by first source occurrence and contains no duplicates.
+    pub fn state_dependencies(&self, field: ValueId) -> &[ValueId] {
+        self.state_dependencies
+            .get(&field)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     /// The result type produced by the nearest failure boundary for `value?`.
     pub fn propagation_target(&self, expression: ExprId) -> Option<TypeId> {
         self.propagation_targets.get(&expression).copied()
@@ -1336,6 +1351,7 @@ pub(crate) struct SemanticBuilder {
     conditional_state_fields: HashMap<ValueId, ResolvedLayoutPredicate>,
     conditional_managed_fields: HashMap<ManagedFieldId, ResolvedLayoutPredicate>,
     state_poll_results: HashMap<ValueId, Type>,
+    state_dependencies: HashMap<ValueId, Vec<ValueId>>,
     propagation_targets: HashMap<ExprId, Type>,
     propagation_retry_boundaries: HashMap<ExprId, ExprId>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
@@ -1560,6 +1576,20 @@ impl SemanticBuilder {
         debug_assert!(previous.is_none(), "state poll result must be unique");
     }
 
+    pub(crate) fn resolve_state_dependency(&mut self, field: ValueId, dependency: ValueId) {
+        let dependencies = self.state_dependencies.entry(field).or_default();
+        if !dependencies.contains(&dependency) {
+            dependencies.push(dependency);
+        }
+    }
+
+    pub(crate) fn state_dependencies(&self, field: ValueId) -> &[ValueId] {
+        self.state_dependencies
+            .get(&field)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
     pub(crate) fn resolve_propagation_target(
         &mut self,
         expression: ExprId,
@@ -1717,6 +1747,7 @@ impl SemanticBuilder {
             conditional_state_fields,
             conditional_managed_fields,
             state_poll_results,
+            state_dependencies,
             propagation_targets,
             propagation_retry_boundaries,
             path_members,
@@ -2016,6 +2047,7 @@ impl SemanticBuilder {
             conditional_state_fields,
             conditional_managed_fields,
             state_poll_results,
+            state_dependencies,
             propagation_targets,
             propagation_retry_boundaries,
             path_members,

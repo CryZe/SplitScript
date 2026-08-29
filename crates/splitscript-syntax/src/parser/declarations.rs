@@ -1064,8 +1064,10 @@ impl Parser<'_> {
                     name,
                     offset: self.expect_i64("expected a signed module offset")?,
                 }
-            } else {
+            } else if matches!(self.current().kind, TokenKind::Int(_)) {
                 PointerPathBase::Absolute(self.expect_u64("expected an unsigned absolute address")?)
+            } else {
+                PointerPathBase::Expression(self.required_expression(12)?)
             };
             let mut offsets = Vec::new();
             while self.at(&TokenKind::Comma)

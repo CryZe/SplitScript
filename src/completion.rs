@@ -580,8 +580,62 @@ fn complete_root(
         availability.state_snapshots,
         effects,
     );
+    add_state_source_bindings(&mut builder, syntax, offset);
     add_visible_bindings(&mut builder, syntax, offset);
     builder.finish()
+}
+
+fn add_state_source_bindings(builder: &mut CompletionBuilder, syntax: &Program, offset: usize) {
+    let Some(state) = &syntax.state else {
+        return;
+    };
+    if !state.layouts.is_empty() {
+        let Some(layout) = state.layouts.iter().find(|layout| {
+            layout
+                .fields
+                .iter()
+                .any(|field| contains_offset(field.span, offset))
+        }) else {
+            return;
+        };
+        for field in &layout.fields {
+            builder.add_scoped(simple_completion(
+                &field.name,
+                CompletionKind::StateField,
+                "sibling state field",
+            ));
+        }
+        return;
+    }
+    let in_common = state
+        .fields
+        .iter()
+        .any(|field| contains_offset(field.span, offset));
+    let active_group = state.conditional_fields.iter().find(|group| {
+        group
+            .fields
+            .iter()
+            .any(|field| contains_offset(field.span, offset))
+    });
+    if !in_common && active_group.is_none() {
+        return;
+    }
+    for field in &state.fields {
+        builder.add_scoped(simple_completion(
+            &field.name,
+            CompletionKind::StateField,
+            "sibling state field",
+        ));
+    }
+    if let Some(group) = active_group {
+        for field in &group.fields {
+            builder.add_scoped(simple_completion(
+                &field.name,
+                CompletionKind::StateField,
+                "conditional sibling state field",
+            ));
+        }
+    }
 }
 
 fn layout_selector_completion(state: &crate::ast::StateDecl) -> CompletionItem {

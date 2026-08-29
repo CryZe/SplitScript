@@ -144,6 +144,21 @@ APIs are `process.follow(base, offsets: [i64])`,
 
 ## Composing dynamic pointer paths
 
+When the dynamic part is itself watched state, use the sibling field directly
+as the [`at`](syntax@at) base. Field order does not matter:
+
+```splitscript
+state "game.exe" {
+    loading: bool at loadingAddress;
+    loadingAddress: address = process.read(0x1000)?;
+}
+```
+
+The compiler evaluates `loadingAddress` first. If that read fails, `loading` is
+not evaluated with a stale address; both fields retain their last accepted
+values. Cyclic sibling dependencies are rejected with labels on every field in
+the cycle.
+
 ASL scripts often copy a selected `DeepPointer` offset array and append one
 runtime-specific final offset. SplitScript's growable [`[T]`] arrays support
 that operation directly; do not branch over every possible path length. Create
@@ -1116,7 +1131,7 @@ The same policy remains available to a discovered-address expression with
 path is static so the declaration shows both the memory layout and its absence
 semantics in one place.
 
-Pointer width is a property of traversal. Static `at` fields use the attached
+Pointer width is a property of traversal. Static [`at`](syntax@at) fields use the attached
 process's native width. When a 64-bit host reads a PE32 or other 32-bit target,
 construct an explicit path with
 `base.memoryPath(offsets, finalOffset, PointerSize.Bit32)` and resolve it before

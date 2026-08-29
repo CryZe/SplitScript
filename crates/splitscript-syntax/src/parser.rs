@@ -1154,6 +1154,25 @@ mod tests {
     }
 
     #[test]
+    fn pointer_paths_accept_a_sibling_field_as_their_dynamic_base() {
+        let source = r#"
+            state "game.exe" {
+                value: u32 at base, 0x20;
+                base: address = 0x1000;
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let StateSource::Pointer(path) = &program.state.as_ref().unwrap().fields[0].source else {
+            panic!("expected a pointer-backed state field");
+        };
+        let PointerPathBase::Expression(base) = &path.base else {
+            panic!("expected a dynamic pointer base");
+        };
+        assert!(matches!(&base.kind, ExprKind::Path(segments) if segments.as_slice() == ["base"]));
+        assert_eq!(path.offsets, [0x20]);
+    }
+
+    #[test]
     fn array_types_use_brackets_and_compose_with_wrappers() {
         let source = r#"
             state "game.exe" {}

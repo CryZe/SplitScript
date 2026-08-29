@@ -264,6 +264,7 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
                 }
             });
         }
+        check_state_dependency_cycles(checker, state);
     });
 }
 
@@ -271,6 +272,12 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
 /// declaration. The caller owns that context so conditional state fields and
 /// named layouts can refine every expression attached to the field uniformly.
 fn check_state_expression(checker: &mut Checker, field: &StateField) {
+    checker.with_state_field(field.id, |checker| {
+        check_state_expression_inner(checker, field)
+    });
+}
+
+fn check_state_expression_inner(checker: &mut Checker, field: &StateField) {
     let field_type = checker.declarations.state_fields_by_id[&field.id];
     if let StateSource::Expression(expression) = &field.source {
         let boundary = contains_propagation(expression)
@@ -319,6 +326,31 @@ fn check_state_expression(checker: &mut Checker, field: &StateField) {
         }
     }
 
+    if let StateSource::Pointer(path) = &field.source
+        && let crate::ast::PointerPathBase::Expression(base) = &path.base
+    {
+        let expected = state_pointer_base_type(checker);
+        checker.with_expected_type_source(
+            super::ExpectedTypeSource {
+                span: base.span,
+                label: "a dynamic `at` base must be an address-valued sibling state field"
+                    .to_owned(),
+            },
+            |checker| {
+                checker.expr(base, Some(expected));
+            },
+        );
+        if !matches!(
+            checker.semantics.resolved_value(base.id),
+            Some(crate::semantic::ResolvedValue::StateCandidate(_))
+        ) {
+            checker.error(
+                "a dynamic `at` base must start from a sibling state field",
+                base.span,
+            );
+        }
+    }
+
     if let Some(transform) = &field.transform {
         checker.scopes.push(HashMap::from([(
             "value".to_owned(),
@@ -355,6 +387,135 @@ fn check_state_expression(checker: &mut Checker, field: &StateField) {
             );
         }
         checker.scopes.pop();
+    }
+}
+
+fn state_pointer_base_type(checker: &mut Checker) -> Type {
+    let Some((provider, _)) = checker.provider_value else {
+        return checker.core_type(crate::stdlib::CoreTypeId::Address);
+    };
+    let provider = checker.standard_library.state_provider(provider);
+    let parameter = checker
+        .standard_library
+        .item(provider.direct_read)
+        .signature
+        .parameters[0]
+        .ty;
+    checker.catalog_type(parameter, &std::collections::HashMap::new())
+}
+
+fn check_state_dependency_cycles(checker: &mut Checker, state: &StateDecl) {
+    use std::collections::{HashMap, HashSet};
+
+    let fields = state.all_fields().collect::<Vec<_>>();
+    let positions = fields
+        .iter()
+        .enumerate()
+        .map(|(position, field)| (field.id, position))
+        .collect::<HashMap<_, _>>();
+    let mut index = 0usize;
+    let mut indices = HashMap::new();
+    let mut lowlinks = HashMap::new();
+    let mut stack = Vec::new();
+    let mut on_stack = HashSet::new();
+    let mut components = Vec::<Vec<crate::ast::ValueId>>::new();
+
+    struct Tarjan<'a> {
+        checker: &'a Checker,
+        positions: &'a HashMap<crate::ast::ValueId, usize>,
+        index: &'a mut usize,
+        indices: &'a mut HashMap<crate::ast::ValueId, usize>,
+        lowlinks: &'a mut HashMap<crate::ast::ValueId, usize>,
+        stack: &'a mut Vec<crate::ast::ValueId>,
+        on_stack: &'a mut HashSet<crate::ast::ValueId>,
+        components: &'a mut Vec<Vec<crate::ast::ValueId>>,
+    }
+
+    impl Tarjan<'_> {
+        fn visit(&mut self, field: crate::ast::ValueId) {
+            let current = *self.index;
+            *self.index += 1;
+            self.indices.insert(field, current);
+            self.lowlinks.insert(field, current);
+            self.stack.push(field);
+            self.on_stack.insert(field);
+
+            for dependency in self.checker.semantics.state_dependencies(field) {
+                if !self.positions.contains_key(dependency) {
+                    continue;
+                }
+                if !self.indices.contains_key(dependency) {
+                    self.visit(*dependency);
+                    let dependency_low = self.lowlinks[dependency];
+                    self.lowlinks
+                        .entry(field)
+                        .and_modify(|low| *low = (*low).min(dependency_low));
+                } else if self.on_stack.contains(dependency) {
+                    let dependency_index = self.indices[dependency];
+                    self.lowlinks
+                        .entry(field)
+                        .and_modify(|low| *low = (*low).min(dependency_index));
+                }
+            }
+
+            if self.lowlinks[&field] != current {
+                return;
+            }
+            let mut component = Vec::new();
+            loop {
+                let member = self.stack.pop().expect("a component root remains on stack");
+                self.on_stack.remove(&member);
+                component.push(member);
+                if member == field {
+                    break;
+                }
+            }
+            component.sort_by_key(|field| self.positions[field]);
+            self.components.push(component);
+        }
+    }
+
+    {
+        let mut tarjan = Tarjan {
+            checker,
+            positions: &positions,
+            index: &mut index,
+            indices: &mut indices,
+            lowlinks: &mut lowlinks,
+            stack: &mut stack,
+            on_stack: &mut on_stack,
+            components: &mut components,
+        };
+        for field in &fields {
+            if !tarjan.indices.contains_key(&field.id) {
+                tarjan.visit(field.id);
+            }
+        }
+    }
+
+    for component in components {
+        let cyclic = component.len() > 1
+            || checker
+                .semantics
+                .state_dependencies(component[0])
+                .contains(&component[0]);
+        if !cyclic {
+            continue;
+        }
+        let first = fields[positions[&component[0]]];
+        let mut diagnostic = crate::Diagnostic::type_error(
+            "state fields cannot depend on each other cyclically",
+            first.span,
+        )
+        .with_primary_label(format!("`{}` participates in this cycle", first.name));
+        for member in component.iter().skip(1) {
+            let field = fields[positions[member]];
+            diagnostic = diagnostic.with_secondary_label(
+                field.span,
+                format!("`{}` also participates in this cycle", field.name),
+            );
+        }
+        checker.errors.push(diagnostic);
     }
 }
 

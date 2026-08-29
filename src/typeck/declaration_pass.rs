@@ -340,7 +340,7 @@ fn collect_state_field_type(
                     field.span,
                 );
             }
-            if !matches!(path.base, crate::ast::PointerPathBase::Absolute(address) if address <= u32::MAX.into())
+            if matches!(path.base, crate::ast::PointerPathBase::Absolute(address) if address > u32::MAX.into())
             {
                 checker.error(
                     format!("`state {}` addresses must fit in `u32`", provider.name),

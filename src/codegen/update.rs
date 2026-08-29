@@ -6,7 +6,7 @@ use wasm_encoder::{BlockType, Function, HeapType, Instruction, RefType, ValType}
 
 use crate::{
     abi::AbiImportId,
-    ast::{ActionKind, Program, ValueId},
+    ast::{ActionKind, Program, StateField, ValueId},
     semantic::SemanticModel,
     stdlib::{CoreTypeId, RuntimeRepresentation, StdlibFieldId, StdlibTypeId},
     wasm_ir,
@@ -15,7 +15,7 @@ use crate::{
 use super::{
     GcLayout, STATE_TYPE, Type,
     data_plan::StringPool,
-    emit_typed_struct_get,
+    emit_result_error, emit_typed_struct_get,
     global_plan::RuntimeGlobals,
     imports::Abi,
     managed_state_reads::ManagedStateReadCache,
@@ -88,6 +88,7 @@ struct StateFieldPoll {
 
 struct SnapshotPollContext<'a> {
     candidate_state: u32,
+    poll_result_locals: HashMap<ValueId, u32>,
     pointer_prefix_locals: &'a PrefixLocals,
     pointer_emission: PrefixEmissionContext<'a>,
     lowering: &'a UpdateContext<'a>,
@@ -142,6 +143,15 @@ pub(super) fn compile_update(
     ));
     let state = program.state.as_ref().unwrap();
     let all_fields = state.all_fields().collect::<Vec<_>>();
+    let read_indices = all_fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| (field.id, index))
+        .collect::<HashMap<_, _>>();
+    let poll_result_locals = read_indices
+        .iter()
+        .map(|(field, index)| (*field, first_poll_result + *index as u32))
+        .collect();
     for field in &all_fields {
         let poll_result = semantic_type(
             semantics
@@ -159,6 +169,7 @@ pub(super) fn compile_update(
     let mut function = Function::new(locals);
     let snapshot_poll = SnapshotPollContext {
         candidate_state,
+        poll_result_locals,
         pointer_prefix_locals: &pointer_prefix_locals,
         pointer_emission: PrefixEmissionContext {
             plan: lowering.pointer_prefixes,
@@ -484,7 +495,8 @@ pub(super) fn compile_update(
         .instruction(&Instruction::LocalSet(candidate_state));
     if state.layouts.is_empty() {
         let mut prefix_emission = PrefixEmissionState::default();
-        for (read_index, field) in all_fields.iter().enumerate() {
+        for field in state_dependency_order(&all_fields, semantics) {
+            let read_index = read_indices[&field.id];
             let predicate = semantics.state_field_layout_predicate(field.id);
             if let Some(predicate) = predicate {
                 emit_layout_predicate(
@@ -533,11 +545,9 @@ pub(super) fn compile_update(
                 .instruction(&Instruction::I32Const(layout_index as i32))
                 .instruction(&Instruction::I32Eq)
                 .instruction(&Instruction::If(BlockType::Empty));
-            for field in &layout.fields {
-                let read_index = all_fields
-                    .iter()
-                    .position(|candidate| candidate.id == field.id)
-                    .expect("layout fields belong to the read-function plan");
+            let layout_fields = layout.fields.iter().collect::<Vec<_>>();
+            for field in state_dependency_order(&layout_fields, semantics) {
+                let read_index = read_indices[&field.id];
                 emit_state_field_poll(
                     &mut function,
                     StateFieldPoll {
@@ -1164,6 +1174,54 @@ fn emit_storage_default(function: &mut Function, ty: ValType) {
     };
 }
 
+/// Stable topological order for the physical fields active in one state
+/// layout. Independent declarations retain source order; dependencies are
+/// emitted before the candidate-state reads that consume them.
+fn state_dependency_order<'a>(
+    fields: &[&'a StateField],
+    semantics: &SemanticModel,
+) -> Vec<&'a StateField> {
+    fn visit<'a>(
+        field: &'a StateField,
+        by_id: &HashMap<ValueId, &'a StateField>,
+        semantics: &SemanticModel,
+        visiting: &mut std::collections::HashSet<ValueId>,
+        visited: &mut std::collections::HashSet<ValueId>,
+        output: &mut Vec<&'a StateField>,
+    ) {
+        if visited.contains(&field.id) || !visiting.insert(field.id) {
+            return;
+        }
+        for dependency in semantics.state_dependencies(field.id) {
+            if let Some(dependency) = by_id.get(dependency) {
+                visit(dependency, by_id, semantics, visiting, visited, output);
+            }
+        }
+        visiting.remove(&field.id);
+        visited.insert(field.id);
+        output.push(field);
+    }
+
+    let by_id = fields
+        .iter()
+        .map(|field| (field.id, *field))
+        .collect::<HashMap<_, _>>();
+    let mut visiting = std::collections::HashSet::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut output = Vec::with_capacity(fields.len());
+    for field in fields {
+        visit(
+            field,
+            &by_id,
+            semantics,
+            &mut visiting,
+            &mut visited,
+            &mut output,
+        );
+    }
+    output
+}
+
 fn emit_state_field_poll(
     function: &mut Function,
     poll: StateFieldPoll,
@@ -1189,9 +1247,9 @@ fn emit_state_field_poll(
     };
     let (field_index, _) = state_storage_index(field, semantics);
     let field_type = value_type(field, semantics);
-    function.instruction(&Instruction::GlobalGet(lowering.runtime_globals.process));
-    if let Some(prefix) = lowering.pointer_prefixes.field(field) {
-        context.pointer_prefix_locals.emit_field_prefix(
+    let prefix = lowering.pointer_prefixes.field(field);
+    if let Some(prefix) = prefix {
+        context.pointer_prefix_locals.ensure_field_prefix(
             function,
             prefix,
             &context.pointer_emission,
@@ -1199,9 +1257,61 @@ fn emit_state_field_poll(
             conditional,
         );
     }
-    function
-        .instruction(&Instruction::Call(read_function))
-        .instruction(&Instruction::LocalSet(poll_result_local));
+    let dependencies = semantics.state_dependencies(field);
+    if dependencies.is_empty() {
+        emit_state_read_call(
+            function,
+            field,
+            read_function,
+            poll_result_local,
+            prefix,
+            context,
+        );
+    } else {
+        for (index, dependency) in dependencies.iter().enumerate() {
+            let dependency_result = semantic_type(
+                semantics
+                    .state_poll_result(*dependency)
+                    .expect("state dependencies have poll-result types"),
+                semantics,
+            );
+            let Type::Result(dependency_result) = dependency_result else {
+                unreachable!("state dependency poll-result types are Result layouts")
+            };
+            function
+                .instruction(&Instruction::LocalGet(
+                    context.poll_result_locals[dependency],
+                ))
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: lowering.gc.index(Type::Result(dependency_result)),
+                    field_index: 1,
+                });
+            if index != 0 {
+                function.instruction(&Instruction::I32Or);
+            }
+        }
+        function.instruction(&Instruction::If(BlockType::Empty));
+        emit_result_error(
+            function,
+            result_type,
+            field_type,
+            "state field dependency was unavailable",
+            lowering.gc,
+        );
+        function
+            .instruction(&Instruction::LocalSet(poll_result_local))
+            .instruction(&Instruction::Else);
+        emit_state_read_call(
+            function,
+            field,
+            read_function,
+            poll_result_local,
+            prefix,
+            context,
+        );
+        function.instruction(&Instruction::End);
+    }
 
     // A filter is itself fallible. A failed raw read bypasses it so the
     // original error reaches the field's acceptance boundary unchanged.
@@ -1222,6 +1332,11 @@ fn emit_state_field_poll(
             field_type,
             lowering,
         );
+        if !dependencies.is_empty() {
+            function
+                .instruction(&Instruction::LocalGet(context.candidate_state))
+                .instruction(&Instruction::RefAsNonNull);
+        }
         function
             .instruction(&Instruction::Call(transform))
             .instruction(&Instruction::LocalSet(poll_result_local))
@@ -1278,6 +1393,37 @@ fn emit_state_field_poll(
             field_index,
         })
         .instruction(&Instruction::End);
+}
+
+fn emit_state_read_call(
+    function: &mut Function,
+    field: ValueId,
+    read_function: u32,
+    poll_result_local: u32,
+    prefix: Option<crate::codegen::pointer_prefixes::FieldPrefix>,
+    context: &SnapshotPollContext<'_>,
+) {
+    function.instruction(&Instruction::GlobalGet(
+        context.lowering.runtime_globals.process,
+    ));
+    if !context
+        .lowering
+        .semantics
+        .state_dependencies(field)
+        .is_empty()
+    {
+        function
+            .instruction(&Instruction::LocalGet(context.candidate_state))
+            .instruction(&Instruction::RefAsNonNull);
+    }
+    if let Some(prefix) = prefix {
+        context
+            .pointer_prefix_locals
+            .emit_field_prefix_values(function, prefix);
+    }
+    function
+        .instruction(&Instruction::Call(read_function))
+        .instruction(&Instruction::LocalSet(poll_result_local));
 }
 
 fn emit_poll_value(

@@ -124,13 +124,34 @@ the right-hand side. A pointer-path field has no typed right-hand side, so its
 type must come from a `current`/`old` use or an explicit annotation. The
 compiler reports an ambiguity if neither provides enough information.
 
+A state field can refer to another field from the same active layout by its
+source name. This works in an expression-backed field and as a dynamic pointer
+base after [`at`](syntax@at):
+
+```splitscript
+state "game.exe" {
+    health: u32 at playerAddress, 0x20;
+    playerAddress: address = process.read(0x1000)?;
+    displayedHealth: u32 = health;
+}
+```
+
+Declarations do not need to be topologically ordered. The compiler builds the
+dependency graph, evaluates `playerAddress` before `health` and `health` before
+`displayedHealth`, and reports every participating declaration when it finds a
+cycle. In a named [`layout`], a reference resolves to the sibling in that
+physical layout rather than a same-named field from another layout.
+
 After attachment, initialization waits for one poll in which every required
 field succeeds. That snapshot initializes both `old` and `current`, and
 lifecycle actions begin on the following poll. Consequently action code never
 observes synthetic zero-filled state. Later, each successful field advances;
 a failed field retains its last accepted value while successful sibling fields
-still advance. The resulting snapshots are WebAssembly GC structs, so action
-code uses typed references rather than a linear-memory state layout.
+still advance. A dependent field is not evaluated in a poll where any direct
+dependency failed, so it cannot follow an address from an older candidate; it
+retains its own last accepted value too. The resulting snapshots are
+WebAssembly GC structs, so action code uses typed references rather than a
+linear-memory state layout.
 
 Some watchers use failed memory access as meaningful absence rather than a
 transient error. Write that choice explicitly with an optional pointer field:
@@ -1653,7 +1674,7 @@ must be rejected before the first complete snapshot can be published.
 
 ## Discovered state and watchers
 
-An `at` field retains the compact static pointer-path syntax. A state field may
+An [`at`](syntax@at) field retains the compact static pointer-path syntax. A state field may
 instead use a typed expression, allowing `onAttach` to discover Unity roots and
 field offsets once and the state DSL to read them every tick:
 
@@ -1733,7 +1754,7 @@ state "game.exe" {
 }
 ```
 
-This is why there is no separate `at32` spelling: static `at` paths use the
+This is why there is no separate `at32` spelling: static [`at`](syntax@at) paths use the
 attached process's native pointer width, while discovered or cross-width paths
 state their `PointerSize` exactly where traversal occurs. The maintained
 Borderlands PE32 layout has a host-executed fixture for this form.
@@ -2014,7 +2035,7 @@ around the generic call delimiters.
 
 `process.follow(base, offsets)` accepts `[i64]` and reads a non-null 64-bit
 pointer at every successive `current + offset` location. This uses the same
-wrapping signed-displacement arithmetic as static `at` paths and
+wrapping signed-displacement arithmetic as static [`at`](syntax@at) paths and
 `MemoryPath`. `process.readRelative32(location)`
 decodes the common x86-64 RIP-relative form as `location + 4 + i32(location)`.
 Both return `address!`. Use `else` or `?` for a one-shot attempt, or `retry` in

@@ -575,7 +575,7 @@ fn source_definition_for_value_path(
     let root_segment = match root {
         ResolvedValue::StandardLibraryConstant(_) => unreachable!(),
         ResolvedValue::ProviderValue(_) | ResolvedValue::ProviderContext { .. } => 0,
-        ResolvedValue::Variable(_) => 0,
+        ResolvedValue::Variable(_) | ResolvedValue::StateCandidate(_) => 0,
         ResolvedValue::ManagedStatic { .. } => unreachable!(),
         ResolvedValue::CurrentSnapshot
         | ResolvedValue::OldSnapshot
@@ -599,6 +599,7 @@ fn source_definition_for_value_path(
             | ResolvedValue::StandardLibraryConstant(_)
             | ResolvedValue::ManagedStatic { .. }
             | ResolvedValue::Variable(_)
+            | ResolvedValue::StateCandidate(_)
             | ResolvedValue::CurrentSnapshot
             | ResolvedValue::OldSnapshot
             | ResolvedValue::SettingsView
@@ -689,7 +690,7 @@ fn definition_for_value_path(
     let root_segment = match root {
         ResolvedValue::StandardLibraryConstant(_) => unreachable!(),
         ResolvedValue::ProviderValue(_) | ResolvedValue::ProviderContext { .. } => 0,
-        ResolvedValue::Variable(_) => 0,
+        ResolvedValue::Variable(_) | ResolvedValue::StateCandidate(_) => 0,
         ResolvedValue::ManagedStatic { .. } => unreachable!(),
         ResolvedValue::CurrentSnapshot
         | ResolvedValue::OldSnapshot
@@ -713,6 +714,7 @@ fn definition_for_value_path(
             | ResolvedValue::StandardLibraryConstant(_)
             | ResolvedValue::ManagedStatic { .. }
             | ResolvedValue::Variable(_)
+            | ResolvedValue::StateCandidate(_)
             | ResolvedValue::CurrentSnapshot
             | ResolvedValue::OldSnapshot
             | ResolvedValue::SettingsView

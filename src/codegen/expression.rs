@@ -104,6 +104,9 @@ pub(super) struct ExprContext<'a> {
     pub global_types: &'a HashMap<ValueId, Type>,
     pub settings: &'a HashMap<ValueId, SettingStorage>,
     pub runtime_globals: RuntimeGlobals,
+    /// Candidate snapshot parameter while evaluating a state field source or
+    /// transform that depends on sibling fields.
+    pub state_candidate: Option<u32>,
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
     pub closures: &'a HashMap<crate::semantic::ClosureInstance, u32>,
@@ -192,6 +195,7 @@ impl<'a> ExprContext<'a> {
             global_types: lowering.global_types,
             settings: lowering.settings,
             runtime_globals: lowering.runtime_globals,
+            state_candidate: None,
             runtime_helpers: lowering.runtime_helpers,
             functions: lowering.functions,
             closures: lowering.closures,
@@ -1446,7 +1450,7 @@ pub(super) fn compile_receiver(
     receiver_type
 }
 
-fn compile_resolved_path(
+pub(super) fn compile_resolved_path(
     function: &mut Function,
     value: ResolvedValue,
     members: &[ResolvedMember],
@@ -1610,6 +1614,17 @@ fn compile_resolved_path(
                     .instruction(&Instruction::RefAsNonNull);
                 emit_struct_get(function, index, field_type);
             }
+            field_type
+        }
+        ResolvedValue::StateCandidate(field) => {
+            let (index, storage) = state_storage_index(field, context.semantics);
+            let field_type = value_type(storage, context.semantics);
+            function.instruction(&Instruction::LocalGet(
+                context
+                    .state_candidate
+                    .expect("candidate-state references require a state function parameter"),
+            ));
+            emit_struct_get(function, index, field_type);
             field_type
         }
         ResolvedValue::Setting(setting) | ResolvedValue::OldSetting(setting) => {
@@ -2468,7 +2483,8 @@ fn resolved_value_type_id(value: ResolvedValue, context: &ExprContext<'_>) -> Op
     match value {
         ResolvedValue::Variable(value)
         | ResolvedValue::CurrentState(value)
-        | ResolvedValue::OldState(value) => context.semantics.value_type(value)?,
+        | ResolvedValue::OldState(value)
+        | ResolvedValue::StateCandidate(value) => context.semantics.value_type(value)?,
         ResolvedValue::Setting(value) | ResolvedValue::OldSetting(value) => {
             context.semantics.value_type(value)?
         }

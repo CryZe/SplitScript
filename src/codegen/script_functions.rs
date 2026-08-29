@@ -8,6 +8,8 @@ pub(super) fn compile_read(
     strings: &StringPool,
     lowering: &EmissionContext<'_>,
 ) -> Function {
+    let has_dependencies = !lowering.semantics.state_dependencies(field.id).is_empty();
+    let candidate_parameter = has_dependencies.then_some(1);
     let StateSource::Pointer(path) = &field.source else {
         let StateSource::Expression(_) = &field.source else {
             unreachable!();
@@ -25,7 +27,7 @@ pub(super) fn compile_read(
             &mut matches,
             &mut local_types,
             LocalPlanOptions {
-                parameter_count: 1,
+                parameter_count: 1 + u32::from(has_dependencies),
                 semantics: lowering.semantics,
                 wasm_ir: lowering.wasm_ir,
                 gc: lowering.gc,
@@ -49,6 +51,7 @@ pub(super) fn compile_read(
             global_types: lowering.global_types,
             settings: lowering.settings,
             runtime_globals: lowering.runtime_globals,
+            state_candidate: candidate_parameter,
             runtime_helpers: lowering.runtime_helpers,
             functions: lowering.functions,
             closures: lowering.closures,
@@ -121,12 +124,8 @@ pub(super) fn compile_read(
                 .expect("provider pointer fields are MemoryReadable")
                 .size();
             return compile_provider_direct_read(
-                match path.base {
-                    crate::ast::PointerPathBase::Absolute(address) => address as u32,
-                    crate::ast::PointerPathBase::Module { .. } => {
-                        unreachable!("provider direct reads reject module-relative roots")
-                    }
-                },
+                &path.base,
+                candidate_parameter,
                 memory_type_id,
                 field_type,
                 optional,
@@ -140,7 +139,8 @@ pub(super) fn compile_read(
         debug_assert_eq!(direct_read, IntrinsicId::ProcessRead);
     }
     let decoded_string = path.decoder.is_some();
-    let parameter_count = if shared_prefix.is_some() { 3 } else { 1 };
+    let parameter_count =
+        1 + u32::from(has_dependencies) + if shared_prefix.is_some() { 2 } else { 0 };
     let mut locals = vec![(1, ValType::I64)];
     if decoded_string {
         locals.push((
@@ -152,14 +152,16 @@ pub(super) fn compile_read(
     let address_local = parameter_count;
     let offsets = &path.offsets;
     if let Some(prefix) = shared_prefix {
+        let prefix_address = 1 + u32::from(has_dependencies);
+        let prefix_status = prefix_address + 1;
         function
-            .instruction(&Instruction::LocalGet(2))
+            .instruction(&Instruction::LocalGet(prefix_status))
             .instruction(&Instruction::I32Const(
                 super::pointer_prefixes::PREFIX_RESOLVED,
             ))
             .instruction(&Instruction::I32Ne)
             .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::LocalGet(2))
+            .instruction(&Instruction::LocalGet(prefix_status))
             .instruction(&Instruction::I32Const(
                 super::pointer_prefixes::PREFIX_MODULE_MISSING,
             ))
@@ -188,7 +190,7 @@ pub(super) fn compile_read(
             .instruction(&Instruction::End)
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End)
-            .instruction(&Instruction::LocalGet(1))
+            .instruction(&Instruction::LocalGet(prefix_address))
             .instruction(&Instruction::I64Const(prefix.initial_offset))
             .instruction(&Instruction::I64Add)
             .instruction(&Instruction::LocalSet(address_local));
@@ -223,6 +225,14 @@ pub(super) fn compile_read(
         function
             .instruction(&Instruction::I64Const(address as i64))
             .instruction(&Instruction::LocalSet(address_local));
+    } else if let crate::ast::PointerPathBase::Expression(expression) = &path.base {
+        emit_dynamic_state_base(
+            &mut function,
+            expression,
+            candidate_parameter.expect("dynamic state bases record a sibling dependency"),
+            lowering,
+        );
+        function.instruction(&Instruction::LocalSet(address_local));
     }
 
     // Resolve the complete pointer chain before either decoding a string or
@@ -311,6 +321,32 @@ pub(super) fn compile_read(
     function
 }
 
+fn emit_dynamic_state_base(
+    function: &mut Function,
+    expression: &crate::ast::Expr,
+    candidate_parameter: u32,
+    lowering: &EmissionContext<'_>,
+) {
+    let values = HashMap::new();
+    let temporaries = HashMap::new();
+    let matches = MatchLayout::default();
+    let mut context = ExprContext::compiler_generated(lowering, &values, &temporaries, &matches);
+    context.state_candidate = Some(candidate_parameter);
+    let root = lowering
+        .semantics
+        .value(expression.id)
+        .expect("checked dynamic state bases have a resolved sibling root");
+    debug_assert!(matches!(
+        root,
+        crate::semantic::ResolvedValue::StateCandidate(_)
+    ));
+    let members = lowering
+        .semantics
+        .path_members(expression.id)
+        .unwrap_or(&[]);
+    compile_resolved_path(function, root, members, &context);
+}
+
 /// Emits a fallible per-field candidate transform. Its parameter is the newly
 /// read value and its result determines whether the field accepts that value.
 pub(super) fn compile_state_transform(
@@ -327,6 +363,7 @@ pub(super) fn compile_state_transform(
         .state_transform(field.id)
         .expect("checked state transforms have Wasm IR plans");
     let field_type = value_type(field.id, lowering.semantics);
+    let has_dependencies = !lowering.semantics.state_dependencies(field.id).is_empty();
     let mut matches = MatchLayout::default();
     let mut local_types = Vec::new();
     let mut planned_locals = HashMap::new();
@@ -336,7 +373,7 @@ pub(super) fn compile_state_transform(
         &mut matches,
         &mut local_types,
         LocalPlanOptions {
-            parameter_count: 1,
+            parameter_count: 1 + u32::from(has_dependencies),
             semantics: lowering.semantics,
             wasm_ir: lowering.wasm_ir,
             gc: lowering.gc,
@@ -361,6 +398,7 @@ pub(super) fn compile_state_transform(
         global_types: lowering.global_types,
         settings: lowering.settings,
         runtime_globals: lowering.runtime_globals,
+        state_candidate: has_dependencies.then_some(1),
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
         closures: lowering.closures,
@@ -401,7 +439,8 @@ pub(super) fn compile_state_transform(
 
 #[allow(clippy::too_many_arguments)]
 fn compile_provider_direct_read(
-    address: u32,
+    base: &crate::ast::PointerPathBase,
+    candidate_parameter: Option<u32>,
     memory_type_id: crate::types::TypeId,
     field_type: Type,
     optional: Option<crate::ast::OptionTypeId>,
@@ -412,11 +451,23 @@ fn compile_provider_direct_read(
     lowering: &EmissionContext<'_>,
 ) -> Function {
     let mut function = Function::new([(1, ValType::I64), (1, ValType::I32)]);
-    let status_local = 1;
-    let guest_address_local = 2;
-    function
-        .instruction(&Instruction::I32Const(address as i32))
-        .instruction(&Instruction::LocalSet(guest_address_local));
+    let status_local = 1 + u32::from(candidate_parameter.is_some());
+    let guest_address_local = status_local + 1;
+    match base {
+        crate::ast::PointerPathBase::Absolute(address) => {
+            function.instruction(&Instruction::I32Const(*address as i32));
+        }
+        crate::ast::PointerPathBase::Module { .. } => {
+            unreachable!("provider direct reads reject module-relative roots")
+        }
+        crate::ast::PointerPathBase::Expression(expression) => emit_dynamic_state_base(
+            &mut function,
+            expression,
+            candidate_parameter.expect("dynamic state bases record a sibling dependency"),
+            lowering,
+        ),
+    }
+    function.instruction(&Instruction::LocalSet(guest_address_local));
     for offset in offsets {
         emit_provider_read(
             &mut function,
@@ -738,6 +789,7 @@ pub(super) fn compile_user_function(
         global_types: lowering.global_types,
         settings: lowering.settings,
         runtime_globals: lowering.runtime_globals,
+        state_candidate: None,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
         closures: lowering.closures,
@@ -916,6 +968,7 @@ pub(super) fn compile_closure(
         global_types: lowering.global_types,
         settings: lowering.settings,
         runtime_globals: lowering.runtime_globals,
+        state_candidate: None,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
         closures: lowering.closures,
@@ -1139,6 +1192,7 @@ pub(super) fn compile_action(
         global_types: lowering.global_types,
         settings: lowering.settings,
         runtime_globals: lowering.runtime_globals,
+        state_candidate: None,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
         closures: lowering.closures,
@@ -1394,7 +1448,7 @@ use super::{
     emit_struct_get, emit_typed_struct_get,
     expression::{
         BareReturn, ClosureEnvironment, ExprContext, LocalStorage, MatchLayout, compile_block,
-        emit_path_fields,
+        compile_resolved_path, emit_path_fields,
     },
     imports::Abi,
     memarg, memory_plan, semantic_type, state_storage_index, value_type,

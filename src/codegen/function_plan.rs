@@ -459,6 +459,10 @@ pub(super) fn encode<'a>(
         );
     }
 
+    let state_ref = ValType::Ref(RefType {
+        nullable: false,
+        heap_type: HeapType::Concrete(STATE_TYPE),
+    });
     let mut reads = Vec::with_capacity(
         program
             .state
@@ -475,6 +479,10 @@ pub(super) fn encode<'a>(
                 semantics,
             );
             let mut parameters = vec![ValType::I64];
+            let has_dependencies = !semantics.state_dependencies(field.id).is_empty();
+            if has_dependencies {
+                parameters.push(state_ref);
+            }
             if pointer_prefixes.field(field.id).is_some() {
                 parameters.extend([ValType::I64, ValType::I32]);
             }
@@ -493,17 +501,17 @@ pub(super) fn encode<'a>(
                 let value = gc.val_type(ty);
                 declare(
                     format!("state::{}::transform", field.name),
-                    vec![value],
+                    if has_dependencies {
+                        vec![value, state_ref]
+                    } else {
+                        vec![value]
+                    },
                     vec![gc.val_type(poll_result)],
                 )
             }));
         }
     }
 
-    let state_ref = ValType::Ref(RefType {
-        nullable: false,
-        heap_type: HeapType::Concrete(STATE_TYPE),
-    });
     let mut actions = HashMap::new();
     for action in &program.actions {
         let (params, results) = match action.kind {

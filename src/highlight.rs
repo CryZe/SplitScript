@@ -657,6 +657,9 @@ impl HighlightCollector<'_> {
                         self.insert(*span, SemanticTokenKind::StateField, MODIFIER_READONLY);
                     }
                 }
+                ResolvedValue::StateCandidate(id) => {
+                    self.insert(spans[0], self.value_kind(id), MODIFIER_READONLY);
+                }
                 ResolvedValue::Setting(id) | ResolvedValue::OldSetting(id) => {
                     self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
                     if let Some(span) = spans.get(1) {
@@ -1953,6 +1956,29 @@ whileAttached {
             SemanticTokenKind::Function,
             MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY
         ));
+    }
+
+    #[test]
+    fn highlights_sibling_state_references_as_readonly_state_fields() {
+        let source = r#"
+state "game.exe" {
+    dependent: u32 at source;
+    source: address = 0x1000;
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        database
+            .check()
+            .expect("sibling state highlighting fixture");
+        let highlights = database.semantic_highlights().unwrap();
+        let reference = source.find("at source").unwrap() + "at ".len();
+        let highlight = highlights
+            .highlights()
+            .iter()
+            .find(|highlight| highlight.span.start == reference)
+            .expect("dynamic state base should be highlighted");
+        assert_eq!(highlight.kind, SemanticTokenKind::StateField);
+        assert_eq!(highlight.modifiers, MODIFIER_READONLY);
     }
 
     #[test]

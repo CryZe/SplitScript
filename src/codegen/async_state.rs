@@ -1106,9 +1106,10 @@ fn emit_cooperative_module_scan_any(
     }
 }
 
-/// Traverses at most one mapped range per poll and completes after one
-/// snapshot of the host's range list. Status values are zero (uninitialized),
-/// one (found), two (exhausted), and three (scanning).
+/// Traverses at most one mapped range per poll. A complete miss refreshes the
+/// host's range list on the next poll, so the future remains pending until a
+/// matching mapping appears or process-close cancellation discards it. Status
+/// values are zero (refresh the snapshot), one (found), and three (scanning).
 #[allow(clippy::too_many_arguments)]
 fn emit_process_find_memory_range(
     function: &mut Function,
@@ -1133,20 +1134,9 @@ fn emit_process_find_memory_range(
         .instruction(&Instruction::LocalGet(status))
         .instruction(&Instruction::I64Const(1))
         .instruction(&Instruction::I64Eq)
-        .instruction(&Instruction::LocalGet(status))
-        .instruction(&Instruction::I64Const(2))
-        .instruction(&Instruction::I64Eq)
-        .instruction(&Instruction::I32Or)
         .instruction(&Instruction::If(BlockType::Empty));
-    if let Some((field, Type::Option(option))) = layout.field(destination) {
+    if let Some((field, _)) = layout.field(destination) {
         context.locals.frame().emit(function);
-        function
-            .instruction(&Instruction::LocalGet(status))
-            .instruction(&Instruction::I64Const(1))
-            .instruction(&Instruction::I64Eq)
-            .instruction(&Instruction::If(BlockType::Result(
-                context.gc.val_type(Type::Option(option)),
-            )));
         emit_intrinsic_state_get(function, context, 2);
         emit_intrinsic_state_get(function, context, 3);
         for mask in [2_i64, 4, 8] {
@@ -1161,14 +1151,6 @@ fn emit_process_find_memory_range(
             .instruction(&Instruction::StructNew(
                 context.gc.standard_index(StdlibTypeId::MemoryRange),
             ))
-            .instruction(&Instruction::StructNew(
-                context.gc.index(Type::Option(option)),
-            ))
-            .instruction(&Instruction::Else)
-            .instruction(&Instruction::RefNull(HeapType::Concrete(
-                context.gc.index(Type::Option(option)),
-            )))
-            .instruction(&Instruction::End)
             .instruction(&Instruction::StructSet {
                 struct_type_index: context.locals.frame().struct_type,
                 field_index: field,
@@ -1201,9 +1183,11 @@ fn emit_process_find_memory_range(
         .instruction(&Instruction::LocalTee(cursor))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::I64Const(2))
-        .instruction(&Instruction::LocalSet(status));
-    emit_intrinsic_state_set_local(function, context, 0, status);
+        // The current snapshot was exhausted. Leave the future pending and
+        // refresh the range count on the next host update.
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::LocalSet(cursor));
+    emit_intrinsic_state_set_local(function, context, 0, cursor);
     function
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::Return)

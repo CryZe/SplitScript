@@ -748,19 +748,11 @@ fn sonic_three_air_shaped_range_discovery_and_filtered_state_compile_cleanly() {
         }
 
         onAttach {
-            wramBase = loop {
-                let mapping = await process.findMemoryRange(
-                    0x521000,
-                    MemoryRangeAccess.Read,
-                )
-                match mapping {
-                    Some(range) => break range.address.offset(0x400020),
-                    None => {
-                        await nextTick()
-                        continue
-                    },
-                }
-            }
+            let mapping = await process.findMemoryRange(
+                0x521000,
+                MemoryRangeAccess.Read,
+            )
+            wramBase = mapping.address.offset(0x400020)
         }
 
         whileAttached {

@@ -1,0 +1,10 @@
+state "game.exe" {}
+
+onAttach {
+    let range = await process.findMemoryRange(
+        0x300,
+        MemoryRangeAccess.ReadWrite,
+    )
+    print(`{range.address}|{range.size}|{range.readable}|{range.writable}|{range.executable}`)
+    await process.closed()
+}

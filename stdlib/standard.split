@@ -709,9 +709,10 @@ intrinsic type Process {
 
     /// Searches mapped memory ranges cooperatively.
     ///
-    /// At most one host memory-range entry is inspected per update. The
-    /// operation completes with [`None`] after one full traversal when no range
-    /// has the requested size and permissions.
+    /// At most one host memory-range entry is inspected per update. When one
+    /// complete snapshot contains no match, the operation refreshes the mapped
+    /// ranges and keeps waiting. It completes only after finding the requested
+    /// size and permissions; closing the attached process cancels it.
     ///
     /// # Example
     ///
@@ -729,7 +730,7 @@ intrinsic type Process {
         size: u64,
         /// Permissions that the range must provide.
         access: MemoryRangeAccess,
-    ) -> async MemoryRange?;
+    ) -> async MemoryRange;
 
     /// Collects a snapshot of the process's mapped memory ranges.
     ///
@@ -5169,7 +5170,7 @@ struct MemoryRange {
     /// Read the mapping base
     ///
     /// ```splitscript
-    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite) else return;
+    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite)
     /// let base = range.address
     /// ```
     address: address,
@@ -5181,7 +5182,7 @@ struct MemoryRange {
     /// Read the mapping size
     ///
     /// ```splitscript
-    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite) else return;
+    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite)
     /// let bytes = range.size
     /// ```
     size: u64,
@@ -5193,7 +5194,7 @@ struct MemoryRange {
     /// Inspect read access
     ///
     /// ```splitscript
-    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite) else return;
+    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite)
     /// let canRead = range.readable
     /// ```
     readable: bool,
@@ -5205,7 +5206,7 @@ struct MemoryRange {
     /// Inspect write access
     ///
     /// ```splitscript
-    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite) else return;
+    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite)
     /// let canWrite = range.writable
     /// ```
     writable: bool,
@@ -5217,7 +5218,7 @@ struct MemoryRange {
     /// Inspect execute access
     ///
     /// ```splitscript
-    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite) else return;
+    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite)
     /// let canExecute = range.executable
     /// ```
     executable: bool,
@@ -7777,23 +7778,17 @@ struct GBAEmulator {
         let processName = process.name()
 
         if processName == "mGBA.exe" || processName == "mGBA" || processName == "EmuHawk.exe" {
-            while true {
-                let range = await process.findMemoryRange(
-                    0x48000,
-                    MemoryRangeAccess.ReadWrite,
-                )
-                while true {
-                    let mapping = range else break
-                    return GBAEmulator {
-                        backend: 1,
-                        ewram: mapping.address,
-                        iwram: mapping.address.offset(0x40000),
-                        aux1: 0,
-                        aux2: 0,
-                        aux3: 0,
-                    }
-                }
-                await nextTick()
+            let mapping = await process.findMemoryRange(
+                0x48000,
+                MemoryRangeAccess.ReadWrite,
+            )
+            return GBAEmulator {
+                backend: 1,
+                ewram: mapping.address,
+                iwram: mapping.address.offset(0x40000),
+                aux1: 0,
+                aux2: 0,
+                aux3: 0,
             }
         }
 
@@ -7864,19 +7859,22 @@ struct GBAEmulator {
         }
 
         if processName == "retroarch.exe" {
-            let range = await process.findMemoryRange(
-                0x48000,
-                MemoryRangeAccess.ReadWrite,
-            )
-            while true {
-                let mapping = range else break
-                return GBAEmulator {
-                    backend: 1,
-                    ewram: mapping.address,
-                    iwram: mapping.address.offset(0x40000),
-                    aux1: 0,
-                    aux2: 0,
-                    aux3: 0,
+            // A completed absence is meaningful here: it selects the fallback
+            // VBA-style core discovery instead of waiting for a direct mapping.
+            for mapping in process.memoryRanges() {
+                if mapping.address != 0
+                    && mapping.size == 0x48000
+                    && mapping.readable
+                    && mapping.writable
+                {
+                    return GBAEmulator {
+                        backend: 1,
+                        ewram: mapping.address,
+                        iwram: mapping.address.offset(0x40000),
+                        aux1: 0,
+                        aux2: 0,
+                        aux3: 0,
+                    }
                 }
             }
 
@@ -8697,7 +8695,7 @@ struct GCNEmulator {
         let mapping = await process.findMemoryRange(
             0x2000000,
             MemoryRangeAccess.ReadWrite,
-        ) else await process.closed()
+        )
         let magic = retry process.read<u32>(mapping.address.offset(0x1c))
         if magic != 0x3d9f33c2 {
             await process.closed()
@@ -8768,7 +8766,7 @@ struct WiiEmulator {
         let mem1 = await process.findMemoryRange(
             0x2000000,
             MemoryRangeAccess.ReadWrite,
-        ) else await process.closed()
+        )
         let marker1 = retry process.read<u32>(mem1.address.offset(0x3118))
         let marker2 = retry process.read<u32>(mem1.address.offset(0x311c))
         if marker1 != 4 || marker2 != 4 {
@@ -8778,7 +8776,7 @@ struct WiiEmulator {
         let mem2 = await process.findMemoryRange(
             0x4000000,
             MemoryRangeAccess.ReadWrite,
-        ) else await process.closed()
+        )
         let mem1Address = mem1.address as u64
         let mem2Address = mem2.address as u64
         if mem2Address <= mem1Address || mem2Address >= mem1Address + 0x10000000 {

@@ -724,10 +724,6 @@ const BOOL_OPTION: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Option,
     arguments: &[BOOL],
 };
-const MEMORY_RANGE_OPTION: ContractTypeRef = ContractTypeRef::Application {
-    constructor: StdlibTypeConstructorId::Option,
-    arguments: &[MEMORY_RANGE],
-};
 const MEMORY_RANGE_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
     arguments: &[MEMORY_RANGE],
@@ -1389,7 +1385,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 NO_TYPE_PARAMETERS,
                 Some(PROCESS_TYPE),
                 params![value(U64), value(MEMORY_RANGE_ACCESS)],
-                MEMORY_RANGE_OPTION,
+                MEMORY_RANGE,
             ),
             PROCESS_SUSPEND.with(Effect::Allocates),
             OnAttach,

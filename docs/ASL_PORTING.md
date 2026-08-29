@@ -1326,6 +1326,26 @@ for range in ranges {
 Searching the contents of those ranges should still use the suspending scan
 APIs so large reads yield between bounded windows.
 
+When attachment should wait for a mapping with an exact size and permission
+set, use [`Process.findMemoryRange`]:
+
+```splitscript
+# state "game.exe" {}
+onAttach {
+    let mapping = await process.findMemoryRange(
+        0x48000,
+        MemoryRangeAccess.ReadWrite,
+    )
+    print(`mapping starts at {mapping.address}`)
+}
+```
+
+The future inspects at most one mapped range per update and refreshes the
+mapping snapshot after a complete miss. It does not return a temporary
+[`None`]; it remains pending until a match appears or the process closes. Use
+[`Process.memoryRanges`] instead when a completed absence must immediately
+select a different discovery strategy.
+
 An awaited scan remains pending when no signature is present; it does not
 produce a temporary zero address. This matches attach-time discovery that
 should wait for a module or runtime allocation to become ready. If an absent

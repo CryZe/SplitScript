@@ -591,6 +591,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/process_find_memory_range.split",
+        output: "process_find_memory_range.wasm",
+        profile: "release",
+        harness: "tests/process_find_memory_range_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/managed_instances_runtime.split",
         output: "managed_instances_runtime.wasm",
         profile: "release",

@@ -6,12 +6,64 @@ use super::{
     ActionKind, Diagnostic, Parser, RecoveryNode, RecoveryNodeKind, Span, Token, TokenKind,
     parse_integer,
 };
+use crate::diagnostic::{DiagnosticCode, DiagnosticFix, FixApplicability, TextEdit};
 use crate::migration::{
     ForeignSpellingContext, MigrationDiagnosticId, diagnostic as migration_diagnostic,
     foreign_spelling, legacy_lifecycle_diagnostic,
 };
 
 impl Parser<'_> {
+    pub(super) fn record_javascript_style_interpolation(&mut self) {
+        let interpolation = self.current().span;
+        let Some(dollar_start) = interpolation.start.checked_sub(1) else {
+            return;
+        };
+        if self.source.as_bytes().get(dollar_start) != Some(&b'$') {
+            return;
+        }
+
+        let preceding_backslashes = self.source.as_bytes()[..dollar_start]
+            .iter()
+            .rev()
+            .take_while(|byte| **byte == b'\\')
+            .count();
+        if preceding_backslashes % 2 == 1 {
+            return;
+        }
+
+        let dollar = Span {
+            start: dollar_start,
+            end: interpolation.start,
+        };
+        self.diagnostics.push(
+            Diagnostic::warning(
+                DiagnosticCode::SuspiciousInterpolation,
+                "JavaScript-style `${...}` is suspicious in a SplitScript template",
+                dollar,
+            )
+            .with_primary_label("`$` is literal text; `{...}` starts the interpolation")
+            .with_note(
+                "remove `$` for ordinary interpolation, or escape it as `\\$` when the rendered text should contain a dollar sign",
+            )
+            .with_fix(DiagnosticFix {
+                title: "remove the JavaScript dollar marker".to_owned(),
+                applicability: FixApplicability::MachineApplicable,
+                edits: vec![TextEdit {
+                    span: dollar,
+                    replacement: String::new(),
+                }],
+            })
+            .with_fix(DiagnosticFix {
+                title: "escape the literal dollar sign".to_owned(),
+                applicability: FixApplicability::MachineApplicable,
+                edits: vec![TextEdit {
+                    span: dollar,
+                    replacement: "\\$".to_owned(),
+                }],
+            }),
+        );
+    }
+
     pub(super) fn terminator(&mut self) -> Result<(), Diagnostic> {
         if self.eat(&TokenKind::Semicolon).is_some()
             || self.at(&TokenKind::RBrace)

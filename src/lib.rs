@@ -107,6 +107,7 @@ pub struct WarningPolicy {
     value_block_semicolon: WarningLevel,
     ambiguous_retry_fallback: WarningLevel,
     static_setting_lookup: WarningLevel,
+    suspicious_interpolation: WarningLevel,
 }
 
 impl WarningPolicy {
@@ -119,6 +120,7 @@ impl WarningPolicy {
             DiagnosticCode::ValueBlockSemicolon => Some(self.value_block_semicolon),
             DiagnosticCode::AmbiguousRetryFallback => Some(self.ambiguous_retry_fallback),
             DiagnosticCode::StaticSettingLookup => Some(self.static_setting_lookup),
+            DiagnosticCode::SuspiciousInterpolation => Some(self.suspicious_interpolation),
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
             | DiagnosticCode::Type
@@ -136,6 +138,7 @@ impl WarningPolicy {
             DiagnosticCode::ValueBlockSemicolon => &mut self.value_block_semicolon,
             DiagnosticCode::AmbiguousRetryFallback => &mut self.ambiguous_retry_fallback,
             DiagnosticCode::StaticSettingLookup => &mut self.static_setting_lookup,
+            DiagnosticCode::SuspiciousInterpolation => &mut self.suspicious_interpolation,
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
             | DiagnosticCode::Type

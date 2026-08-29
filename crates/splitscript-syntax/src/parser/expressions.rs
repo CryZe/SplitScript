@@ -539,6 +539,7 @@ impl Parser<'_> {
                         parts.push(InterpolatedPart::Text(value));
                     }
                     TokenKind::TemplateExprStart => {
+                        self.record_javascript_style_interpolation();
                         self.bump();
                         let expression_start = self.cursor.position();
                         if let Some(value) = self.interpolated_expression(expression_start) {

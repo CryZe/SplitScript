@@ -1571,6 +1571,7 @@ impl Parser<'_> {
                     parts.push(SettingTextPart::Text(value));
                 }
                 TokenKind::TemplateExprStart => {
+                    self.record_javascript_style_interpolation();
                     self.bump();
                     let (name, span) =
                         self.expect_any_ident("expected the family binding in this template")?;

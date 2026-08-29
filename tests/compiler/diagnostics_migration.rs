@@ -1,6 +1,66 @@
 //! diagnostics migration integration tests.
 
 #[test]
+fn javascript_template_interpolation_warns_with_both_intent_preserving_fixes() {
+    use splitscript::{DiagnosticCode, DiagnosticSeverity, FixApplicability};
+
+    let source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let score = 1200
+            print(`Score: ${score}`)
+        }
+    "#;
+    let recovered = splitscript::parse_recovering(source)
+        .expect("JavaScript-style interpolation should retain a syntax tree");
+    let diagnostic = recovered
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code == DiagnosticCode::SuspiciousInterpolation)
+        .expect("the unescaped dollar marker should warn");
+    assert_eq!(diagnostic.severity, DiagnosticSeverity::Warning);
+    assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "$");
+    assert_eq!(diagnostic.fixes.len(), 2);
+    assert!(
+        diagnostic
+            .fixes
+            .iter()
+            .all(|fix| fix.applicability == FixApplicability::MachineApplicable)
+    );
+    assert_eq!(diagnostic.fixes[0].edits[0].replacement, "");
+    assert_eq!(diagnostic.fixes[1].edits[0].replacement, "\\$");
+
+    for fix in diagnostic.fixes.iter() {
+        let edit = &fix.edits[0];
+        let mut fixed = source.to_owned();
+        fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+        let reparsed = splitscript::parse_recovering(&fixed).unwrap();
+        assert!(
+            reparsed
+                .diagnostics()
+                .iter()
+                .all(|diagnostic| diagnostic.code != DiagnosticCode::SuspiciousInterpolation),
+            "fix `{}` should make the intent explicit",
+            fix.title
+        );
+    }
+
+    for canonical in [r#"`{score}`"#, r#"`\${score}`"#, r#"`cost $5`"#] {
+        let fixture = format!(
+            "state \"game.exe\" {{}}\nwhileAttached {{ let score = 5 print({canonical}) }}"
+        );
+        let parsed = splitscript::parse_recovering(&fixture).unwrap();
+        assert!(
+            parsed
+                .diagnostics()
+                .iter()
+                .all(|diagnostic| diagnostic.code != DiagnosticCode::SuspiciousInterpolation),
+            "`{canonical}` should not warn"
+        );
+    }
+}
+
+#[test]
 fn javascript_strict_equality_recovers_with_machine_applicable_fixes() {
     use splitscript::FixApplicability;
 

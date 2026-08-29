@@ -23,9 +23,10 @@ print(scoreText("Runner", score))
 # }
 ```
 
-Interpolation is `{expression}`, not `${expression}`. A literal dollar sign
-before an interpolation stays literal, so `${score}` produces a dollar sign
-followed by the formatted score.
+Interpolation is `{expression}`, not `${expression}`. The compiler warns on
+`${score}` and offers to remove the JavaScript dollar marker. If the rendered
+text really needs a dollar sign before the formatted score, escape that intent
+as `\${score}`.
 
 Records and enums have no mutable prototype chain. They receive a readable
 multiline display representation automatically. Define

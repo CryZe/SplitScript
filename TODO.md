@@ -720,11 +720,7 @@ concepts rather than maintaining a parallel inventory.
   declarations, option value, strings, durations, and numeric types. Add new
   entries only for corpus-proven, unambiguous spellings that are not already
   handled by the type-aware callable suggestion machinery. Keep canonical
-  syntax unique; do not add compatibility aliases. Diagnose JavaScript-style
-  `${value}` inside backtick strings as suspicious while preserving its current
-  meaning: offer `{value}` when the dollar was accidental and `\${value}` when
-  a literal dollar before the interpolation was intended. `$` remains ordinary
-  string/template text and is unrelated to identifier syntax.
+  syntax unique; do not add compatibility aliases.
 - [ ] Include the canonical compiler identity already exposed by the compiler
   service and generated-module metadata in machine-readable port reports so
   future evidence remains reproducible.

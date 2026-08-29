@@ -17,10 +17,11 @@ pub enum DiagnosticCode {
     ValueBlockSemicolon,
     AmbiguousRetryFallback,
     StaticSettingLookup,
+    SuspiciousInterpolation,
 }
 
 impl DiagnosticCode {
-    pub const WARNINGS: [Self; 7] = [
+    pub const WARNINGS: [Self; 8] = [
         Self::MustUse,
         Self::UnusedBinding,
         Self::UnusedDeclaration,
@@ -28,6 +29,7 @@ impl DiagnosticCode {
         Self::ValueBlockSemicolon,
         Self::AmbiguousRetryFallback,
         Self::StaticSettingLookup,
+        Self::SuspiciousInterpolation,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -43,6 +45,7 @@ impl DiagnosticCode {
             Self::ValueBlockSemicolon => "SS1005",
             Self::AmbiguousRetryFallback => "SS1006",
             Self::StaticSettingLookup => "SS1007",
+            Self::SuspiciousInterpolation => "SS1008",
         }
     }
 
@@ -56,6 +59,7 @@ impl DiagnosticCode {
                 | Self::ValueBlockSemicolon
                 | Self::AmbiguousRetryFallback
                 | Self::StaticSettingLookup
+                | Self::SuspiciousInterpolation
         )
     }
 }
@@ -76,6 +80,7 @@ impl FromStr for DiagnosticCode {
             "SS1005" => Ok(Self::ValueBlockSemicolon),
             "SS1006" => Ok(Self::AmbiguousRetryFallback),
             "SS1007" => Ok(Self::StaticSettingLookup),
+            "SS1008" => Ok(Self::SuspiciousInterpolation),
             _ => Err(()),
         }
     }

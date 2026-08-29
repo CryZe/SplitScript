@@ -4105,3 +4105,12 @@ language catalog document the refinement rule.
 - Removed the accidental acceptance of `$` in source identifiers. It remains
   ordinary content in strings and template strings, including process names
   such as `NO$GBA.EXE`.
+
+# 2026-08-29: explicit dollar intent in template interpolation
+
+- Added warning `SS1008` for JavaScript-style `${value}` in backtick strings,
+  explaining that SplitScript interpolation starts with `{` and that the
+  unescaped dollar would otherwise be rendered literally.
+- Offered machine-applicable fixes for both possible intentions: remove `$` for
+  `{value}`, or escape it as `\${value}` when the rendered text needs the dollar
+  before the interpolated value. Ordinary dollar text remains warning-free.

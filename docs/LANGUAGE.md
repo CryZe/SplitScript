@@ -2139,9 +2139,10 @@ widths, `address`, and standard-library types with source-defined formatting
 such as `FileVersion` are supported, while values without the [`Display`]
 capability produce compile-time errors. Template strings may contain multiple interpolations,
 nested expressions, and newlines. Literal braces are written as `\{` and `\}`.
-`$` is ordinary template text, so `${value}` intentionally emits a literal
-dollar sign followed by the interpolation of `value`; the compiler cannot
-safely treat that spelling as a JavaScript migration typo.
+`$` is ordinary template text, but JavaScript-style `${value}` warns because it
+is usually an accidental spelling. Remove the `$` for `{value}`, or write
+`\${value}` explicitly to emit a literal dollar sign followed by the
+interpolation of `value`.
 
 ```text
 let level = `{stage}-{act}`

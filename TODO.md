@@ -410,7 +410,7 @@ concepts rather than maintaining a parallel inventory.
   the first diagnostic. Introduce attachment, one typed setting, one `at` state
   field, `old` / `current`, and one timer decision before scans, Unity, layouts,
   or async discovery.
-- [ ] Rewrite the packaged VS Code README as an extension-user/Marketplace
+- [x] Rewrite the packaged VS Code README as an extension-user/Marketplace
   artifact: outcome, first workflow, commands and outputs, bundled compiler,
   documentation, requirements, limitations, and troubleshooting. Move npm,
   VSIX construction, web-host tests, workers, and Extension Development Host

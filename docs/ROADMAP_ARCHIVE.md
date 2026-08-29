@@ -13,6 +13,14 @@
 - Corrected the remaining first-use roadmap so disposable examples are neither
   bundled nor promoted as required author documentation.
 
+## 2026-08-30: extension package documentation for authors
+
+- Rewrote the VS Code package README around outcomes and the first successful
+  author workflow, with exact commands, neighboring Wasm output, bundled
+  tooling, requirements, host boundaries, and recovery steps.
+- Moved npm setup, VSIX construction, worker architecture, extension-host
+  launches, and browser-host testing into a contributor-only development guide.
+
 ## 2026-08-29: managed-string bound ergonomics resolved by schema syntax
 
 - The earlier porting question about accepting arbitrary integer types for a

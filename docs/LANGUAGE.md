@@ -411,9 +411,10 @@ otherwise ambiguous value needs an annotation. Memory reads are stricter: a
 component constrained by `MemoryReadable` never uses a numeric default, even if
 it also contains a literal or an `Integer`/`Float` constraint. The concrete
 memory representation must come from an annotation, explicit generic argument,
-or another exact type. Mutable `let` bindings are monomorphic. User functions
-are also currently monomorphic per declaration; generalized polymorphic
-functions will require Wasm signature specialization.
+or another exact type. Mutable `let` bindings are monomorphic. Unannotated user
+function parameters and results are generalized at the declaration boundary,
+then instantiated independently for each call site. The backend emits a
+concrete Wasm signature and body for every reachable specialization.
 
 Decimal floating-point literals may use an exponent, such as `1e-45` or
 `6.022e+23`. They are rounded once to their inferred `f32` or `f64` target and
@@ -775,14 +776,15 @@ non-file editor documents retain their URI. APIs that intentionally compile
 only an in-memory string use `input.split`. Release builds omit both the name
 section and every `.debug_*` section.
 
-The statement form accepts bindings, expression statements, assignments, `if`,
-`while`, and `await` or `retry` statements. It rejects `return`, `throw`,
-`break`, and `continue` until profile-dependent termination rules are
-specified.
+The `debug` modifier accepts bindings, expression statements, assignments,
+`if`, `while`, `for`, and `await` or `retry` statements. It rejects `return`,
+`throw`, `break`, and `continue` because erasing a terminator would change the
+surrounding release control flow.
 
-Expression branches currently contain one expression rather than a sequence of
-statements with a trailing value. A state-field assignment is a failure
-boundary, so `?` can propagate a read error directly out of the selected branch:
+Blocks are expressions wherever an expression is expected. They may contain
+statements and yield their final expression, including inside an `if` branch.
+A state-field assignment is a failure boundary, so `?` can propagate a read
+error directly out of the selected branch:
 
 ```text
 levelOrScene = if isDlcDemo {
@@ -2223,5 +2225,5 @@ in exported linear memory. SplitScript therefore keeps a small memory page for
 the host boundary and scratch reads. This is an ABI adapter, not the language's
 object model.
 
-Future arrays, strings, user records, closures, and generic collections can all
-be represented as GC values without changing the host ABI.
+Arrays, strings, user records, closures, sets, iterators, and generic wrappers
+are represented as GC values without changing the host ABI.

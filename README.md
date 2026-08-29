@@ -92,6 +92,8 @@ The durable contributor references are:
   for current and proposed host contracts.
 - [Runtime conformance](docs/PORT_CONFORMANCE.md) and [measured baselines](docs/BASELINES.md)
   for what repository verification proves.
+- [Porting campaign audit](docs/PORTING_CAMPAIGN_AUDIT.md) for durable findings
+  from real migration attempts and maintained runtime evidence.
 - [Active roadmap](TODO.md) for prioritized remaining work.
 - [VS Code development](editors/vscode/DEVELOPMENT.md) for packaging and
   extension-host tests.

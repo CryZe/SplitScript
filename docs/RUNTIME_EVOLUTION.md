@@ -351,7 +351,7 @@ Before implementing this direction, settle:
   returns, globals, and editor type information;
 - whether `T?`/`T!` receive specialized resource drop glue before user
   records and variable-length collections;
-- how current aliasable arrays, sets, records, and future closures are
+- how current aliasable arrays, sets, records, and closures are
   restricted when they transitively contain a resource;
 - the exact non-suspending, non-failing destructor ABI and its behavior during
   traps, hot reload, and store destruction;

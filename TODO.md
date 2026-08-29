@@ -422,20 +422,21 @@ concepts rather than maintaining a parallel inventory.
   contributor documents and keep backend, LSP, and debug-metadata inventories
   in developer architecture documents; do not make full examples part of the
   user path.
-- [ ] Keep maintained port and conformance evidence discoverable for compiler
+- [x] Keep maintained port and conformance evidence discoverable for compiler
   contributors without making the `examples` directory part of the authoring
   path. User guides must remain self-contained and must not link to disposable
   full autosplitter scripts.
 
 ### Make every documentation surface agree
 
-- [ ] Correct current contradictions before expanding prose: generic user
+- [x] Correct current contradictions before expanding prose: generic user
   functions and source async helpers are implemented; strings, records,
   arrays, closures, iterators, UTF-16 decoding, numeric formatting, string
   construction, browsable docs, and generated reference pages must not still
-  be described as future work. Make compiler catalogs canonical for exact
-  signatures, effects, availability, members, and support status; hand-written
-  pages link to those facts instead of copying tables.
+  be described as future work.
+- [ ] Keep compiler catalogs canonical for exact signatures, effects,
+  availability, members, and support status; hand-written pages should link to
+  those facts instead of copying tables.
 - [ ] Split the user-facing language path from compiler architecture. Start
   with one complete autosplitter and the update/lifecycle mental model, then
   teach ordinary language, state/memory, settings/timer, failure/async, and

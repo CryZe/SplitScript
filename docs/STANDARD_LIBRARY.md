@@ -431,9 +431,9 @@ control flow rather than eager method calls.
 Read-only queries cover item enumeration, exact canonical lookup, path and
 method candidate lookup, signature rendering, and the documentation stored on
 each item. `StandardLibraryDocumentation` turns those facts into one canonical
-generic or call-site-substituted reference entry. Completion, hover, and
-signature help already consume that entry; the future browsable and
-machine-readable documentation renderers will use the same payload.
+generic or call-site-substituted reference entry. Completion, hover, signature
+help, the browsable reference, and terminal documentation already consume that
+entry; a future machine-readable exporter must use the same payload.
 
 Every parsed expression also has a stable per-program `ExprId`. Checked
 expression types and standard-library call resolutions are queried by this ID,
@@ -470,8 +470,8 @@ defaults, are semantic queries consumed directly by match and settings
 lowering. Variant text remains in settings lowering only as the external value
 understood by the host settings map.
 
-The same catalog is the API for future generated documentation, LSP completion,
-hover, and signature help. Tools can parse and check a program and inspect its
+The same catalog drives generated documentation, LSP completion, hover, and
+signature help. Tools can parse and check a program and inspect its
 semantic call resolutions without constructing the WebAssembly backend. All
 currently implemented functions and type-directed methods—including numeric,
 array, process, duration, address, and Unity APIs—are catalog-backed. Compiled

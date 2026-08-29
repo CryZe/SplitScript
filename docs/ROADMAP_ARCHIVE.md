@@ -30,6 +30,18 @@
 - Routed exact language, standard-library, ABI, architecture, conformance, and
   measurement facts to their durable documents instead of duplicating stale
   feature and backend inventories or promoting full ports as tutorials.
+- Kept the durable porting-campaign audit discoverable for contributors while
+  leaving full scripts outside the user authoring path.
+
+## 2026-08-30: stale public capability claims removed
+
+- Corrected hand-written language and architecture prose that still described
+  generalized user functions, value-producing block branches, LSP formatting,
+  browsable and terminal documentation, wrapper editor types, closures,
+  iterators, arrays, strings, records, and other GC values as future work.
+- Kept genuinely pending host events, machine-readable/static exporters, race
+  combinators, resource ownership, and unsupported-build behavior explicitly
+  pending rather than flattening all forward-looking prose indiscriminately.
 
 ## 2026-08-29: managed-string bound ergonomics resolved by schema syntax
 

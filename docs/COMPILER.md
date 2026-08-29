@@ -285,7 +285,8 @@ from those fallbacks. Exact identifier segments connect recovered resolutions
 to the same source and compiler-catalog definition targets as checked source.
 The sibling `format` query reuses the cached strict parse and canonical
 formatter, returning shared formatted text or the same syntax diagnostics.
-This is the document-formatting boundary intended for the future LSP.
+The native and WebAssembly-backed language servers expose this query as
+whole-document LSP formatting.
 
 After inference, `check` materializes a `TypedProgram` body HIR. Every
 `TypedExpression` contains its stable `ExprId`, source span, and semantic
@@ -809,7 +810,7 @@ an attached process. After typed HIR is built, `OperationAnalysis` computes a
 fixed point over resolved user-function and method calls. The process
 requirement therefore propagates through forward calls, methods, and recursive
 call graphs, and the action boundary rejects the outer invalid call. The result
-is exposed by `CheckedProgram::effects` for future hover and navigation. The
+is exposed by `CheckedProgram::effects` to hover and other semantic queries. The
 public catalog rendering query similarly prevents documentation and LSP clients
 from reconstructing these rules independently.
 
@@ -923,10 +924,10 @@ result type and ordinary result control flow rather than through a new
 backend-only failure channel. This keeps semantic facts and backend physical
 types separate.
 
-`T?` and `T!` are already first-class constructed type annotations. Parsing
-assigns stable layout identities, inference preserves their value types, and
-the semantic store exposes `TypeKind::Option` and `TypeKind::Result` for the
-backend and future editor tooling. The backend emits a monomorphized Wasm GC
+`T?` and `T!` are first-class constructed type annotations. Parsing assigns
+stable layout identities, inference preserves their value types, and the
+semantic store exposes `TypeKind::Option` and `TypeKind::Result` for the
+backend and editor tooling. The backend emits a monomorphized Wasm GC
 struct layout for each used wrapper. `None`, `Some(value)`, `Ok(value)`,
 `Err(message)`, and implicit optional/successful lifts are ordinary typed
 values: every lift is recorded as

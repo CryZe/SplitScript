@@ -1202,19 +1202,7 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
         library.render_signature(read.item.id),
         "Process.read<T>(address: address) -> T! where T: MemoryReadable"
     );
-    let managed_string = library
-        .method_candidates("readManagedString")
-        .into_iter()
-        .next()
-        .expect("managed strings should be a Process method");
-    assert_eq!(
-        managed_string.item.id,
-        StdlibItemId::ProcessReadManagedString
-    );
-    assert_eq!(
-        library.render_signature(managed_string.item.id),
-        "Process.readManagedString(address: address, maxUtf16Units: u32) -> String!"
-    );
+    assert!(library.method_candidates("readManagedString").is_empty());
     assert_eq!(
         library.render_signature(StdlibItemId::TimerState),
         "timer.state() -> TimerState"

@@ -72,6 +72,8 @@ pub(crate) enum RuntimeHelperId {
     ReadUtf8String,
     ReadUtf16LeString,
     ReadManagedString,
+    ReadManagedStringField,
+    ReadOptionalManagedStringField,
     LoadedModule,
     ModulePath,
     ProcessPath,
@@ -437,7 +439,6 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::ProcessReadRelative32
         | IntrinsicId::ProcessReadUtf8
         | IntrinsicId::ProcessReadUtf16Le
-        | IntrinsicId::ProcessReadManagedString
         | IntrinsicId::ModulePath
         | IntrinsicId::ProcessPath
         | IntrinsicId::RuntimeOperatingSystem
@@ -507,7 +508,6 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::ProcessReadRelative32 => &[Helper(Runtime::ReadRelative32)],
         IntrinsicId::ProcessReadUtf8 => &[Helper(Runtime::ReadUtf8String)],
         IntrinsicId::ProcessReadUtf16Le => &[Helper(Runtime::ReadUtf16LeString)],
-        IntrinsicId::ProcessReadManagedString => &[Helper(Runtime::ReadManagedString)],
         IntrinsicId::ModulePath => &[Helper(Runtime::ModulePath)],
         IntrinsicId::ProcessPath => &[Helper(Runtime::ProcessPath)],
         IntrinsicId::RuntimeOperatingSystem => &[Helper(Runtime::RuntimeOperatingSystem)],
@@ -1525,19 +1525,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         ),
         IntrinsicId::ProcessReadUtf16Le => contract!(
             ProcessReadUtf16Le,
-            Method,
-            signature(
-                NO_TYPE_PARAMETERS,
-                Some(PROCESS_TYPE),
-                params![value(ADDRESS), value(U32)],
-                STRING_RESULT,
-            ),
-            PROCESS,
-            Everywhere,
-            Retryable
-        ),
-        IntrinsicId::ProcessReadManagedString => contract!(
-            ProcessReadManagedString,
             Method,
             signature(
                 NO_TYPE_PARAMETERS,

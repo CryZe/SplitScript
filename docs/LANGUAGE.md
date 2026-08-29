@@ -226,7 +226,7 @@ image "Assembly-CSharp" {
         if layout.edition == Edition.BaseGame {
             u32 level;
         } else {
-            u32 scene;
+            String scene maxLength 64;
         }
     }
 }
@@ -237,7 +237,7 @@ whileAttached {
         print(manager.level else 0)
     } else {
         let manager = GameManager.instance else return
-        print(manager.scene else 0)
+        print(manager.scene else "Unknown")
     }
 }
 ```
@@ -765,10 +765,7 @@ boundary, so `?` can propagate a read error directly out of the selected branch:
 
 ```text
 levelOrScene = if isDlcDemo {
-    LevelOrScene.Scene(process.readManagedString(
-        process.read(gameManager.offset(levelOrSceneOffset))?,
-        16
-    )?)
+    LevelOrScene.Scene(GameManager.instance?.scene?)
 } else {
     LevelOrScene.Level(
         process.read(gameManager.offset(levelOrSceneOffset))?
@@ -1946,9 +1943,9 @@ returns `String!`. An inaccessible range, a zero or excessive bound, or invalid
 UTF-8 is an ordinary error. `process.readUtf16Le(address, maxUtf16Units)` reads
 at most 2048 little-endian UTF-16 code units, also stops at NUL or the bound,
 and replaces malformed surrogate sequences with the Unicode replacement
-character. This is intentionally different from
-`process.readManagedString`, which understands the in-memory layout of a Unity
-managed string.
+character. Unity managed strings instead use schema fields such as
+`String scene maxLength 64;`; their generated readers understand the managed
+object layout and expose an ordinary `String!` field hop.
 
 Pointer-backed state fields have compact sugar for the same operation. The
 decoder applies after the complete module-relative pointer path has been
@@ -2107,12 +2104,12 @@ reused 768-digit scratch buffer. It does not parse through an intermediate
 `f64` when the target is `f32`, avoiding double rounding, and it does not call a
 locale-sensitive host routine.
 
-`process.readManagedString(address, maxLength)` reads a bounded IL2CPP managed
-string, decodes UTF-16 (including surrogate pairs), and returns a GC UTF-8
-`String!`. Memory-access failures are ordinary errors that can be handled with
-`else` or `?`, or polled with `retry` during attachment. The unit limit bounds
-decoding, and malformed surrogate sequences become the Unicode replacement
-character.
+A managed class may declare `String field maxLength N;` or
+`String? field maxLength N;`. The bound is a positive compile-time number of
+UTF-16 code units and controls the read rather than changing the resulting
+type. Required null references, failed memory access, and overlong payloads are
+ordinary errors; optional null references become `None`. Malformed surrogate
+sequences become the Unicode replacement character.
 
 JavaScript-inspired template strings use backticks and `{expression}`, without
 JavaScript's `$` marker. Existing strings are inserted directly. Every other

@@ -2,9 +2,9 @@ use std::collections::BTreeSet;
 
 use crate::{
     abi::AbiImportId,
-    ast::{ActionKind, Program, SettingFileFilter, SettingKind, StateSource},
+    ast::{ActionKind, ManagedFieldId, Program, SettingFileFilter, SettingKind, StateSource},
     intrinsic_registry::{self, DependencyRoot, RuntimeHelperId},
-    semantic::SemanticModel,
+    semantic::{ResolvedMember, ResolvedValue, SemanticModel},
     stdlib::{CoreTypeId, Implementation, IntrinsicId, StdlibItemId, StdlibTypeId},
     types::{TypeId, TypeKind},
     wasm_ir,
@@ -36,6 +36,19 @@ impl BackendDependencies {
         dependencies.require_import(AbiImportId::RuntimeSetTickRate);
         if automatic_layout.is_some() {
             dependencies.require_import(AbiImportId::RuntimePrintMessage);
+        }
+
+        // Snapshot readers materialize every instance field of a reachable
+        // class. Direct field paths below cover static and live-reference
+        // reads. Keeping these roots separate prevents an unused declaration
+        // from retaining the managed-string decoder.
+        for class in reachability.managed_snapshots() {
+            let declaration = program
+                .managed_class(class)
+                .expect("reachable managed classes belong to the program");
+            for field in declaration.all_fields().filter(|field| !field.is_static) {
+                dependencies.require_managed_field_reader(field.id, program, semantics);
+            }
         }
 
         if let Some(state) = &program.state {
@@ -118,6 +131,26 @@ impl BackendDependencies {
                     .as_ref()
                     .map_or(ty, |instance| semantics.specialize_type(instance, ty))
             };
+            match &expression.kind {
+                wasm_ir::ExpressionKind::Path { root, members } => {
+                    if let Some(ResolvedValue::ManagedStatic { field, .. }) = root {
+                        dependencies.require_managed_field_reader(*field, program, semantics);
+                    }
+                    for member in members {
+                        if let ResolvedMember::ManagedField(field) = member {
+                            dependencies.require_managed_field_reader(*field, program, semantics);
+                        }
+                    }
+                }
+                wasm_ir::ExpressionKind::Member { members, .. } => {
+                    for member in members {
+                        if let ResolvedMember::ManagedField(field) = member {
+                            dependencies.require_managed_field_reader(*field, program, semantics);
+                        }
+                    }
+                }
+                _ => {}
+            }
             match &expression.kind {
                 wasm_ir::ExpressionKind::Call { target, .. }
                     if matches!(
@@ -293,6 +326,33 @@ impl BackendDependencies {
         }
 
         dependencies
+    }
+
+    fn require_managed_field_reader(
+        &mut self,
+        field: ManagedFieldId,
+        program: &Program,
+        semantics: &SemanticModel,
+    ) {
+        let declaration = program
+            .managed_class_declarations()
+            .into_iter()
+            .flat_map(|class| class.all_fields())
+            .find(|candidate| candidate.id == field)
+            .expect("resolved managed fields belong to the program");
+        if declaration.max_length.is_none() {
+            return;
+        }
+        let value = semantics
+            .managed_field_value_type(field)
+            .expect("checked managed fields have semantic value types");
+        self.require(
+            if matches!(semantics.types().kind(value), TypeKind::Option { .. }) {
+                RuntimeHelperId::ReadOptionalManagedStringField
+            } else {
+                RuntimeHelperId::ReadManagedStringField
+            },
+        );
     }
 
     pub fn uses_helper(&self, helper: RuntimeHelperId) -> bool {

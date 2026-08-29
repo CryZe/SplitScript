@@ -230,8 +230,8 @@ to inference or code generation.
   `LevelTimeParts`, and the bounded DLC scene string.
 - [x] Port `examples/lunistice.split` from manual class/instance/offset globals
   and raw `process.read` calls to generated transactional `GameManager` and
-  `Timer` snapshots, retaining a live bounded-string read only for the DLC
-  scene until managed strings gain declaration syntax. Preserve
+  `Timer` snapshots. The DLC scene is now an ordinary schema-declared
+  `String scene maxLength 16` field read as part of the shared snapshot. Preserve
   all existing autosplitter behavior and keep the user's current local example
   edits out of intermediate mechanical rewrites.
 - [x] Add synthetic runtime coverage for both base and DLC metadata layouts,
@@ -268,8 +268,14 @@ to inference or code generation.
 - [ ] Expose Unity global managers such as `unity.time.frameCount` and
   `unity.time.timeScale` through reachable source-defined declarations rather
   than bespoke compiler names.
-- [ ] Design bounded managed-string declarations and managed storage syntax
-  before implementing collections. Managed arrays and managed lists both
+- [x] Add bounded managed-string fields as `String field maxLength N` and
+  `String? field maxLength N`. The policy is binding-plan data shared by static,
+  live, and snapshot reads; nullability is typed, overlong payloads fail rather
+  than truncate, UTF-16 replacement decoding is consistent, the raw
+  `Process.readManagedString` surface is gone, and diagnostics, completion,
+  hover, highlighting, docs, and Lunistice use the schema form.
+- [ ] Design managed arrays and managed lists after the string storage model.
+  Both
   materialize as `[T]`; do not reintroduce a public `List<T>` value type.
   Dictionaries and dynamic typed values need a separately approved language
   design based on representative ports.
@@ -310,9 +316,9 @@ or assumptions tied to one generated corpus.
   reference documents `T.Ref`, fallible live hops, `T`, transactional
   `.snapshot()`, layout refinement, and demand-driven reader generation; editor
   hover and navigation lead back to the source class and fields.
-- [ ] Add a higher-level bounded managed-string declaration after its source
-  design is approved. Keep examples and diagnostics synchronized with that
-  facility rather than documenting raw traversal as a workaround.
+- [x] Add the approved higher-level bounded managed-string declaration and keep
+  examples, diagnostics, tooling, runtime semantics, and migration docs on the
+  schema workflow rather than raw object traversal.
 - [x] Make emulator providers equally difficult to miss. General state and
   porting documentation now links all seven typed providers instead of using
   GBA as the whole model. Provider pages own their emulator, core, address,
@@ -451,6 +457,16 @@ or assumptions tied to one generated corpus.
   offsets, padding/alignment, packing, and per-field byte order. Keep
   field-order native-endian layout as the default and diagnose overlaps and
   unsupported combinations.
+- [ ] Evaluate adjacent state reads after the existing exact pointer-prefix
+  sharing pass. When several fields resolve the same base and cover neighboring
+  bytes, compare two user-facing outcomes before choosing one: a contextual
+  suggestion to model the memory shape as one [`MemoryReadable`] record, or a
+  lowering pass that safely coalesces the reads without changing per-field
+  failure retention. Any automatic form must prove compatible layout guards,
+  byte order, alignment, optional fields, overlapping ranges, process-memory
+  volatility, and the rule that successful sibling fields may advance when one
+  field fails. Do not emit a noisy warning or widen reads across inaccessible
+  pages until those semantics and a representative port justify it.
 
 ### Polling, mutable watcher patterns, and settings
 
@@ -746,6 +762,15 @@ remaining work is product hardening and distribution.
 
 ## P1 — remaining language and runtime breadth
 
+- [ ] Add shorthand record field initializers: `Point { x }` means
+  `Point { x: x }`. When an explicit initializer repeats the exact field name,
+  emit a warning with a machine-applicable rewrite to the shorthand. Rename
+  must preserve meaning in both directions: renaming either the field or the
+  referenced local independently expands shorthand back to an explicit
+  `newField: oldLocal` or `oldField: newLocal` initializer as appropriate;
+  renaming both together may retain shorthand. Cover parsing, formatting,
+  inference, hover, navigation, references, highlighting, and extraction.
+
 - [ ] Design exact host-driven `onSplit` delivery. It must fire even when no
   game process or emulator is attached and distinguish an ordinary split from
   skips, undos, and multiple timer operations between updates. Specify the
@@ -939,29 +964,25 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Bring the bounded managed-string schema design to the user, then implement
-   the approved form across binding, snapshots, diagnostics, tooling, and the
-   Unity migration journey. Do not make raw metadata traversal public while the
-   higher-level value shape is being completed.
-2. Propose the source-defined `unity.time` manager surface, including discovery,
+1. Propose the source-defined `unity.time` manager surface, including discovery,
    lifetime, fallibility, and allocation behavior, before adding its public
    names. Validate it against the ASR use cases rather than one game.
-3. Turn the remaining porting-campaign questions into focused decisions:
+2. Turn the remaining porting-campaign questions into focused decisions:
    bounded integer arguments, sibling state-field references, Unicode blank
    strings, and whether known emulator executable sets merit a contextual
    provider suggestion.
-4. Add the compiler-query fixture and review checklist for clean-compiling
+3. Add the compiler-query fixture and review checklist for clean-compiling
    semantic drift, then apply it to a small corrected and runtime-tested native,
    Unity, and emulator port set.
-5. Complete the remaining official host ABI as typed facilities and keep exact
+4. Complete the remaining official host ABI as typed facilities and keep exact
    `shutdown` / `onSplit` delivery in the runtime-evolution contract until the
    host exposes the required events.
-6. Extend Unity managed collections only after strings and scalar snapshots are
+5. Extend Unity managed collections only after strings and scalar snapshots are
    complete, using the maintained Alba and A Short Hike requirements to shape
    lists, dictionaries, and dynamic values.
-7. Harden and publish the bundled VSIX and native releases, then evaluate the
+6. Harden and publish the bundled VSIX and native releases, then evaluate the
    hosted Code OSS workbench. Resume source debugging only after choosing among
    the JavaScript debugger, native Wasmtime/DWARF, and typed-IR interpreter.
-8. Keep physical `None` aggregate specialization and sandbox-sensitive host
+7. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

@@ -79,7 +79,7 @@ for (let tick = 0; tick < 3 && observed === undefined; tick += 1) {
     instance.exports.update();
 }
 
-const expected = "4369,12308,Hi,error,error,error,Café,Café,error,error,Hi😀,Hi😀,�X,error,error";
+const expected = "4369,12308,error,error,Café,Café,error,error,Hi😀,Hi😀,�X,error,error";
 if (observed !== expected) {
     throw new Error(`unexpected process operation output: ${JSON.stringify({ expected, observed })}`);
 }

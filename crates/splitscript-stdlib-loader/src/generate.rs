@@ -1004,6 +1004,7 @@ fn is_complete_program_example(source: &str) -> bool {
         "fn",
         "record",
         "enum",
+        "image",
     ]
     .into_iter()
     .any(|keyword| {

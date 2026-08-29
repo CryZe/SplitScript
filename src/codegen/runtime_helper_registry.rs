@@ -47,6 +47,8 @@ pub(super) enum HelperValueType {
     Standard(StdlibTypeId),
     StringArray,
     I64Array,
+    StringResult,
+    OptionalStringResult,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -82,7 +84,10 @@ macro_rules! helper {
     };
 }
 
-use HelperValueType::{F32, F64, I32, I64, I64Array, Standard, String as StringValue, StringArray};
+use HelperValueType::{
+    F32, F64, I32, I64, I64Array, OptionalStringResult, Standard, String as StringValue,
+    StringArray, StringResult,
+};
 
 /// Canonical function-index and body order. Dependencies always occur before
 /// the helpers that call them, which is validated by the registry tests.
@@ -122,7 +127,9 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(Utf16StringFromMemory, (I32) -> (StringValue), deps [], imports [], build_utf16_string_from_memory),
     helper!(ReadUtf8String, (I64, I64, I32) -> (StringValue), deps [StringFromMemory], imports [ProcessRead], build_read_utf8_string),
     helper!(ReadUtf16LeString, (I64, I64, I32) -> (StringValue), deps [Utf16StringFromMemory], imports [ProcessRead], build_read_utf16_le_string),
-    helper!(ReadManagedString, (I64, I64, I32) -> (StringValue), deps [], imports [ProcessRead], build_read_managed_string),
+    helper!(ReadManagedString, (I64, I64, I32) -> (I32, StringValue), deps [], imports [ProcessRead], build_read_managed_string),
+    helper!(ReadManagedStringField, (I64, I64, I32, I32) -> (StringResult), deps [ReadManagedString], imports [ProcessRead], build_read_managed_string_field),
+    helper!(ReadOptionalManagedStringField, (I64, I64, I32, I32) -> (OptionalStringResult), deps [ReadManagedString], imports [ProcessRead], build_read_optional_managed_string_field),
     helper!(LoadedModule, (I64, StringValue) -> (Standard(StdlibTypeId::Module)), deps [], imports [ProcessGetModuleAddress, ProcessGetModuleSize], build_loaded_module),
     helper!(ModulePath, (I64, StringValue) -> (StringValue), deps [StringFromMemory], imports [ProcessGetModulePath], build_module_path),
     helper!(ProcessPath, (I64) -> (StringValue), deps [StringFromMemory], imports [ProcessGetPath], build_process_path),
@@ -261,6 +268,10 @@ pub(super) fn resolve_signature(
         HelperValueType::F64 => ValType::F64,
         HelperValueType::String => gc.val_type(Type::Standard(StdlibTypeId::String)),
         HelperValueType::Standard(standard) => gc.val_type(Type::Standard(standard)),
+        HelperValueType::StringResult => gc.val_type(managed_string_result_type(semantics, false)),
+        HelperValueType::OptionalStringResult => {
+            gc.val_type(managed_string_result_type(semantics, true))
+        }
         HelperValueType::StringArray | HelperValueType::I64Array => gc.val_type(Type::Array(
             required_array_layout(ty, arrays, semantics)
                 .expect("runtime array helper has a reachable layout"),
@@ -301,12 +312,45 @@ fn required_array_layout(
         | HelperValueType::F32
         | HelperValueType::F64
         | HelperValueType::String
+        | HelperValueType::StringResult
+        | HelperValueType::OptionalStringResult
         | HelperValueType::Standard(_) => return None,
     };
     arrays
         .iter()
         .find(|array| try_array_element_type(array.id, semantics) == Some(element))
         .map(|array| array.id)
+}
+
+pub(super) fn managed_string_result_type(
+    semantics: &crate::semantic::SemanticModel,
+    optional: bool,
+) -> Type {
+    let string = semantics.types().id_for_standard(StdlibTypeId::String);
+    let value = if optional {
+        semantics
+            .types()
+            .iter()
+            .find_map(|(id, kind)| match kind {
+                crate::types::TypeKind::Option { value, .. } if *value == string => Some(id),
+                _ => None,
+            })
+            .expect("managed optional strings have a reachable option type")
+    } else {
+        string
+    };
+    let result = semantics
+        .types()
+        .iter()
+        .find_map(|(_, kind)| match kind {
+            crate::types::TypeKind::Result {
+                layout,
+                value: candidate,
+            } if *candidate == value => Some(*layout),
+            _ => None,
+        })
+        .expect("managed strings have a reachable Result type");
+    Type::Result(result)
 }
 
 #[cfg(test)]

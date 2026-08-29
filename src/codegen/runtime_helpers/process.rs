@@ -2,11 +2,16 @@
 
 use wasm_encoder::{BlockType, Function, HeapType, Instruction, RefType, ValType};
 
-use crate::{abi::AbiImportId, intrinsic_registry::MAX_NATIVE_STRING_BYTES, stdlib::StdlibTypeId};
+use crate::{
+    abi::AbiImportId,
+    ast::{OptionTypeId, ResultTypeId},
+    intrinsic_registry::MAX_NATIVE_STRING_BYTES,
+    stdlib::StdlibTypeId,
+};
 
 use super::super::imports::Abi;
 use super::super::memory_plan::{AbiReadScratch, ScratchRegion};
-use super::super::{GcLayout, Type, memarg};
+use super::super::{GcLayout, Type, emit_result_error, emit_result_success, memarg};
 pub(super) fn compile_scan_process_range(abi: &Abi, scan: ScratchRegion) -> Function {
     let scan_start = scan.start();
     let mut function = Function::new([(2, ValType::I64), (5, ValType::I32)]);
@@ -902,10 +907,25 @@ pub(super) fn compile_read_managed_string(
     let output = 10;
 
     function
+        // The schema path validates constants earlier. Keep the internal
+        // helper defensive so future compiler-owned callers cannot bypass
+        // the allocation bound.
+        .instruction(&Instruction::LocalGet(max_units))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::LocalGet(max_units))
+        .instruction(&Instruction::I32Const(
+            crate::intrinsic_registry::MAX_NATIVE_UTF16_UNITS as i32,
+        ))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_failed_managed_string_return(&mut function, gc);
+    function
+        .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(address))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty));
-    emit_null_string_return(&mut function, gc);
+    emit_failed_managed_string_return(&mut function, gc);
     function
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(process))
@@ -917,39 +937,26 @@ pub(super) fn compile_read_managed_string(
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty));
-    emit_null_string_return(&mut function, gc);
+    emit_failed_managed_string_return(&mut function, gc);
     function
         .instruction(&Instruction::End)
         .instruction(&Instruction::I32Const(abi_read.start()))
         .instruction(&Instruction::I32Load(memarg()))
-        .instruction(&Instruction::LocalGet(max_units))
-        .instruction(&Instruction::I32LtU)
-        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
-        .instruction(&Instruction::I32Const(abi_read.start()))
-        .instruction(&Instruction::I32Load(memarg()))
-        .instruction(&Instruction::Else)
-        .instruction(&Instruction::LocalGet(max_units))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::I32Const(255))
-        .instruction(&Instruction::I32LtU)
-        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
-        .instruction(&Instruction::I32Const(abi_read.start()))
-        .instruction(&Instruction::I32Load(memarg()))
-        .instruction(&Instruction::LocalGet(max_units))
-        .instruction(&Instruction::I32LtU)
-        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
-        .instruction(&Instruction::I32Const(abi_read.start()))
-        .instruction(&Instruction::I32Load(memarg()))
-        .instruction(&Instruction::Else)
-        .instruction(&Instruction::LocalGet(max_units))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::Else)
-        .instruction(&Instruction::I32Const(255))
-        .instruction(&Instruction::End)
         .instruction(&Instruction::LocalTee(units))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32LtS)
+        .instruction(&Instruction::LocalGet(units))
+        .instruction(&Instruction::LocalGet(max_units))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_failed_managed_string_return(&mut function, gc);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(units))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty));
-    emit_empty_string_return(&mut function, gc);
+    emit_successful_empty_managed_string_return(&mut function, gc);
     function
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(process))
@@ -963,7 +970,7 @@ pub(super) fn compile_read_managed_string(
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty));
-    emit_null_string_return(&mut function, gc);
+    emit_failed_managed_string_return(&mut function, gc);
     function
         .instruction(&Instruction::End)
         .instruction(&Instruction::Block(BlockType::Empty))
@@ -1076,9 +1083,134 @@ pub(super) fn compile_read_managed_string(
         .instruction(&Instruction::Br(0))
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::LocalGet(output))
         .instruction(&Instruction::End);
     function
+}
+
+/// Reads the pointer stored in a managed field and decodes its bounded string
+/// payload as one typed Result. Centralizing both steps keeps every live,
+/// static, and snapshot access on the same failure and nullability policy.
+pub(super) fn compile_read_managed_string_field(
+    abi: &Abi,
+    read_string: u32,
+    gc: &GcLayout,
+    abi_read: AbiReadScratch,
+    result: ResultTypeId,
+    option: Option<OptionTypeId>,
+) -> Function {
+    let mut nullable_string = gc.val_type(Type::Standard(StdlibTypeId::String));
+    let ValType::Ref(reference) = &mut nullable_string else {
+        unreachable!("String is represented by a GC reference")
+    };
+    reference.nullable = true;
+    let mut function = Function::new([(1, ValType::I64), (1, nullable_string)]);
+    let process = 0;
+    let field_address = 1;
+    let pointer_size = 2;
+    let max_units = 3;
+    let pointer = 4;
+    let string = 5;
+    let value_type = option.map_or(Type::Standard(StdlibTypeId::String), Type::Option);
+
+    function
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(field_address))
+        .instruction(&Instruction::I32Const(abi_read.destination(8)))
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
+        .instruction(&Instruction::If(BlockType::Result(
+            gc.val_type(Type::Result(result)),
+        )))
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::I32Const(abi_read.start()))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(abi_read.start()))
+        .instruction(&Instruction::I64Load(memarg()))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalTee(pointer))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Result(
+            gc.val_type(Type::Result(result)),
+        )));
+    if let Some(option) = option {
+        function.instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.index(Type::Option(option)),
+        )));
+        emit_result_success(&mut function, result, gc);
+    } else {
+        emit_result_error(
+            &mut function,
+            result,
+            value_type,
+            "managed field contained a null string",
+            gc,
+        );
+    }
+    function
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(pointer))
+        .instruction(&Instruction::LocalGet(max_units))
+        .instruction(&Instruction::Call(read_string))
+        .instruction(&Instruction::LocalSet(string))
+        .instruction(&Instruction::If(BlockType::Result(
+            gc.val_type(Type::Result(result)),
+        )))
+        .instruction(&Instruction::LocalGet(string))
+        .instruction(&Instruction::RefAsNonNull);
+    if let Some(option) = option {
+        function.instruction(&Instruction::StructNew(gc.index(Type::Option(option))));
+    }
+    emit_result_success(&mut function, result, gc);
+    function.instruction(&Instruction::Else);
+    emit_result_error(
+        &mut function,
+        result,
+        value_type,
+        "managed string could not be read within its declared maximum length",
+        gc,
+    );
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+    function.instruction(&Instruction::Else);
+    emit_result_error(
+        &mut function,
+        result,
+        value_type,
+        "managed string field pointer could not be read",
+        gc,
+    );
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+    function
+}
+
+fn emit_failed_managed_string_return(function: &mut Function, gc: &GcLayout) {
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.standard_index(StdlibTypeId::String),
+        )))
+        .instruction(&Instruction::Return);
+}
+
+fn emit_successful_empty_managed_string_return(function: &mut Function, gc: &GcLayout) {
+    function
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::ArrayNewFixed {
+            array_type_index: gc.standard_index(StdlibTypeId::String),
+            array_size: 0,
+        })
+        .instruction(&Instruction::Return);
 }
 
 /// Queries one module without waiting. A null reference is the internal
@@ -1423,15 +1555,6 @@ fn emit_ensure_linear_capacity(function: &mut Function, end: i32, required_pages
         .instruction(&Instruction::MemoryGrow(0))
         .instruction(&Instruction::Drop)
         .instruction(&Instruction::End);
-}
-
-fn emit_empty_string_return(function: &mut Function, gc: &GcLayout) {
-    function
-        .instruction(&Instruction::ArrayNewFixed {
-            array_type_index: gc.standard_index(StdlibTypeId::String),
-            array_size: 0,
-        })
-        .instruction(&Instruction::Return);
 }
 
 fn emit_null_string_return(function: &mut Function, gc: &GcLayout) {

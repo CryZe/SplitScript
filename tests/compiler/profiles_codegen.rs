@@ -295,6 +295,53 @@ fn managed_reference_snapshot_reads_the_complete_layout_refined_shape() {
 }
 
 #[test]
+fn managed_string_decoders_are_retained_only_for_reachable_reads() {
+    use splitscript::{BuildProfile, CompilerOptions};
+
+    let compile_names = |state_fields: &str| {
+        let source = format!(
+            r#"
+                image "Assembly-CSharp" {{
+                    class GameManager {{
+                        static String scene maxLength 64;
+                    }}
+                }}
+
+                state Unity.il2cpp(2020) ["game.exe"] {{
+                    {state_fields}
+                }}
+            "#
+        );
+        let wasm = splitscript::compile_with_options(
+            &source,
+            CompilerOptions {
+                profile: BuildProfile::Debug,
+                ..CompilerOptions::default()
+            },
+        )
+        .expect("managed string reachability fixture should compile");
+        debug_function_names(&wasm)
+            .expect("debug names should exist")
+            .1
+    };
+
+    let unused = compile_names("");
+    assert!(
+        unused
+            .iter()
+            .all(|(_, name)| !name.contains("ReadManagedString")),
+        "an unused managed string declaration must not retain its decoder: {unused:#?}"
+    );
+
+    let used = compile_names("scene: String = GameManager.scene?;");
+    assert!(
+        used.iter()
+            .any(|(_, name)| name.ends_with("ReadManagedStringField")),
+        "a reachable managed string read must retain its typed decoder: {used:#?}"
+    );
+}
+
+#[test]
 fn explicit_unity_backends_prune_the_unreachable_schema_binder() {
     use splitscript::{BuildProfile, CompilerOptions};
 
@@ -358,7 +405,7 @@ fn managed_schema_declarations_retain_their_logical_hierarchy() {
                 class GameManager {
                     i32 points;
                     if layout.edition == Edition.Demo {
-                        String scene;
+                        String scene maxLength 64;
                     }
                 }
             }

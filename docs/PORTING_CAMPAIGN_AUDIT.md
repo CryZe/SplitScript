@@ -58,7 +58,7 @@ just as much as a missing facility is.
 
 The existing facilities were compiled together in one probe: alternate exact
 process names, named layouts selected through `process.name()`, `tickRate`,
-`timer.state()`, and `process.readManagedString()` all compose in one source
+`timer.state()`, and schema-declared bounded managed strings all compose in one source
 file.
 
 ### First-tranche classifications
@@ -66,7 +66,7 @@ file.
 | Candidate | Campaign result | Audit result |
 | --- | --- | --- |
 | Arietta of Spirits | `PORTED` | The extensionless Windows provider compiles but does not attach under the current host contract. This is an exact-name **discoverability failure**. Omitting the single ASL version label remains a reasonable **policy** until another physical layout is supported. |
-| TUNIC | `PORTED-LIMITED` | The campaign could not find how one file accepts both `TUNIC` and `Secret Legend`; one state candidate array supports both exact executable names. The port also manually decodes a Mono string instead of finding `process.readManagedString()`. Both are **discoverability failures**. Missing Unity scene behavior is a **language or library question**, and exact `onStart` cleanup remains a **host gap**. |
+| TUNIC | `PORTED-LIMITED` | The campaign could not find how one file accepts both `TUNIC` and `Secret Legend`; one state candidate array supports both exact executable names. The port also manually decodes a Mono string instead of declaring a bounded managed `String` field. Both are **discoverability failures**. Missing Unity scene behavior is a **language or library question**, and exact `onStart` cleanup remains a **host gap**. |
 | A Proof of Concept | `PORTED-LIMITED` as two files | One state candidate array, two named layouts, `process.name()`, and a returned `StateLayout` can represent both executables in one file. Producing separate files is a **discoverability failure** around the combined attachment/layout workflow. Timer run-offset mutation and exact `onStart` restoration remain **host gaps**. |
 | Aim Climb | `PORTED-LIMITED` | Dropping ASL's 60 Hz `refreshRate` is a **discoverability failure** because `tickRate { attached: 60 }` owns this lifecycle behavior. The module-qualified `.exe` reads do not repair the extensionless provider. Dynamic lookup of a statically declared setting is valid but misses its typed member. |
 | 25 To Life | `PORTED-LIMITED` | Missing `timer.state() == TimerState.NotRunning` is a **discoverability failure** because it can preserve the source's accumulator reset. Accumulating on every positive IGT rollback instead of only a positive-to-zero boundary is a **port bug**. The provider is also extensionless. |
@@ -91,7 +91,7 @@ host will ever discover the declared process.
 - Correction: declare both exact executable names in one state candidate array.
 - Source: UnityASL reads `LastEvent` as a managed string.
 - Candidate: hard-coded Mono object offsets followed by `readUtf16Le`.
-- Correction: call `process.readManagedString(address, maxUtf16Units)`.
+- Correction: declare the field as `String lastEvent maxLength N;` in the Unity schema and use its typed fallible field path.
 - Remaining question: scene transitions arm starting and drive area splits, but
   the candidate removes scene state and starts on any timer-running edge. A
   Unity scene facility needs a separate design discussion.
@@ -651,7 +651,7 @@ discovered-address, and managed-collection shapes. Unity scenes and ergonomic
 typed Mono scalar/string paths remain provider design work. They deliberately
 do not get placeholder migration pages whose answer is only "not available";
 the roadmap prioritizes implementing a real API first. In particular, the
-existence of `MemoryPath` and `readManagedString` does not make manual
+existence of `MemoryPath` does not make manual
 object-header arithmetic an acceptable final `mono.MakeString` migration.
 
 ### Real compiler and documentation work

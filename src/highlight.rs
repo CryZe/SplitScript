@@ -1048,6 +1048,10 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
         if let Some(span) = field.metadata_names.keyword_span {
             self.insert(span, SemanticTokenKind::Keyword, 0);
         }
+        if let Some(max_length) = field.max_length {
+            self.insert(max_length.keyword_span, SemanticTokenKind::Keyword, 0);
+            self.insert(max_length.value_span, SemanticTokenKind::Number, 0);
+        }
         self.insert(
             field.name_span,
             SemanticTokenKind::Property,
@@ -1624,6 +1628,7 @@ image "Assembly-CSharp" {
     namespace Game {
         class Player from "RuntimePlayer" {
             static f32 health from "_health";
+            String name maxLength 64;
             if layout.edition == Edition.Alternate {
                 f32 armor;
             }
@@ -1644,6 +1649,7 @@ let player: Player.Ref? = None
             "class",
             "from",
             "static",
+            "maxLength",
             "layout",
             "if",
         ] {
@@ -1655,6 +1661,13 @@ let player: Player.Ref? = None
                 0,
             ));
         }
+        assert!(contains(
+            source,
+            &highlights,
+            "64",
+            SemanticTokenKind::Number,
+            0,
+        ));
         assert!(contains(
             source,
             &highlights,

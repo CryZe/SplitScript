@@ -80,7 +80,6 @@ macro_rules! trusted_intrinsics {
             ProcessReadRelative32,
             ProcessReadUtf8,
             ProcessReadUtf16Le,
-            ProcessReadManagedString,
             TimerState,
             TimerCurrentSplitIndex,
             TimerSegmentWasSplit,

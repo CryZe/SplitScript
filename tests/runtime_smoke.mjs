@@ -178,12 +178,12 @@ if (moduleSizeNames.join(",") !== "GameAssembly.dll,Lunistice-Demo.exe") {
     throw new Error(`unexpected module-size names: ${JSON.stringify(moduleSizeNames)}`);
 }
 
-if (scanReads !== 14) {
-    throw new Error(`expected fourteen bulk/scan reads, got ${scanReads}`);
+if (scanReads !== 16) {
+    throw new Error(`expected sixteen bulk/scan reads, got ${scanReads}`);
 }
 
-if (scalarReads !== 31) {
-    throw new Error(`expected thirty-one scalar reads, got ${scalarReads}`);
+if (scalarReads !== 38) {
+    throw new Error(`expected thirty-eight scalar reads, got ${scalarReads}`);
 }
 
 const activeScanTicks = scanBytesPerTick.filter((bytes) => bytes > 0);

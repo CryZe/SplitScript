@@ -55,7 +55,6 @@ onAttach {
     let answer: i32 = retry process.read(object + 0x10)
     let relative = retry process.readRelative32(gameAssembly.address + 0x400)
     let _gameManager = GameManager.instance else return
-    let managedScene = retry process.readManagedString(0x2800, 16)
     let formatted = `{-42}:{7.9 as u32}`
     setVariable("Probe", formatted)
     setVariable("Process", executable)
@@ -68,7 +67,6 @@ onAttach {
         && object == 0x1300
         && answer == 42
         && relative == 0x1500
-        && managedScene == "Shrine01 🦊"
         && executable == "Lunistice-Demo.exe"
         && formatted == "-42:7"
         && (process.read<u8>(marker) else 0) == 0x48

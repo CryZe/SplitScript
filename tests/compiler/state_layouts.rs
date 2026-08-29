@@ -511,7 +511,8 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
                 }
 
                 else {
-                    address scene from "_currentScene";
+                    String scene from "_currentScene" maxLength 16;
+                    String? subtitle maxLength 64;
                 }
             }
 
@@ -534,7 +535,8 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
                 level: i32 = GameManager.instance?.level?;
             }
             else {
-                scene: String = process.readManagedString(GameManager.instance?.scene?, 16)?;
+                scene: String = GameManager.instance?.scene?;
+                subtitle: String? = GameManager.instance?.subtitle?;
             }
             levelTime: f32 = Timer.instance?.levelTime?;
             levelTimeParts: LevelTimeParts = Timer.instance?.levelTimeParts?;
@@ -548,6 +550,7 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
                 print(current.level)
             } else {
                 print(current.scene)
+                print(current.subtitle)
             }
         }
     "#;
@@ -570,6 +573,46 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("the Lunistice-shaped schema should produce valid Wasm GC");
+}
+
+#[test]
+fn managed_string_fields_require_a_valid_explicit_bound() {
+    let source = r#"
+        image "Assembly-CSharp" {
+            class GameManager {
+                String missing;
+                u32 score maxLength 16;
+                String empty maxLength 0;
+                String excessive maxLength 2049;
+            }
+        }
+        state Unity ["game.exe"] {}
+    "#;
+    let diagnostics = splitscript::compile(source).expect_err("invalid managed string policies");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("needs an explicit maximum length")
+            && diagnostic.fixes.iter().any(|fix| {
+                fix.applicability == splitscript::FixApplicability::MaybeIncorrect
+                    && fix.edits[0].replacement == " maxLength 64"
+            })
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("only valid on managed `String` or `String?`")
+    }));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("greater than zero"))
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("limited to 2048"))
+    );
 }
 
 #[test]

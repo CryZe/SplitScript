@@ -301,6 +301,49 @@ pub(super) fn build_read_managed_string(inputs: &RuntimeHelperInputs<'_>) -> Fun
     )
 }
 
+pub(super) fn build_read_managed_string_field(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    build_managed_string_field(inputs, false)
+}
+
+pub(super) fn build_read_optional_managed_string_field(
+    inputs: &RuntimeHelperInputs<'_>,
+) -> Function {
+    build_managed_string_field(inputs, true)
+}
+
+fn build_managed_string_field(inputs: &RuntimeHelperInputs<'_>, optional: bool) -> Function {
+    let Type::Result(result) =
+        runtime_helper_registry::managed_string_result_type(inputs.semantics, optional)
+    else {
+        unreachable!("managed string field helpers return Result values")
+    };
+    let option = optional.then(|| {
+        let string = inputs
+            .semantics
+            .types()
+            .id_for_standard(StdlibTypeId::String);
+        inputs
+            .semantics
+            .types()
+            .iter()
+            .find_map(|(_, kind)| match kind {
+                crate::types::TypeKind::Option { layout, value } if *value == string => {
+                    Some(*layout)
+                }
+                _ => None,
+            })
+            .expect("optional managed strings have an Option layout")
+    });
+    process::compile_read_managed_string_field(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::ReadManagedString),
+        inputs.gc,
+        inputs.memory.scratch().abi_read,
+        result,
+        option,
+    )
+}
+
 pub(super) fn build_module_path(inputs: &RuntimeHelperInputs<'_>) -> Function {
     process::compile_module_path(
         inputs.abi,

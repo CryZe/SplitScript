@@ -28,8 +28,8 @@ image "Assembly-CSharp" {
             /// The original game's numeric level index.
             i32 level from "currentLevel";
         } else {
-            /// Address of the DLC demo's current managed scene string.
-            address scene from "_currentScene";
+            /// The DLC demo's current managed scene name.
+            String scene from "_currentScene" maxLength 16;
         }
     }
 
@@ -54,9 +54,6 @@ state Unity.il2cpp(2020) ["Lunistice.exe", "Lunistice-Demo.exe"] {
 
     gameManager: GameManager = GameManager.instance?.snapshot()?;
     timer: Timer = Timer.instance?.snapshot()?;
-    if layout.edition == Edition.DlcDemo {
-        scene: String = process.readManagedString(GameManager.instance?.scene?, 16)?;
-    }
 }
 
 let runTimeSeconds
@@ -114,7 +111,7 @@ whileAttached {
     if layout.edition == Edition.BaseGame {
         setVariable("Level", levelText(current.gameManager.level))
     } else {
-        setVariable("Scene", current.scene)
+        setVariable("Scene", current.gameManager.scene)
     }
     setVariable(
         "Character",
@@ -126,7 +123,7 @@ start {
     let isFirstLevel = if layout.edition == Edition.BaseGame {
         current.gameManager.level == 0
     } else {
-        current.scene == "Shrine01"
+        current.gameManager.scene == "Shrine01"
     }
     if old.timer.stopped != current.timer.stopped && !current.timer.stopped && isFirstLevel {
         return true

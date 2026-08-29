@@ -1763,7 +1763,7 @@ onAttach {
         let source = r#"enum Edition{Base,DlcDemo}
 state"game.exe"{layout{edition:Edition}}
 onAttach{return Layout{edition:Edition.Base}}
-image"Assembly-CSharp"{namespace Game{class Player from"RuntimePlayer"{f32 health;}}class GameManager{static GameManager instance from["Instance","_instance",];i32 points from"_points";if layout.edition==Edition.Base{i32 gameState;i32 currentLevel;}if layout.edition==Edition.DlcDemo{i32 gameState from"GameState";String currentScene from"_currentScene";}}}
+image"Assembly-CSharp"{namespace Game{class Player from"RuntimePlayer"{f32 health;}}class GameManager{static GameManager instance from["Instance","_instance",];i32 points from"_points";if layout.edition==Edition.Base{i32 gameState;i32 currentLevel;}if layout.edition==Edition.DlcDemo{i32 gameState from"GameState";String currentScene from"_currentScene" maxLength 64;}}}
 fn identity(value:GameManager.Ref)->GameManager.Ref{return value}"#;
         let expected = r#"enum Edition {
     Base,
@@ -1794,7 +1794,7 @@ image "Assembly-CSharp" {
         }
         if layout.edition == Edition.DlcDemo {
             i32 gameState from "GameState";
-            String currentScene from "_currentScene";
+            String currentScene from "_currentScene" maxLength 64;
         }
     }
 }

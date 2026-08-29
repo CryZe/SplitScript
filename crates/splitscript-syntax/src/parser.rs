@@ -649,7 +649,7 @@ mod tests {
 
                     else {
                         i32 gameState from "GameState";
-                        String currentScene from "_currentScene";
+                        String currentScene from "_currentScene" maxLength 64;
                     }
                 }
             }
@@ -694,6 +694,11 @@ mod tests {
         assert!(manager.conditional_fields[0].else_span.is_none());
         assert!(manager.conditional_fields[0].condition.is_some());
         assert_eq!(manager.conditional_fields[0].fields[0].name, "gameState");
+        let scene = &manager.conditional_fields[1].fields[1];
+        let max_length = scene
+            .max_length
+            .expect("managed strings retain their read bound");
+        assert_eq!(max_length.value, 64);
         assert_eq!(
             manager.conditional_fields[0].fields[0]
                 .documentation

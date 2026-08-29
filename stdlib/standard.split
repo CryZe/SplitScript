@@ -980,34 +980,6 @@ intrinsic type Process {
         maxUtf16Units: u32,
     ) -> String!;
 
-    /// Reads a Unity managed string.
-    ///
-    /// The address identifies a Unity managed string object rather than its text
-    /// bytes. Its bounded UTF-16 payload is decoded into an ordinary immutable
-    /// SplitScript [`String`]. Memory-access failure or an excessive bound returns
-    /// an error; malformed surrogate sequences decode as the Unicode replacement
-    /// character.
-    ///
-    /// # Example
-    ///
-    /// Read a Unity string
-    ///
-    /// ```splitscript
-    /// # state "game.exe" {}
-    /// # onAttach {
-    /// # let sceneAddress: address = 0x1000
-    /// let scene = process.readManagedString(sceneAddress, 64) else "Unknown"
-    /// # print(scene)
-    /// # }
-    /// ```
-    @requires(attachedProcess)
-    @intrinsic(ProcessReadManagedString)
-    fn readManagedString(
-        /// The managed string object address.
-        address: address,
-        /// The maximum UTF-16 code units to decode.
-        maxUtf16Units: u32,
-    ) -> String!;
 }
 
 /// Reads information from the timer.

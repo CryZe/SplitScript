@@ -1,5 +1,23 @@
 # SplitScript roadmap
 
+## 2026-08-29: bounded managed strings become schema values
+
+- Added `String field maxLength N` and `String? field maxLength N` to managed
+  class declarations. The bound is one field read policy rather than a new
+  string type, and the binding plan carries it consistently through static
+  reads, live references, and transactional snapshots.
+- Made nullability and failure explicit: required null strings fail, optional
+  null strings become `None`, memory failures remain errors, overlong payloads
+  are rejected rather than truncated, and invalid UTF-16 uses replacement
+  decoding.
+- Removed the raw public `Process.readManagedString` route, moved Lunistice's
+  DLC scene into its `GameManager` snapshot, and updated completion, hover,
+  semantic highlighting, formatting, diagnostics, migration guidance, and the
+  reference journey around the schema-first spelling.
+- Recorded record-initializer shorthand and adjacent shared-prefix state reads
+  as separate follow-up work so neither is smuggled into this storage-policy
+  milestone without its own rename and memory-semantics design.
+
 ## 2026-08-29: complete schema-first Unity documentation
 
 - Made the `Unity` provider page the canonical managed-memory entry point. It

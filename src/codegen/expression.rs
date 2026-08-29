@@ -2628,6 +2628,24 @@ fn emit_managed_read_at_address(
         .expect("a checked managed field access has a concrete Result layout");
     let value_type = semantic_type(field.value_type, context.semantics);
 
+    if let crate::managed::ManagedFieldRead::ManagedString {
+        max_utf16_units,
+        nullable,
+    } = field.read
+    {
+        emit_managed_binding_field(function, MANAGED_POINTER_SIZE_FIELD, context);
+        function
+            .instruction(&Instruction::I32Const(max_utf16_units as i32))
+            .instruction(&Instruction::Call(context.runtime_helpers.function(
+                if nullable {
+                    RuntimeHelperId::ReadOptionalManagedStringField
+                } else {
+                    RuntimeHelperId::ReadManagedStringField
+                },
+            )));
+        return Type::Result(result);
+    }
+
     if matches!(
         context.semantics.types().kind(field.value_type),
         crate::types::TypeKind::ManagedReference(_)
@@ -4466,24 +4484,6 @@ fn compile_expr_unconverted(
                     Type::Standard(StdlibTypeId::String),
                     Instruction::RefIsNull,
                     "UTF-16LE string could not be read",
-                    context,
-                );
-            }
-            IntrinsicId::ProcessReadManagedString => {
-                compile_receiver(function, target, context);
-                compile_expr(function, args[0], context);
-                compile_expr(function, args[1], context);
-                function.instruction(&Instruction::Call(
-                    context
-                        .runtime_helpers
-                        .function(RuntimeHelperId::ReadManagedString),
-                ));
-                emit_sentinel_result(
-                    function,
-                    expression,
-                    Type::Standard(StdlibTypeId::String),
-                    Instruction::RefIsNull,
-                    "managed string could not be read",
                     context,
                 );
             }

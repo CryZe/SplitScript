@@ -65,7 +65,20 @@ pub(crate) struct ManagedFieldBinding {
     /// Value produced by a field read. Direct managed class fields become the
     /// corresponding `T.Ref`; terminal fields retain their declared type.
     pub value_type: TypeId,
+    /// How the remote field storage is decoded after its metadata offset has
+    /// been resolved. Keeping this policy in the binding plan prevents Mono,
+    /// IL2CPP, snapshots, and live reads from growing separate string rules.
+    pub read: ManagedFieldRead,
     pub metadata_names: Vec<ManagedMetadataCandidate>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ManagedFieldRead {
+    Fixed,
+    ManagedString {
+        max_utf16_units: u32,
+        nullable: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,6 +212,15 @@ fn field_binding(field: &ManagedFieldDecl, semantics: &SemanticModel) -> Managed
     let value_type = semantics
         .managed_field_value_type(field.id)
         .expect("checked managed fields have value semantic types");
+    let read = field.max_length.map_or(ManagedFieldRead::Fixed, |limit| {
+        ManagedFieldRead::ManagedString {
+            max_utf16_units: limit.value,
+            nullable: matches!(
+                semantics.types().kind(value_type),
+                crate::types::TypeKind::Option { .. }
+            ),
+        }
+    });
     ManagedFieldBinding {
         id: field.id,
         kind: if field.is_static {
@@ -208,6 +230,7 @@ fn field_binding(field: &ManagedFieldDecl, semantics: &SemanticModel) -> Managed
         },
         declared_type,
         value_type,
+        read,
         metadata_names: field_metadata_candidates(field),
     }
 }

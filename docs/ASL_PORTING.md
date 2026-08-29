@@ -250,9 +250,9 @@ machine-applicable because only the autosplitter author can verify the target
 encoding. The UTF-16LE action is available only for an even ASL byte bound.
 
 The stricter UTF-8 malformed-input policy is equivalent for A Plague Tale's
-ASCII map identifiers. Do not use [`readManagedString`] for a native buffer: that
-method reads the object layout of a Unity managed string rather than text bytes
-at the supplied address.
+ASCII map identifiers. A Unity managed string is not a native buffer: declare
+it in the managed [`class`] schema with [`maxLength`](syntax@maxLength) instead
+of applying a native decoder to its object address.
 
 The maintained Arietta of Spirits port uses independent `utf8(128)` and
 `utf8(8)` fields for its stage and pause-menu identifiers. Its host fixture
@@ -1223,14 +1223,14 @@ image "Assembly-CSharp" {
         static PlayerStats current from ["Instance", "_instance"];
         i32 district from "currDistrict";
         bool inRun;
-        address sceneName;
+        String sceneName maxLength 64;
     }
 }
 
 state Unity ["game.exe"] {
     district: i32 = PlayerStats.current?.district?;
     inRun: bool = PlayerStats.current?.inRun?;
-    sceneName: String = process.readManagedString(PlayerStats.current?.sceneName?, 64)?;
+    sceneName: String = PlayerStats.current?.sceneName?;
 }
 ```
 
@@ -1252,12 +1252,13 @@ failed member never publishes a partially populated object. Snapshots, arrays,
 strings, and completed instance searches materialize owned values; generated
 support is retained only when reachable.
 
-A managed string leaf is currently declared as an [`address`] and decoded with
-the bounded
-[`Process.readManagedString`](method@Process.readManagedString) operation. The
-bound is the maximum UTF-16 code-unit length accepted from the target process.
-This is a temporary schema-value gap, not an invitation to reproduce managed
-object-header traversal or make the metadata API public.
+A managed string leaf is declared as an ordinary [`String`] or optional [`T?`]
+field with an explicit [`maxLength`](syntax@maxLength) read policy. The bound is
+the maximum UTF-16 code-unit length accepted from the target process; exceeding
+it rejects the read instead of truncating text. A required string rejects a
+null managed reference, while an optional string maps that reference to
+[`None`]. Both still propagate memory failures normally. This keeps object
+headers and backend-specific decoding inside the generated Unity reader.
 
 Use [`from`] for exact metadata names or ordered name alternatives. Without it,
 the source declaration name is used and instance fields also recognize the

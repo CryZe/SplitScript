@@ -7,6 +7,7 @@
   },
   "include": [
     "src/embeddedCompiler.ts",
+    "src/savedScript.ts",
     "src/taskState.ts",
     "test/**/*.ts",
     "test/**/*.mts"

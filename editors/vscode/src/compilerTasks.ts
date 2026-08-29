@@ -6,6 +6,7 @@ import {
     type EmbeddedServiceDiagnostic,
 } from './embeddedCompiler';
 import { errorMessage } from './paths';
+import { resolveSavedScript, type SavedScriptFailure } from './savedScript';
 import { ExclusiveTaskState } from './taskState';
 
 export interface EmbeddedCompilerClient {
@@ -351,21 +352,23 @@ export class CompilerTaskController implements vscode.Disposable {
     }
 
     private async savedActiveScript(): Promise<vscode.TextDocument | undefined> {
-        let document = vscode.window.activeTextEditor?.document;
-        if (document === undefined || document.languageId !== 'splitscript') {
-            void vscode.window.showErrorMessage('Open a SplitScript file first.');
+        let result;
+        try {
+            result = await resolveSavedScript<vscode.Uri, vscode.TextDocument>({
+                activeDocument: () => vscode.window.activeTextEditor?.document,
+                save: uri => vscode.workspace.save(uri),
+                saveAs: uri => vscode.workspace.saveAs(uri),
+                openDocument: uri => vscode.workspace.openTextDocument(uri),
+            });
+        } catch (error) {
+            this.reportWorkerError('The SplitScript file could not be saved', error);
             return undefined;
         }
-        if ((document.isDirty || document.isUntitled) && !await document.save()) {
-            void vscode.window.showErrorMessage('The SplitScript file could not be saved.');
+        if ('failure' in result) {
+            void vscode.window.showErrorMessage(savedScriptFailureMessage(result.failure));
             return undefined;
         }
-        document = vscode.window.activeTextEditor?.document;
-        if (document === undefined || document.isUntitled) {
-            void vscode.window.showErrorMessage('Save the SplitScript file first.');
-            return undefined;
-        }
-        return document;
+        return result.document;
     }
 
     private beginOutput(
@@ -458,4 +461,19 @@ function compilerErrorCode(error: unknown): string | undefined {
         && typeof error.code === 'string'
         ? error.code
         : undefined;
+}
+
+function savedScriptFailureMessage(failure: SavedScriptFailure): string {
+    switch (failure) {
+        case 'noScript':
+            return 'Open a SplitScript file first.';
+        case 'saveFailed':
+            return 'The SplitScript file could not be saved.';
+        case 'notSaved':
+            return 'Save the SplitScript file first.';
+        case 'wrongLanguage':
+            return 'The saved file is not recognized as SplitScript.';
+        case 'wrongResource':
+            return 'The saved SplitScript document could not be resolved.';
+    }
 }

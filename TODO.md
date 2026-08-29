@@ -402,12 +402,6 @@ concepts rather than maintaining a parallel inventory.
 
 ### Correct editor behavior before broader packaging
 
-- [ ] Fix the VS Code save/focus race in build, release, and watch commands.
-  Preserve the selected SplitScript document across `await document.save()`,
-  handle an untitled Save As transition explicitly, and never compile whichever
-  editor happens to become active. Revalidate language, URI, and document
-  identity; cover focus changes, failed saves, stale revisions, output
-  replacement, and temporary-file cleanup through controller-level tests.
 - [ ] Bound documentation-page caching to the finite canonical route graph.
   Validate or canonicalize a requested URI before cache insertion, never retain
   arbitrary failed client lookups forever, and cache the immutable index/search
@@ -1052,6 +1046,11 @@ remaining work is product hardening and distribution.
   transport, message, subscription, and error adapters. Keep Node and browser
   entry points thin and run the same start, restart, cancellation, failure, and
   stop contract tests through both adapters.
+- [ ] Extend the VS Code compiler-task harness beyond saved-document identity
+  to exercise release/watch stale-result suppression, atomic output
+  replacement, and temporary-file cleanup through host-neutral controller
+  tests. The production paths already guard these cases; this is regression
+  hardening rather than a known editor correctness defect.
 - [ ] Replace the opaque aggregate documentation fingerprint with reviewable
   checked-in metadata or per-page fingerprints that report changed URIs and
   fields. Provide an explicit regeneration command; retain full graph, link,
@@ -1146,9 +1145,8 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Fix the confirmed editor correctness seams: preserve the selected document
-   across VS Code save/build/watch awaits and reject invalid documentation
-   routes before cache insertion.
+1. Fix the remaining confirmed editor correctness seam by rejecting invalid
+   documentation routes before cache insertion.
 2. Establish the first-use product path: a compiler-checked Getting Started
    guide and beginner native example, an extension-user Marketplace README, a
    routed repository README, and a curated examples index.

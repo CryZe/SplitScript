@@ -4114,3 +4114,15 @@ language catalog document the refinement rule.
 - Offered machine-applicable fixes for both possible intentions: remove `$` for
   `{value}`, or escape it as `\${value}` when the rendered text needs the dollar
   before the interpolated value. Ordinary dollar text remains warning-free.
+
+# 2026-08-30: identity-safe VS Code saves
+
+- Made release builds and debug watch retain the SplitScript document selected
+  when the command starts instead of rereading the editor that happens to be
+  focused after saving completes.
+- Followed the exact URI returned by VS Code's `workspace.save` and
+  `workspace.saveAs` APIs. Untitled Save As can replace the original document;
+  the controller opens and revalidates that returned resource, including its
+  language, saved state, and URI, before taking a compiler snapshot.
+- Added host-neutral tests for focus changes during save, untitled document
+  replacement, cancelled saves, and a Save As target with the wrong language.

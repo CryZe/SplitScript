@@ -1096,6 +1096,7 @@ fn emit_array_get(function: &mut Function, array_type_index: u32, element: Type,
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_memory_value(
     function: &mut Function,
     ty: TypeId,

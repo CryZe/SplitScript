@@ -250,18 +250,15 @@ impl Checker {
                         (Type::Array(self.array_type_id(element)), element)
                     });
                 let iterable_ty = self.expr(iterable, empty_array_hint.map(|(array, _)| array));
-                let iterable_ty = iterable_ty.map_or_else(
-                    || {
-                        empty_array_hint.map_or_else(
-                            || {
-                                let element = self.fresh_inference(Requirements::none(), None);
-                                Type::Array(self.array_type_id(element))
-                            },
-                            |(array, _)| array,
-                        )
-                    },
-                    |ty| ty,
-                );
+                let iterable_ty = iterable_ty.unwrap_or_else(|| {
+                    empty_array_hint.map_or_else(
+                        || {
+                            let element = self.fresh_inference(Requirements::none(), None);
+                            Type::Array(self.array_type_id(element))
+                        },
+                        |(array, _)| array,
+                    )
+                });
                 let mut iterable_ty = self.shallow_type(iterable_ty);
                 // Source-defined methods intentionally omit catalog-generic
                 // annotations at the parser boundary and let ordinary

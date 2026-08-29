@@ -268,14 +268,13 @@ fn diagnose_float_literal_ranges(
     .visit_program(program);
 }
 
-fn bind_function_generics(
-    checker: &mut Checker,
-    program: &Program,
-) -> (
+type FunctionGenericBindings = (
     HashMap<FunctionId, Vec<crate::types::TypeId>>,
     HashMap<crate::types::TypeId, Vec<crate::stdlib::StdlibCapabilityId>>,
     HashMap<FunctionId, Vec<crate::semantic::FunctionAssociatedProjection>>,
-) {
+);
+
+fn bind_function_generics(checker: &mut Checker, program: &Program) -> FunctionGenericBindings {
     let mut roots = HashMap::new();
     let mut parameters = HashMap::new();
     let mut constraints = HashMap::new();
@@ -395,11 +394,7 @@ impl Checker {
                 continue;
             }
 
-            let qualifier = global
-                .value
-                .is_none()
-                .then_some("bare ")
-                .unwrap_or_default();
+            let qualifier = if global.value.is_none() { "bare " } else { "" };
             let mut diagnostic = Diagnostic::type_error(
                 format!(
                     "cannot infer the type of {qualifier}global `{}`",

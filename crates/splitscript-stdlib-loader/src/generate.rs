@@ -18,6 +18,12 @@ struct CatalogGenerator<'a> {
     capability_names: HashSet<&'a str>,
 }
 
+#[derive(Clone, Copy)]
+struct FieldEmissionOptions {
+    owner_private: bool,
+    test_only: bool,
+}
+
 impl<'a> CatalogGenerator<'a> {
     fn new(library: &'a Library) -> Result<Self, Vec<Error>> {
         let errors = crate::validation::validate(library);
@@ -251,8 +257,10 @@ impl<'a> CatalogGenerator<'a> {
                         ),
                         &declaration.fields,
                         &[],
-                        declaration.private,
-                        has_attribute(&declaration.attributes, "testOnly"),
+                        FieldEmissionOptions {
+                            owner_private: declaration.private,
+                            test_only: has_attribute(&declaration.attributes, "testOnly"),
+                        },
                     );
                 }
                 Declaration::TypeConstructor(declaration) => self.emit_fields(
@@ -264,8 +272,10 @@ impl<'a> CatalogGenerator<'a> {
                     ),
                     &declaration.fields,
                     &declaration.type_parameters,
-                    false,
-                    has_attribute(&declaration.attributes, "testOnly"),
+                    FieldEmissionOptions {
+                        owner_private: false,
+                        test_only: has_attribute(&declaration.attributes, "testOnly"),
+                    },
                 ),
                 _ => {}
             }
@@ -347,12 +357,11 @@ impl<'a> CatalogGenerator<'a> {
         owner_expression: &str,
         fields: &[crate::FieldDeclaration],
         type_parameters: &[TypeParameter],
-        owner_private: bool,
-        test_only: bool,
+        options: FieldEmissionOptions,
     ) {
         let owner_id = ident(owner);
         for field in fields {
-            if test_only {
+            if options.test_only {
                 output.push_str("#[cfg(test)] ");
             }
             output.push_str(&format!(
@@ -360,7 +369,7 @@ impl<'a> CatalogGenerator<'a> {
                 owner_id, ident(&field.name),
                 quote(&field.name),
                 self.type_ref(&field.ty, type_parameters, &[]),
-                if owner_private || field.private {
+                if options.owner_private || field.private {
                     "RuntimePrivate"
                 } else {
                     "Public"

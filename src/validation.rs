@@ -383,9 +383,8 @@ fn validate_global_initializers(
             .global_reads
             .iter()
             .chain(&operation.global_writes)
-            .copied()
         {
-            if let Some(declaration) = declarations.get(&value) {
+            if let Some(declaration) = declarations.get(value) {
                 diagnostic = diagnostic.with_secondary_label(
                     declaration.name_span,
                     format!(
@@ -478,6 +477,7 @@ fn first_invalid_initializer_call(
     finder.found
 }
 
+#[allow(clippy::too_many_arguments)]
 fn capability_diagnostic(
     message: String,
     span: ast::Span,

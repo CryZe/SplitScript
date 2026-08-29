@@ -579,7 +579,6 @@ fn compile_block_with_loop(
                 index_value,
                 version_value,
                 iterable,
-                iterator_step: _,
                 ..
             } => compile_for_init(
                 function,

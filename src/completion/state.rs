@@ -12,10 +12,10 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Context {
-    StateBody,
-    NamedLayoutBody,
-    AttachmentLayoutBody,
-    ConditionalStateBody,
+    State,
+    NamedLayout,
+    AttachmentLayout,
+    ConditionalState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +40,7 @@ pub(super) fn complete_state_dsl(
         .state
         .as_ref()
         .is_some_and(|state| state.provider.is_some());
-    let body_kind = if context != Context::StateBody {
+    let body_kind = if context != Context::State {
         StateBodyKind::Fields
     } else {
         state_body_kind(&tokens, state_open, offset)
@@ -64,20 +64,20 @@ pub(super) fn complete_state_dsl(
             && significant[0].span == replacement
             && matches!(significant[0].kind, TokenKind::Ident(_))
     {
-        if context == Context::AttachmentLayoutBody {
+        if context == Context::AttachmentLayout {
             add_dimension_completion(&mut builder);
             return Some(builder.finish());
         }
         if body_kind != StateBodyKind::Layouts {
             add_field_completions(&mut builder, provider_is_specialized);
         }
-        if context == Context::StateBody && body_kind != StateBodyKind::Fields {
+        if context == Context::State && body_kind != StateBodyKind::Fields {
             add_layout_completion(&mut builder, body_kind == StateBodyKind::Unknown);
         }
         return Some(builder.finish());
     }
 
-    if context == Context::StateBody && body_kind == StateBodyKind::Layouts {
+    if context == Context::State && body_kind == StateBodyKind::Layouts {
         return Some(builder.finish());
     }
 
@@ -162,7 +162,7 @@ fn innermost_context(
     state_open: usize,
     offset: usize,
 ) -> Option<(usize, Context)> {
-    let mut braces = vec![(state_open, Some(Context::StateBody))];
+    let mut braces = vec![(state_open, Some(Context::State))];
     for (index, token) in tokens.iter().enumerate().skip(state_open + 1) {
         if token.span.start >= offset {
             break;
@@ -173,7 +173,7 @@ fn innermost_context(
                     .last()
                     .and_then(|(_, context)| *context)
                     .and_then(|context| {
-                        (context == Context::StateBody).then(|| {
+                        (context == Context::State).then(|| {
                             declaration_group_kind(tokens, braces.last().unwrap().0, index)
                         })?
                     });
@@ -206,16 +206,16 @@ fn declaration_group_kind(
         .collect::<Vec<_>>();
     if matches!(significant.first().map(|token| &token.kind), Some(TokenKind::Ident(name)) if name == "if")
     {
-        return Some(Context::ConditionalStateBody);
+        return Some(Context::ConditionalState);
     }
     if !matches!(significant.first().map(|token| &token.kind), Some(TokenKind::Ident(name)) if name == "layout")
     {
         return None;
     }
     Some(if significant.len() == 1 {
-        Context::AttachmentLayoutBody
+        Context::AttachmentLayout
     } else {
-        Context::NamedLayoutBody
+        Context::NamedLayout
     })
 }
 

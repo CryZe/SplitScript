@@ -753,12 +753,14 @@ impl<'a> Evaluator<'a> {
     ) -> (FunctionOperationSemantics, SymbolicValue) {
         match callee {
             SymbolicValue::Parameter { index, fields } => {
-                let mut operation = FunctionOperationSemantics::default();
-                operation.latent_parameter_operations = vec![LatentParameterOperation {
-                    parameter: *index,
-                    fields: fields.clone(),
-                    kind: LatentOperationKind::Invoke,
-                }];
+                let operation = FunctionOperationSemantics {
+                    latent_parameter_operations: vec![LatentParameterOperation {
+                        parameter: *index,
+                        fields: fields.clone(),
+                        kind: LatentOperationKind::Invoke,
+                    }],
+                    ..FunctionOperationSemantics::default()
+                };
                 (operation, SymbolicValue::Unknown)
             }
             SymbolicValue::Closure {
@@ -813,15 +815,14 @@ impl<'a> Evaluator<'a> {
 
     fn operation_for_iteration(&mut self, value: &SymbolicValue) -> FunctionOperationSemantics {
         match value {
-            SymbolicValue::Parameter { index, fields } => {
-                let mut operation = FunctionOperationSemantics::default();
-                operation.latent_parameter_operations = vec![LatentParameterOperation {
+            SymbolicValue::Parameter { index, fields } => FunctionOperationSemantics {
+                latent_parameter_operations: vec![LatentParameterOperation {
                     parameter: *index,
                     fields: fields.clone(),
                     kind: LatentOperationKind::Iterate,
-                }];
-                operation
-            }
+                }],
+                ..FunctionOperationSemantics::default()
+            },
             SymbolicValue::Record {
                 constructor: Some(StdlibTypeConstructorId::MapIterator),
                 fields,
@@ -941,6 +942,7 @@ fn function_environment(function: FunctionId, syntax: &Program) -> HashMap<Value
         .unwrap_or_default()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn evaluate_function(
     function: FunctionId,
     body: &TypedBlock,

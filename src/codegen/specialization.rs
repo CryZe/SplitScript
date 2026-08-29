@@ -14,6 +14,7 @@ use crate::{
     wasm_ir::{self, BodyOwner, Visitor},
 };
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn materialize(
     wasm: &wasm_ir::Program,
     program: &crate::ast::Program,

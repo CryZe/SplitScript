@@ -1441,11 +1441,28 @@ impl Parser<'_> {
     /// same block semantics.
     fn normalize_value_block(&mut self, mut block: crate::ast::Block) -> crate::ast::Block {
         if let Some(statement) = block.statements.pop() {
-            match self.tail_statement_expression(statement) {
-                Ok(expression) => block
+            if let crate::ast::Stmt::If {
+                condition,
+                then_block,
+                else_block: Some(else_block),
+                span,
+            } = statement
+            {
+                let then_expr = self.parsed_value_block_expression(then_block);
+                let else_expr = self.parsed_value_block_expression(else_block);
+                let expression = self.new_expr(
+                    ExprKind::If {
+                        condition: Box::new(condition),
+                        then_expr: Box::new(then_expr),
+                        else_expr: Box::new(else_expr),
+                    },
+                    span,
+                );
+                block
                     .statements
-                    .push(crate::ast::Stmt::Expression(expression)),
-                Err(statement) => block.statements.push(statement),
+                    .push(crate::ast::Stmt::Expression(expression));
+            } else {
+                block.statements.push(statement);
             }
         }
         block
@@ -1463,32 +1480,6 @@ impl Parser<'_> {
         } else {
             self.value_block(block)
         }
-    }
-
-    fn tail_statement_expression(
-        &mut self,
-        statement: crate::ast::Stmt,
-    ) -> Result<Expr, crate::ast::Stmt> {
-        let crate::ast::Stmt::If {
-            condition,
-            then_block,
-            else_block: Some(else_block),
-            span,
-        } = statement
-        else {
-            return Err(statement);
-        };
-
-        let then_expr = self.parsed_value_block_expression(then_block);
-        let else_expr = self.parsed_value_block_expression(else_block);
-        Ok(self.new_expr(
-            ExprKind::If {
-                condition: Box::new(condition),
-                then_expr: Box::new(then_expr),
-                else_expr: Box::new(else_expr),
-            },
-            span,
-        ))
     }
 
     fn value_block(&mut self, block: crate::ast::Block) -> Expr {

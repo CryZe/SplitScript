@@ -647,14 +647,14 @@ pub(crate) fn lower_for_tooling(parsed: ParsedProgram) -> Result<LoweredProgram,
     let syntax_diagnostics = parsed.syntax_diagnostics;
     let mut compilation_syntax = syntax.clone();
     let mut resolution_diagnostics = parsed.resolution_diagnostics;
-    if parsed.context.include_standard_library_bodies {
-        if let Some(augmented) = stdlib::augment_program_with_library_bodies(
+    if parsed.context.include_standard_library_bodies
+        && let Some(augmented) = stdlib::augment_program_with_library_bodies(
             parsed.document.source(),
             &syntax,
             &parsed.context.standard_library(),
-        )? {
-            compilation_syntax = augmented;
-        }
+        )?
+    {
+        compilation_syntax = augmented;
     }
     let mut resolutions = resolution::ProgramResolutions::default();
     resolution_diagnostics.extend(resolution::resolve_program(

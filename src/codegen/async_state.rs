@@ -436,7 +436,6 @@ fn compile_async_body(
                 loop_targets.map(|targets| targets.control(1)),
                 result_global,
                 cancellation_region,
-                runtime,
                 layout,
                 &context,
             ),
@@ -481,7 +480,6 @@ fn compile_async_body(
                     ),
                     result_global,
                     cancellation_region,
-                    runtime,
                     layout,
                     &context,
                 );
@@ -2589,7 +2587,7 @@ fn compile_source_future_poll(
             .instruction(&Instruction::If(BlockType::Empty));
         emit_child_frame(function, parent, child_field, child_frame);
         function
-            .instruction(&Instruction::Call(context.closure_polls[&child]))
+            .instruction(&Instruction::Call(context.closure_polls[child]))
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::I32Const(0))
@@ -3068,7 +3066,6 @@ fn compile_async_flow(
     loop_control: Option<LoopControl>,
     result_global: Option<u32>,
     cancellation_region: wasm_ir::CancellationRegion,
-    runtime: &AttachContext<'_>,
     layout: &AsyncFrameLayout,
     context: &ExprContext<'_>,
 ) {
@@ -3134,7 +3131,6 @@ fn compile_async_flow(
                     loop_control.map(|control| control.nested(1)),
                     result_global,
                     cancellation_region,
-                    runtime,
                     layout,
                     context,
                 );
@@ -3146,7 +3142,6 @@ fn compile_async_flow(
                     loop_control.map(|control| control.nested(1)),
                     result_global,
                     cancellation_region,
-                    runtime,
                     layout,
                     context,
                 );
@@ -3197,7 +3192,6 @@ fn compile_async_flow(
                         arm_context.loop_control,
                         result_global,
                         cancellation_region,
-                        runtime,
                         layout,
                         &arm_context,
                     );
@@ -3223,7 +3217,6 @@ fn compile_async_flow(
                     loop_control.map(|control| control.nested(1)),
                     result_global,
                     cancellation_region,
-                    runtime,
                     layout,
                     context,
                 );
@@ -3235,7 +3228,6 @@ fn compile_async_flow(
                     loop_control.map(|control| control.nested(1)),
                     result_global,
                     cancellation_region,
-                    runtime,
                     layout,
                     context,
                 );
@@ -3264,7 +3256,6 @@ fn compile_async_flow(
                     }),
                     result_global,
                     cancellation_region,
-                    runtime,
                     layout,
                     context,
                 );
@@ -3323,7 +3314,6 @@ fn compile_async_flow(
                     }),
                     result_global,
                     cancellation_region,
-                    runtime,
                     layout,
                     context,
                 );
@@ -3397,7 +3387,6 @@ fn compile_async_flow(
                 loop_control.map(|control| control.nested(1)),
                 result_global,
                 cancellation_region,
-                runtime,
                 layout,
                 context,
             );

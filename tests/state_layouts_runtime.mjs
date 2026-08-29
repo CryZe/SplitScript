@@ -10,6 +10,8 @@ const unknown = mode === "unknown";
 const gog = mode === "gog";
 const moduleSize = unknown ? 1n : gog ? 0x2000n : 0x1000n;
 const expectedAddress = gog ? 0x2000n : 0x1000n;
+const expectedCheckpointAddress = gog ? 0x2100n : 0x1100n;
+const expectedCheckpointSize = gog ? 2 : 1;
 const expectedLayout = gog ? "GOG" : "Steam";
 const decoder = new TextDecoder();
 const variables = new Map();
@@ -44,11 +46,20 @@ const env = {
     process_is_open: () => processOpen ? 1 : 0,
     process_read(_process, address, destination, size) {
         reads.push(address);
-        if (unknown || address !== expectedAddress || size !== 4) {
-            throw new Error(`unexpected state read: ${address.toString(16)} (${size})`);
+        const view = new DataView(instance.exports.memory.buffer);
+        if (!unknown && address === expectedAddress && size === 4) {
+            view.setUint32(destination, memoryValue, true);
+            return 1;
         }
-        new DataView(instance.exports.memory.buffer).setUint32(destination, memoryValue, true);
-        return 1;
+        if (!unknown && address === expectedCheckpointAddress && size === expectedCheckpointSize) {
+            if (size === 1) {
+                view.setUint8(destination, 7);
+            } else {
+                view.setUint16(destination, 7, true);
+            }
+            return 1;
+        }
+        throw new Error(`unexpected state read: ${address.toString(16)} (${size})`);
     },
     process_get_module_address: () => 0x400000n,
     process_get_module_size: () => moduleSize,
@@ -81,10 +92,10 @@ if (unknown) {
 } else {
     memoryValue = 1;
     instance.exports.update();
-    if (reads.some((address) => address !== expectedAddress)) {
+    if (reads.some((address) => address !== expectedAddress && address !== expectedCheckpointAddress)) {
         throw new Error(`selected layout read the wrong address: ${reads.map(String)}`);
     }
-    if (variables.get("Layout") !== expectedLayout || splits !== 1) {
+    if (variables.get("Layout") !== expectedLayout || variables.get("Checkpoint") !== "7" || splits !== 1) {
         throw new Error(`selected layout behaved incorrectly: ${JSON.stringify({ variables: Object.fromEntries(variables), splits })}`);
     }
 }

@@ -1720,8 +1720,7 @@ pub(crate) fn resolve_capability_requirement(
                     dispatch_type: type_arguments[dispatch_parameter],
                     cases: cases
                         .iter()
-                        .enumerate()
-                        .map(|(_index, case)| {
+                        .map(|case| {
                             let function_name = case.function_name;
                             let function = program
                                 .functions
@@ -2033,6 +2032,7 @@ fn closure_captures(
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn lower_body(
     owner: BodyOwner,
     block: &hir::TypedBlock,
@@ -3413,6 +3413,7 @@ fn map_expression_children(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn lower_normalized_match_arms(
     expression: ExprId,
     value: ExprId,

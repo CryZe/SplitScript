@@ -1046,14 +1046,14 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             .as_ref()
             .and_then(|state| state.layout.as_ref())
             .is_some_and(|layout| layout.record == record.id);
-        if !is_attachment_layout {
-            if let Some(definition) = self.definition(
+        if !is_attachment_layout
+            && let Some(definition) = self.definition(
                 SourceDefinitionId::Record(record.id),
                 &record.name,
                 record.span,
-            ) {
-                self.insert_definition(definition);
-            }
+            )
+        {
+            self.insert_definition(definition);
         }
         for field in &record.fields {
             if let Some(definition) = self.definition(

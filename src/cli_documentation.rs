@@ -827,7 +827,7 @@ fn render_table(writer: &mut dyn WriteColor, rows: &[Vec<String>], width: usize)
                 .max(1)
         })
         .collect::<Vec<_>>();
-    let minimum = (available / columns).min(12).max(4);
+    let minimum = (available / columns).clamp(4, 12);
     while widths.iter().sum::<usize>() > available {
         let Some((column, _)) = widths
             .iter()

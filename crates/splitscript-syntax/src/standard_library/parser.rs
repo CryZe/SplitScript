@@ -35,6 +35,13 @@ enum AssociatedTypesMode {
     Definitions,
 }
 
+#[derive(Clone, Copy)]
+struct CallableOwnerOptions {
+    functions_are_static: bool,
+    fields_allowed: bool,
+    associated_types: AssociatedTypesMode,
+}
+
 impl Parser<'_> {
     fn library(&mut self) -> Result<Library, Error> {
         let mut declarations = Vec::new();
@@ -111,9 +118,11 @@ impl Parser<'_> {
                     type_parameters,
                     documentation,
                     attributes,
-                    false,
-                    true,
-                    AssociatedTypesMode::Definitions,
+                    CallableOwnerOptions {
+                        functions_are_static: false,
+                        fields_allowed: true,
+                        associated_types: AssociatedTypesMode::Definitions,
+                    },
                 )?;
                 declaration.type_constructor_syntax = Some(syntax);
                 declarations.push(Declaration::TypeConstructor(declaration));
@@ -260,9 +269,11 @@ impl Parser<'_> {
             type_parameters,
             documentation,
             attributes,
-            functions_are_static,
-            fields_allowed,
-            associated_types,
+            CallableOwnerOptions {
+                functions_are_static,
+                fields_allowed,
+                associated_types,
+            },
         )
     }
 
@@ -272,9 +283,7 @@ impl Parser<'_> {
         type_parameters: Vec<TypeParameter>,
         documentation: Documentation,
         attributes: Vec<Attribute>,
-        functions_are_static: bool,
-        fields_allowed: bool,
-        associated_types_mode: AssociatedTypesMode,
+        options: CallableOwnerOptions,
     ) -> Result<CallableOwnerDeclaration, Error> {
         self.expect(TokenKind::LBrace, "expected `{` after the declaration name")?;
         let mut fields = Vec::new();
@@ -289,7 +298,7 @@ impl Parser<'_> {
             let private = self.eat_ident("private");
             let explicitly_static = self.eat_ident("static");
             if self.eat_ident("type") {
-                if associated_types_mode == AssociatedTypesMode::Forbidden {
+                if options.associated_types == AssociatedTypesMode::Forbidden {
                     return Err(self.error(
                         "associated types are only valid in capabilities and type constructors",
                     ));
@@ -312,7 +321,7 @@ impl Parser<'_> {
                 } else {
                     None
                 };
-                match associated_types_mode {
+                match options.associated_types {
                     AssociatedTypesMode::Requirements if value.is_some() => {
                         return Err(self.error("a capability associated type is a requirement and cannot define a value"));
                     }
@@ -338,7 +347,7 @@ impl Parser<'_> {
                     documentation,
                     attributes,
                     private,
-                    functions_are_static || explicitly_static,
+                    options.functions_are_static || explicitly_static,
                 )?);
             } else if self.eat_ident("const") {
                 if private || explicitly_static {
@@ -347,7 +356,7 @@ impl Parser<'_> {
                     );
                 }
                 functions.push(self.constant_declaration(documentation, attributes)?);
-            } else if fields_allowed {
+            } else if options.fields_allowed {
                 if explicitly_static {
                     return Err(self.error("expected `fn` after `static`"));
                 }

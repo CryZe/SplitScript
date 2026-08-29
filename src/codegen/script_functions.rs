@@ -399,6 +399,7 @@ pub(super) fn compile_state_transform(
     function
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compile_provider_direct_read(
     address: u32,
     memory_type_id: crate::types::TypeId,
@@ -465,6 +466,7 @@ fn compile_provider_direct_read(
     function
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_provider_read(
     function: &mut Function,
     guest_address_local: u32,

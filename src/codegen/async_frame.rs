@@ -170,6 +170,7 @@ impl AsyncFrameLayout {
         .with_completion(completion)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn for_body(
         entry: &wasm_ir::Block,
         locals: &[wasm_ir::Local],

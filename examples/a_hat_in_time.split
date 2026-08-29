@@ -7,7 +7,7 @@ enum SaveDataLayout {
 
 /// Time rift currently occupied by Hat Kid.
 enum Rift {
-    None,
+    Inactive,
     PurpleMafiaOfCooks,
     PurpleDeadBirdStudio,
     PurpleSleepySubcon,
@@ -502,7 +502,7 @@ let lastChapter = 0
 let gameTimeFinal = 0.0
 let savedGameTime = 0.0
 let splitInLoadScreen = false
-let currentRift = Rift.None
+let currentRift = Rift.Inactive
 let justEnteredRift = false
 let positionSplitKey = 0
 let observedSplitIndex: u64? = None
@@ -1152,7 +1152,7 @@ fn detectRift(chapter: i32, x: f32, y: f32, z: f32) -> Rift {
             return location.rift
         }
     }
-    return Rift.None
+    return Rift.Inactive
 }
 
 fn isBackAtHub(chapter: i32, x: f32, y: f32, z: f32) -> bool {
@@ -1171,7 +1171,7 @@ fn riftEnabled(rift: Rift) -> bool {
         return false
     }
     return match rift {
-        Rift.None => false,
+        Rift.Inactive => false,
         Rift.PurpleMafiaOfCooks => settings.manySplits_riftPurple
             && settings.manySplits_riftPurple_moc,
         Rift.PurpleDeadBirdStudio => settings.manySplits_riftPurple
@@ -1216,7 +1216,7 @@ fn riftTimePieceEnabled(rift: Rift) -> bool {
         return false
     }
     return match rift {
-        Rift.None => false,
+        Rift.Inactive => false,
         Rift.PurpleMafiaOfCooks => settings.manySplits_riftPurple_moc_tp,
         Rift.PurpleDeadBirdStudio => settings.manySplits_riftPurple_dbs_tp,
         Rift.PurpleSleepySubcon => settings.manySplits_riftPurple_sleepy_tp,
@@ -1243,7 +1243,7 @@ fn riftEntryEnabled(rift: Rift) -> bool {
         return false
     }
     return match rift {
-        Rift.None => false,
+        Rift.Inactive => false,
         Rift.PurpleMafiaOfCooks => settings.manySplits_riftPurple_moc_entry,
         Rift.PurpleDeadBirdStudio => settings.manySplits_riftPurple_dbs_entry,
         Rift.PurpleSleepySubcon => settings.manySplits_riftPurple_sleepy_entry,
@@ -1299,7 +1299,7 @@ fn acquiredAnyTimePiece(currentFlag: i32, oldFlag: i32) -> bool {
 
 fn splitLockElapsed(milliseconds: i64) -> bool {
     let splitAt = lastSplitAt else return true
-    return splitAt.hasElapsed(Duration.fromWholeMilliseconds(milliseconds))
+    return splitAt.hasElapsed(Duration.fromMilliseconds(milliseconds))
 }
 
 fn detailedChapterEnabled(chapter: i32) -> bool {
@@ -1501,7 +1501,7 @@ fn shouldDetailedSplit(currentState, oldState) -> bool {
         oldState.timePieceCount,
     ) || acquiredAnyTimePiece(currentState.justGotTimePiece, oldState.justGotTimePiece)
 
-    if currentRift == Rift.None {
+    if currentRift == Rift.Inactive {
         return gotTimePiece
             && detailedTimePieceEnabled(currentState.chapter, currentState.act)
             || currentState.checkpoint != oldState.checkpoint
@@ -1646,12 +1646,12 @@ whileAttached {
         splitInLoadScreen = false
         positionSplitKey = 0
         if isBackAtHub(current.chapter, current.x, current.y, current.z) {
-            currentRift = Rift.None
+            currentRift = Rift.Inactive
         }
     }
 
-    if current.timerState == 0 && currentRift != Rift.None {
-        currentRift = Rift.None
+    if current.timerState == 0 && currentRift != Rift.Inactive {
+        currentRift = Rift.Inactive
     }
 
     if justEnteredRift {
@@ -1659,11 +1659,11 @@ whileAttached {
     }
 
     if current.gameTimerIsPaused != old.gameTimerIsPaused
-        && currentRift == Rift.None
+        && currentRift == Rift.Inactive
         && settings.manySplits
     {
         currentRift = detectRift(current.chapter, current.x, current.y, current.z)
-        if currentRift != Rift.None {
+        if currentRift != Rift.Inactive {
             justEnteredRift = true
         }
     }
@@ -1712,7 +1712,7 @@ split {
         }
         if current.actTimerIsVisible == 1
             && old.actTimerIsVisible == 0
-            && currentRift == Rift.None
+            && currentRift == Rift.Inactive
             && settings.splits_actEntry
             && !ilModeEnabled()
         {

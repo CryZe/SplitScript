@@ -13,7 +13,7 @@ use crate::{
 };
 
 use super::{
-    GcLayout, STATE_TYPE, Type, constant,
+    GcLayout, STATE_TYPE, Type, constant, is_wasm_global_constant,
     managed_state_reads::{self, ManagedStateReadCache},
     semantic_type, value_type,
 };
@@ -335,12 +335,16 @@ pub(super) fn encode(
         }
         let index = section.len();
         let mut val_type = gc.val_type(ty);
-        if variable.value.is_none()
+        let runtime_initialized = variable
+            .value
+            .as_ref()
+            .is_some_and(|value| !is_wasm_global_constant(value.id, wasm_ir));
+        if (variable.value.is_none() || runtime_initialized)
             && let ValType::Ref(reference) = &mut val_type
         {
-            // The source value is non-null after successful initialization,
-            // but detached storage needs a null sentinel so it can release
-            // the previous attachment's GC graph.
+            // The source value is non-null whenever user code may observe it,
+            // but Wasm storage needs a null placeholder before module-start or
+            // lifecycle initialization has populated the value.
             reference.nullable = true;
         }
         let global_type = GlobalType {
@@ -353,21 +357,11 @@ pub(super) fn encode(
                 global_type,
                 &ConstExpr::ref_null(HeapType::Concrete(gc.index(Type::Option(option)))),
             );
-        } else if ty.is_enum(wasm_ir.standard_library())
-            || matches!(
-                ty,
-                Type::Record(_)
-                    | Type::Array(_)
-                    | Type::Range(_)
-                    | Type::Set(_)
-                    | Type::Standard(StdlibTypeId::String)
-            )
+        } else if let ValType::Ref(reference) = gc.val_type(ty) {
+            section.global(global_type, &ConstExpr::ref_null(reference.heap_type));
+        } else if let Some(value) = &variable.value
+            && is_wasm_global_constant(value.id, wasm_ir)
         {
-            section.global(
-                global_type,
-                &ConstExpr::ref_null(HeapType::Concrete(gc.index(ty))),
-            );
-        } else if let Some(value) = &variable.value {
             section.global(global_type, &constant(value.id, wasm_ir, ty));
         } else {
             section.global(global_type, &default_const_expr(gc.val_type(ty)));

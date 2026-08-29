@@ -556,14 +556,11 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         lowering: &lowering,
     };
     let settings_context = settings::SettingsContext {
-        standard_library: &standard_library,
         abi: &abi,
         enums,
         gc: &gc,
-        globals: &global_indices,
         runtime_globals,
         semantics,
-        wasm_ir,
     };
     let provider_attach = provider_attachment.as_ref().map(|instance| {
         let plan = user_functions[instance];
@@ -1404,6 +1401,53 @@ fn constant(expression: ExprId, wasm_ir: &wasm_ir::Program, ty: Type) -> ConstEx
         }
         _ => unreachable!(),
     }
+}
+
+/// Whether an initializer can remain in the Wasm global section instead of
+/// executing in the module start body. Keep this deliberately narrower than
+/// source-level purity: Wasm constant expressions cannot call even a pure
+/// helper or allocate a GC aggregate.
+fn is_wasm_global_constant(expression: ExprId, wasm_ir: &wasm_ir::Program) -> bool {
+    let Some(expression) = wasm_ir.expression(expression) else {
+        return false;
+    };
+    if matches!(
+        expression.kind,
+        wasm_ir::ExpressionKind::None
+            | wasm_ir::ExpressionKind::Bool(_)
+            | wasm_ir::ExpressionKind::Char(_)
+            | wasm_ir::ExpressionKind::Int(_)
+            | wasm_ir::ExpressionKind::Float(_)
+    ) {
+        return true;
+    }
+    let wasm_ir::ExpressionKind::Call {
+        target:
+            wasm_ir::CallTarget::Intrinsic {
+                intrinsic:
+                    IntrinsicId::SignedNegate | IntrinsicId::BoolNot | IntrinsicId::IntegerBitNot,
+                receiver:
+                    Some(ResolvedReceiver::Expression {
+                        expression: inner,
+                        members,
+                    }),
+                ..
+            },
+        arguments,
+    } = &expression.kind
+    else {
+        return false;
+    };
+    members.is_empty()
+        && arguments.is_empty()
+        && wasm_ir.expression(*inner).is_some_and(|inner| {
+            matches!(
+                inner.kind,
+                wasm_ir::ExpressionKind::Bool(_)
+                    | wasm_ir::ExpressionKind::Int(_)
+                    | wasm_ir::ExpressionKind::Float(_)
+            )
+        })
 }
 
 fn action_result_val_type(action: ActionKind, gc: &GcLayout) -> ValType {

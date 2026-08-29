@@ -621,6 +621,19 @@ pub struct StateExpression {
     pub locals: Vec<Local>,
 }
 
+/// One closed source initializer lowered into module-start control flow.
+///
+/// Its terminal store is part of the plan, so value blocks, loops, fallback,
+/// and future expression forms share ordinary statement lowering instead of
+/// requiring a second expression evaluator in the backend.
+#[derive(Debug, Clone)]
+pub struct GlobalInitializerPlan {
+    pub value: ValueId,
+    pub expression: ExprId,
+    pub entry: Block,
+    pub locals: Vec<Local>,
+}
+
 #[derive(Debug, Clone)]
 pub struct StateTransform {
     pub field: ValueId,
@@ -662,6 +675,7 @@ pub struct Program {
     profile: crate::BuildProfile,
     bodies: Vec<Body>,
     global_initializers: Vec<(ValueId, ExprId)>,
+    global_initializer_plans: Vec<GlobalInitializerPlan>,
     attachment_globals: Vec<ValueId>,
     attempt_globals: Vec<ValueId>,
     state_expressions: Vec<StateExpression>,
@@ -737,6 +751,7 @@ impl Program {
             profile,
             bodies: Vec::new(),
             global_initializers,
+            global_initializer_plans: Vec::new(),
             attachment_globals,
             attempt_globals,
             state_expressions: Vec::new(),
@@ -750,6 +765,40 @@ impl Program {
             next_generated_expression,
             next_temporary: 0,
         };
+        let global_initializers = program.global_initializers.clone();
+        for (value, expression) in global_initializers {
+            let normalized =
+                normalize_expression_suspensions(expression, typed_hir, semantics, &mut program);
+            let continuation = Block {
+                statements: vec![Statement::Store {
+                    target: value,
+                    declaration: false,
+                    operation: None,
+                    value: normalized.value,
+                }],
+                terminator: Terminator::Fallthrough,
+            };
+            let entry = wrap_async_expression_steps(
+                normalized.steps,
+                continuation,
+                typed_hir,
+                semantics,
+                SourceProvenance {
+                    profile,
+                    visible: expression.index() < typed_hir.visible_expression_count(),
+                },
+                &mut program,
+            );
+            let locals = plan_block(&entry, &program, semantics, capabilities);
+            program
+                .global_initializer_plans
+                .push(GlobalInitializerPlan {
+                    value,
+                    expression,
+                    entry,
+                    locals,
+                });
+        }
         let mutated_values = mutated_values(typed_hir);
         let globals = program
             .global_initializers
@@ -931,6 +980,10 @@ impl Program {
 
     pub fn global_initializers(&self) -> impl Iterator<Item = (ValueId, ExprId)> + '_ {
         self.global_initializers.iter().copied()
+    }
+
+    pub fn global_initializer_plans(&self) -> impl Iterator<Item = &GlobalInitializerPlan> {
+        self.global_initializer_plans.iter()
     }
 
     pub fn contains_global(&self, value: ValueId) -> bool {

@@ -1671,21 +1671,6 @@ impl SemanticBuilder {
         debug_assert!(previous.is_none(), "expression conversion must be unique");
     }
 
-    pub(crate) fn standard_library_item(&self, expression: ExprId) -> Option<StdlibItemId> {
-        self.calls.get(&expression).and_then(|call| match call {
-            PendingResolvedCall::StandardLibrary { item, .. } => Some(*item),
-            PendingResolvedCall::UserFunction { .. }
-            | PendingResolvedCall::UserMethod { .. }
-            | PendingResolvedCall::ManagedSnapshot { .. }
-            | PendingResolvedCall::ManagedComponent { .. }
-            | PendingResolvedCall::ManagedInstances { .. }
-            | PendingResolvedCall::ResultError { .. }
-            | PendingResolvedCall::OptionSome { .. }
-            | PendingResolvedCall::IteratorItem { .. }
-            | PendingResolvedCall::ResultSuccess { .. } => None,
-        })
-    }
-
     pub(crate) fn finish(
         self,
         mut types: TypeStore,

@@ -172,6 +172,8 @@ impl Default for FunctionSummary {
 #[derive(Default)]
 struct Accumulator {
     effects: Vec<Effect>,
+    global_reads: Vec<ValueId>,
+    global_writes: Vec<ValueId>,
     availability: Option<Availability>,
     latent: Vec<LatentParameterOperation>,
 }
@@ -189,6 +191,9 @@ impl Accumulator {
 
     fn operation(&mut self, operation: &FunctionOperationSemantics) {
         self.effects.extend_from_slice(&operation.effects);
+        self.global_reads.extend_from_slice(&operation.global_reads);
+        self.global_writes
+            .extend_from_slice(&operation.global_writes);
         self.availability(operation.availability);
         for latent in &operation.latent_parameter_operations {
             if !self.latent.contains(latent) {
@@ -202,6 +207,12 @@ impl Accumulator {
             self.effects,
             self.availability.unwrap_or(Availability::Everywhere),
         );
+        self.global_reads.sort_by_key(|value| value.index());
+        self.global_reads.dedup();
+        self.global_writes.sort_by_key(|value| value.index());
+        self.global_writes.dedup();
+        operation.global_reads = self.global_reads;
+        operation.global_writes = self.global_writes;
         self.latent
             .sort_by_key(|latent| (latent.parameter, latent.fields.len()));
         self.latent.dedup();
@@ -272,6 +283,9 @@ impl<'a> Evaluator<'a> {
                     self.apply_resolved_call(None, call, &[], false);
                 }
                 self.env.insert(assignment.target, value);
+                if self.is_source_global(assignment.target) {
+                    self.accumulator.global_writes.push(assignment.target);
+                }
                 if self.scoped_globals.is_attachment_global(assignment.target) {
                     self.accumulator.effect(Effect::RequiresAttachedProcess);
                 }
@@ -566,6 +580,11 @@ impl<'a> Evaluator<'a> {
             }
         }
         if let Some((root, _)) = self.program.value_path(expression.id) {
+            if let Some(ResolvedValue::Variable(value)) = root
+                && self.is_source_global(value)
+            {
+                self.accumulator.global_reads.push(value);
+            }
             if matches!(
                 root,
                 Some(
@@ -588,7 +607,26 @@ impl<'a> Evaluator<'a> {
             ) {
                 self.accumulator.effect(Effect::RequiresAttachedProcess);
             }
+            if matches!(
+                root,
+                Some(
+                    ResolvedValue::SettingsView
+                        | ResolvedValue::OldSettingsView
+                        | ResolvedValue::Setting(_)
+                        | ResolvedValue::OldSetting(_)
+                )
+            ) {
+                self.accumulator.effect(Effect::ReadsRuntime);
+            }
+            if matches!(root, Some(ResolvedValue::ManagedStatic { .. })) {
+                self.accumulator.effect(Effect::ReadsProcess);
+                self.accumulator.effect(Effect::RequiresAttachedProcess);
+            }
         }
+    }
+
+    fn is_source_global(&self, value: ValueId) -> bool {
+        self.syntax.globals.iter().any(|global| global.id == value)
     }
 
     fn value_path(&self, id: ExprId) -> SymbolicValue {
@@ -686,6 +724,12 @@ impl<'a> Evaluator<'a> {
     ) -> FunctionOperationSemantics {
         let mut accumulator = Accumulator::default();
         accumulator.effects.extend_from_slice(&operation.effects);
+        accumulator
+            .global_reads
+            .extend_from_slice(&operation.global_reads);
+        accumulator
+            .global_writes
+            .extend_from_slice(&operation.global_writes);
         accumulator.availability(operation.availability);
         for latent in &operation.latent_parameter_operations {
             let value = inputs
@@ -958,6 +1002,21 @@ pub(super) fn infer(
     }
 
     let mut calls = HashMap::new();
+    let mut global_initializers = HashMap::new();
+    for initializer in program.global_initializers() {
+        let mut evaluator = Evaluator::new(
+            syntax,
+            program,
+            semantics,
+            capabilities,
+            scoped_globals,
+            &summaries,
+            HashMap::new(),
+        )
+        .with_calls(&mut calls);
+        evaluator.expression(initializer.expression);
+        global_initializers.insert(initializer.expression, evaluator.accumulator.finish());
+    }
     for action in program.action_bodies() {
         let mut evaluator = Evaluator::new(
             syntax,
@@ -1004,5 +1063,6 @@ pub(super) fn infer(
             .map(|summary| summary.operation)
             .collect(),
         calls,
+        global_initializers,
     }
 }

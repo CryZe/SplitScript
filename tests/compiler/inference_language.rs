@@ -3,41 +3,157 @@
 use super::*;
 
 #[test]
-fn dynamic_global_initializer_diagnostic_explains_persistent_sets_without_internal_terms() {
+fn closed_pure_global_initializers_run_through_module_start() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn increment(value: u32) -> u32 {
+                return value + 1
+            }
+
+            let value: u32 = {
+                let base = 40
+                increment(base)
+            }
+            let visited = Set.new<String>()
+            let delay = Duration.fromSeconds(1.5)
+
+            whileAttached {
+                print(value)
+                print(visited)
+            }
+
+            gameTime { return delay }
+        "#,
+    )
+    .expect("closed pure calls and value blocks should initialize globals");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("runtime global initializers should produce valid Wasm");
+}
+
+#[test]
+fn global_initializers_reject_transitive_global_and_runtime_dependencies() {
     let diagnostics = splitscript::compile(
         r#"
             state "game.exe" {}
 
-            fn initialValue() -> u32 {
-                return 1
+            let seed = 40
+
+            fn readsSeed() -> i32 {
+                return seed
             }
 
-            let value = initialValue()
-
-            whileAttached {
-                print(value)
+            fn logsAndReturns() -> i32 {
+                print("initializing")
+                return 2
             }
+
+            let fromGlobal = readsSeed()
+            let fromRuntime = logsAndReturns()
         "#,
     )
-    .expect_err("function calls are not constant global initializers");
-    let diagnostic = diagnostics
+    .expect_err("global initializers must not observe global or runtime state");
+    let initializer_diagnostics = diagnostics
         .iter()
-        .find(|diagnostic| diagnostic.message.contains("global initializers"))
-        .expect("a focused global-initializer diagnostic should be emitted");
-    assert!(diagnostic.message.contains("`Set.new<T>()`"));
-    assert!(
+        .filter(|diagnostic| {
+            diagnostic
+                .message
+                .contains("must be closed, synchronous, and pure")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(initializer_diagnostics.len(), 2, "{diagnostics:#?}");
+    assert!(initializer_diagnostics.iter().any(|diagnostic| {
+        diagnostic.labels.iter().any(|label| {
+            label
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("seed"))
+        })
+    }));
+    assert!(initializer_diagnostics.iter().any(|diagnostic| {
         diagnostic
             .notes
             .iter()
-            .any(|note| note.contains("persistent mutable set"))
-    );
+            .any(|note| note.contains("writes runtime state"))
+    }));
+    assert!(initializer_diagnostics.iter().any(|diagnostic| {
+        diagnostic.labels.iter().any(|label| {
+            label
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("helper carries"))
+        })
+    }));
+}
+
+#[test]
+fn global_initializers_reject_settings_timer_process_and_global_writes() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            settings {
+                "Enabled" => enabled: true
+            }
+
+            let destination = 0
+
+            fn overwriteDestination() -> i32 {
+                destination = 1
+                return 1
+            }
+
+            let settingAtLoad = settings.enabled
+            let timerAtLoad = timer.state()
+            let processAtLoad = process.name()
+            let writtenAtLoad = overwriteDestination()
+        "#,
+    )
+    .expect_err("global initializers must not depend on runtime context or mutate globals");
+    let initializer_diagnostics = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic
+                .message
+                .contains("must be closed, synchronous, and pure")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(initializer_diagnostics.len(), 4, "{diagnostics:#?}");
+    assert!(initializer_diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("reads runtime state"))
+    }));
+    assert!(initializer_diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("reads timer state"))
+    }));
     assert!(
-        !diagnostic.message.contains("run-scoped")
-            && diagnostic
+        initializer_diagnostics.iter().any(|diagnostic| {
+            diagnostic
                 .notes
                 .iter()
-                .all(|note| !note.contains("run-scoped"))
+                .any(|note| note.contains("reads process memory"))
+                || diagnostic
+                    .notes
+                    .iter()
+                    .any(|note| note.contains("requires an attached process"))
+        }),
+        "{diagnostics:#?}"
     );
+    assert!(initializer_diagnostics.iter().any(|diagnostic| {
+        diagnostic.labels.iter().any(|label| {
+            label
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("destination"))
+        })
+    }));
 }
 
 #[test]

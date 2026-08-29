@@ -367,10 +367,6 @@ or assumptions tied to one generated corpus.
   names away from their grammar positions.
 - [ ] Convert the remaining campaign boundaries into focused decisions rather
   than preserving workarounds as recommendations:
-  - Decide whether pure source-defined constructors such as
-    `Duration.fromSeconds(...)` should be constant-evaluable in module globals,
-    or whether lifecycle initialization remains intentional; then align the
-    diagnostic and docs.
   - Decide whether bounded string lengths should accept any `Integer` and
     perform one checked conversion, instead of requiring authors to discover a
     `u32` suffix for ordinary positive constants.

@@ -8,9 +8,8 @@ use crate::{
     abi::AbiImportId,
     ast::{EnumDecl, Program, SettingFileFilter, SettingKind, ValueId},
     semantic::SemanticModel,
-    stdlib::{StandardLibrary, StdlibTypeId},
+    stdlib::StdlibTypeId,
     types::TypeKind,
-    wasm_ir,
 };
 
 use super::memory_plan::RuntimeScratch;
@@ -21,14 +20,11 @@ use super::{
 
 /// Settings-only view of the completed backend plans.
 pub(super) struct SettingsContext<'a> {
-    pub standard_library: &'a StandardLibrary,
     pub abi: &'a Abi,
     pub enums: &'a [EnumDecl],
     pub gc: &'a GcLayout,
-    pub globals: &'a HashMap<ValueId, u32>,
     pub runtime_globals: RuntimeGlobals,
     pub semantics: &'a SemanticModel,
-    pub wasm_ir: &'a wasm_ir::Program,
 }
 
 pub(super) fn compile_string_from_memory(gc: &GcLayout) -> Function {

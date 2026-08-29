@@ -7,10 +7,8 @@ use wasm_encoder::{Function, Instruction};
 use crate::{
     abi::AbiImportId,
     ast::{Program, RecordDecl, RecordId, ValueId},
-    semantic::{ResolvedEnumVariantId, SemanticModel},
-    stdlib::{StandardLibrary, StdlibTypeId},
+    semantic::SemanticModel,
     types::{TypeId, TypeKind},
-    wasm_ir,
 };
 
 use super::{
@@ -19,9 +17,11 @@ use super::{
     data_plan::StringPool,
     debug_artifacts::DebugEmission,
     emit_default,
-    expression::{BareReturn, ExprContext, LocalStorage, MatchLayout, compile_expr},
+    expression::{BareReturn, ExprContext, LocalStorage, MatchLayout, compile_block},
+    is_wasm_global_constant,
+    script_functions::{LocalPlanOptions, plan_wasm_locals},
     semantic_type,
-    settings::{SettingsContext, emit_enum_variant, emit_setting_registration},
+    settings::{SettingsContext, emit_setting_registration},
     value_type,
 };
 
@@ -41,10 +41,37 @@ pub(super) fn compile_start(
     has_async_frame: bool,
 ) -> Function {
     let semantics = settings_context.semantics;
-    let mut function = Function::new([]);
+    let mut locals = HashMap::new();
+    let mut matches = MatchLayout::default();
+    let mut local_types = Vec::new();
+    for initializer in emission
+        .wasm_ir
+        .global_initializer_plans()
+        .filter(|initializer| {
+            let ty = value_type(initializer.value, semantics);
+            ty.has_runtime_value()
+                && !is_wasm_global_constant(initializer.expression, emission.wasm_ir)
+        })
+    {
+        plan_wasm_locals(
+            &initializer.locals,
+            &mut locals,
+            &mut matches,
+            &mut local_types,
+            LocalPlanOptions {
+                parameter_count: 0,
+                semantics,
+                wasm_ir: emission.wasm_ir,
+                gc: settings_context.gc,
+                reachability: emission.reachability,
+                instance: None,
+                include_values: true,
+            },
+        );
+    }
+    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
     let debug = emission.debug_emission(start_functions.start);
-    emit_enum_global_initializers(&mut function, program, settings_context, debug);
-    emit_aggregate_global_initializers(&mut function, program, emission, debug);
+    emit_runtime_global_initializers(&mut function, emission, &locals, &matches, debug);
     emit_initial_state(&mut function, program, semantics, settings_context.gc);
     function.instruction(&Instruction::GlobalSet(
         settings_context.runtime_globals.current,
@@ -86,84 +113,26 @@ pub(super) fn compile_start(
     function
 }
 
-fn emit_enum_global_initializers(
-    function: &mut Function,
-    program: &Program,
-    lowering: &SettingsContext<'_>,
-    debug: Option<DebugEmission<'_>>,
-) {
-    for variable in program.globals.iter().filter(|variable| {
-        variable.value.is_some() && lowering.wasm_ir.contains_global(variable.id)
-    }) {
-        let value = variable.value.as_ref().unwrap();
-        let ty = value_type(variable.id, lowering.semantics);
-        if !ty.is_enum(lowering.standard_library) {
-            continue;
-        }
-        let wasm_ir::ExpressionKind::Enum { variant, .. } = &lowering
-            .wasm_ir
-            .expression(value.id)
-            .expect("global enum initializer belongs to Wasm IR")
-            .kind
-        else {
-            unreachable!("checked enum globals use enum constructors")
-        };
-        if let Some(debug) = debug {
-            debug.mark(
-                function,
-                lowering
-                    .wasm_ir
-                    .expression(value.id)
-                    .and_then(|expression| expression.source),
-            );
-        }
-        match (ty, variant) {
-            (Type::Enum(enumeration), ResolvedEnumVariantId::Source(variant)) => {
-                emit_enum_variant(
-                    function,
-                    enumeration,
-                    *variant,
-                    lowering.enums,
-                    lowering.semantics,
-                    lowering.gc,
-                );
-            }
-            (Type::Standard(enumeration), ResolvedEnumVariantId::Standard(variant)) => {
-                emit_standard_enum_variant(
-                    function,
-                    enumeration,
-                    *variant,
-                    lowering.standard_library,
-                    lowering.gc,
-                )
-            }
-            _ => unreachable!("checked enum globals use variants from the same declaration"),
-        }
-        function.instruction(&Instruction::GlobalSet(lowering.globals[&variable.id]));
-    }
-}
-
-/// Materializes source aggregate constants once in the module start function.
+/// Materializes non-Wasm-constant source initializers once in the module start
+/// function.
 ///
-/// Wasm constant expressions cannot construct GC arrays or structs. Their
-/// globals therefore begin as nullable references and are populated before any
-/// exported script entry point can observe them. Source expressions still see
-/// the ordinary non-optional array or record type.
-fn emit_aggregate_global_initializers(
+/// Wasm constant expressions cannot call pure helpers or construct GC values.
+/// Their globals therefore begin with backend defaults and are populated before
+/// any exported script entry point can observe them.
+fn emit_runtime_global_initializers(
     function: &mut Function,
-    program: &Program,
     lowering: &EmissionContext<'_>,
+    locals: &HashMap<ValueId, (u32, Type)>,
+    matches: &MatchLayout,
     debug: Option<DebugEmission<'_>>,
 ) {
-    let locals = HashMap::new();
-    let matches = MatchLayout::default();
     let context = ExprContext {
         standard_library: lowering.standard_library,
         reachability: lowering.reachability,
         abi: lowering.abi,
         state: lowering.state,
         locals: LocalStorage::Wasm {
-            values: &locals,
+            values: locals,
             temporaries: &matches.temporaries,
         },
         globals: lowering.globals,
@@ -191,7 +160,7 @@ fn emit_aggregate_global_initializers(
         memory: lowering.memory,
         abi_read: lowering.abi_read,
         signatures: lowering.signatures,
-        matches: &matches,
+        matches,
         semantics: lowering.semantics,
         wasm_ir: lowering.wasm_ir,
         gc: lowering.gc,
@@ -204,42 +173,15 @@ fn emit_aggregate_global_initializers(
         materialize_none: true,
     };
 
-    for variable in program.globals.iter().filter(|variable| {
-        variable.value.is_some() && lowering.wasm_ir.contains_global(variable.id)
-    }) {
-        let value = variable.value.as_ref().unwrap();
-        let ty = value_type(variable.id, lowering.semantics);
-        if !matches!(
-            ty,
-            Type::Record(_)
-                | Type::Array(_)
-                | Type::Range(_)
-                | Type::Set(_)
-                | Type::Standard(StdlibTypeId::String)
-        ) {
+    for initializer in lowering.wasm_ir.global_initializer_plans() {
+        let ty = value_type(initializer.value, lowering.semantics);
+        if !ty.has_runtime_value()
+            || is_wasm_global_constant(initializer.expression, lowering.wasm_ir)
+        {
             continue;
         }
-        compile_expr(function, value.id, &context);
-        function.instruction(&Instruction::GlobalSet(lowering.globals[&variable.id]));
+        compile_block(function, &initializer.entry, &context, None);
     }
-}
-
-fn emit_standard_enum_variant(
-    function: &mut Function,
-    enumeration: StdlibTypeId,
-    variant: crate::stdlib::StdlibVariantId,
-    standard_library: &StandardLibrary,
-    gc: &GcLayout,
-) {
-    let selected = standard_library
-        .variants_of(enumeration)
-        .position(|candidate| candidate.id == variant)
-        .expect("checked standard enum variants belong to their declaration");
-    function.instruction(&Instruction::I32Const(selected as i32));
-    for _ in standard_library.variants_of(enumeration) {
-        function.instruction(&Instruction::I32Const(0));
-    }
-    function.instruction(&Instruction::StructNew(gc.standard_index(enumeration)));
 }
 
 /// Constructs source-language state defaults instead of relying on Wasm's

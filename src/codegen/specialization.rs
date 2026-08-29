@@ -148,12 +148,12 @@ fn expression_owners(wasm: &wasm_ir::Program) -> HashMap<ExprId, Option<crate::a
         }
         .visit_block(&transform.entry, wasm);
     }
-    for (_, expression) in wasm.global_initializers() {
+    for initializer in wasm.global_initializer_plans() {
         Collector {
             owner: None,
             owners: &mut owners,
         }
-        .visit_expression_id(expression, wasm);
+        .visit_block(&initializer.entry, wasm);
     }
     owners
 }

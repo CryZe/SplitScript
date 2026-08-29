@@ -603,6 +603,34 @@ fn computed_infinity_can_be_converted_to_a_string_explicitly() {
 }
 
 #[test]
+fn closed_pure_global_initializers_execute_before_setup() {
+    let source = r#"
+        fn increment(value: u32) -> u32 {
+            return value + 1
+        }
+
+        let answer: u32 = {
+            let base = 40
+            increment(increment(base))
+        }
+        let labels = ["ready", "go"]
+
+        state "game.exe" {}
+
+        setup {
+            print(answer)
+            print(labels)
+        }
+    "#;
+
+    let (store, _) = execute_with_mock_host(source);
+    assert_eq!(
+        store.data().messages,
+        ["42", "[\n    \"ready\",\n    \"go\",\n]"]
+    );
+}
+
+#[test]
 fn floating_point_constants_round_trip_through_display_and_parse() {
     let source = r#"
         state "game.exe" {}

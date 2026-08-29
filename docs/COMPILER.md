@@ -739,6 +739,19 @@ source-global, and current/old settings storage. Its result contains the global
 section plus the value-to-index/type maps used by lowering, so body generators
 cannot allocate globals opportunistically.
 
+Initialized source globals have two backend forms. Literal scalar expressions
+remain Wasm global constant expressions. Every other closed, synchronous, pure
+initializer is normalized by `wasm_ir.rs` into an ordinary control-flow block
+ending in a global store, with its locals planned through the same machinery as
+function bodies. `_start` executes those plans in source order before setup and
+lifecycle scaffolding. This keeps value blocks, source-defined helper calls,
+and allocating standard-library operations on the normal lowering path rather
+than maintaining a second constant evaluator. Operational analysis tracks
+transitive global reads and writes alongside effects and availability; semantic
+validation rejects any initializer that can observe another global or runtime
+context, mutate global state, or suspend, so execution order cannot expose
+partially initialized state.
+
 GC type construction also returns an explicit `GcLayout`. The map is the sole
 source of physical indices and reference/storage types for recursive GC fields,
 globals, generated function signatures, ordinary/async locals, aggregate

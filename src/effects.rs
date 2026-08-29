@@ -31,6 +31,12 @@ pub enum LatentOperationKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionOperationSemantics {
     pub effects: Vec<Effect>,
+    /// Source globals read while evaluating the operation, including through
+    /// source-defined callees and invoked closures.
+    pub global_reads: Vec<crate::ast::ValueId>,
+    /// Source globals written while evaluating the operation, including
+    /// through source-defined callees and invoked closures.
+    pub global_writes: Vec<crate::ast::ValueId>,
     /// Parameter-dependent operations that become concrete when a function is
     /// called with a particular callable or iterable value.
     pub latent_parameter_operations: Vec<LatentParameterOperation>,
@@ -63,6 +69,7 @@ impl FunctionOperationSemantics {
 pub struct OperationAnalysis {
     functions: Vec<FunctionOperationSemantics>,
     calls: std::collections::HashMap<crate::ast::ExprId, FunctionOperationSemantics>,
+    global_initializers: std::collections::HashMap<crate::ast::ExprId, FunctionOperationSemantics>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,6 +167,14 @@ impl OperationAnalysis {
     /// one invocation site.
     pub fn call(&self, expression: crate::ast::ExprId) -> Option<&FunctionOperationSemantics> {
         self.calls.get(&expression)
+    }
+
+    /// Complete operational semantics of one top-level global initializer.
+    pub fn global_initializer(
+        &self,
+        expression: crate::ast::ExprId,
+    ) -> Option<&FunctionOperationSemantics> {
+        self.global_initializers.get(&expression)
     }
 
     pub fn attached_process_violations(
@@ -564,6 +579,8 @@ fn function_semantics(
     let operation = metadata.semantics();
     FunctionOperationSemantics {
         effects,
+        global_reads: Vec::new(),
+        global_writes: Vec::new(),
         latent_parameter_operations: Vec::new(),
         requires_attached_process: operation.requires_attached_process,
         requires_state_snapshots: operation.requires_state_snapshots,

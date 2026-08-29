@@ -1,5 +1,20 @@
 # SplitScript roadmap
 
+## 2026-08-29: closed pure module-global initialization
+
+- Generalized initialized top-level bindings from literal aggregates and one
+  special set constructor to any closed, synchronous, pure expression. They may
+  allocate, use value blocks, and call source-defined or standard-library
+  helpers, and execute exactly once before `setup`.
+- Extended operational summaries with transitive global reads and writes.
+  Initializers now reject global dependencies and mutation, settings, timer,
+  process and contextual state, and suspension with diagnostics that identify
+  the responsible helper and referenced declaration.
+- Lowered runtime initializers into ordinary Wasm IR blocks with shared local,
+  specialization, reachability, and expression emission machinery. Literal
+  scalars continue to use Wasm global constant expressions, avoiding runtime
+  work where the binary format already represents the value directly.
+
 ## 2026-08-28: schema-only public Unity metadata
 
 - Made top-level managed `image`, `namespace`, `class`, `static`, and `from`

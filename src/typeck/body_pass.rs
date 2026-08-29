@@ -101,10 +101,6 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
             );
             continue;
         }
-        let constant_initializer = global
-            .value
-            .as_ref()
-            .is_some_and(|value| crate::constant::is_constant(value, &checker.resolutions));
         let inferred = if let Some(value) = &global.value {
             checker.with_debug_context(
                 DebugContext::from_declaration(global.debug_only),
@@ -151,30 +147,6 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
                     }),
             )
         };
-        let run_scoped_initializer = global.value.as_ref().is_some_and(|value| {
-            checker.semantics.standard_library_item(value.id)
-                == Some(crate::stdlib::StdlibItemId::SetNew)
-        });
-        let initializer_checked = inferred.is_some();
-        if let Some(value) = &global.value
-            && initializer_checked
-            && !constant_initializer
-            && !run_scoped_initializer
-        {
-            checker.errors.push(
-                Diagnostic::type_error(
-                    "global initializers must be constant values or `Set.new<T>()`",
-                    value.span,
-                )
-                .with_primary_label("this initializer needs runtime evaluation")
-                .with_note(
-                    "constant values may be composed from `None`, number, boolean, string, payload-free enum, record, array, and range literals",
-                )
-                .with_note(
-                    "`Set.new<T>()` is also allowed and creates one persistent mutable set for this script instance",
-                ),
-            );
-        }
         let mut ty = inferred.unwrap_or_else(|| checker.error_type());
         let unsupported_standard = checker.standard_type_id(ty).is_some_and(|standard| {
             standard != StdlibTypeId::String

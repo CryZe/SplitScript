@@ -590,6 +590,18 @@ onAttach {
     module = await process.mainModule()
 }"#;
 
+const MODULE_GLOBAL_SOURCE: &str = r#"fn defaultDelay() -> Duration {
+    return Duration.fromSeconds(1.5)
+}
+
+let retryDelay = defaultDelay()
+
+state "game.exe" {}
+
+gameTime {
+    return retryDelay
+}"#;
+
 const LET_EXAMPLE: &[Example] = &[
     Example::checked(
         "Infer a local type",
@@ -600,6 +612,11 @@ const LET_EXAMPLE: &[Example] = &[
         "Keep an attachment-discovered value",
         ATTACHMENT_GLOBAL_SOURCE,
         ATTACHMENT_GLOBAL_SOURCE,
+    ),
+    Example::checked(
+        "Compute module state once",
+        "let retryDelay = defaultDelay()",
+        MODULE_GLOBAL_SOURCE,
     ),
 ];
 focused_example!(
@@ -1149,7 +1166,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "let name = expression or let name",
         "Declares an inferred variable.",
-        "Bindings are mutable and their types are inferred bidirectionally from initializers, assignments, and uses. A bare top-level [`let`] gets its lifetime from its direct lifecycle initializer: [`onAttach`] creates attachment-scoped state that is cleared on detach, while [`onStart`] creates attempt-scoped (or run-scoped) state that is cleared after [`onReset`]. The initializer must assign it on every completing path. An initialized top-level binding is ordinary module state.",
+        "Bindings are mutable and their types are inferred bidirectionally from initializers, assignments, and uses. An initialized top-level binding is module state: its initializer runs exactly once, before [`setup`]. It may allocate and call synchronous pure helpers, but it must be closed: it cannot read or write another global, observe settings, timer, process, or state context, or suspend. A bare top-level [`let`] instead gets its lifetime from its direct lifecycle initializer: [`onAttach`] creates attachment-scoped state that is cleared on detach, while [`onStart`] creates attempt-scoped (or run-scoped) state that is cleared after [`onReset`]. The lifecycle initializer must assign it on every completing path.",
         LET_EXAMPLE
     ),
     language_item!(

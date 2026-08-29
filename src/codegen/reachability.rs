@@ -91,11 +91,15 @@ impl Reachability {
                 &mut pending_functions,
             );
         }
-        pending.extend(
-            wasm_ir
-                .global_initializers()
-                .map(|(_, expression)| (None, expression)),
-        );
+        for initializer in wasm_ir.global_initializer_plans() {
+            collect_block_expression_roots(&initializer.entry, wasm_ir, None, &mut pending);
+            collect_assignment_function_roots(
+                &initializer.entry,
+                wasm_ir,
+                None,
+                &mut pending_functions,
+            );
+        }
 
         let mut reachable = Self::default();
         loop {
@@ -462,6 +466,9 @@ impl Reachability {
         for transform in wasm_ir.state_transforms() {
             type_roots.extend(transform.locals.iter().map(|local| local.ty));
         }
+        for initializer in wasm_ir.global_initializer_plans() {
+            type_roots.extend(initializer.locals.iter().map(|local| local.ty));
+        }
         for instance in &reachable.functions {
             let function = program
                 .functions
@@ -583,6 +590,24 @@ impl Reachability {
             standard_library,
             capabilities,
         );
+        // Every emitted Set layout currently owns its complete method suite,
+        // including contains/insert/remove. Those bodies require element
+        // equality even when the source only constructs or displays the set.
+        // Keep this dependency paired with the emitted body family rather
+        // than relying on an incidental call site to pull it in.
+        let set_elements = semantics
+            .types()
+            .iter()
+            .filter_map(|(_, kind)| match kind {
+                TypeKind::Set {
+                    layout, element, ..
+                } if reachable.gc_sets.contains(layout) => Some(*element),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for element in set_elements {
+            reachable.require_equality(element, semantics, standard_library, capabilities);
+        }
         reachable
     }
 

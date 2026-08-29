@@ -56,6 +56,7 @@ pub(crate) fn validate(
     let effects = OperationAnalysis::infer(syntax, hir, semantics, &capabilities, &scoped_globals);
     let mut diagnostics = Vec::new();
     diagnostics.extend(scoped_global_diagnostics);
+    diagnostics.extend(validate_global_initializers(syntax, hir, &effects));
     diagnostics.extend(stdlib_bodies::validate_signatures(
         &standard_library,
         syntax,
@@ -310,6 +311,171 @@ pub(crate) fn validate(
         effects,
         diagnostics,
     }
+}
+
+fn validate_global_initializers(
+    syntax: &Program,
+    hir: &TypedProgram,
+    effects: &OperationAnalysis,
+) -> Vec<Diagnostic> {
+    let declarations = syntax
+        .globals
+        .iter()
+        .map(|global| (global.id, global))
+        .collect::<HashMap<_, _>>();
+    let mut diagnostics = Vec::new();
+
+    for initializer in hir.global_initializers() {
+        let Some(operation) = effects.global_initializer(initializer.expression) else {
+            continue;
+        };
+        let forbidden_effects = operation
+            .effects
+            .iter()
+            .copied()
+            .filter(|effect| {
+                !matches!(
+                    effect,
+                    crate::stdlib::Effect::Pure | crate::stdlib::Effect::Allocates
+                )
+            })
+            .collect::<Vec<_>>();
+        if forbidden_effects.is_empty()
+            && operation.global_reads.is_empty()
+            && operation.global_writes.is_empty()
+            && operation.availability == crate::stdlib::Availability::Everywhere
+        {
+            continue;
+        }
+
+        let Some(global) = declarations.get(&initializer.value) else {
+            continue;
+        };
+        let initializer_span = hir
+            .expression(initializer.expression)
+            .map_or(global.span, |expression| expression.span);
+        let invalid_call = first_invalid_initializer_call(initializer.expression, hir, effects);
+        let span = invalid_call
+            .and_then(|(expression, _)| hir.expression(expression))
+            .map_or(initializer_span, |expression| expression.span);
+        let mut diagnostic = Diagnostic::semantic(
+            format!(
+                "global initializer for `{}` must be closed, synchronous, and pure",
+                global.name
+            ),
+            span,
+        )
+        .with_primary_label("this expression runs once during module initialization");
+
+        if let Some((_, function)) = invalid_call
+            && let Some(declaration) = syntax
+                .functions
+                .iter()
+                .find(|declaration| declaration.id == function)
+        {
+            diagnostic = diagnostic.with_secondary_label(
+                declaration.name_span,
+                "this helper carries the initializer dependency",
+            );
+        }
+
+        for value in operation
+            .global_reads
+            .iter()
+            .chain(&operation.global_writes)
+            .copied()
+        {
+            if let Some(declaration) = declarations.get(&value) {
+                diagnostic = diagnostic.with_secondary_label(
+                    declaration.name_span,
+                    format!(
+                        "the initializer transitively accesses global `{}`",
+                        declaration.name
+                    ),
+                );
+            }
+        }
+        if !forbidden_effects.is_empty() {
+            diagnostic = diagnostic.with_note(format!(
+                "the initializer transitively {}",
+                forbidden_effects
+                    .iter()
+                    .map(|effect| effect.name())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if operation.availability != crate::stdlib::Availability::Everywhere {
+            diagnostic = diagnostic
+                .with_note("the initializer depends on values that only exist while attached");
+        }
+        diagnostics.push(
+            diagnostic
+                .with_note(
+                    "global initializers may allocate and call synchronous pure helpers, but cannot access globals, settings, timer or process state, or suspend",
+                )
+                .with_note(
+                    "move runtime-dependent initialization to the appropriate lifecycle block",
+                ),
+        );
+    }
+
+    diagnostics
+}
+
+fn initializer_operation_is_invalid(
+    operation: &crate::effects::FunctionOperationSemantics,
+) -> bool {
+    operation.effects.iter().any(|effect| {
+        !matches!(
+            effect,
+            crate::stdlib::Effect::Pure | crate::stdlib::Effect::Allocates
+        )
+    }) || !operation.global_reads.is_empty()
+        || !operation.global_writes.is_empty()
+        || operation.availability != crate::stdlib::Availability::Everywhere
+}
+
+fn first_invalid_initializer_call(
+    root: ast::ExprId,
+    hir: &TypedProgram,
+    effects: &OperationAnalysis,
+) -> Option<(ast::ExprId, ast::FunctionId)> {
+    struct Finder<'a> {
+        effects: &'a OperationAnalysis,
+        found: Option<(ast::ExprId, ast::FunctionId)>,
+    }
+
+    impl TypedVisitor for Finder<'_> {
+        fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
+            if self.found.is_some() {
+                return;
+            }
+            hir::walk_typed_expression(self, expression, program);
+            if self.found.is_some()
+                || !self
+                    .effects
+                    .call(expression.id)
+                    .is_some_and(initializer_operation_is_invalid)
+            {
+                return;
+            }
+            let function = match program.call(expression.id) {
+                Some(ResolvedCall::UserFunction { function, .. })
+                | Some(ResolvedCall::UserMethod { function, .. }) => *function,
+                _ => return,
+            };
+            self.found = Some((expression.id, function));
+        }
+    }
+
+    let expression = hir.expression(root)?;
+    let mut finder = Finder {
+        effects,
+        found: None,
+    };
+    finder.visit_expression(expression, hir);
+    finder.found
 }
 
 fn capability_diagnostic(

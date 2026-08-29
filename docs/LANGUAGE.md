@@ -30,6 +30,13 @@ bidirectionally from those assignments and later uses. Assigning the same bare
 global from both boundaries is an error rather than an implicit lifetime
 choice.
 
+A top-level declaration with an initializer is module-scoped state. Its
+initializer runs exactly once, before `setup`, and may allocate or call
+synchronous pure helpers. The initializer must be closed: it cannot read or
+write another global, observe settings, timer, process, or state context, or
+suspend. Runtime-dependent values belong in the lifecycle boundary that owns
+their lifetime.
+
 Attachment-scoped storage is cleared when the process detaches and is not
 available in detached actions. With named state layouts, a value may be
 initialized for only some returned layouts; a direct `match layout` refines

@@ -45,6 +45,8 @@ mod inference_language;
 mod iterators;
 #[path = "compiler/parser_recovery.rs"]
 mod parser_recovery;
+#[path = "compiler/port_review.rs"]
+mod port_review;
 #[path = "compiler/profiles_codegen.rs"]
 mod profiles_codegen;
 #[path = "compiler/ranges.rs"]

@@ -11,6 +11,50 @@ repository verification. The rendered guide omits its rustdoc-style hidden
 setup, so visible code stays limited to the concept while types, effects,
 lifecycle availability, and current API spellings remain checked.
 
+## Review a compiler-clean port
+
+A successful build proves that the port is valid SplitScript. It does not prove
+that the script attaches to the intended game or preserves the source behavior.
+Before runtime testing, review these semantic choices:
+
+- **Process identity:** Check every exact process candidate against the host.
+  Windows executable identities include `.exe`. An array represents alternate
+  names for one attachment, not several simultaneous attachments.
+- **Selected build:** Preserve every source version distinction that changes an
+  address, type, or behavior. Select named state layouts or independent
+  [`layout`] dimensions from reliable evidence, and handle an unknown build
+  explicitly instead of silently choosing a default.
+- **Provider choice:** Use the canonical typed provider. Unity ports declare
+  [`image`] schemas under [`Unity`]. Emulator ports use the provider for the
+  original console rather than manually rediscovering emulator memory.
+- **Byte order:** Let an emulator provider decode its console's memory. For
+  native data, retain the source format's byte order deliberately and use
+  [`Numeric.swapBytes`] only when the stored order differs from the host order.
+- **Lifecycle ownership:** Place attachment discovery in [`onAttach`], polled
+  observation in state fields or [`whileAttached`], timer decisions in their
+  action blocks, and attempt state in [`onStart`] when appropriate. Confirm the
+  relative timing against the source instead of moving code merely because it
+  compiles in another block.
+- **Settings reachability:** Confirm that every behavior gate reads its typed
+  setting and that every exposed setting can affect reachable behavior. The
+  unused-setting warning is review evidence, not just cleanup advice.
+- **Integer width:** Preserve signedness and physical width for every memory
+  field, constant, sentinel, mask, and comparison. Do not widen a field merely
+  because its current values happen to fit.
+- **Failure behavior:** Decide whether absence should retry, wait, skip the
+  current tick, use an honest default, detach, or stop an unsupported
+  attachment. An [`else`] that makes code compile can still change behavior.
+- **Omitted branches:** Record every source branch, setting, platform, version,
+  and timer behavior left out of the port. An intentional omission is valid;
+  an invisible omission is a semantic regression.
+
+Use `splitc docs search` with the source vocabulary while reviewing. Searches
+such as `.exe`, `version labelled states`, `settings.Add`, `UnityASL`,
+`mono.Make`, `Dolphin`, `DeepPointer`, and `TryParse` lead to the canonical
+language or provider pages. Keep the review record beside the maintained port;
+generated full-script candidates are evidence to inspect, not fixtures to
+preserve.
+
 ## Attachment state declarations
 
 Every SplitScript file is one executable autosplitter and declares exactly one

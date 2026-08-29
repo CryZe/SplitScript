@@ -2065,27 +2065,20 @@ message in `whileAttached` prints every attached tick.
 The immutable `String` API uses explicit UTF-8 byte semantics where indexing
 is involved:
 
-| Operation | Behavior |
-| --- | --- |
-| `byteLength()` | UTF-8 byte length |
-| `isEmpty()` | Whether the required string contains zero UTF-8 bytes |
-| `contains(text)` | Case-sensitive substring test |
-| `indexOf(text)` | First matching UTF-8 byte offset as `u32?` |
-| `lastIndexOf(text)` | Last matching UTF-8 byte offset as `u32?` |
-| `startsWith(text)` / `endsWith(text)` | Case-sensitive prefix/suffix tests |
-| `equalsIgnoreAsciiCase(text)` | Equality folding only ASCII letters |
-| `toAsciiLowerCase()` | Lowercase ASCII letters; preserve every other UTF-8 byte |
-| `toAsciiUpperCase()` | Uppercase ASCII letters; preserve every other UTF-8 byte |
-| `trimAsciiWhitespace()` | Remove ASCII boundary whitespace; preserve interior and non-ASCII bytes |
-| `padStart(width, fill)` / `padEnd(width, fill)` | Pad to a minimum Unicode-scalar length with one `char` |
-| `split(delimiter)` | Fallible exact split preserving leading, repeated, and trailing empty segments |
-| `parse<T>()` | Strict fallible ASCII decimal parsing into an inferred numeric type |
-| `byteAt(byteIndex)` | Fallible raw UTF-8 byte lookup; continuation bytes remain observable |
-| `charAt(byteIndex)` | Fallible `char` lookup at a UTF-8 byte boundary |
-| `slice(start, end)` | Fallible half-open UTF-8 byte range; offsets must be code-point boundaries |
-| `replaceAll(search, replacement)` | Fallible exact non-overlapping replacement |
-| `String.concat(values)` | Concatenate an array of strings |
-| `String.join(values, separator)` | Join a string array with one separator between adjacent values |
+Use the generated [`String`] page for the exact member set, signatures, effects,
+and examples. Choose operations by unit and task:
+
+- For UTF-8 storage size and raw offsets, use [`String.byteLength`],
+  [`String.byteAt`], [`String.indexOf`], and [`String.slice`].
+- For Unicode scalar access and scalar-count padding, use [`String.charAt`],
+  [`String.padStart`], and [`String.padEnd`]. These are not terminal-column
+  measurement APIs.
+- For exact search and transformation, use [`String.contains`],
+  [`String.startsWith`], [`String.endsWith`], [`String.replaceAll`], and
+  [`String.split`]. ASCII-only case and trimming operations say so in their
+  symbol names and documentation.
+- For construction and conversion, use [`String.concat`], [`String.join`],
+  interpolation, [`Display`], or [`String.parse`] according to the source value.
 
 Case conversion reuses an already-normalized immutable string and allocates
 only when at least one ASCII letter changes. The operations intentionally have

@@ -942,6 +942,282 @@ layout IDs before lowering; the backend does not rediscover their meaning from
 source spelling. Fallible control flow remains a separate semantic step;
 none of these physical layouts introduce a private failure protocol.
 
+## Standard-library catalog and tooling model
+
+The library surface is described by a backend-independent catalog. Each entry
+has a stable ID, canonical name, callable kind, generic type scheme,
+constraints, documentation, parameter documentation, examples, related items,
+deprecation information, and an implementation key.
+Type checking resolves source calls to these IDs. WebAssembly generation and
+async lowering only handle the resolved implementation key; neither resolves
+source names. Operational metadata has exactly one authority per implementation:
+the closed intrinsic registry for intrinsic leaves and compiler analysis for
+source-defined bodies.
+
+Every callable has exactly one implementation: either a trusted intrinsic
+declaration ending in `;` or an ordinary SplitScript body. Intrinsics remain
+necessary for host ABI access, physical representations, runtime helpers, and
+special lowering primitives. Higher-level operations are composed in library
+source and checked and lowered through the same resolver, inference, typed HIR,
+effect analysis, reachability, Wasm IR, and encoder as user functions. Merely
+being a library body grants no privilege; it can reach host behavior only by
+calling a validated intrinsic declaration.
+
+The implemented synchronous body tier uses ordinary inferred function
+templates and demand-driven monomorphization. A catalog call supplies its exact
+concrete receiver, parameter, and result signature, so constructed layouts and
+source-owned types use the same `FunctionInstance` machinery as user-defined
+generic functions. Reachability emits only called concrete instances.
+`Numeric.clamp` composes the primitive `min` and `max` operations, while
+`[T].isEmpty()` composes `length()` across arbitrary array element types.
+`[T].contains(value)` and `[T].indexOf(value)` are source-defined search loops;
+their declarations add `Equatable` only to the inherited `T` used by those
+methods, leaving operations such as `length()` available for every element
+type. None of these helpers has dedicated intrinsic dispatch or backend
+lowering.
+
+Bodies may perform any operation reachable through their permitted intrinsic
+leaves. All `Duration` constructors are source-defined: their arithmetic and
+physical GC-record construction live in `standard.split`, so the type has no
+intrinsic operations. This includes zero, exact integer and fractional unit
+constructors, frames, and parts. Capability-directed implementation cases let
+one public `T: Numeric` constructor retain separate `Integer` and `Float`
+source bodies; selection occurs only after generic specialization and is not a
+general user-visible overload system. A catalog-owned body may construct its
+owning GC struct, including runtime-private fields, without making that
+constructor syntax available to user code or unrelated library functions.
+`address.offset` widens its argument and delegates to primitive full-width
+address addition. `timer.isRunning` and `Module.readRelative32` demonstrate
+effectful composition over timer and process intrinsics entirely in library
+source.
+
+Each independently owned catalog graph runs a standalone compilation of its
+source bodies once. Ordinary typed call-graph analysis derives a canonical
+effect set, availability, attachment requirement, suspension, and cancellation
+metadata without consulting a user program. The immutable result is cached on
+the graph and supplies checking and editor queries. Source entries contain no
+fake `pure` fields that a consumer could accidentally treat as authoritative.
+Normal user compilations still type-check the injected bodies and verify their
+inferred metadata against the standalone result. Actual suspending library
+bodies remain the next body tier.
+
+`CompilerContext` owns the selected catalog through a cloneable
+`StandardLibrary` handle backed by an immutable `Arc` graph. Compiler passes
+borrow that graph; parsed, checked, tooling, and backend products clone the
+owner only when they must retain it. The bundled graph is cached, while tests
+also construct and inject an independently owned validated graph through the
+same context path. This makes catalog identity and lifetime explicit without
+requiring each pass to reconstruct global state. Its declaration producer is
+the build-only privileged SplitScript loader: `stdlib/standard.split` is parsed
+and source-validated once during the Cargo build, then emitted as typed catalog
+data. Callable body blocks are retained only for source-defined
+implementations. The compiler injects one hidden inferred function template per
+catalog source body after the user file and parses it with the ordinary program
+parser. Resolved catalog call signatures drive concrete instances through
+ordinary demand specialization. Public syntax, HIR, semantic
+iterators, symbols, and editor features retain the user-only view, while the
+backend sees the complete unit. Generated function names use a reserved prefix
+that user programs cannot declare.
+
+Effects distinguish ordinary process reads from operations that require an
+attached process, suspend or retry, and cancel when that process closes.
+`RequiresAttachedProcess` and `CancelsOnProcessClose` are catalog facts shared
+with type checking and async lowering. `StandardLibrary::operation_semantics`
+normalizes them into `SuspensionKind`, `CancellationKind`, availability, and a
+process requirement; `render_operation_semantics` provides their common human
+presentation. Catalog validation rejects incompatible declarations such as a
+non-awaitable cancellable item. Documentation and editor tooling consume these
+queries directly rather than reading implementation-specific storage.
+
+Language-only constructs live in a sibling `LanguageCatalog`, rather than as
+fake standard-library functions. It gives keywords such as `await`, `retry`,
+and `as`; lifecycle actions; source-spellable built-in and constructed types;
+wrapper/literal syntax; snapshot roots; compiler-provided fields and
+the settings DSL stable IDs, compact source forms, documentation, and checked
+examples. Standard-library namespaces, nominal types (including
+`TimerState`), fields, variants, and callables remain exclusively in the
+standard-library catalog. Both catalogs
+share the generic documentation and example model in `catalog.rs`, so generated
+reference pages and LSP hover/completion can consume one metadata shape while
+preserving the semantic difference between syntax and callable APIs.
+
+Resolved user functions and methods inherit the attached-process requirement
+through a fixed-point call-graph analysis. This includes recursive call graphs;
+no source annotation is required. The inferred result is available through the
+checked compiler product and prevents a process-dependent helper from hiding an
+invalid `onDetach` operation.
+
+Catalog signatures no longer depend on parser AST types: built-in catalog
+types use `BuiltinType`, and a checked call exposes its inferred generic
+arguments as interned `TypeId` values. `TypeStore` lets documentation and editor
+clients inspect `TypeKind` directly, including constructed arrays, without
+depending on inference-only AST variants. Inferred declaration types are also
+semantic facts: `SemanticModel::value_type` covers globals, parameters, locals,
+await bindings, state fields, settings, and match payload bindings, while
+`SemanticModel::function_result` covers function results. Optional source
+annotations remain optional in checked syntax instead of being overwritten by
+inference. Record fields, enum payloads, and array elements likewise publish
+their resolved `TypeId` layouts through `RecordFieldId`, `EnumVariantId`, and
+dedicated constructed-type identities; WebAssembly GC layout construction reads those
+semantic queries rather than the AST annotations. `TypeKind::Array` retains
+its `ArrayTypeId` layout identity, element `TypeId`, and optional exact length,
+so code generation never needs to reconstruct this information from syntax.
+`TypeKind::Set` similarly retains the source generic-application identity,
+element type, and compiler-selected backing-array identity.
+`TypeStore` has no
+parallel legacy type representation: Wasm storage/value selection lowers
+`TypeId` / `TypeKind` directly into backend-local physical categories.
+
+The semantic `TypeStore` is created before inference. Core primitives,
+standard-library types, and source record/enum types enter inference as their
+canonical `TypeId` and retain that exact identity through checked publication,
+rather than passing through parallel enums and post-inference conversion
+tables. Only inference variables and temporarily unresolved `[T]`, `T?`, and
+`T!` constructor terms remain solver-local. Namespace, nominal-type, field,
+variant, and callable IDs are generated from the same declaration rows as their
+names, ownership, documentation, and representation metadata.
+
+Catalog-declared capabilities are executable contracts rather than labels.
+Capabilities can build on other capabilities in the privileged source. For
+example, `Numeric<T: Equatable>` makes equality part of the numeric
+contract, while `Integer<T: Numeric + Display>` makes every integer numeric,
+equatable through that numeric relationship, and displayable. The
+compiler follows this hierarchy transitively for type checking and method
+completion, while inferred constraints and rendered signatures retain only the
+strongest non-redundant capabilities. Concrete integer types consequently
+declare `Integer` once instead of separately repeating those memberships.
+Capabilities may also declare structural method requirements in privileged
+source. `Display` requires `fn toString() -> String`; user records and enums
+derive a structural implementation by default, while a corresponding
+`fn Type.toString()` method overrides it. The checker matches the semantic
+receiver, parameters, and result against the catalog requirement, and implicit
+conversions enter the ordinary source call graph so effects and reachability
+remain accurate. Structural shape is shared with equality analysis, and the
+backend plans both kinds of generated helper from reachable uses rather than
+emitting one for every declaration. This intentionally avoids requiring
+`impl` blocks in short user scripts.
+
+Nominal standard-library types remain explicit. They connect a parameterless
+`String`-returning source method to `Display` with the private `@display`
+annotation. The generated type declaration owns that implementation identity,
+catalog validation checks its receiver and signature, and reachability treats
+conversions as calls to the ordinary hidden library body.
+`FileVersion.toString()` is the first such implementation: casts,
+interpolation, `print`, and `setVariable` all dispatch to it, while codegen has
+no `FileVersion` formatting case.
+`MemoryReadable` GC records derive their naturally aligned field layout from
+catalog field declarations through the same semantic-`TypeId` layout engine as
+source records. `Equatable` catalog records similarly receive generated
+structural equality helpers whose dependencies close over nested declared
+fields. Catalog validation rejects readable or equatable declarations whose
+representation and fields cannot satisfy those contracts. A test-only ordinary
+record, with no intrinsic implementation, passes through name resolution,
+checking, memory layout, equality, hover, completion, and Wasm GC generation;
+this guards the promise that future ordinary types do not need compiler-wide
+type matches.
+
+Source annotations, cast targets, and integer suffixes use the separate,
+inference-free `ast::TypeRef`. It contains no catalog or resolved nominal IDs;
+lowering publishes those as `types::ResolvedTypeRef`. Parser-owned constructed
+type expressions and checker-owned resolved layouts are distinct as well.
+Expressions have no checker-owned
+type slot: pending types are recorded directly by `ExprId` and resolved when
+the semantic model is finalized. The dedicated inference context owns type
+variables, union/find unification, requirement composition, integer-literal
+bounds, numeric defaulting, and inferred array layouts. The checker translates
+solver failures into source diagnostics; syntax and editor APIs never expose
+these temporary types.
+
+Free functions and type-directed methods are exposed as
+declarative `CallCandidate` values. `process.read(address)` leaves its named
+generic parameter open for bidirectional inference, while an explicit generic
+call such as `process.read<u16>(address)` seeds `T = u16`. Method candidates
+carry their receiver type scheme and
+capability constraints, and retain the selected receiver value through Wasm
+lowering. The checker uses
+one catalog-call path to instantiate that scheme and submit receiver,
+argument, expected-result, and capability constraints to the same inference
+context used by ordinary expressions. Candidate discovery itself commits no
+new constraints, and ambiguous applicable candidates produce a diagnostic
+before a candidate is committed. The catalog validates duplicate callable
+shapes so accidental indistinguishable overloads are caught by tests.
+Binary and unary operator syntax uses this same path. Privileged declarations
+bind methods to operator identities with `@operator`, so `value + other`,
+`value == other`, `-value`, and `!value` resolve to the same items exposed as
+ordinary documented methods. Short-circuit `&&` and `||` remain language-level
+control flow rather than eager method calls.
+
+Read-only queries cover item enumeration, exact canonical lookup, path and
+method candidate lookup, signature rendering, and the documentation stored on
+each item. `StandardLibraryDocumentation` turns those facts into one canonical
+generic or call-site-substituted reference entry. Completion, hover, signature
+help, the browsable reference, and terminal documentation already consume that
+entry; a future machine-readable exporter must use the same payload.
+
+Every parsed expression also has a stable per-program `ExprId`. Checked
+expression types and standard-library call resolutions are queried by this ID,
+not by source spans. Syntax expressions are never mutated with inferred types;
+WebAssembly lowering reads the semantic `TypeId`. This keeps syntax suitable
+for future incremental editor analysis while inference internals continue to
+be migrated.
+
+User functions and methods likewise have stable per-program `FunctionId`
+values. `ResolvedCall` distinguishes user functions, user methods, and catalog
+items, so editor navigation and WebAssembly lowering consume the same checked
+call target. Method-call facts also retain the resolved receiver root and its
+semantic type, allowing hover/navigation and lowering to agree about the value
+on which a method operates. Backend callable dispatch is entirely ID-based;
+member resolution is being migrated independently as described below.
+
+Globals, parameters, ordinary locals, awaited bindings, state fields, and
+settings now carry `ValueId` values as well. Path expressions publish a
+`ResolvedValue` root for go-to-definition, including the temporal distinction
+between `current`/`old` and `settings`/`oldSettings`. Backend reads use ID-keyed
+Wasm locals, continuation-frame fields, state slots, setting globals, and user
+globals. Assignment statements have stable `AssignmentId` values and publish
+their `ValueId` targets too, so backend writes use the same ID-keyed storage.
+Match payload bindings also have `ValueId` values. Method receivers are lowered
+from their semantic `ResolvedValue` roots, so compiler-created receiver paths
+and their former local/global/setting name maps are gone. Records, enums,
+record fields, enum variants, and compiler-provided fields have distinct typed
+IDs. Path expressions publish ordered `ResolvedMember` chains, while record
+literals and enum constructors publish the selected field/variant IDs. The
+backend therefore does not reinterpret member-path or constructor spelling.
+Match arms have `PatternId` values, and choice options have
+`SettingChoiceOptionId` values; their resolved enum variants, including choice
+defaults, are semantic queries consumed directly by match and settings
+lowering. Variant text remains in settings lowering only as the external value
+understood by the host settings map.
+
+The same catalog drives generated documentation, LSP completion, hover, and
+signature help. Tools can parse and check a program and inspect its
+semantic call resolutions without constructing the WebAssembly backend. All
+currently implemented functions and type-directed methods—including numeric,
+array, process, duration, address, and Unity APIs—are catalog-backed. Compiled
+catalog examples keep their user-facing snippets separate from complete
+validation programs. A line prefixed with `# ` inside a `splitscript` example
+fence participates in parsing, type checking, semantic highlighting, and
+definition resolution, but is omitted from rendered documentation. This is the
+standard way to supply lifecycle scaffolding and local declarations without
+distracting from the focused snippet. The generated reference maps semantic
+spans from the complete fixture back onto the visible lines, so links never
+depend on identifier text alone.
+
+Catalog entries can also declare a use obligation with
+`@mustUse("reason")`. A bare expression statement that discards such a return
+value produces a warning while compilation and Wasm generation still succeed.
+The marker may be attached to a callable for an operation-specific explanation,
+or to a type form such as `T?` and `T!` so the obligation
+follows values returned by user functions as well. `String.toAsciiLowerCase`,
+`String.replaceAll`, and `String.split` use callable-specific reasons because
+strings are immutable: they return transformed values and never change their
+receivers. The ASCII conversion's runtime helper reuses the receiver when no
+byte changes, while still conservatively advertising its possible allocation
+effect. The checked compiler product retains these warnings, and the database,
+LSP, compiler service, CLI, and watch workflow all
+publish the same structured diagnostics.
+
+
 ## Syntax traversal
 
 [`src/visit.rs`](../src/visit.rs) is the single exhaustive definition of AST

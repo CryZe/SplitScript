@@ -43,6 +43,20 @@
   combinators, resource ownership, and unsupported-build behavior explicitly
   pending rather than flattening all forward-looking prose indiscriminately.
 
+## 2026-08-30: one canonical standard-library reference
+
+- Turned `STANDARD_LIBRARY.md` into a task-oriented chooser for native,
+  emulator, Unity, value, state, text, and timer workflows. Exact signatures,
+  bounds, effects, availability, and examples now point to compiler-generated
+  symbol pages rather than a hand-maintained member inventory.
+- Replaced the duplicated string-operation table with unit- and task-based
+  guidance linked to exact generated `String` members.
+- Moved the complete catalog, semantic-ID, inference, HIR, backend dispatch,
+  diagnostic, and documentation architecture section intact into
+  `COMPILER.md`, keeping contributor detail without presenting it as public API.
+- Resolved every newly referenced catalog identity through the CLI documentation
+  query to catch misspelled or nonexistent links.
+
 ## 2026-08-29: managed-string bound ergonomics resolved by schema syntax
 
 - The earlier porting question about accepting arbitrary integer types for a

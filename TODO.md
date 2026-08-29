@@ -434,7 +434,7 @@ concepts rather than maintaining a parallel inventory.
   arrays, closures, iterators, UTF-16 decoding, numeric formatting, string
   construction, browsable docs, and generated reference pages must not still
   be described as future work.
-- [ ] Keep compiler catalogs canonical for exact signatures, effects,
+- [x] Keep compiler catalogs canonical for exact signatures, effects,
   availability, members, and support status; hand-written pages should link to
   those facts instead of copying tables.
 - [ ] Split the user-facing language path from compiler architecture. Start
@@ -444,7 +444,7 @@ concepts rather than maintaining a parallel inventory.
   frames, lowering, and DWARF details to `COMPILER.md`, `ABI.md`, or a focused
   developer guide. Give the remaining long concept pages task-named navigation
   and a table of contents.
-- [ ] Turn the standard-library Markdown into a task-oriented overview linked
+- [x] Turn the standard-library Markdown into a task-oriented overview linked
   to generated exact symbol pages. Move its catalog IDs, inference internals,
   HIR/Wasm IR, compiler context, and backend dispatch material to compiler
   architecture, and remove manually maintained public-member inventories.

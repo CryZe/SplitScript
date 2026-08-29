@@ -1568,6 +1568,11 @@ selects among boolean keys, use `settings.enabled(key)`; use
 remain distinct. Literal keys are checked and completed against this file's
 declarations, including explicit `key` strings.
 
+When the source registers a bounded numbered series in a `settings.Add` loop,
+use a compile-time [`settings family`] rather than copying every generated
+declaration by hand. The next section defines its label, key, default, tooltip,
+and lookup behavior.
+
 ## Finite settings families
 
 Prefer direct `settings.name` access when the setting is known statically. For
@@ -1762,7 +1767,8 @@ onReset {
 }
 ```
 
-The compiler infers `collectedItems` as attempt-scoped. It remains available
+The compiler infers `collectedItems` as attempt-scoped (sometimes called
+run-scoped in existing autosplitters). It remains available
 across a game-process detach and is cleared after [`onReset`] completes. It may
 also be used from [`split`], [`reset`], [`isLoading`], and [`gameTime`], with the
 requirement propagating through helper functions. Loading an autosplitter while

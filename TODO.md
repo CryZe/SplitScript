@@ -381,13 +381,14 @@ or assumptions tied to one generated corpus.
   - Add `String.isBlank()` or an approved equivalent only after confirming the
     intended Unicode whitespace semantics; several ports silently replaced
     C# `IsNullOrWhiteSpace` with an empty-string test.
-- [ ] Recheck clean-compiling omissions against facilities added before or
-  during the exercise. In particular, `timer.currentSplitIndex()` was omitted
-  from a route-index port, attempt-scoped globals were manually reset from
-  polling code, generic numeric `Duration` constructors were surrounded by
-  unnecessary casts, and finite settings families were flattened or reduced.
-  Improve exact search terms, examples, hover links, completion, and migration
-  diagnostics before proposing duplicate features.
+- [x] Recheck clean-compiling omissions against facilities added before or
+  during the exercise. `timer.currentSplitIndex()`, generic numeric `Duration`
+  constructors, and finite settings families already surfaced through focused
+  reference searches and canonical pages. Add the missing attempt/run-scoped
+  state migration topic, teach the `let` page the alternate vocabulary, and
+  make `settings.Add` loop searches lead to compile-time settings families
+  instead of hand-expanded declarations. Search regressions now preserve these
+  routes before proposing duplicate features.
 
 ### Prevent clean-compiling semantic drift
 

@@ -1149,7 +1149,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "let name = expression or let name",
         "Declares an inferred variable.",
-        "Bindings are mutable and their types are inferred bidirectionally from initializers, assignments, and uses. A bare top-level [`let`] gets its lifetime from its direct lifecycle initializer: [`onAttach`] creates attachment-scoped state that is cleared on detach, while [`onStart`] creates attempt-scoped state that is cleared after [`onReset`]. The initializer must assign it on every completing path. An initialized top-level binding is ordinary module state.",
+        "Bindings are mutable and their types are inferred bidirectionally from initializers, assignments, and uses. A bare top-level [`let`] gets its lifetime from its direct lifecycle initializer: [`onAttach`] creates attachment-scoped state that is cleared on detach, while [`onStart`] creates attempt-scoped (or run-scoped) state that is cleared after [`onReset`]. The initializer must assign it on every completing path. An initialized top-level binding is ordinary module state.",
         LET_EXAMPLE
     ),
     language_item!(

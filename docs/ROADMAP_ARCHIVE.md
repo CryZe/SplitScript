@@ -4126,3 +4126,12 @@ language catalog document the refinement rule.
   language, saved state, and URI, before taking a compiler snapshot.
 - Added host-neutral tests for focus changes during save, untitled document
   replacement, cancelled saves, and a Save As target with the wrong language.
+
+# 2026-08-30: bounded documentation page caching
+
+- Derived one immutable finite route set from the compiler-owned documentation
+  index plus its root page, and reject every noncanonical virtual-document URI
+  before allocating a page-cache entry.
+- Kept lazy independent rendering for valid pages while proving that one
+  thousand distinct invalid requests retain no cache state and that every
+  indexed route still renders through the validated documentation graph.

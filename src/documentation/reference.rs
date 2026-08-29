@@ -1,6 +1,9 @@
 //! Navigable standard-library reference pages over compiler-owned catalogs.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use crate::{
     catalog::Documentation,
@@ -92,8 +95,8 @@ impl Default for DocumentationReference {
 /// Sharing one lazily initialized cell per URI prevents full-reference tests,
 /// LSP requests, and parallel clients from compiling the same examples again.
 /// Distinct pages retain independent cells and can still render concurrently.
-static PAGE_CACHE: OnceLock<Mutex<std::collections::HashMap<(bool, String), CachedPage>>> =
-    OnceLock::new();
+static PAGE_ROUTES: OnceLock<HashSet<String>> = OnceLock::new();
+static PAGE_CACHE: OnceLock<Mutex<HashMap<(bool, String), CachedPage>>> = OnceLock::new();
 
 impl DocumentationReference {
     pub(super) fn with_lexical_examples(&self) -> Self {
@@ -454,9 +457,12 @@ impl DocumentationReference {
     }
 
     pub fn page(&self, uri: &str) -> Option<DocumentationPage> {
+        if !self.page_routes().contains(uri) {
+            return None;
+        }
         let page = {
             let mut cache = PAGE_CACHE
-                .get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+                .get_or_init(|| Mutex::new(HashMap::new()))
                 .lock()
                 .expect("documentation page cache should not be poisoned");
             cache
@@ -465,6 +471,18 @@ impl DocumentationReference {
                 .clone()
         };
         page.get_or_init(|| self.render_page(uri)).clone()
+    }
+
+    fn page_routes(&self) -> &'static HashSet<String> {
+        PAGE_ROUTES.get_or_init(|| {
+            let mut routes = self
+                .index()
+                .into_iter()
+                .map(|entry| entry.uri)
+                .collect::<HashSet<_>>();
+            routes.insert("/index.md".to_owned());
+            routes
+        })
     }
 
     fn render_page(&self, uri: &str) -> Option<DocumentationPage> {
@@ -2246,6 +2264,37 @@ mod tests {
         assert!(!page.markdown.contains("FileVersion.major"));
         assert!(!page.markdown.contains("TimerState.Running"));
         assert!(reference.page("/missing.md").is_none());
+    }
+
+    #[test]
+    fn invalid_documentation_routes_never_enter_the_page_cache() {
+        let reference = DocumentationReference::default();
+        let routes = reference.page_routes();
+        assert_eq!(routes.len(), reference.index().len() + 1);
+
+        let invalid = (0..1_000)
+            .map(|index| format!("/invalid-cache-probe-{index}.md"))
+            .collect::<Vec<_>>();
+        for uri in &invalid {
+            assert!(reference.page(uri).is_none());
+        }
+        for uri in [
+            "index.md",
+            "//index.md",
+            "/index.md?query",
+            "/guides/../index.md",
+        ] {
+            assert!(
+                reference.page(uri).is_none(),
+                "accepted invalid route `{uri}`"
+            );
+        }
+
+        let cache = PAGE_CACHE
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .expect("documentation page cache should not be poisoned");
+        assert!(cache.keys().all(|(_, uri)| !invalid.contains(uri)));
     }
 
     #[test]

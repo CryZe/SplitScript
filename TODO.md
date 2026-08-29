@@ -400,14 +400,6 @@ existing compiler, porting, and packaging work. Exact API facts must continue
 to come from compiler-owned catalogs; hand-written documents teach tasks and
 concepts rather than maintaining a parallel inventory.
 
-### Correct editor behavior before broader packaging
-
-- [ ] Bound documentation-page caching to the finite canonical route graph.
-  Validate or canonicalize a requested URI before cache insertion, never retain
-  arbitrary failed client lookups forever, and cache the immutable index/search
-  representation separately if measurement justifies it. Test that many unique
-  invalid URIs do not grow retained cache state.
-
 ### Give a new author one short successful workflow
 
 - [ ] Add a compiler-checked Getting Started guide and a genuinely small native
@@ -1145,43 +1137,41 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Fix the remaining confirmed editor correctness seam by rejecting invalid
-   documentation routes before cache insertion.
-2. Establish the first-use product path: a compiler-checked Getting Started
+1. Establish the first-use product path: a compiler-checked Getting Started
    guide and beginner native example, an extension-user Marketplace README, a
    routed repository README, and a curated examples index.
-3. Remove stale language/standard-library claims and make compiler catalogs the
+2. Remove stale language/standard-library claims and make compiler catalogs the
    canonical exact reference. Then publish renderer-produced static Markdown
    and reorganize lifecycle, state-form, failure/async, string-unit, and
    migration navigation around user tasks.
-4. Establish editor latency/heap benchmarks, then remove repeated completion
+3. Establish editor latency/heap benchmarks, then remove repeated completion
    lexing and linear cursor scans, coalesce superseded diagnostics, and share
    immutable query-stage products according to measured bottlenecks.
-5. Add profile-aware unused analysis for declarations whose only consumers are
+4. Add profile-aware unused analysis for declarations whose only consumers are
    erased `debug` code, with a safe quick fix to mark erasable declarations
    `debug` before release emission retains them unnecessarily.
-6. Complete the remaining official host ABI as typed facilities and keep exact
+5. Complete the remaining official host ABI as typed facilities and keep exact
    `shutdown` / `onSplit` delivery in the runtime-evolution contract until the
    host exposes the required events.
-7. Extend Unity managed collections only after strings and scalar snapshots are
+6. Extend Unity managed collections only after strings and scalar snapshots are
    complete, using the maintained Alba and A Short Hike requirements to shape
    lists, dictionaries, and dynamic values.
-8. Harden and publish the bundled VSIX and native releases, including pinned
+7. Harden and publish the bundled VSIX and native releases, including pinned
    toolchains/actions and license packaging, then evaluate the
    hosted Code OSS workbench. Resume source debugging only after choosing among
    the JavaScript debugger, native Wasmtime/DWARF, and typed-IR interpreter.
-9. Reduce verification and architecture duplication incrementally: compile
+8. Reduce verification and architecture duplication incrementally: compile
    runtime artifacts once, share minimal harness/worker controllers, improve
    documentation snapshots, and split broad compiler coordinators only at
    tested semantic boundaries.
-10. Decide whether known emulator executable sets merit a non-noisy contextual
+9. Decide whether known emulator executable sets merit a non-noisy contextual
    provider suggestion. Unicode blank strings now use the Unicode `White_Space`
    property, while bounded managed-string lengths are already untyped
    compile-time literals in schema syntax and require no integer suffix or
    generic conversion API.
-11. Revisit `unity.time` only after ASR has a tested implementation whose
+10. Revisit `unity.time` only after ASR has a tested implementation whose
    discovery, lifetime, fallibility, and allocation behavior can define the
    cross-language contract.
-12. Keep physical `None` aggregate specialization and sandbox-sensitive host
+11. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

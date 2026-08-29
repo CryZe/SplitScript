@@ -211,6 +211,8 @@ pub const CSHARP_STRING_PADDING_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.padding-call");
 pub const CSHARP_STRING_IS_NULL_OR_EMPTY_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.is-null-or-empty-call");
+pub const CSHARP_STRING_IS_NULL_OR_WHITE_SPACE_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.string.is-null-or-white-space-call");
 pub const CSHARP_STRING_LENGTH_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.length-property");
 pub const CSHARP_ARRAY_LENGTH_DIAGNOSTIC: MigrationDiagnosticId =
@@ -607,6 +609,19 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_STRING_IS_NULL_OR_WHITE_SPACE_DIAGNOSTIC,
+        concept: MigrationConceptId::new("string.null-or-white-space"),
+        message: "C# `String.IsNullOrWhiteSpace` crosses SplitScript's Option boundary",
+        primary_label: "choose Unicode blankness or optional absence from the value's type",
+        notes: &[
+            "for a required `String`, rewrite `String.IsNullOrWhiteSpace(value)` as `value.isBlank()` because the value cannot be null",
+            "for `String?`, use `match value { None => true, Some(text) => text.isBlank() }` so absence remains explicit",
+            "`isBlank()` uses the Unicode `White_Space` property and therefore includes empty strings, ASCII whitespace, and non-ASCII whitespace such as non-breaking space",
+            "process and state read failures are not automatically null strings; preserve their declared Result or Option policy before checking blankness",
+            "there is no automatic rewrite because the static call does not reveal whether the migrated value should be required, optional, or fallible",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_STRING_LENGTH_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.length"),
         message: "C# string `Length` has no encoding-neutral SplitScript rename",
@@ -940,6 +955,9 @@ pub fn legacy_static_call_diagnostic(
     };
     if owner == "String" && method == "IsNullOrEmpty" {
         return Some(CSHARP_STRING_IS_NULL_OR_EMPTY_DIAGNOSTIC);
+    }
+    if owner == "String" && method == "IsNullOrWhiteSpace" {
+        return Some(CSHARP_STRING_IS_NULL_OR_WHITE_SPACE_DIAGNOSTIC);
     }
     if owner == "String" && method == "Join" {
         return Some(CSHARP_STRING_JOIN_DIAGNOSTIC);
@@ -1565,6 +1583,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::TypedPattern,
         summary: "Use [`String.isEmpty`] for required strings and match `String?` explicitly when absence should also count as empty.",
         targets: &[MigrationTarget::StandardLibraryItem("String.isEmpty")],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.null-or-white-space"),
+        name: "Nullable blank strings",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use [`String.isBlank`] for required strings and match `String?` explicitly when absence should also count as blank.",
+        targets: &[MigrationTarget::StandardLibraryItem("String.isBlank")],
         cookbook_anchor: Some("c-string-operations"),
         spellings: &[],
     },

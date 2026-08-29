@@ -99,6 +99,7 @@ macro_rules! trusted_intrinsics {
             StringToAsciiLowerCase,
             StringToAsciiUpperCase,
             StringTrimAsciiWhitespace,
+            StringIsBlank,
             StringPadStart,
             StringPadEnd,
             StringReplaceAll,

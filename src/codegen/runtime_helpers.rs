@@ -222,6 +222,10 @@ pub(super) fn build_string_trim_ascii_whitespace(inputs: &RuntimeHelperInputs<'_
     )
 }
 
+pub(super) fn build_string_is_blank(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_is_blank(inputs.plan.function(RuntimeHelperId::StringInspect))
+}
+
 pub(super) fn build_string_pad(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_string_pad(inputs.gc)
 }

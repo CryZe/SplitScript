@@ -116,6 +116,7 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(StringInspect, (StringValue, I32, I32) -> (I32, I32), deps [], imports [], build_string_inspect),
     helper!(StringSlice, (StringValue, I32, I32) -> (StringValue), deps [], imports [], build_string_slice),
     helper!(StringTrimAsciiWhitespace, (StringValue) -> (StringValue), deps [StringSlice], imports [], build_string_trim_ascii_whitespace),
+    helper!(StringIsBlank, (StringValue) -> (I32), deps [StringInspect], imports [], build_string_is_blank),
     helper!(StringPad, (StringValue, I32, I32, I32) -> (StringValue), deps [], imports [], build_string_pad),
     helper!(ScanProcessRange, (I64, I64, I64, I32, I32, I32) -> (I64), deps [], imports [ProcessRead], build_scan_process_range),
     helper!(ScanAlignedPointerRange, (I64, I64, I64, I64, I32) -> (I64), deps [], imports [ProcessRead], build_scan_aligned_pointer_range),

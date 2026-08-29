@@ -4009,6 +4009,14 @@ fn compile_expr_unconverted(
                         .function(RuntimeHelperId::StringTrimAsciiWhitespace),
                 ));
             }
+            IntrinsicId::StringIsBlank => {
+                compile_receiver(function, target, context);
+                function.instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::StringIsBlank),
+                ));
+            }
             IntrinsicId::StringPadStart | IntrinsicId::StringPadEnd => {
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);

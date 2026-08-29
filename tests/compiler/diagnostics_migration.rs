@@ -384,6 +384,43 @@ fn csharp_is_null_or_empty_explains_required_and_optional_strings() {
 }
 
 #[test]
+fn csharp_is_null_or_white_space_explains_unicode_and_option_semantics() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn missingLabel(value: String?) -> bool {
+            return String.IsNullOrWhiteSpace(value)
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("C# IsNullOrWhiteSpace needs Unicode- and Option-aware guidance");
+
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# `String.IsNullOrWhiteSpace` crosses SplitScript's Option boundary"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "IsNullOrWhiteSpace"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| { note.contains("required `String`") && note.contains("value.isBlank()") })
+    );
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("String?") && note.contains("None") && note.contains("Some(text)")
+    }));
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("Unicode `White_Space`") && note.contains("non-breaking space")
+    }));
+}
+
+#[test]
 fn csharp_length_distinguishes_arrays_from_utf8_strings() {
     use splitscript::FixApplicability;
 

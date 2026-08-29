@@ -4057,6 +4057,25 @@ intrinsic type String {
     @intrinsic(StringTrimAsciiWhitespace)
     fn trimAsciiWhitespace() -> String;
 
+    /// Reports whether this string is empty or contains only Unicode whitespace.
+    ///
+    /// Whitespace follows the Unicode `White_Space` property. This includes
+    /// ordinary ASCII spacing and line breaks as well as characters such as
+    /// non-breaking space. [`String`] itself is never absent; use [`match`] on
+    /// [`T?`] when [`None`] should also satisfy the condition.
+    ///
+    /// # Example
+    ///
+    /// Ignore a blank checkpoint label
+    ///
+    /// ```splitscript
+    /// let padding = String.concat(["\t", '\u{00a0}' as String, "\n"])
+    /// let missingLabel = padding.isBlank()
+    /// ```
+    @mustUse("The string blankness result must be used.")
+    @intrinsic(StringIsBlank)
+    fn isBlank() -> bool;
+
     /// Pads the beginning of this string to a minimum Unicode-scalar length.
     ///
     /// The original string is returned unchanged when it already contains at

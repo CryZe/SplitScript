@@ -427,6 +427,24 @@ first whether that boundary should remain fallible ([`T!`]), become a `String?`,
 retain the last accepted state value. The compiler therefore gives
 `String.IsNullOrEmpty` focused guidance without guessing an automatic rewrite.
 
+C# `String.IsNullOrWhiteSpace(value)` has the same optionality boundary. For a
+required [`String`], use `value.isBlank()`. It returns true for the empty string
+and for text made entirely from Unicode `White_Space` characters, including
+non-breaking space. For `String?`, keep absence explicit:
+
+```splitscript
+# state "game.exe" {}
+# fn missingLabel(value: String?) -> bool {
+return match value {
+    None => true,
+    Some(text) => text.isBlank(),
+}
+# }
+```
+
+Unlike [`trimAsciiWhitespace`], [`isBlank`] is deliberately Unicode-aware and
+does not allocate a normalized string.
+
 C# `String.Length` counts UTF-16 code units, so it has no encoding-neutral
 rename for SplitScript's immutable UTF-8 strings. Prefer the operation that
 expresses the surrounding intent. An emptiness check does not need a numeric

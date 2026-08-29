@@ -117,6 +117,68 @@ whileAttached {
     if "".isEmpty() && !"Map_A".isEmpty() {
         matches += 262144
     }
+    let everyUnicodeWhitespace = String.concat([
+        '\u{0009}' as String,
+        '\u{000a}' as String,
+        '\u{000b}' as String,
+        '\u{000c}' as String,
+        '\u{000d}' as String,
+        '\u{0020}' as String,
+        '\u{0085}' as String,
+        '\u{00a0}' as String,
+        '\u{1680}' as String,
+        '\u{2000}' as String,
+        '\u{2001}' as String,
+        '\u{2002}' as String,
+        '\u{2003}' as String,
+        '\u{2004}' as String,
+        '\u{2005}' as String,
+        '\u{2006}' as String,
+        '\u{2007}' as String,
+        '\u{2008}' as String,
+        '\u{2009}' as String,
+        '\u{200a}' as String,
+        '\u{2028}' as String,
+        '\u{2029}' as String,
+        '\u{202f}' as String,
+        '\u{205f}' as String,
+        '\u{3000}' as String,
+    ])
+    let mixedWhitespace = String.concat(["\t", '\u{00a0}' as String, "\n"])
+    let whitespaceAroundText = String.concat([
+        " ",
+        '\u{2000}' as String,
+        "x",
+        '\u{3000}' as String,
+    ])
+    if "".isBlank()
+        && everyUnicodeWhitespace.isBlank()
+        && mixedWhitespace.isBlank()
+        && !"not blank".isBlank()
+        && !whitespaceAroundText.isBlank()
+        && !('\u{0008}' as String).isBlank()
+        && !('\u{000e}' as String).isBlank()
+        && !('\u{001f}' as String).isBlank()
+        && !('\u{0021}' as String).isBlank()
+        && !('\u{0084}' as String).isBlank()
+        && !('\u{0086}' as String).isBlank()
+        && !('\u{009f}' as String).isBlank()
+        && !('\u{00a1}' as String).isBlank()
+        && !('\u{167f}' as String).isBlank()
+        && !('\u{1681}' as String).isBlank()
+        && !('\u{1fff}' as String).isBlank()
+        && !('\u{200b}' as String).isBlank()
+        && !('\u{2027}' as String).isBlank()
+        && !('\u{202a}' as String).isBlank()
+        && !('\u{202e}' as String).isBlank()
+        && !('\u{2030}' as String).isBlank()
+        && !('\u{205e}' as String).isBlank()
+        && !('\u{2060}' as String).isBlank()
+        && !('\u{2fff}' as String).isBlank()
+        && !('\u{3001}' as String).isBlank()
+    {
+        matches += 4194304
+    }
     if String.join(["chapter", "room", "exit"], ".") == "chapter.room.exit"
         && String.join([], "-") == ""
         && String.join(["only"], "-") == "only"

@@ -2098,6 +2098,122 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_trim_ascii_whitespace(
     function
 }
 
+/// Reports whether an immutable UTF-8 string is empty or consists entirely of
+/// Unicode whitespace. Scalar decoding is delegated to `StringInspect`, which
+/// also keeps this helper defensive if an invalid internal String is ever
+/// manufactured.
+///
+/// The ranges in `emit_is_unicode_white_space` are the complete `White_Space`
+/// property from Unicode 17.0.0, `PropList-17.0.0.txt`, dated 2025-06-30:
+/// https://www.unicode.org/Public/17.0.0/ucd/PropList.txt
+///
+/// When updating Unicode, update the version and source above together with
+/// the ranges below and the boundary cases in `tests/string_predicates.split`.
+pub(in crate::codegen::runtime_helpers) fn compile_string_is_blank(
+    string_inspect: u32,
+) -> Function {
+    let mut function = Function::new([(4, ValType::I32)]);
+    let value = 0;
+    let value_len = 1;
+    let index = 2;
+    let success = 3;
+    let code_point = 4;
+
+    function
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalSet(value_len))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(value_len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::Call(string_inspect))
+        // Multiple results are consumed from right to left.
+        .instruction(&Instruction::LocalSet(code_point))
+        .instruction(&Instruction::LocalSet(success))
+        .instruction(&Instruction::LocalGet(success))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+    emit_is_unicode_white_space(&mut function, code_point);
+    function
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(code_point))
+        .instruction(&Instruction::I32Const(0x80))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(code_point))
+        .instruction(&Instruction::I32Const(0x800))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::Else)
+        // Unicode White_Space currently contains no four-byte scalar.
+        .instruction(&Instruction::I32Const(3))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::End);
+    function
+}
+
+/// Pushes whether `code_point` has Unicode 17.0.0's `White_Space` property.
+fn emit_is_unicode_white_space(function: &mut Function, code_point: u32) {
+    function
+        // U+0009..U+000D
+        .instruction(&Instruction::LocalGet(code_point))
+        .instruction(&Instruction::I32Const(0x0009))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::LocalGet(code_point))
+        .instruction(&Instruction::I32Const(0x000D))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::I32And);
+    for scalar in [0x0020, 0x0085, 0x00A0, 0x1680] {
+        function
+            .instruction(&Instruction::LocalGet(code_point))
+            .instruction(&Instruction::I32Const(scalar))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::I32Or);
+    }
+    function
+        // U+2000..U+200A
+        .instruction(&Instruction::LocalGet(code_point))
+        .instruction(&Instruction::I32Const(0x2000))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::LocalGet(code_point))
+        .instruction(&Instruction::I32Const(0x200A))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or);
+    for scalar in [0x2028, 0x2029, 0x202F, 0x205F, 0x3000] {
+        function
+            .instruction(&Instruction::LocalGet(code_point))
+            .instruction(&Instruction::I32Const(scalar))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::I32Or);
+    }
+}
+
 /// Pads an immutable UTF-8 string to a minimum Unicode-scalar length. The
 /// original GC object is reused when no padding is required; otherwise the
 /// result is allocated once at its exact byte length. `pad_end` selects whether

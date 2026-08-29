@@ -1935,6 +1935,10 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         "String.trimAsciiWhitespace() -> String"
     );
     assert_eq!(
+        library.render_signature(StdlibItemId::StringIsBlank),
+        "String.isBlank() -> bool"
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::StringJoin),
         "String.join(values: [String], separator: String) -> String"
     );

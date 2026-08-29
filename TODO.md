@@ -365,9 +365,11 @@ or assumptions tied to one generated corpus.
   same resolution path. A failed dependency skips its dependents for that poll
   so no stale candidate address is dereferenced; every affected field retains
   its own last accepted value.
-- [ ] Add `String.isBlank()` or an approved equivalent only after confirming
-  the intended Unicode whitespace semantics; several ports silently replaced
-  C# `IsNullOrWhiteSpace` with an empty-string test.
+- [x] Add `String.isBlank()` with Unicode `White_Space` semantics; several
+  ports silently replaced C# `IsNullOrWhiteSpace` with an empty-string test.
+  Keep absence explicit for `String?`, provide focused C# migration guidance,
+  and pin the internal property table and its boundary tests to a documented
+  Unicode version so future updates are deliberate.
 - [x] Recheck clean-compiling omissions against facilities added before or
   during the exercise. `timer.currentSplitIndex()`, generic numeric `Duration`
   constructors, and finite settings families already surfaced through focused
@@ -965,10 +967,10 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Turn the remaining porting-campaign questions into focused decisions:
-   Unicode blank strings and whether known emulator executable sets merit a
-   contextual provider suggestion. Bounded
-   managed-string lengths are already untyped compile-time literals in schema
+1. Decide whether known emulator executable sets merit a non-noisy contextual
+   provider suggestion. Unicode blank strings now use the Unicode `White_Space`
+   property, while bounded managed-string lengths are already untyped compile-time
+   literals in schema
    syntax and require no integer suffix or generic conversion API.
 2. Add the compiler-query fixture and review checklist for clean-compiling
    semantic drift, then apply it to a small corrected and runtime-tested native,

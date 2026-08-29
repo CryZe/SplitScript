@@ -942,6 +942,38 @@ layout IDs before lowering; the backend does not rediscover their meaning from
 source spelling. Fallible control flow remains a separate semantic step;
 none of these physical layouts introduce a private failure protocol.
 
+## Debug metadata and source identity
+
+Debug builds contain a WebAssembly `name` section derived from final function
+indices. It names host imports, generated helpers, concrete generic
+specializations, async initializer/poller pairs, state readers and transforms,
+lifecycle blocks, `_start`, and `update`.
+
+They also contain initial DWARF v5 compilation-unit, subprogram, and line-table
+metadata. Source-backed function bodies map emitted instruction boundaries to
+the original expression and statement lines, including bare control-flow
+statements and source statements moved into async poll continuations.
+Compiler-generated scaffolding deliberately has no source location. Source
+parameters and primitive scalar locals in direct synchronous functions receive
+Wasm local names, DWARF base types, declaration metadata, lexical visibility
+ranges, and `DW_OP_WASM_location` expressions. Values moved into async GC
+frames are omitted until location changes across suspension can be represented
+honestly. Reachable source globals receive WebAssembly global names and scalar
+globals receive `DW_OP_WASM_location` global locations.
+
+Source identity flows through every compiler stage: the CLI records an
+absolute `.split` path, the extension records VS Code's native file path, and
+non-file editor documents retain their URI. APIs that intentionally compile
+only an in-memory string use `input.split`. Release builds omit both the name
+section and every `.debug_*` section.
+
+## Numeric parsing implementation
+
+The Wasm implementation uses allocation-free Simple Decimal Conversion with a
+reused 768-digit scratch buffer. It does not parse through an intermediate
+`f64` when the target is `f32`, avoiding double rounding, and it does not call a
+locale-sensitive host routine.
+
 ## Standard-library catalog and tooling model
 
 The library surface is described by a backend-independent catalog. Each entry

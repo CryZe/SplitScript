@@ -57,6 +57,19 @@
 - Resolved every newly referenced catalog identity through the CLI documentation
   query to catch misspelled or nonexistent links.
 
+## 2026-08-30: user language guide separated from compiler internals
+
+- Added task-based navigation from the self-contained Getting Started workflow
+  into state, ordinary logic, value modeling, timer control, failure/async, and
+  native text/memory concepts without depending on full example files.
+- Removed HIR, Wasm representation, GC-layout, backend-lowering,
+  continuation-frame, and linear-memory exposition from user semantics while
+  preserving observable evaluation, lifetime, suspension, and module-size
+  behavior.
+- Moved debug name/DWARF/source-identity details and the exact decimal parsing
+  implementation into `COMPILER.md`; existing async and ABI architecture pages
+  already own the remaining physical details.
+
 ## 2026-08-29: managed-string bound ergonomics resolved by schema syntax
 
 - The earlier porting question about accepting arbitrary integer types for a

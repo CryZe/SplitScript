@@ -437,13 +437,13 @@ concepts rather than maintaining a parallel inventory.
 - [x] Keep compiler catalogs canonical for exact signatures, effects,
   availability, members, and support status; hand-written pages should link to
   those facts instead of copying tables.
-- [ ] Split the user-facing language path from compiler architecture. Start
-  with one complete autosplitter and the update/lifecycle mental model, then
-  teach ordinary language, state/memory, settings/timer, failure/async, and
-  advanced providers. Move HIR, Wasm representation, GC layout, continuation
-  frames, lowering, and DWARF details to `COMPILER.md`, `ABI.md`, or a focused
-  developer guide. Give the remaining long concept pages task-named navigation
-  and a table of contents.
+- [x] Split the user-facing language path from compiler architecture. Route new
+  authors through the self-contained Getting Started workflow, then teach
+  ordinary language, state/memory, settings/timer, failure/async, and advanced
+  providers without depending on full example files. Move HIR, Wasm
+  representation, GC layout, continuation frames, lowering, and DWARF details
+  to `COMPILER.md`, `ABI.md`, or a focused developer guide. Give the remaining
+  long concept pages task-named navigation and a table of contents.
 - [x] Turn the standard-library Markdown into a task-oriented overview linked
   to generated exact symbol pages. Move its catalog IDs, inference internals,
   HIR/Wasm IR, compiler context, and backend dispatch material to compiler

@@ -16,6 +16,21 @@ It is statically typed. There is no JavaScript-style numeric supertype and no
 implicit widening between integer widths. This is important when values come
 from process memory.
 
+New authors should begin with [`GETTING_STARTED.md`](GETTING_STARTED.md). Use
+this longer page as a concept reference:
+
+- Attach and read game state: [state and pointer paths](#state-and-pointer-paths)
+  and [discovered state and watchers](#discovered-state-and-watchers).
+- Express ordinary logic: [variables and inference](#variables-and-inference),
+  [value blocks](#value-blocks), and [functions](#functions).
+- Model values and collections: [records](#records),
+  [pattern matching](#pattern-matching), [arrays](#arrays), [sets](#sets), and
+  [integer ranges](#integer-ranges).
+- Configure and control the timer: [settings](#settings) and [actions](#actions).
+- Handle absence, failure, and waiting: [optional and fallible values](#optional-and-fallible-values)
+  and [structured async initialization](#structured-async-initialization).
+- Decode native values and text: [typed process memory](#typed-process-memory).
+
 Inference flows through global uses and assignments as well as initializers.
 An unannotated mutable global initialized to `None` becomes `T?` when a later
 ordinary assignment supplies a `T`; a standalone `None` global remains the
@@ -149,9 +164,8 @@ observes synthetic zero-filled state. Later, each successful field advances;
 a failed field retains its last accepted value while successful sibling fields
 still advance. A dependent field is not evaluated in a poll where any direct
 dependency failed, so it cannot follow an address from an older candidate; it
-retains its own last accepted value too. The resulting snapshots are
-WebAssembly GC structs, so action code uses typed references rather than a
-linear-memory state layout.
+retains its own last accepted value too. The resulting snapshots are ordinary
+typed values in action code.
 
 Some watchers use failed memory access as meaningful absence rather than a
 transient error. Write that choice explicitly with an optional pointer field:
@@ -349,10 +363,9 @@ split {
 }
 ```
 
-The incompatible `bike` declarations occupy distinct typed fields in the Wasm
-GC snapshot. They are not optional and the compiler does not synthesize a
-default to hide the physical difference. Accessing `current.bike` without a
-layout refinement is an error.
+The incompatible `bike` declarations remain distinct typed fields. They are not
+optional and the compiler does not synthesize a default to hide the difference.
+Accessing `current.bike` without a layout refinement is an error.
 
 ## Variables and inference
 
@@ -413,8 +426,7 @@ it also contains a literal or an `Integer`/`Float` constraint. The concrete
 memory representation must come from an annotation, explicit generic argument,
 or another exact type. Mutable `let` bindings are monomorphic. Unannotated user
 function parameters and results are generalized at the declaration boundary,
-then instantiated independently for each call site. The backend emits a
-concrete Wasm signature and body for every reachable specialization.
+then instantiated independently for each call site.
 
 Decimal floating-point literals may use an exponent, such as `1e-45` or
 `6.022e+23`. They are rounded once to their inferred `f32` or `f64` target and
@@ -516,12 +528,12 @@ Supported value types are:
 - `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`
 - `address`, a nominal 64-bit target-process address
 - `f32`, `f64`
-- `String`, an immutable UTF-8 WebAssembly GC array
+- `String`, immutable UTF-8 text
 - `[T]`, a mutable array whose length is not encoded in its type
 - `[T; N]`, a mutable array with exactly `N` elements
 - `T?`, an optional value containing either `Some(T)` or `None`
 - `T!`, a result containing either `T` or a standard string error
-- the built-in GC reference types `Duration`, `FileVersion`, and `Module`
+- the built-in value types `Duration`, `FileVersion`, and `Module`
 - `Signature`, the compile-time-only type produced by `sig"..."`
 
 Character literals use single quotes and contain exactly one Unicode scalar
@@ -545,8 +557,7 @@ Unary `!` is type-directed: it performs logical negation on `bool` and a
 width-preserving bitwise complement on every integer type. The familiar `~`
 spelling is diagnosed with a machine-applicable replacement. Integer
 arithmetic, unary negation, bitwise operations, and shifts normalize their
-results to the declared width, so `255u8 + 1u8` wraps to `0u8` even while the
-backend represents the value in a WebAssembly `i32`.
+results to the declared width, so `255u8 + 1u8` wraps to `0u8`.
 
 Operators use Rust's relative precedence. From tightest to loosest, the
 currently supported operators are unary operators, `as`, `*`/`/`/`%`, `+`/`-`,
@@ -703,11 +714,10 @@ let selected = if useFallback {
 }
 ```
 
-Inside `onAttach`, `await` and `retry` may suspend within a loop. The async
-lowering gives each suspending loop explicit header and exit states, so a
-resumed continuation can `break`, `continue`, or complete an iteration without
-replaying work from earlier iterations. Nested suspending loops target their
-nearest loop and preserve values live across each suspension.
+Inside `onAttach`, `await` and `retry` may suspend within a loop. Resuming does
+not replay work from before the pending operation: the loop can `break`,
+`continue`, or complete the current iteration normally. Nested loops target
+their nearest loop and preserve values needed after suspension.
 
 ## Debug-only statements
 
@@ -744,37 +754,12 @@ can declare locals with `debug let`, including values produced by `await` or
 An ordinary statement or ordinary function may not use a debug-only function,
 global, or local because that reference would remain after its declaration is
 erased. The compiler reports this at the reference site; wrapping the use in
-`debug` establishes the required context. Release Wasm IR contains neither the
+`debug` establishes the required context. A release module contains neither the
 function body nor storage and initialization for a debug-only global.
 
 Debug-only code is still parsed, resolved, and type-checked in release builds,
-so a stale diagnostic path cannot silently rot. Erasure happens during semantic
-Wasm lowering, before reachability, string collection, import selection, and
-helper discovery. Consequently, a release module does not retain debug-only
-messages or logging imports.
-
-Debug builds contain a WebAssembly `name` section derived from final function
-indices. It names host imports, generated helpers, concrete generic
-specializations, async initializer/poller pairs, state readers and transforms,
-lifecycle blocks, `_start`, and `update`.
-
-They also contain initial DWARF v5 compilation-unit, subprogram, and line-table
-metadata. Source-backed function bodies map emitted instruction boundaries to
-the original expression and statement lines, including bare control-flow
-statements and source statements moved into async poll continuations.
-Compiler-generated scaffolding deliberately has no source location. Source
-parameters and primitive scalar locals in direct synchronous functions receive
-Wasm local names, DWARF base types, declaration metadata, lexical visibility
-ranges, and `DW_OP_WASM_location` expressions. Values moved into async GC
-frames are omitted until location changes across suspension can be represented
-honestly. Reachable source globals receive WebAssembly global names and scalar
-globals receive `DW_OP_WASM_location` global locations.
-
-Source identity flows through every compiler stage: the CLI records an
-absolute `.split` path, the extension records VS Code's native file path, and
-non-file editor documents retain their URI. APIs that intentionally compile
-only an in-memory string use `input.split`. Release builds omit both the name
-section and every `.debug_*` section.
+so a stale diagnostic path cannot silently rot. A release module does not
+retain debug-only messages or logging facilities used only by erased code.
 
 The `debug` modifier accepts bindings, expression statements, assignments,
 `if`, `while`, `for`, and `await` or `retry` statements. It rejects `return`,
@@ -868,9 +853,9 @@ fn readMode(address: address) -> i32! {
 }
 ```
 
-Actions such as `whileAttached` are not result boundaries, so an unhandled `?` there is
-a compile-time error. The propagation operation is represented explicitly in
-typed HIR with its target result type; it is not treated as a zero/default read.
+Actions such as `whileAttached` are not result boundaries, so an unhandled `?`
+there is a compile-time error. Propagation never turns a failed read into a
+zero or default value.
 
 An explicit `throw error` expression transfers a `String` error through the
 same boundary mechanism. It has type [`Never`], so it can appear wherever an
@@ -1094,7 +1079,7 @@ Parameter and result types are inferred from the body, invocation sites, and
 an expected callable type in either direction. Write `-> async T` when an
 asynchronous closure result is explicit. Creating a closure retains its
 lexical captures but does not execute the body. Immutable captures are stored
-as values. Mutable locals use one shared GC cell, so the declaring scope,
+as values. Mutable locals use one shared cell, so the declaring scope,
 returned closures, nested closures, and continuations across [`await`] all see
 the same assignments. [`return`] exits the closure itself; [`break`] and
 [`continue`] cannot target a loop outside it. Callable values do not implement
@@ -1102,8 +1087,8 @@ the same assignments. [`return`] exits the closure itself; [`break`] and
 
 ## Records
 
-Records are immutable, named value shapes represented as WebAssembly GC
-structs. Declarations can refer to records declared later in the file. Record
+Records are immutable, named value shapes. Declarations can refer to records
+declared later in the file. Record
 literals are checked for unknown, duplicate, missing, and incorrectly typed
 fields; their source order does not matter.
 
@@ -1125,8 +1110,8 @@ let digits = Digits {
 }
 ```
 
-Records may contain other records and GC strings, pass through functions, and
-remain live in an `onAttach` continuation across `await`. Immutability keeps
+Records may contain other records and strings, pass through functions, and
+remain live across `await`. Immutability keeps
 shared metadata bindings predictable; a new value is constructed when a
 snapshot needs to change.
 
@@ -1161,8 +1146,8 @@ fn isFirst(value: LevelOrScene) -> bool {
 ```
 
 Strings, characters, integers, booleans, and file versions can be matched with
-literals. String patterns compare decoded text contents rather than WebAssembly
-GC object identities. Arms may have an `if` guard, and `_` is the catch-all
+literals. String patterns compare decoded text contents. Arms may have an `if`
+guard, and `_` is the catch-all
 pattern. Patterns participate in inference, so the parameter types below are
 inferred as an integer and `bool` from their uses.
 
@@ -1201,7 +1186,7 @@ its pattern. Enum matches must cover every variant, boolean matches must cover
 open-ended and require an unguarded `_` arm. A wildcard can also make an enum
 or boolean match exhaustive.
 
-Enums are immutable GC values and can be nested in records, passed through
+Enums are immutable values and can be nested in records, passed through
 functions, and retained across `await`. This directly models the original
 Lunistice autosplitter's base-game level number versus DLC-demo scene name.
 
@@ -1232,18 +1217,16 @@ if game.location.isFirst() {
 ```
 
 Methods can have additional typed parameters and may be invoked through nested
-record paths. They use the same functions and Wasm call instructions as global
-helpers; method syntax only provides type-directed organization and an implicit
-receiver.
+record paths. Method syntax provides type-directed organization and an implicit
+receiver; calls otherwise behave like global helpers.
 
 ## Arrays
 
-Arrays use mutable WebAssembly GC storage. `[T]` is the general array type: each
+Arrays are mutable values. `[T]` is the general array type: each
 value keeps its creation-time length, but that length is not part of the type.
 `[T; N]` additionally records an exact compile-time element count. A sized
 array can be passed anywhere `[T]` is expected, while a general `[T]` cannot be
-narrowed to a particular length without proof. Each element type is
-monomorphized into a concrete GC array representation.
+narrowed to a particular length without proof.
 
 Non-empty literals infer their element type. An expected `[T; N]` also checks
 the literal's exact element count. An empty literal keeps an unresolved element
@@ -1272,7 +1255,7 @@ let marker = bytes.indexOf(0x8b) // u32?
 `array[index] = value` replaces the selected element. The assignment is
 resolved through the standard library's array-mutation capability: the array
 and index are each evaluated once, aliases observe the replacement, both `[T]`
-and `[T; N]` support it, and Wasm performs bounds checks. Replacement does not
+and `[T; N]` support it, and out-of-range access traps. Replacement does not
 change collection structure, so it does not invalidate active iteration.
 Compound indexed assignments use the same catalog-defined operators as local
 and global assignments. The collection, index, and right operand are evaluated
@@ -1282,7 +1265,7 @@ once in that order; compiler temporaries preserve them across `await` and
 methods are available when the element type supports `Equatable`; they are
 ordinary source-defined library loops rather than dedicated compiler
 operations. Arrays can contain records, enums, strings, and other arrays, and
-can themselves be stored in records or continuation frames.
+can themselves be stored in records or retained across suspension.
 
 Only growable `[T]` arrays provide `push(value)`, `extend(values)`,
 `removeAt(index)`, `remove(value)`, `pop()`, and `clear()`. Extension appends a
@@ -1406,9 +1389,8 @@ if checkpoints.contains(4) {
 ```
 
 An ascending range whose end precedes its start is empty; an exclusive range
-also excludes equal endpoints. Direct `for` iteration keeps the bounds in
-compiler-owned scalar locals and allocates no range object. A stored or passed
-range uses an immutable WebAssembly GC value. Inclusive iteration records
+also excludes equal endpoints. Direct `for` iteration does not allocate a range
+object, while a stored or passed range is an immutable value. Inclusive iteration records
 completion separately from its current integer, so ending at an integer type's
 maximum value terminates without wrapping.
 
@@ -1519,7 +1501,7 @@ label; `///` documentation comments are the only way to define its tooltip.
 
 ## Actions
 
-`setup` runs once for each loaded WebAssembly instance at the beginning of its
+`setup` runs once for each loaded script instance at the beginning of its
 first host update, after global values and the settings UI have been initialized
 and the current settings have been loaded. It is intended for
 process-independent startup work such as printing a startup message:
@@ -1857,35 +1839,31 @@ onAttach {
 }
 ```
 
-Calling `afterTick` evaluates and captures its arguments once and allocates a
-typed WebAssembly GC continuation frame; it does not begin polling the body.
+Calling `afterTick` evaluates and captures its arguments once; it does not begin
+polling the body.
 Intrinsically asynchronous operations behave the same way, so
 `let pending = process.module("game.dll")` creates a future that may be passed
 or stored before `await pending`. An `async T` value can be held in a local,
-record, enum, option, result, or array and passed as a parameter. Awaiting it
-dispatches to its concrete typed poll function. Once complete, the frame
-retains `T`, so another await returns the same value without rerunning the
+record, enum, option, result, or array and passed as a parameter. Once complete,
+the future retains `T`, so another await returns the same value without rerunning the
 operation. Merely creating a future is synchronous. Futures are owned by the
 attached-process lifetime and therefore cannot be stored in globals.
 
 `await` is an ordinary prefix expression rather than a declaration form. It
 can appear inside member access, arguments, arithmetic, interpolation,
-conditional and match arms, guards, fallbacks, and loop conditions. Lowering
-spills earlier operands once and leaves branch-local suspensions inside the
-selected branch, preserving source evaluation order across ticks.
+conditional and match arms, guards, fallbacks, and loop conditions. Earlier
+operands are evaluated once, and only the selected branch is polled, preserving
+source evaluation order across ticks.
 
 `onAttach` supports the same variables, assignments, expressions, calls, and
 conditional control flow as other action blocks, including suspensions nested
-in `if`, `else if`, and `else` branches. Locals that live across a suspension
-are stored in a compiler-generated WebAssembly GC continuation frame;
-values whose next use is preceded by another assignment stay ordinary Wasm
-locals. Each suspension has a dedicated poll state, so conditions and side effects
-before a pending operation are not replayed on the next tick. A successful poll
-continues through the selected branch and rejoins statements after it.
+in `if`, `else if`, and `else` branches. Local values needed later survive the
+suspension. Conditions and side effects before a pending operation are not
+replayed on the next tick; success continues through the selected branch and
+then rejoins statements after it.
 
 `process.module(name)` produces a `Module` with `address: address` and
-`size: u64`. An awaited result is stored in the GC continuation frame only when
-a later suspension segment uses it. A signature literal is distinct from
+`size: u64`. A signature literal is distinct from
 `String`: its nibbles are checked and converted to needle/mask bytes at compile
 time.
 
@@ -1944,7 +1922,7 @@ let next: address = retry process.read(object + 0x20)
 
 Named `MemoryReadable` records use the same call. The runtime performs one host
 read for the complete naturally aligned record, then constructs its immutable
-WebAssembly GC value locally. Nested readable records are decoded recursively,
+value. Nested readable records are decoded recursively,
 so a state snapshot cannot observe a torn mixture of individually read fields.
 
 ```text
@@ -2115,11 +2093,6 @@ overflow remains an error. Whitespace, digit separators, and trailing text are
 rejected, so malformed game-memory input uses ordinary `T!` handling
 rather than silently producing a partial value.
 
-The Wasm implementation uses allocation-free Simple Decimal Conversion with a
-reused 768-digit scratch buffer. It does not parse through an intermediate
-`f64` when the target is `f32`, avoiding double rounding, and it does not call a
-locale-sensitive host routine.
-
 A managed class may declare `String field maxLength N;` or
 `String? field maxLength N;`. The bound is a positive compile-time number of
 UTF-16 code units and controls the read rather than changing the resulting
@@ -2153,16 +2126,14 @@ The [`print`] and [`setVariable`] functions accept any [`Display`] value
 and apply these same conversions at the runtime boundary, so numeric values and
 addresses do not need an explicit `as String` cast. Standard-library types can
 provide one checked implementation for all four conversion entry points
-without a type-specific backend branch. `FileVersion` uses this mechanism to
-render
-`major.minor.build.private`. `timer.state()` and
-`setTickRate<T: Numeric>(T)` expose the corresponding ASR facilities without
-linear-memory pointers in source code.
+without special syntax. [`FileVersion`] uses this mechanism to render
+`major.minor.build.private`. [`Timer.state`] and [`setTickRate`] expose the
+corresponding runtime facilities.
 
 User records and enums derive [`Display`] automatically. The default is a
 stable multiline structural representation containing the type, variant,
-field, and payload names. The backend generates that formatter lazily only
-when a reachable conversion needs the concrete type. Defining the exact method
+field, and payload names. That derived implementation is materialized only when
+a reachable conversion needs the concrete type. Defining the exact method
 `fn TypeName.toString() -> String` overrides the derived representation, and
 the `String` result may be inferred from the body. User code does not write an
 `impl` block, capability declaration, or annotation. The compiler checks an
@@ -2209,14 +2180,3 @@ The generated loop follows this order:
 6. If the timer has not started, evaluate `start`.
 7. If it is running or paused, apply `isLoading`, then `gameTime`, then `reset`;
    evaluate `split` only when reset did not trigger.
-
-## Why GC and linear memory both appear
-
-Long-lived language values use WebAssembly GC. Today, the Auto Splitting Runtime
-ABI represents host strings and process read buffers as `(pointer, length)` pairs
-in exported linear memory. SplitScript therefore keeps a small memory page for
-the host boundary and scratch reads. This is an ABI adapter, not the language's
-object model.
-
-Arrays, strings, user records, closures, sets, iterators, and generic wrappers
-are represented as GC values without changing the host ABI.

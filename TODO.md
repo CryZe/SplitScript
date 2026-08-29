@@ -215,16 +215,6 @@ to inference or code generation.
   boundary, and locals reset naturally for the next candidate snapshot. The
   release Neon White fixture shrank from 6,707 to 6,515 bytes while removing
   the duplicate host calls.
-- [ ] If more snapshot-scoped duplication appears outside state paths, model a
-  compiler-internal "snapshot-stable" operation contract and an effect-aware
-  common-subexpression pass over Wasm IR. Do not describe arbitrary process
-  reads as pure: the host process can mutate concurrently, so sharing is valid
-  only where a compiler-created snapshot transaction promises it. Immutable
-  managed-snapshot field projections are now concrete evidence for this pass:
-  the transactional Lunistice source is 31,838 bytes versus the former 28,529
-  byte flat-state module because repeated `current.manager.field` projections
-  are lowered independently. Optimize those local GC projections without
-  weakening live process-read ordering.
 - [x] Extend the attachment cache with managed field offsets and presence
   evidence used to validate the attachment-wide layout. Strings, arrays, and
   explicit snapshots may still allocate their returned values.

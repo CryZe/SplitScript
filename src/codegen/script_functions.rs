@@ -588,6 +588,61 @@ fn emit_pointer_read_success(
     emit_result_success(function, result_type, gc);
 }
 
+/// Materializes repeated immutable managed-snapshot roots once at entry to a
+/// synchronous body. The Wasm-IR planner deliberately emits no such locals for
+/// async bodies, where a suspension could observe a later state snapshot.
+fn emit_snapshot_projection_prologue(
+    function: &mut Function,
+    planned: &[wasm_ir::Local],
+    context: &ExprContext<'_>,
+) {
+    for local in planned {
+        let LocalPurpose::SnapshotProjection(projection) = local.purpose else {
+            continue;
+        };
+        let &(destination, projected_type) = context
+            .matches
+            .snapshot_projections
+            .get(&projection)
+            .expect("planned snapshot projections have physical locals");
+        let root_projection = wasm_ir::SnapshotProjection {
+            root: projection.root,
+            field: projection.field,
+            member: None,
+        };
+        let field_type = if projection.member.is_some()
+            && let Some(&(root_local, root_type)) =
+                context.matches.snapshot_projections.get(&root_projection)
+        {
+            function.instruction(&Instruction::LocalGet(root_local));
+            root_type
+        } else {
+            function
+                .instruction(&Instruction::GlobalGet(match projection.root {
+                    wasm_ir::SnapshotRoot::Current => context.runtime_globals.current,
+                    wasm_ir::SnapshotRoot::Old => context.runtime_globals.old,
+                }))
+                .instruction(&Instruction::RefAsNonNull);
+            let (field_index, storage) = state_storage_index(projection.field, context.semantics);
+            let field_type = value_type(storage, context.semantics);
+            emit_struct_get(function, field_index, field_type);
+            field_type
+        };
+        if let Some(member) = projection.member {
+            let lowered_type = emit_path_fields(
+                function,
+                &[crate::semantic::ResolvedMember::ManagedField(member)],
+                field_type,
+                context,
+            );
+            debug_assert_eq!(projected_type, lowered_type);
+        } else {
+            debug_assert_eq!(projected_type, field_type);
+        }
+        function.instruction(&Instruction::LocalSet(destination));
+    }
+}
+
 pub(super) fn compile_user_function(
     declaration: &FunctionDecl,
     instance: &crate::semantic::FunctionInstance,
@@ -714,6 +769,7 @@ pub(super) fn compile_user_function(
         bare_return: BareReturn::None,
         materialize_none: true,
     };
+    emit_snapshot_projection_prologue(&mut function, &wasm_body.locals, &context);
     compile_block(&mut function, &wasm_body.entry, &context, None);
     let result = semantic_type(
         lowering.semantics.specialize_type(
@@ -1114,6 +1170,7 @@ pub(super) fn compile_action(
         bare_return: BareReturn::Action(action.kind),
         materialize_none: true,
     };
+    emit_snapshot_projection_prologue(&mut function, &wasm_body.locals, &context);
     compile_block(&mut function, &wasm_body.entry, &context, Some(action.kind));
     emit_action_default(&mut function, action.kind, lowering.gc);
     function.instruction(&Instruction::End);
@@ -1247,6 +1304,11 @@ pub(super) fn plan_wasm_locals(
                 LocalPurpose::Temporary(temporary) => {
                     matches.temporaries.insert(temporary, (u32::MAX, ty));
                 }
+                LocalPurpose::SnapshotProjection(projection) => {
+                    matches
+                        .snapshot_projections
+                        .insert(projection, (u32::MAX, ty));
+                }
                 LocalPurpose::MatchValue(expression) => {
                     matches.values.insert(expression, u32::MAX);
                 }
@@ -1286,6 +1348,9 @@ pub(super) fn plan_wasm_locals(
             LocalPurpose::Temporary(temporary) => {
                 matches.temporaries.insert(temporary, (index, ty));
             }
+            LocalPurpose::SnapshotProjection(projection) => {
+                matches.snapshot_projections.insert(projection, (index, ty));
+            }
             LocalPurpose::MatchValue(expression) => {
                 matches.values.insert(expression, index);
             }
@@ -1324,12 +1389,13 @@ use super::{
     context::EmissionContext,
     data_plan::StringPool,
     emit_default, emit_memory_load, emit_memory_value, emit_result_error, emit_result_success,
-    emit_typed_struct_get,
+    emit_struct_get, emit_typed_struct_get,
     expression::{
         BareReturn, ClosureEnvironment, ExprContext, LocalStorage, MatchLayout, compile_block,
+        emit_path_fields,
     },
     imports::Abi,
-    memarg, memory_plan, semantic_type, value_type,
+    memarg, memory_plan, semantic_type, state_storage_index, value_type,
 };
 
 pub(super) fn compile_async_function_init(

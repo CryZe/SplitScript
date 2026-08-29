@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+mod snapshot_projections;
 mod visit;
 pub use visit::{
     Visitor, visit_expression_children, walk_expression, walk_statement, walk_terminator,
@@ -15,8 +16,8 @@ pub use visit::{
 
 use crate::{
     ast::{
-        ActionKind, BinaryOp, ExprId, ManagedClassId, OptionTypeId, PatternId, ResultTypeId, Span,
-        SuspensionMode, UnaryOp, ValueId,
+        ActionKind, BinaryOp, ExprId, ManagedClassId, ManagedFieldId, OptionTypeId, PatternId,
+        ResultTypeId, Span, SuspensionMode, UnaryOp, ValueId,
     },
     effects::OperationAnalysis,
     hir::{
@@ -88,10 +89,30 @@ impl AsyncStateId {
 pub enum LocalPurpose {
     Value(ValueId),
     Temporary(TemporaryId),
+    SnapshotProjection(SnapshotProjection),
     MatchValue(ExprId),
     FallbackValue(ExprId),
     IntrinsicScratch { expression: ExprId, slot: u8 },
     SuspensionScratch(ExprId),
+}
+
+/// A compiler-owned local that reuses one immutable managed snapshot stored in
+/// the current or old state snapshot. This deliberately does not represent a
+/// general process-memory read: only values already materialized by the state
+/// transaction are stable for the duration of a synchronous body invocation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SnapshotProjection {
+    pub root: SnapshotRoot,
+    pub field: ValueId,
+    /// One direct field of the immutable managed snapshot, or `None` for the
+    /// state field containing the managed snapshot itself.
+    pub member: Option<ManagedFieldId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SnapshotRoot {
+    Current,
+    Old,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -843,6 +864,7 @@ impl Program {
                     visible: function.function.function.index()
                         < typed_hir.visible_function_count(),
                 },
+                &mutated_values,
                 &mut program,
             );
             program.bodies.push(body);
@@ -859,6 +881,7 @@ impl Program {
                     profile,
                     visible: true,
                 },
+                &mutated_values,
                 &mut program,
             );
             program.bodies.push(body);
@@ -1867,7 +1890,9 @@ fn mutated_values(program: &TypedProgram) -> HashSet<ValueId> {
 
     impl hir::TypedVisitor for Collector {
         fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
-            if let TypedStatementKind::Assign { assignment, .. } = &statement.kind {
+            if let TypedStatementKind::Assign { assignment, .. }
+            | TypedStatementKind::StateAssign { assignment, .. } = &statement.kind
+            {
                 self.values.insert(assignment.target);
             }
             hir::walk_typed_statement(self, statement, program);
@@ -2016,6 +2041,7 @@ fn lower_body(
     effects: &OperationAnalysis,
     capabilities: &crate::capabilities::CapabilityAnalysis,
     source: SourceProvenance,
+    mutated_values: &HashSet<ValueId>,
     wasm_ir: &mut Program,
 ) -> Body {
     let abi = match &owner {
@@ -2039,7 +2065,10 @@ fn lower_body(
     };
     let mut next_async_state = 1;
     assign_async_states(&mut entry, &mut next_async_state);
-    let locals = plan_block(&entry, wasm_ir, semantics, capabilities);
+    let mut locals = plan_block(&entry, wasm_ir, semantics, capabilities);
+    if matches!(abi, BodyAbi::Direct) {
+        snapshot_projections::plan(&entry, wasm_ir, semantics, mutated_values, &mut locals);
+    }
     let frame_values = plan_frame_values(&mut entry, &locals, wasm_ir);
     let frame_temporaries = locals
         .iter()

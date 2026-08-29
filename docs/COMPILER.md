@@ -905,6 +905,19 @@ encoded directly from their Wasm-IR target, and ordinary expression emission
 no longer receives typed HIR. This completes the expression-plan migration
 without introducing a second expression identity or a general SSA optimizer.
 
+Synchronous-body local planning also recognizes repeated projections of
+immutable managed snapshots already stored in `current` or `old`. Three or
+more uses can share the state field itself; two or more uses can share a direct
+field projected from that managed snapshot. Both become compiler-owned Wasm
+locals, avoiding repeated state and managed-object GC field loads. This is
+intentionally a narrow snapshot-stability rule rather than general
+common-subexpression elimination: live process reads may observe concurrent
+mutation and are never shared by this pass, async bodies may cross a tick and
+are excluded, and assigning a `current` field disables every reuse rooted at
+that field throughout the program. `old` remains immutable by construction.
+The plan is recorded as an explicit Wasm-IR local purpose, so emission does not
+rediscover the optimization from source syntax.
+
 Process-read failure will remain expressed through the language's real `T!`
 result type and ordinary result control flow rather than through a new
 backend-only failure channel. This keeps semantic facts and backend physical

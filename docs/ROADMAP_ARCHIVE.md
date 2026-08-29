@@ -1,5 +1,20 @@
 # SplitScript roadmap
 
+## 2026-08-29: stable managed-snapshot projection reuse
+
+- Added a conservative Wasm-IR local plan for managed snapshots projected from
+  `current` and `old` repeatedly in one synchronous body. Generated code reuses
+  both profitable snapshot roots and repeated direct fields without treating
+  live process-memory operations as pure or carrying cached values across a
+  suspension.
+- Made source state assignment part of the compiler's shared mutation census.
+  Any assignable `current` snapshot root is excluded from reuse, while `old`
+  remains immutable. Focused lowering tests cover both the profitable reuse and
+  mutation exclusion paths.
+- Reduced the current release Lunistice artifact from 34,428 to 34,413 bytes.
+  The small but measured saving closes this specific duplicated-GC-projection
+  case without introducing a general optimizer or weakening read ordering.
+
 ## 2026-08-29: closed pure module-global initialization
 
 - Generalized initialized top-level bindings from literal aggregates and one

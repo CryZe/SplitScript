@@ -20,7 +20,7 @@ use crate::{
         provider_context_field_name,
     },
     types::{EnumTypeId, ResolvedArrayType, TypeId},
-    wasm_ir::{self, TemporaryId},
+    wasm_ir::{self, SnapshotProjection, SnapshotRoot, TemporaryId},
 };
 
 use super::{
@@ -48,6 +48,7 @@ pub(super) struct MatchLayout {
     pub intrinsic_temps: HashMap<ExprId, Vec<u32>>,
     pub suspension_temps: HashMap<ExprId, u32>,
     pub temporaries: HashMap<TemporaryId, (u32, Type)>,
+    pub snapshot_projections: HashMap<SnapshotProjection, (u32, Type)>,
 }
 
 #[derive(Clone, Copy)]
@@ -1452,6 +1453,25 @@ fn compile_resolved_path(
     members: &[ResolvedMember],
     context: &ExprContext<'_>,
 ) -> Type {
+    if let (
+        ResolvedValue::CurrentState(field) | ResolvedValue::OldState(field),
+        Some(ResolvedMember::ManagedField(member)),
+    ) = (value, members.first())
+    {
+        let projection = SnapshotProjection {
+            root: if matches!(value, ResolvedValue::OldState(_)) {
+                SnapshotRoot::Old
+            } else {
+                SnapshotRoot::Current
+            },
+            field,
+            member: Some(*member),
+        };
+        if let Some(&(local, cached_type)) = context.matches.snapshot_projections.get(&projection) {
+            function.instruction(&Instruction::LocalGet(local));
+            return emit_path_fields(function, &members[1..], cached_type, context);
+        }
+    }
     if let [ResolvedMember::ManagedField(field)] = members
         && resolved_value_type_id(value, context).is_some_and(|ty| {
             matches!(
@@ -1563,18 +1583,34 @@ fn compile_resolved_path(
             Type::SettingsView
         }
         ResolvedValue::CurrentState(field) | ResolvedValue::OldState(field) => {
-            function
-                .instruction(&Instruction::GlobalGet(
-                    if matches!(value, ResolvedValue::OldState(_)) {
-                        context.runtime_globals.old
-                    } else {
-                        context.runtime_globals.current
-                    },
-                ))
-                .instruction(&Instruction::RefAsNonNull);
             let (index, storage) = state_storage_index(field, context.semantics);
             let field_type = value_type(storage, context.semantics);
-            emit_struct_get(function, index, field_type);
+            let projection = SnapshotProjection {
+                root: if matches!(value, ResolvedValue::OldState(_)) {
+                    SnapshotRoot::Old
+                } else {
+                    SnapshotRoot::Current
+                },
+                field,
+                member: None,
+            };
+            if let Some(&(local, cached_type)) =
+                context.matches.snapshot_projections.get(&projection)
+            {
+                debug_assert_eq!(cached_type, field_type);
+                function.instruction(&Instruction::LocalGet(local));
+            } else {
+                function
+                    .instruction(&Instruction::GlobalGet(
+                        if projection.root == SnapshotRoot::Old {
+                            context.runtime_globals.old
+                        } else {
+                            context.runtime_globals.current
+                        },
+                    ))
+                    .instruction(&Instruction::RefAsNonNull);
+                emit_struct_get(function, index, field_type);
+            }
             field_type
         }
         ResolvedValue::Setting(setting) | ResolvedValue::OldSetting(setting) => {
@@ -2262,7 +2298,7 @@ pub(super) fn compile_for_bind_and_advance(
     });
 }
 
-fn emit_path_fields(
+pub(super) fn emit_path_fields(
     function: &mut Function,
     fields: &[ResolvedMember],
     mut current_type: Type,

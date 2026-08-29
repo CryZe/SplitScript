@@ -391,6 +391,109 @@ or assumptions tied to one generated corpus.
   The fixture should assert documentation journeys and diagnostics, not bundle
   disposable full-script outputs.
 
+## P0 — fix editor correctness and the first-use path
+
+The 2026-08-29 usability and codebase reviews are preserved as evidence in
+[`USABILITY.md`](USABILITY.md) and [`CODEBASE_REVIEW.md`](CODEBASE_REVIEW.md).
+The roadmap below keeps their actionable findings, deduplicated against the
+existing compiler, porting, and packaging work. Exact API facts must continue
+to come from compiler-owned catalogs; hand-written documents teach tasks and
+concepts rather than maintaining a parallel inventory.
+
+### Correct editor behavior before broader packaging
+
+- [ ] Make legal identifier classification one syntax-owned contract. The
+  lexer and rename validation accept `$` in identifiers, while completion's
+  byte scanner currently splits `$value`, `obj.$field`, and internal `$`
+  segments incorrectly. Reuse recovered token spans where possible and add
+  cross-feature tests for root/member completion, rename, references, and
+  Unicode-adjacent offsets instead of copying another classifier.
+- [ ] Fix the VS Code save/focus race in build, release, and watch commands.
+  Preserve the selected SplitScript document across `await document.save()`,
+  handle an untitled Save As transition explicitly, and never compile whichever
+  editor happens to become active. Revalidate language, URI, and document
+  identity; cover focus changes, failed saves, stale revisions, output
+  replacement, and temporary-file cleanup through controller-level tests.
+- [ ] Bound documentation-page caching to the finite canonical route graph.
+  Validate or canonicalize a requested URI before cache insertion, never retain
+  arbitrary failed client lookups forever, and cache the immutable index/search
+  representation separately if measurement justifies it. Test that many unique
+  invalid URIs do not grow retained cache state.
+
+### Give a new author one short successful workflow
+
+- [ ] Add a compiler-checked Getting Started guide and a genuinely small native
+  example. Cover obtaining the extension or CLI, creating a `.split` file,
+  debug and release builds, neighboring `.wasm` output, the currently supported
+  host-loading workflow and limitations, opening/searching docs, and reading
+  the first diagnostic. Introduce attachment, one typed setting, one `at` state
+  field, `old` / `current`, and one timer decision before scans, Unity, layouts,
+  or async discovery.
+- [ ] Rewrite the packaged VS Code README as an extension-user/Marketplace
+  artifact: outcome, first workflow, commands and outputs, bundled compiler,
+  documentation, requirements, limitations, and troubleshooting. Move npm,
+  VSIX construction, web-host tests, workers, and Extension Development Host
+  instructions to `editors/vscode/DEVELOPMENT.md`, linked once for contributors.
+- [ ] Restructure the repository README as an honest audience router. Lead with
+  what an autosplitter author can accomplish, current project/host status, a
+  minimal warning-free example, and paths for extension users, CLI users, ASL
+  porters, and compiler contributors. Move production-port evidence to an
+  examples/evidence index and keep backend, LSP, and debug-metadata inventories
+  in developer architecture documents.
+- [ ] Add `examples/README.md` with purpose, difficulty, provider, concepts,
+  runnable/simulated/conformance status, and a recommended order. Curate small
+  focused examples for settings, load removal/game time, failure and async
+  forms, attach-time discovery, layouts, Unity, and an emulator without
+  promoting disposable `showcase`, `testing`, or `weird` scripts.
+
+### Make every documentation surface agree
+
+- [ ] Correct current contradictions before expanding prose: generic user
+  functions and source async helpers are implemented; strings, records,
+  arrays, closures, iterators, UTF-16 decoding, numeric formatting, string
+  construction, browsable docs, and generated reference pages must not still
+  be described as future work. Make compiler catalogs canonical for exact
+  signatures, effects, availability, members, and support status; hand-written
+  pages link to those facts instead of copying tables.
+- [ ] Split the user-facing language path from compiler architecture. Start
+  with one complete autosplitter and the update/lifecycle mental model, then
+  teach ordinary language, state/memory, settings/timer, failure/async, and
+  advanced providers. Move HIR, Wasm representation, GC layout, continuation
+  frames, lowering, and DWARF details to `COMPILER.md`, `ABI.md`, or a focused
+  developer guide. Give the remaining long concept pages task-named navigation
+  and a table of contents.
+- [ ] Turn the standard-library Markdown into a task-oriented overview linked
+  to generated exact symbol pages. Move its catalog IDs, inference internals,
+  HIR/Wasm IR, compiler context, and backend dispatch material to compiler
+  architecture, and remove manually maintained public-member inventories.
+- [ ] Replace the flat migration capability table and repeated alphabetical
+  catalog renderings with source-first, task-grouped navigation. Within ASL,
+  group attachment/state, process/memory, lifecycle/timer, settings,
+  collections/text, Unity/emulators, and unsupported host behavior. Detailed
+  pages use one consistent shape: source pattern, canonical example, semantic
+  difference, supported hosts, and related reference links; keep catalog IDs
+  in metadata/URLs rather than reader-facing labels. Keep the C#, JavaScript,
+  and Rust guides compact, add a clear next step, and use a few explicit
+  source-spelling to SplitScript-spelling pairs rather than another large table.
+- [ ] Add compact decision guides for lifecycle availability, choosing a state
+  field form, failure/async syntax, and string units. The lifecycle matrix must
+  state timing, available roots/globals, suspension policy, return type, and
+  fallthrough for every action. The other guides should lead from a task to
+  `at` versus discovery, required versus optional fields, layouts versus
+  dimensions, `T?` / `T!` / `else` / `?` / `retry` / `await`, and UTF-8 byte,
+  Unicode scalar, UTF-16LE, and managed-string units.
+- [ ] Publish renderer-produced static Markdown for repository/web readers so
+  compiler-only intra-doc links resolve and hidden example scaffolding is not
+  shown on GitHub. Add CI checks for the published output's freshness, links,
+  anchors, visible example compilation, and hidden-line removal. Standalone
+  HTML and machine-readable export remain additional renderers of the same
+  hierarchy, never another documentation source.
+- [ ] Improve generated reference presentation where catalog facts are
+  mechanically correct but user-hostile: render attachment availability as one
+  actionable rule, simplify structural type names in indexes, and enrich core
+  lifecycle pages such as `onAttach` with related concepts without duplicating
+  full guides. Use `splitscript` fences consistently in every static example.
+
 ## P0 — unblock the next representative native ports
 
 ### Lifecycle semantics exposed by legacy ASL
@@ -629,6 +732,32 @@ or assumptions tied to one generated corpus.
 - [ ] Include the canonical compiler identity already exposed by the compiler
   service and generated-module metadata in machine-readable port reports so
   future evidence remains reproducible.
+
+## P1 — measure and improve interactive compiler queries
+
+- [ ] Establish repeatable latency and retained-heap benchmarks before an
+  incremental-analysis redesign. Measure `didChange` to diagnostics, root and
+  member completion, hover, semantic tokens, repeated edits, worker recovery,
+  and a warm multi-query sequence on representative small, medium, and large
+  scripts. Record p95 latency and retained-byte targets so optimization has a
+  finish line.
+- [ ] Build one request-scoped completion context from the existing recovered
+  `SourceDocument`, token stream, syntax, cursor, and lazy semantic facts.
+  Remove repeated `lex_lossless` calls, use the current database before a
+  repair probe, return compact receiver facts rather than cloned programs, and
+  use binary search/`partition_point` for ordered token and definition-reference
+  cursor lookups with boundary/trivia regressions.
+- [ ] Debounce and coalesce diagnostic work by document URI/version and suppress
+  every superseded result. Add cancellation checkpoints to recovering analysis
+  if benchmarks show one pass still blocks completion or hover. Keep full-sync
+  text transport until measurement demonstrates that incremental synchronization
+  and stage invalidation are worth their complexity.
+- [ ] Replace deep per-stage ownership copies with shared immutable compiler
+  products. Share source documents, syntax, and stable resolution inputs through
+  `Arc` or borrowing; let each later stage own only transformed facts. Measure
+  parse, diagnostics, semantic tokens, hover, and completion on one database
+  before and after, rather than hiding the issue behind additional `Clone`
+  implementations.
 
 ## P1 — source-level debugging after the debugger boundary is chosen
 
@@ -884,10 +1013,10 @@ remaining work is product hardening and distribution.
 
 ## P2 — documentation and editor evolution
 
-- [ ] After the in-editor documentation reference has proven the documentation
-  graph and navigation model, add machine-readable export and rustdoc-like
-  standalone HTML as additional renderers. Publishing HTML must not introduce
-  a second hierarchy, link scheme, example store, or documentation source.
+- [ ] After renderer-produced static Markdown proves the published-output
+  pipeline, add machine-readable export and rustdoc-like standalone HTML as
+  additional renderers. Publishing HTML must not introduce a second hierarchy,
+  link scheme, example store, or documentation source.
 - [x] Add document highlights for every source-owned occurrence of the symbol
   under the cursor, with read/write classification, and type-definition
   navigation for inferred source and catalog types.
@@ -908,6 +1037,38 @@ remaining work is product hardening and distribution.
   real confusing cases rather than growing a speculative diagnostic catalog.
 - [ ] Introduce file identities, modules, and imports only together with a real
   multi-source use case. Most autosplitters should remain pleasant as one file.
+
+## P2 — architecture, verification, and release scaling
+
+- [ ] Decompose broad backend and type-checking coordinators by semantic
+  ownership under existing behavior tests. Extract structural expression,
+  call dispatch, numeric, string/collection, process/memory, and suspension
+  emitters with narrow inputs; separate call candidate collection, generic
+  solving/selection, and diagnostic construction. Move one family at a time
+  and do not replace one all-purpose context with nested bags of everything.
+- [ ] Compile each unique runtime `(source, output, profile)` artifact once in
+  `cargo xtask check`, validate it once, and run all argument/scenario variants
+  against that artifact. Model compilation separately from runtime scenarios
+  and reject conflicting output definitions or duplicate scenarios without
+  reducing the maintained host coverage.
+- [ ] Add a small shared `instantiateRuntimeFixture` host for common Wasm
+  loading, text/memory helpers, default imports, `_start`, and `update`, while
+  keeping unusual host behavior and assertions local. Migrate harnesses only
+  when touched so focused tests do not acquire an oversized universal host.
+- [ ] Consolidate desktop/browser compiler-worker and language-client lifecycle
+  policy behind host-neutral controllers parameterized by worker creation,
+  transport, message, subscription, and error adapters. Keep Node and browser
+  entry points thin and run the same start, restart, cancellation, failure, and
+  stop contract tests through both adapters.
+- [ ] Replace the opaque aggregate documentation fingerprint with reviewable
+  checked-in metadata or per-page fingerprints that report changed URIs and
+  fields. Provide an explicit regeneration command; retain full graph, link,
+  anchor, and example validation as the semantic guard.
+- [ ] Tighten release reproducibility and licensing: pin Rust through
+  `rust-toolchain.toml`, pin third-party Actions to reviewed commit SHAs, add
+  the declared MIT and Apache-2.0 license texts to source and packages, and
+  inherit shared Rust version/edition/license fields from `[workspace.package]`.
+  Keep extension versioning independent only if release policy says so.
 
 ## P2 / deliberately deferred
 
@@ -981,38 +1142,56 @@ remaining work is product hardening and distribution.
 - [ ] Keep `cargo xtask check` as the single local and CI verification matrix.
   Extend it whenever a product surface is added; generated Wasm/Wat belongs
   under ignored `target` directories.
-- [ ] Review modules above roughly 1,000 lines when related work changes them.
-  Split only at a named product, context, or visitor boundary; line count alone
-  is not a reason to scatter shared mutable state.
+- [ ] Replace the stale hard-coded list of modules above roughly 1,000 lines in
+  `COMPILER.md` with a generated ownership signal or a policy that records the
+  named boundaries already reviewed. Review oversized coordinators when related
+  work changes them; split only at a product, context, visitor, or semantic
+  domain boundary, since line count alone is not a reason to scatter shared
+  mutable state.
 - [ ] Add a generated large-catalog performance dimension when alternate
   catalog construction exists, covering validation, indexing, completion,
   hover, and documentation queries.
 
 ## Recommended execution order
 
-1. Add the compiler-query fixture and review checklist for clean-compiling
-   semantic drift, then apply it to a small corrected and runtime-tested native,
-   Unity, and emulator port set.
-2. Add profile-aware unused analysis for declarations whose only consumers are
+1. Fix the confirmed editor correctness seams: unify `$` identifier grammar,
+   preserve the selected document across VS Code save/build/watch awaits, and
+   reject invalid documentation routes before cache insertion.
+2. Establish the first-use product path: a compiler-checked Getting Started
+   guide and beginner native example, an extension-user Marketplace README, a
+   routed repository README, and a curated examples index.
+3. Remove stale language/standard-library claims and make compiler catalogs the
+   canonical exact reference. Then publish renderer-produced static Markdown
+   and reorganize lifecycle, state-form, failure/async, string-unit, and
+   migration navigation around user tasks.
+4. Establish editor latency/heap benchmarks, then remove repeated completion
+   lexing and linear cursor scans, coalesce superseded diagnostics, and share
+   immutable query-stage products according to measured bottlenecks.
+5. Add profile-aware unused analysis for declarations whose only consumers are
    erased `debug` code, with a safe quick fix to mark erasable declarations
    `debug` before release emission retains them unnecessarily.
-3. Complete the remaining official host ABI as typed facilities and keep exact
+6. Complete the remaining official host ABI as typed facilities and keep exact
    `shutdown` / `onSplit` delivery in the runtime-evolution contract until the
    host exposes the required events.
-4. Extend Unity managed collections only after strings and scalar snapshots are
+7. Extend Unity managed collections only after strings and scalar snapshots are
    complete, using the maintained Alba and A Short Hike requirements to shape
    lists, dictionaries, and dynamic values.
-5. Harden and publish the bundled VSIX and native releases, then evaluate the
+8. Harden and publish the bundled VSIX and native releases, including pinned
+   toolchains/actions and license packaging, then evaluate the
    hosted Code OSS workbench. Resume source debugging only after choosing among
    the JavaScript debugger, native Wasmtime/DWARF, and typed-IR interpreter.
-6. Decide whether known emulator executable sets merit a non-noisy contextual
+9. Reduce verification and architecture duplication incrementally: compile
+   runtime artifacts once, share minimal harness/worker controllers, improve
+   documentation snapshots, and split broad compiler coordinators only at
+   tested semantic boundaries.
+10. Decide whether known emulator executable sets merit a non-noisy contextual
    provider suggestion. Unicode blank strings now use the Unicode `White_Space`
    property, while bounded managed-string lengths are already untyped
    compile-time literals in schema syntax and require no integer suffix or
    generic conversion API.
-7. Revisit `unity.time` only after ASR has a tested implementation whose
+11. Revisit `unity.time` only after ASR has a tested implementation whose
    discovery, lifetime, fallibility, and allocation behavior can define the
    cross-language contract.
-8. Keep physical `None` aggregate specialization and sandbox-sensitive host
+12. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

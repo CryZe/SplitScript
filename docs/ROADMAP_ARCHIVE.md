@@ -4096,3 +4096,12 @@ language catalog document the refinement rule.
 - Propagated failed dependencies at the candidate-snapshot boundary: dependent
   fields are skipped and retain their accepted values instead of dereferencing
   stale candidate addresses, while independent siblings still advance.
+
+# 2026-08-29: canonical identifier syntax
+
+- Centralized the ASCII letter/underscore identifier-start and
+  alphanumeric/underscore continuation rules in the shared syntax crate for
+  lexing, completion, and rename validation.
+- Removed the accidental acceptance of `$` in source identifiers. It remains
+  ordinary content in strings and template strings, including process names
+  such as `NO$GBA.EXE`.

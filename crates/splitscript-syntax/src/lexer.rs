@@ -187,7 +187,7 @@ impl Lexer<'_> {
             }
 
             let kind = match self.bytes[self.pos] {
-                b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'$' => self.identifier(),
+                byte if crate::is_identifier_start_byte(byte) => self.identifier(),
                 b'0'..=b'9' => self.number()?,
                 b'"' => self.string()?,
                 b'\'' => self.character()?,
@@ -479,7 +479,7 @@ impl Lexer<'_> {
         while self
             .bytes
             .get(self.pos)
-            .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$'))
+            .is_some_and(|byte| crate::is_identifier_continue_byte(*byte))
         {
             self.pos += 1;
         }
@@ -848,6 +848,15 @@ mod tests {
             TokenKind::ShrAssign,
         ] {
             assert!(tokens.iter().any(|token| token.kind == expected));
+        }
+    }
+
+    #[test]
+    fn rejects_dollars_in_identifiers() {
+        for source in ["$value", "value$more"] {
+            let error = lex(source, SyntaxMode::Program).unwrap_err();
+            assert_eq!(error.message, "unexpected character");
+            assert_eq!(&source[error.span.start..error.span.end], "$");
         }
     }
 

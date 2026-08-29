@@ -1276,6 +1276,10 @@ fn rename_queries_validate_identifiers_reservations_and_binding_identity() {
         Err(RenameError::InvalidIdentifier)
     ));
     assert!(matches!(
+        database.rename_at(parameter, "$amount"),
+        Err(RenameError::InvalidIdentifier)
+    ));
+    assert!(matches!(
         database.rename_at(parameter, "if"),
         Err(RenameError::ReservedIdentifier)
     ));

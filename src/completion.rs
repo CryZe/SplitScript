@@ -2401,11 +2401,11 @@ fn identifier_span(source: &str, offset: usize) -> Span {
 }
 
 fn is_identifier(name: &str) -> bool {
-    !name.is_empty() && name.bytes().all(is_identifier_byte) && !name.as_bytes()[0].is_ascii_digit()
+    splitscript_syntax::is_identifier(name)
 }
 
 fn is_identifier_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
+    splitscript_syntax::is_identifier_continue_byte(byte)
 }
 
 fn floor_char_boundary(source: &str, mut offset: usize) -> usize {

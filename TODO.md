@@ -402,12 +402,6 @@ concepts rather than maintaining a parallel inventory.
 
 ### Correct editor behavior before broader packaging
 
-- [ ] Make legal identifier classification one syntax-owned contract. The
-  lexer and rename validation accept `$` in identifiers, while completion's
-  byte scanner currently splits `$value`, `obj.$field`, and internal `$`
-  segments incorrectly. Reuse recovered token spans where possible and add
-  cross-feature tests for root/member completion, rename, references, and
-  Unicode-adjacent offsets instead of copying another classifier.
 - [ ] Fix the VS Code save/focus race in build, release, and watch commands.
   Preserve the selected SplitScript document across `await document.save()`,
   handle an untitled Save As transition explicitly, and never compile whichever
@@ -726,9 +720,11 @@ concepts rather than maintaining a parallel inventory.
   declarations, option value, strings, durations, and numeric types. Add new
   entries only for corpus-proven, unambiguous spellings that are not already
   handled by the type-aware callable suggestion machinery. Keep canonical
-  syntax unique; do not add compatibility aliases. Do not diagnose
-  JavaScript-style `${...}` because it validly means a literal dollar sign
-  followed by interpolation in SplitScript.
+  syntax unique; do not add compatibility aliases. Diagnose JavaScript-style
+  `${value}` inside backtick strings as suspicious while preserving its current
+  meaning: offer `{value}` when the dollar was accidental and `\${value}` when
+  a literal dollar before the interpolation was intended. `$` remains ordinary
+  string/template text and is unrelated to identifier syntax.
 - [ ] Include the canonical compiler identity already exposed by the compiler
   service and generated-module metadata in machine-readable port reports so
   future evidence remains reproducible.
@@ -1154,9 +1150,9 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Fix the confirmed editor correctness seams: unify `$` identifier grammar,
-   preserve the selected document across VS Code save/build/watch awaits, and
-   reject invalid documentation routes before cache insertion.
+1. Fix the confirmed editor correctness seams: preserve the selected document
+   across VS Code save/build/watch awaits and reject invalid documentation
+   routes before cache insertion.
 2. Establish the first-use product path: a compiler-checked Getting Started
    guide and beginner native example, an extension-user Marketplace README, a
    routed repository README, and a curated examples index.

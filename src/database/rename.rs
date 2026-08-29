@@ -116,7 +116,7 @@ impl CompilerDatabase {
             .rename_target_at(offset)
             .map_err(RenameError::Diagnostics)?
             .ok_or(RenameError::NotRenameable)?;
-        if !is_source_identifier(new_name) {
+        if !splitscript_syntax::is_identifier(new_name) {
             return Err(RenameError::InvalidIdentifier);
         }
         if is_reserved_source_identifier(self.context.standard_library(), new_name) {
@@ -309,15 +309,6 @@ impl CompilerDatabase {
             || matches!(id, SourceDefinitionId::Enum(enumeration)
                 if state.layout_enum.as_ref().is_some_and(|layout| layout.id == enumeration))
     }
-}
-
-fn is_source_identifier(name: &str) -> bool {
-    let mut bytes = name.bytes();
-    let Some(first) = bytes.next() else {
-        return false;
-    };
-    matches!(first, b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'$')
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$'))
 }
 
 fn is_reserved_source_identifier(standard_library: StandardLibrary, name: &str) -> bool {

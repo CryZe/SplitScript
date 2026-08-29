@@ -20,6 +20,25 @@ use std::fmt;
 pub use cursor::TokenCursor;
 pub use lexer::{Lexed, Lexeme, Token, TokenKind, Trivia, TriviaKind, lex, lex_lossless};
 
+/// Returns whether `byte` can begin a SplitScript identifier.
+///
+/// Keep cursor-oriented tooling on this syntax-owned definition instead of
+/// recreating a slightly different language grammar in each consumer.
+pub const fn is_identifier_start_byte(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_'
+}
+
+/// Returns whether `byte` can continue a SplitScript identifier.
+pub const fn is_identifier_continue_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// Returns whether `name` is one complete SplitScript identifier.
+pub fn is_identifier(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes.next().is_some_and(is_identifier_start_byte) && bytes.all(is_identifier_continue_byte)
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Span {
     pub start: usize,
@@ -166,7 +185,7 @@ impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {
-    use super::PrimitiveType;
+    use super::{PrimitiveType, is_identifier};
 
     #[test]
     fn primitive_spellings_round_trip_without_catalog_state() {
@@ -178,5 +197,18 @@ mod tests {
             Some(PrimitiveType::Address)
         );
         assert_eq!(PrimitiveType::parse("String"), None);
+    }
+
+    #[test]
+    fn identifiers_use_the_language_grammar() {
+        for valid in ["value", "_value", "value2"] {
+            assert!(is_identifier(valid), "`{valid}` should be an identifier");
+        }
+        for invalid in ["", "2value", "$value", "value$", "value-name"] {
+            assert!(
+                !is_identifier(invalid),
+                "`{invalid}` should not be an identifier"
+            );
+        }
     }
 }

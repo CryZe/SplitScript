@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-30: self-contained first build journey
+
+- Added a compiler-owned Getting Started guide that takes a new author through
+  installing a supplied VSIX or invoking the native CLI, declaring exact native
+  attachment, one typed setting, one pointer-backed state field, transactional
+  `old` / `current` comparison, debug-watch and release outputs, diagnostics,
+  documentation discovery, and the current host-loading boundary.
+- Kept the guide independent of the repository's full autosplitter files. Its
+  focused visible snippets carry hidden compiler-checking context, and the
+  complete documentation graph validates their intra-doc links and routes.
+- Corrected the remaining first-use roadmap so disposable examples are neither
+  bundled nor promoted as required author documentation.
+
 ## 2026-08-29: managed-string bound ergonomics resolved by schema syntax
 
 - The earlier porting question about accepting arbitrary integer types for a

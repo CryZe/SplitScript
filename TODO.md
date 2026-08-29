@@ -402,8 +402,9 @@ concepts rather than maintaining a parallel inventory.
 
 ### Give a new author one short successful workflow
 
-- [ ] Add a compiler-checked Getting Started guide and a genuinely small native
-  example. Cover obtaining the extension or CLI, creating a `.split` file,
+- [x] Add a compiler-checked, self-contained Getting Started guide with focused
+  inline snippets rather than a bundled or linked full autosplitter. Cover
+  obtaining the extension or CLI, creating a `.split` file,
   debug and release builds, neighboring `.wasm` output, the currently supported
   host-loading workflow and limitations, opening/searching docs, and reading
   the first diagnostic. Introduce attachment, one typed setting, one `at` state
@@ -420,11 +421,10 @@ concepts rather than maintaining a parallel inventory.
   porters, and compiler contributors. Move production-port evidence to an
   examples/evidence index and keep backend, LSP, and debug-metadata inventories
   in developer architecture documents.
-- [ ] Add `examples/README.md` with purpose, difficulty, provider, concepts,
-  runnable/simulated/conformance status, and a recommended order. Curate small
-  focused examples for settings, load removal/game time, failure and async
-  forms, attach-time discovery, layouts, Unity, and an emulator without
-  promoting disposable `showcase`, `testing`, or `weird` scripts.
+- [ ] Keep maintained port and conformance evidence discoverable for compiler
+  contributors without making the `examples` directory part of the authoring
+  path. User guides must remain self-contained and must not link to disposable
+  full autosplitter scripts.
 
 ### Make every documentation surface agree
 
@@ -1137,9 +1137,9 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Establish the first-use product path: a compiler-checked Getting Started
-   guide and beginner native example, an extension-user Marketplace README, a
-   routed repository README, and a curated examples index.
+1. Establish the first-use product path: a compiler-checked, self-contained
+   Getting Started guide, an extension-user Marketplace README, and a routed
+   repository README. Keep full example scripts out of the authoring path.
 2. Remove stale language/standard-library claims and make compiler catalogs the
    canonical exact reference. Then publish renderer-produced static Markdown
    and reorganize lifecycle, state-form, failure/async, string-unit, and

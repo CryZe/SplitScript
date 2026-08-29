@@ -28,6 +28,13 @@ struct BundledGuide {
 
 const GUIDES: &[BundledGuide] = &[
     BundledGuide {
+        uri: "/guides/getting-started.md",
+        title: "Getting started",
+        summary: "Build a first SplitScript autosplitter with the VS Code extension or native CLI.",
+        source: include_str!("../../docs/GETTING_STARTED.md"),
+        migration_overview: false,
+    },
+    BundledGuide {
         uri: "/guides/asl-porting.md",
         title: "Porting ASL to SplitScript",
         summary: "Canonical compiler-checked recipes for migrating legacy ASL autosplitters.",

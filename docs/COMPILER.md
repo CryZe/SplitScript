@@ -1538,6 +1538,21 @@ migration identity, or virtual path and renders the same Markdown. Guide links
 are intentionally self-contained: focused snippets explain individual concepts,
 while complete `.split` examples are neither bundled nor required navigation.
 
+`cargo xtask docs` renders this exact hierarchy as a static HTML site under the
+ignored `target/generated-docs` directory; an alternative repository-relative
+output directory may be passed explicitly. The site preserves compiler-produced
+semantic SplitScript highlighting and symbol links, and adds shared responsive
+navigation and client-side search without introducing another documentation
+catalog. Hidden rustdoc-style example scaffolding is removed by the bundled
+guide renderer before export.
+
+`cargo xtask docs --check` renders the site in memory and validates every page,
+local link, and heading anchor. The repository verification matrix runs that
+check, while the documentation workflow regenerates the output and publishes it
+to GitHub Pages. No generated reference pages are committed. Future
+machine-readable output should remain another rendering mode over the same
+hierarchy rather than define another catalog.
+
 Catalog-backed completion and hover results carry the same stable page URI and
 append an **Open full documentation** command link. The VS Code clients trust
 only that one command in language-server Markdown, and the command opens the

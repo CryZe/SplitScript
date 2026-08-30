@@ -464,17 +464,19 @@ concepts rather than maintaining a parallel inventory.
   `at` versus discovery, required versus optional fields, layouts versus
   dimensions, `T?` / `T!` / `else` / `?` / `retry` / `await`, and UTF-8 byte,
   Unicode scalar, UTF-16LE, and managed-string units.
-- [ ] Publish renderer-produced static Markdown for repository/web readers so
-  compiler-only intra-doc links resolve and hidden example scaffolding is not
-  shown on GitHub. Add CI checks for the published output's freshness, links,
-  anchors, visible example compilation, and hidden-line removal. Standalone
-  HTML and machine-readable export remain additional renderers of the same
-  hierarchy, never another documentation source.
+- [x] Publish a renderer-produced static HTML reference for web readers so
+  compiler-owned intra-doc links, semantic code highlighting, hierarchy, and
+  search work outside the editor. Generate it in CI rather than committing the
+  roughly half-megabyte reference tree, validate pages, links, anchors, visible
+  examples, and hidden-line removal, and deploy it to GitHub Pages. Future
+  machine-readable output should reuse the same hierarchy rather than invent
+  another catalog.
 - [ ] Improve generated reference presentation where catalog facts are
   mechanically correct but user-hostile: render attachment availability as one
   actionable rule, simplify structural type names in indexes, and enrich core
   lifecycle pages such as `onAttach` with related concepts without duplicating
-  full guides. Use `splitscript` fences consistently in every static example.
+  full guides. Use compiler-produced semantic rendering consistently in every
+  static example.
 
 ## P0 — unblock the next representative native ports
 

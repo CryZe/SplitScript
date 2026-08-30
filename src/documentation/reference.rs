@@ -2069,6 +2069,7 @@ pub(crate) fn language_item_uri(id: LanguageItemId) -> String {
         "!=" => "inequality".to_owned(),
         "T?" => "optional-type".to_owned(),
         "T!" => "fallible-type".to_owned(),
+        "?" => "error-propagation".to_owned(),
         "[T; N]" => "array-type".to_owned(),
         "///" => "documentation-comment".to_owned(),
         name => documentation_slug(name),
@@ -2835,6 +2836,17 @@ mod tests {
                 entry.uri,
             );
         }
+    }
+
+    #[test]
+    fn postfix_question_mark_has_a_stable_documentation_route() {
+        let reference = DocumentationReference::default();
+        assert!(
+            reference
+                .index()
+                .iter()
+                .any(|entry| entry.uri == "/language/error-propagation.md")
+        );
     }
 
     #[test]

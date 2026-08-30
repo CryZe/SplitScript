@@ -1,5 +1,8 @@
 //! Repository-wide verification orchestration.
 
+#[path = "xtask/documentation_site.rs"]
+mod documentation_site;
+
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -677,17 +680,44 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
 ];
 
 fn main() -> ExitCode {
-    let mut arguments = env::args().skip(1);
-    match (arguments.next().as_deref(), arguments.next()) {
-        (Some("check"), None) => match check() {
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    match arguments.as_slice() {
+        [command] if command == "check" => match check() {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("verification failed: {error}");
                 ExitCode::FAILURE
             }
         },
+        [command] if command == "docs" => {
+            match documentation_site::generate(Some(Path::new("target/generated-docs"))) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("documentation site generation failed: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        [command, mode] if command == "docs" && mode == "--check" => {
+            match documentation_site::generate(None) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("documentation site validation failed: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        [command, destination] if command == "docs" => {
+            match documentation_site::generate(Some(Path::new(destination))) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("documentation site generation failed: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         _ => {
-            eprintln!("usage: cargo xtask check");
+            eprintln!("usage: cargo xtask <check | docs [OUTPUT | --check]>");
             ExitCode::FAILURE
         }
     }
@@ -701,6 +731,7 @@ fn check() -> Result<(), String> {
         "cargo",
         &["clippy", "--all-targets", "--", "-D", "warnings"],
     )?;
+    documentation_site::generate(None)?;
     run(
         &root,
         "cargo",

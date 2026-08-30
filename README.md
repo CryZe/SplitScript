@@ -63,7 +63,9 @@ cargo run --bin splitc -- docs
 
 A failed build leaves the previous successful output untouched. `splitc docs`
 renders the same compiler-owned reference used by the extension; add a symbol
-or search term to open a focused page.
+or search term to open a focused page. The same hierarchy is published as a
+[searchable HTML reference](https://cryze.github.io/SplitScript/) with semantic
+SplitScript highlighting and symbol navigation.
 
 ### Authors porting ASL
 
@@ -107,6 +109,9 @@ cargo xtask check
 It checks formatting and Clippy, runs Rust and VS Code tests, compiles and
 validates debug/release modules, and executes the maintained host-runtime
 fixtures. Generated artifacts remain under ignored build directories.
+It also renders the documentation site in memory and rejects broken pages,
+links, or anchors. `cargo xtask docs` writes a local preview to the ignored
+`target/generated-docs` directory; CI regenerates and publishes that output.
 
 ## Current product boundaries
 

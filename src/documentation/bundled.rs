@@ -164,13 +164,13 @@ fn insert_lifecycle_matrix(uri: &str, source: &str) -> String {
         let facts = language.action_reference_facts(action);
         let target = super::reference::language_item_uri(item.id);
         matrix.push_str(&format!(
-            "\n| [{}]({}) | {} | {} | {} | `{}` | {} |",
+            "\n| [{}]({}) | {} | {} | {} | <code>{}</code> | {} |",
             item.name,
             relative_document_link(uri, &target),
             facts.timing,
             facts.available_context,
             facts.suspension,
-            format!("<code>{}</code>", facts.result),
+            facts.result,
             facts.fallthrough,
         ));
     }

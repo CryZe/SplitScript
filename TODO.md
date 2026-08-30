@@ -329,10 +329,6 @@ or assumptions tied to one generated corpus.
   covers every provider; and reference-search tests require `Dolphin`, `Fusion`,
   `RetroArch`, `PCSX2`, `DuckStation`, `mGBA`, and `DeepPointer` to surface the
   corresponding provider declarations rather than only backing record types.
-- [ ] Decide with the user whether a native state whose process candidates all
-  match a known typed emulator provider merits a non-noisy contextual
-  suggestion. Do not turn cross-platform executable naming into a warning, and
-  do not prescribe a diagnostic until its false-positive policy is agreed.
 - [x] Make `setTickRate` document the complete polling policy in its own page:
   the default 120 Hz attached and 1 Hz detached rates, when those lifecycle
   values are applied, how a top-level `tickRate` declaration overrides either
@@ -471,12 +467,14 @@ concepts rather than maintaining a parallel inventory.
   examples, and hidden-line removal, and deploy it to GitHub Pages. Future
   machine-readable output should reuse the same hierarchy rather than invent
   another catalog.
-- [ ] Improve generated reference presentation where catalog facts are
-  mechanically correct but user-hostile: render attachment availability as one
-  actionable rule, simplify structural type names in indexes, and enrich core
-  lifecycle pages such as `onAttach` with related concepts without duplicating
-  full guides. Use compiler-produced semantic rendering consistently in every
-  static example.
+- [x] Improve generated reference presentation where catalog facts are
+  mechanically correct but user-hostile. Attachment requirements now render as
+  one actionable availability rule instead of overlapping facts; structural
+  type forms use concise source spellings in indexes, headings, breadcrumbs,
+  and member names while retaining capability constraints in their signatures;
+  and `onAttach` links its core state, layout, suspension, and snapshot
+  concepts. Every static example continues through compiler-produced semantic
+  rendering.
 
 ## P0 — unblock the next representative native ports
 
@@ -1059,6 +1057,13 @@ remaining work is product hardening and distribution.
 
 ## P2 / deliberately deferred
 
+- [ ] Revisit native-state suggestions for typed emulator providers only if
+  future porting evidence shows this remains a recurring source of incorrect
+  scripts after the current provider documentation and search work. This is
+  speculative guidance for otherwise valid source, not a present usability
+  blocker; any eventual design must account for ambiguous emulator process
+  names and cross-platform executable identity without producing a noisy
+  warning.
 - [ ] Design a contextual `default` literal backed by a source-defined
   `Default` capability. Like `None`, it may be assigned directly where the
   expected type or later constraints determine a unique target, but it must not

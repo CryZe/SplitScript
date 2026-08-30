@@ -1259,7 +1259,7 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
     );
     assert_eq!(
         library.render_operation_semantics(process_closed.id),
-        "available in onAttach; suspends; requires an attached process; cancels when the process closes"
+        "available only in onAttach; suspends; cancels when the process closes"
     );
 
     assert!(library.item_by_name("UnityClass.fieldAny").is_none());

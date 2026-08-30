@@ -1088,6 +1088,25 @@ macro_rules! language_item {
 
 macro_rules! action_item {
     ($id:ident, $action:ident, $name:literal, $summary:literal, $details:literal,
+     $example:literal, related: $related:expr) => {
+        LanguageItem {
+            id: LanguageItemId::$id,
+            name: $name,
+            kind: LanguageItemKind::Action(ActionKind::$action),
+            form: concat!($name, " { ... }"),
+            documentation: Documentation {
+                summary: $summary,
+                details: $details,
+                examples: &[Example::checked(
+                    concat!("Use ", $name),
+                    $example,
+                    LIFECYCLE_SOURCE,
+                )],
+                related: $related,
+            },
+        }
+    };
+    ($id:ident, $action:ident, $name:literal, $summary:literal, $details:literal,
      $example:literal) => {
         language_item!(
             $id,
@@ -1911,7 +1930,8 @@ define_language_catalog! {
         "onAttach",
         "Initializes one attached process.",
         "This action is implicitly suspending and owns process-lifetime cancellation for [`await`] and [`retry`] continuations. When the [`state`] declaration contains named [`layout`] declarations, it returns the generated layout variant that should be polled.",
-        "onAttach {\n    let module = await process.module(\"GameAssembly.dll\")\n}"
+        "onAttach {\n    let module = await process.module(\"GameAssembly.dll\")\n}",
+        related: &[LanguageItemId::State, LanguageItemId::StateLayout, LanguageItemId::Await, LanguageItemId::Retry, LanguageItemId::OnStateReady]
     ),
     action_item!(
         OnStateReady,

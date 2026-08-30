@@ -168,10 +168,9 @@ mod tests {
             relative.effects,
             ["reads process memory", "requires an attached process"]
         );
-        assert!(
-            relative
-                .runtime_behavior
-                .ends_with("requires an attached process")
+        assert_eq!(
+            relative.runtime_behavior,
+            "available while a process is attached, except in onDetach; synchronous"
         );
 
         let suspending = StandardLibraryDocumentation::generate(

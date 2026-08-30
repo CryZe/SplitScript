@@ -1782,7 +1782,7 @@ whileAttached {
                 .contains("**Effects:** reads process memory, requires an attached process")
         );
         assert!(relative.markdown.contains(
-            "**Runtime behavior:** available everywhere; synchronous; requires an attached process"
+            "**Runtime behavior:** available while a process is attached, except in onDetach; synchronous"
         ));
 
         let timer = database
@@ -2113,7 +2113,11 @@ fn ranges() {
                 .contains("Process.mainModule() -> async Module")
         );
         assert!(hover.markdown.contains("main executable module"));
-        assert!(hover.markdown.contains("available in onAttach; suspends"));
+        assert!(
+            hover
+                .markdown
+                .contains("available only in onAttach; suspends")
+        );
     }
 
     #[test]
@@ -2155,9 +2159,11 @@ fn ranges() {
                 .markdown
                 .contains("never closes or detaches the process itself")
         );
-        assert!(hover.markdown.contains(
-            "available in onAttach; suspends; requires an attached process; cancels when the process closes"
-        ));
+        assert!(
+            hover
+                .markdown
+                .contains("available only in onAttach; suspends; cancels when the process closes")
+        );
     }
 
     #[test]

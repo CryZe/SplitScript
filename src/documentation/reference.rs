@@ -232,13 +232,13 @@ impl DocumentationReference {
             }
         }));
         entries.extend(self.library.type_constructors().iter().map(|constructor| {
-            let signature = render_type_constructor(constructor, &self.library);
+            let title = self.library.render_type_constructor(constructor.id);
             DocumentationIndexEntry {
                 uri: symbol_uri(
                     StdlibSymbolId::TypeConstructor(constructor.id),
                     &self.library,
                 ),
-                title: signature.clone(),
+                title,
                 kind: "type constructor",
                 summary: compact_prose(constructor.documentation.summary),
                 raw_summary: constructor.documentation.summary,
@@ -246,7 +246,10 @@ impl DocumentationReference {
                     "{} {}",
                     constructor.documentation.summary, constructor.documentation.details
                 ),
-                signature: Some(signature),
+                signature: Some(render_constrained_type_constructor(
+                    constructor,
+                    &self.library,
+                )),
             }
         }));
         entries.extend(self.library.types().map(|ty| DocumentationIndexEntry {
@@ -603,9 +606,9 @@ impl DocumentationReference {
                     .map(|value| {
                         self.declaration_page(
                             StdlibSymbolId::TypeConstructor(value.id),
-                            render_type_constructor(value, &self.library),
+                            self.library.render_type_constructor(value.id),
                             "type constructor",
-                            Some(render_type_constructor(value, &self.library)),
+                            Some(render_constrained_type_constructor(value, &self.library)),
                             &value.documentation,
                             vec![
                                 DocumentationMemberGroup::symbols(
@@ -1480,14 +1483,14 @@ impl DocumentationReference {
                 symbol_uri(StdlibSymbolId::Capability(id), &self.library),
             )],
             StdlibOwner::TypeConstructor(id) => vec![(
-                render_type_constructor(self.library.type_constructor(id), &self.library),
+                self.library.render_type_constructor(id),
                 symbol_uri(StdlibSymbolId::TypeConstructor(id), &self.library),
             )],
         }
     }
 }
 
-fn render_type_constructor(
+fn render_constrained_type_constructor(
     constructor: &crate::stdlib::StdlibTypeConstructor,
     library: &StandardLibrary,
 ) -> String {
@@ -1552,11 +1555,9 @@ fn render_type_declaration(ty: &crate::stdlib::StdlibType) -> String {
 
 fn render_item_name(item: &crate::stdlib::StdlibItem, library: &StandardLibrary) -> String {
     match item.owner {
-        StdlibOwner::TypeConstructor(owner) => format!(
-            "{}.{}",
-            render_type_constructor(library.type_constructor(owner), library),
-            item.name
-        ),
+        StdlibOwner::TypeConstructor(owner) => {
+            format!("{}.{}", library.render_type_constructor(owner), item.name)
+        }
         _ => item.qualified_name.to_owned(),
     }
 }
@@ -2478,6 +2479,22 @@ mod tests {
                 .contains("<pre class=\"hljs splitscript-code\">")
         );
 
+        let on_attach = reference
+            .page("/language/on-attach.md")
+            .expect("onAttach has a language page");
+        for related in [
+            "[state](state.md)",
+            "[layout](layout.md)",
+            "[await](await.md)",
+            "[retry](retry.md)",
+            "[onStateReady](on-state-ready.md)",
+        ] {
+            assert!(
+                on_attach.markdown.contains(related),
+                "onAttach is missing related concept `{related}`"
+            );
+        }
+
         let async_page = reference
             .page("/language/async.md")
             .expect("async has a language page");
@@ -2996,21 +3013,17 @@ mod tests {
         let exclusive_range = reference
             .page("/stdlib/type-forms/exclusive-range/index.md")
             .expect("T..<T has a page with a URL-safe path");
-        assert!(
-            exclusive_range
-                .markdown
-                .contains("# T where Integer..<T where Integer")
-        );
+        assert!(exclusive_range.markdown.contains("# T..<T"));
+        assert!(exclusive_range.markdown.contains("where"));
+        assert!(exclusive_range.markdown.contains("Integer"));
         assert!(exclusive_range.markdown.contains("upper bound is excluded"));
 
         let inclusive_range = reference
             .page("/stdlib/type-forms/inclusive-range/index.md")
             .expect("T..=T has a page with a URL-safe path");
-        assert!(
-            inclusive_range
-                .markdown
-                .contains("# T where Integer..=T where Integer")
-        );
+        assert!(inclusive_range.markdown.contains("# T..=T"));
+        assert!(inclusive_range.markdown.contains("where"));
+        assert!(inclusive_range.markdown.contains("Integer"));
         assert!(inclusive_range.markdown.contains("upper bound is included"));
 
         assert!(

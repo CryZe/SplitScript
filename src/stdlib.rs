@@ -807,17 +807,24 @@ impl StandardLibrary {
 
     pub fn render_operation_semantics(&self, id: StdlibItemId) -> String {
         let semantics = self.operation_semantics(id);
-        let mut facts = vec![match semantics.availability {
-            Availability::Everywhere => "available everywhere",
-            Availability::OnAttach => "available in onAttach",
+        let mut facts = vec![match (
+            semantics.availability,
+            semantics.requires_state_snapshots,
+            semantics.requires_attached_process,
+        ) {
+            (Availability::OnAttach, _, _) => "available only in onAttach",
+            (Availability::Everywhere, true, _) => {
+                "available after old and current state snapshots are initialized"
+            }
+            (Availability::Everywhere, false, true) => {
+                "available while a process is attached, except in onDetach"
+            }
+            (Availability::Everywhere, false, false) => "available everywhere",
         }];
         facts.push(match semantics.suspension {
             SuspensionKind::None => "synchronous",
             SuspensionKind::Suspends => "suspends",
         });
-        if semantics.requires_attached_process {
-            facts.push("requires an attached process");
-        }
         if semantics.cancellation == CancellationKind::ProcessClose {
             facts.push("cancels when the process closes");
         }

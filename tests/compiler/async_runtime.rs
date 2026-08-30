@@ -2338,6 +2338,105 @@ fn future_timeout_supports_intrinsic_and_closure_future_producers() {
 }
 
 #[test]
+fn on_attach_failure_holds_the_process_until_close_without_running_on_detach() {
+    let source = r#"
+        state "game.exe" {}
+
+        onAttach {
+            print("attempt")
+            let marker = process.read<u8>(0x1000)?
+            if marker != 7 {
+                throw "unsupported process build"
+            }
+            print("ready")
+        }
+
+        onDetach {
+            print("detached")
+        }
+    "#;
+
+    // A propagated read failure rejects this process exactly once. The handle
+    // remains retained until close, so discovery cannot immediately select it
+    // again and an attachment that never completed owns no onDetach event.
+    let (mut failed_store, failed_instance) = execute_with_mock_host(source);
+    let failed_update = failed_instance
+        .get_typed_func::<(), ()>(&mut failed_store, "update")
+        .unwrap();
+    failed_update.call(&mut failed_store, ()).unwrap();
+    failed_update.call(&mut failed_store, ()).unwrap();
+    assert_eq!(failed_store.data().messages, ["attempt"]);
+    failed_store.data_mut().process_open = false;
+    failed_update.call(&mut failed_store, ()).unwrap();
+    assert_eq!(failed_store.data().messages, ["attempt"]);
+
+    // An explicit throw has the same boundary semantics.
+    let (mut rejected_store, rejected_instance) = execute_with_mock_host(source);
+    rejected_store
+        .data_mut()
+        .memory_regions
+        .push((0x1000, vec![8]));
+    let rejected_update = rejected_instance
+        .get_typed_func::<(), ()>(&mut rejected_store, "update")
+        .unwrap();
+    rejected_update.call(&mut rejected_store, ()).unwrap();
+    rejected_update.call(&mut rejected_store, ()).unwrap();
+    assert_eq!(rejected_store.data().messages, ["attempt"]);
+
+    // A successfully initialized process still receives exactly one onDetach.
+    let (mut ready_store, ready_instance) = execute_with_mock_host(source);
+    ready_store
+        .data_mut()
+        .memory_regions
+        .push((0x1000, vec![7]));
+    let ready_update = ready_instance
+        .get_typed_func::<(), ()>(&mut ready_store, "update")
+        .unwrap();
+    ready_update.call(&mut ready_store, ()).unwrap();
+    assert_eq!(ready_store.data().messages, ["attempt", "ready"]);
+    ready_store.data_mut().process_open = false;
+    ready_update.call(&mut ready_store, ()).unwrap();
+    assert_eq!(
+        ready_store.data().messages,
+        ["attempt", "ready", "detached"]
+    );
+
+    // Omitting onAttach makes completion implicit once provider preparation
+    // reaches the normal attachment path; it still owns an onDetach event.
+    let no_initializer = r#"
+        state "game.exe" {}
+        onDetach { print("detached") }
+    "#;
+    let (mut implicit_store, implicit_instance) = execute_with_mock_host(no_initializer);
+    let implicit_update = implicit_instance
+        .get_typed_func::<(), ()>(&mut implicit_store, "update")
+        .unwrap();
+    implicit_update.call(&mut implicit_store, ()).unwrap();
+    implicit_store.data_mut().process_open = false;
+    implicit_update.call(&mut implicit_store, ()).unwrap();
+    assert_eq!(implicit_store.data().messages, ["detached"]);
+
+    // Process closure while an initializer is still suspended cancels it but
+    // does not synthesize an onDetach for an attachment that never completed.
+    let pending_initializer = r#"
+        state "game.exe" {}
+        onAttach {
+            print("pending")
+            await process.closed()
+        }
+        onDetach { print("detached") }
+    "#;
+    let (mut pending_store, pending_instance) = execute_with_mock_host(pending_initializer);
+    let pending_update = pending_instance
+        .get_typed_func::<(), ()>(&mut pending_store, "update")
+        .unwrap();
+    pending_update.call(&mut pending_store, ()).unwrap();
+    pending_store.data_mut().process_open = false;
+    pending_update.call(&mut pending_store, ()).unwrap();
+    assert_eq!(pending_store.data().messages, ["pending"]);
+}
+
+#[test]
 fn future_timeout_expires_pending_operations_and_flattens_existing_failures() {
     let source = r#"
         state "game.exe" {}

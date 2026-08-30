@@ -16,7 +16,7 @@ use super::{
     GcLayout, STATE_TYPE, Type,
     data_plan::StringPool,
     emit_result_error, emit_typed_struct_get,
-    global_plan::RuntimeGlobals,
+    global_plan::{ATTACH_LAYOUT_SELECTED, ATTACH_READY, ATTACH_REJECTED, RuntimeGlobals},
     imports::Abi,
     managed_state_reads::ManagedStateReadCache,
     memarg,
@@ -26,10 +26,6 @@ use super::{
     },
     record_field_type, semantic_type, state_storage_index, value_type,
 };
-
-const ATTACH_READY: i32 = 1;
-const ATTACH_REJECTED: i32 = 2;
-const ATTACH_LAYOUT_SELECTED: i32 = 3;
 
 /// Per-tick runtime view of the completed backend plans.
 pub(super) struct UpdateContext<'a> {
@@ -501,6 +497,13 @@ pub(super) fn compile_update(
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessIsOpen)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
+        // Only a process whose complete attachment initialization succeeded
+        // owns an onDetach event. Pending or rejected initialization is merely
+        // cancelled and cleared when that process closes.
+        .instruction(&Instruction::GlobalGet(globals.attach_ready))
+        .instruction(&Instruction::I32Const(ATTACH_READY))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalSet(newly_attached))
         .instruction(&Instruction::GlobalGet(globals.process))
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessDetach)))
         .instruction(&Instruction::I64Const(0))
@@ -563,7 +566,11 @@ pub(super) fn compile_update(
             abi.function(AbiImportId::RuntimeSetTickRate),
         ));
     if let Some(detach) = actions.get(&ActionKind::OnDetach) {
-        function.instruction(&Instruction::Call(*detach));
+        function
+            .instruction(&Instruction::LocalGet(newly_attached))
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Call(*detach))
+            .instruction(&Instruction::End);
     }
     function
         .instruction(&Instruction::Return)
@@ -703,7 +710,9 @@ pub(super) fn compile_update(
                 .instruction(&Instruction::I32Eqz)
                 .instruction(&Instruction::If(BlockType::Empty))
                 .instruction(&Instruction::Return)
-                .instruction(&Instruction::End)
+                .instruction(&Instruction::End);
+            emit_return_if_attachment_rejected(&mut function, globals);
+            function
                 .instruction(&Instruction::I32Const(ATTACH_READY))
                 .instruction(&Instruction::GlobalSet(globals.attach_ready))
                 .instruction(&Instruction::End);
@@ -719,17 +728,23 @@ pub(super) fn compile_update(
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End);
+        emit_return_if_attachment_rejected(&mut function, globals);
         emit_managed_field_presence_validation(&mut function, program, lowering);
         function
             .instruction(&Instruction::I32Const(ATTACH_READY))
             .instruction(&Instruction::GlobalSet(globals.attach_ready))
             .instruction(&Instruction::End);
+    } else {
+        // With no user initializer, reaching this point means provider
+        // preparation (if any) completed and the attachment is fully ready.
+        function
+            .instruction(&Instruction::I32Const(ATTACH_READY))
+            .instruction(&Instruction::GlobalSet(globals.attach_ready));
     }
 
-    // `2` records that metadata evidence contradicted the layout chosen by
-    // `onAttach`. Keep the process attached so the normal process-lifetime
-    // boundary resets everything when it exits, without repeatedly invoking
-    // user attachment code or polling an invalid schema.
+    // A rejected attachment can come from managed metadata validation or the
+    // implicit failure boundary around `onAttach`. Retain the selected process
+    // until it closes so a live process is not selected again every tick.
     function
         .instruction(&Instruction::GlobalGet(globals.attach_ready))
         .instruction(&Instruction::I32Const(ATTACH_REJECTED))
@@ -992,6 +1007,16 @@ pub(super) fn compile_update(
 
     function.instruction(&Instruction::End);
     function
+}
+
+fn emit_return_if_attachment_rejected(function: &mut Function, globals: RuntimeGlobals) {
+    function
+        .instruction(&Instruction::GlobalGet(globals.attach_ready))
+        .instruction(&Instruction::I32Const(ATTACH_REJECTED))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
 }
 
 fn emit_automatic_layout_failure_report(

@@ -30,7 +30,7 @@ use super::{
     emit_array_get, emit_default, emit_failure_transfer, emit_frame_typed_struct_get, emit_int,
     emit_memory_value, emit_monotonic_nanoseconds, emit_result_error, emit_result_success,
     emit_string_literal, emit_struct_get, emit_typed_struct_get, enum_variant_payload,
-    global_plan::RuntimeGlobals,
+    global_plan::{ATTACH_REJECTED, RuntimeGlobals},
     imports::Abi,
     managed_state_reads::ManagedStateReadCache,
     memarg,
@@ -659,13 +659,9 @@ fn compile_block_with_loop(
                 let Type::Result(target_result) = context.ty(*target) else {
                     unreachable!("throw targets are result values")
                 };
-                emit_failure_transfer(
-                    function,
-                    target_result,
-                    result_value_type(target_result, context.semantics),
-                    context.gc,
-                    |function| compile_expr(function, *error, context),
-                );
+                emit_failure_return(function, target_result, context, |function| {
+                    compile_expr(function, *error, context)
+                });
             }
             crate::hir::FailureTarget::Retry { .. } => {
                 compile_expr(function, *error, context);
@@ -3291,13 +3287,9 @@ fn compile_expr_unconverted(
                 let Type::Result(target_result) = context.ty(*target) else {
                     unreachable!("throw targets are result values")
                 };
-                emit_failure_transfer(
-                    function,
-                    target_result,
-                    result_value_type(target_result, context.semantics),
-                    context.gc,
-                    |function| compile_expr(function, *error, context),
-                );
+                emit_failure_return(function, target_result, context, |function| {
+                    compile_expr(function, *error, context)
+                });
             }
             crate::hir::FailureTarget::Retry { .. } => {
                 compile_expr(function, *error, context);
@@ -3329,23 +3321,17 @@ fn compile_expr_unconverted(
                     let Type::Result(target_result) = context.ty(*target) else {
                         unreachable!("propagation targets are result values")
                     };
-                    emit_failure_transfer(
-                        function,
-                        target_result,
-                        result_value_type(target_result, context.semantics),
-                        context.gc,
-                        |function| {
-                            function
-                                .instruction(&Instruction::LocalGet(input_local))
-                                .instruction(&Instruction::RefAsNonNull);
-                            emit_typed_struct_get(
-                                function,
-                                context.gc.index(Type::Result(input_result)),
-                                2,
-                                Type::Standard(StdlibTypeId::String),
-                            );
-                        },
-                    );
+                    emit_failure_return(function, target_result, context, |function| {
+                        function
+                            .instruction(&Instruction::LocalGet(input_local))
+                            .instruction(&Instruction::RefAsNonNull);
+                        emit_typed_struct_get(
+                            function,
+                            context.gc.index(Type::Result(input_result)),
+                            2,
+                            Type::Standard(StdlibTypeId::String),
+                        );
+                    });
                 }
                 crate::hir::FailureTarget::Retry { .. } => {
                     function
@@ -4811,6 +4797,38 @@ fn compile_expr_unconverted(
             ty: AbstractHeapType::None,
         }));
     }
+}
+
+pub(super) fn emit_failure_return(
+    function: &mut Function,
+    target_result: ResultTypeId,
+    context: &ExprContext<'_>,
+    emit_error: impl FnOnce(&mut Function),
+) {
+    if matches!(context.bare_return, BareReturn::AsyncAttach { .. }) {
+        // `onAttach` catches ordinary errors as rejection of this acquired
+        // process. Retain the process handle until it closes so discovery
+        // cannot select the same live process again on the next update.
+        emit_error(function);
+        function
+            .instruction(&Instruction::Drop)
+            .instruction(&Instruction::I32Const(ATTACH_REJECTED))
+            .instruction(&Instruction::GlobalSet(
+                context.runtime_globals.attach_ready,
+            ))
+            // The async attachment poll itself completed; the update loop
+            // observes `ATTACH_REJECTED` and does not promote it to ready.
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::Return);
+        return;
+    }
+    emit_failure_transfer(
+        function,
+        target_result,
+        result_value_type(target_result, context.semantics),
+        context.gc,
+        emit_error,
+    );
 }
 
 fn compile_user_argument(function: &mut Function, argument: ExprId, context: &ExprContext<'_>) {

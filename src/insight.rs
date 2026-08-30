@@ -2237,10 +2237,12 @@ split { return layout == StateLayout.Steam }
             .hover(source.find("onDetach").unwrap() + 1)
             .unwrap()
             .expect("onDetach hover");
+        assert!(hover.markdown.contains("once when a process whose"));
+        assert!(hover.markdown.contains("completed closes"));
         assert!(
-            hover
-                .markdown
-                .contains("once when an attached process closes")
+            hover.markdown.contains(
+                "does not run when attachment initialization was still pending or rejected"
+            )
         );
         assert!(
             hover

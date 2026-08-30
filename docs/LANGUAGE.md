@@ -1575,8 +1575,9 @@ predicate should identify the desired process from stable process evidence.
 Scripts without this block retain the host's direct name-attachment path and
 pay no PID-enumeration cost.
 
-`onDetach` runs exactly once when a real attached process closes. It does not
-run during initial detached startup or repeat on detached ticks:
+`onDetach` runs exactly once when a successfully initialized process closes. It
+does not run during initial detached startup, repeat on detached ticks, or run
+for a process rejected before `onAttach` completed:
 
 ```text
 onDetach {
@@ -1821,6 +1822,14 @@ scope cancels the initializer, resets it, and starts fresh with the next
 attached process. This is the language-level counterpart to ASR's
 `until_closes`, without requiring scripts to manually write the outer
 attach/cancellation loops.
+
+`onAttach` is also an implicit ordinary error boundary. Postfix [`?`] and
+[`throw`] reject the acquired process instead of aborting the update. The
+runtime retains that rejected process handle without polling state or invoking
+`onAttach` again until the process closes; this prevents the discovery loop
+from selecting the same unsupported live instance every tick. Because the
+attachment never completed, its closure does not invoke [`onDetach`]. A later
+process instance starts with a fresh initializer and cleared attachment state.
 
 [`retry`] is the dual of [`await`]. [`await`] polls one already-asynchronous
 value without evaluating its source expression again. `retry expression`
@@ -2231,7 +2240,8 @@ The generated loop follows this order:
 2. Attach to the configured process, first running `selectProcess` for each
    same-name candidate when declared; return and retry next tick if none is
    accepted.
-3. Detect a closed process, detach, and return.
+3. Detect a closed process, detach, run `onDetach` only if `onAttach` completed
+   successfully, and return.
 4. Commit the first complete state as equal `old` and `current` snapshots, run
    `onStateReady`, and return; or rotate and refresh an initialized snapshot.
 5. On initialized updates after that first snapshot, run `whileAttached`.

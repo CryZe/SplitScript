@@ -18,6 +18,14 @@ use super::{
     semantic_type, value_type,
 };
 
+/// User attachment initialization completed and normal state polling may run.
+pub(super) const ATTACH_READY: i32 = 1;
+/// This process was rejected after acquisition and remains held only until it
+/// closes, preventing the discovery loop from immediately selecting it again.
+pub(super) const ATTACH_REJECTED: i32 = 2;
+/// Automatic metadata selected a layout and user `onAttach` is still pending.
+pub(super) const ATTACH_LAYOUT_SELECTED: i32 = 3;
+
 pub(super) struct GlobalPlan {
     pub section: GlobalSection,
     pub runtime: RuntimeGlobals,

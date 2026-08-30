@@ -4279,3 +4279,24 @@ language catalog document the refinement rule.
 - Added native and Unity-backed compiler coverage plus a runtime fixture where
   `false`, a propagated read error, and `true` candidates are tried in order;
   only the accepted process proceeds into state polling and timer decisions.
+
+# 2026-08-31: fallible attachment initialization
+
+- Made `onAttach` an implicit ordinary error boundary without changing its
+  successful `None`, `Layout`, or `StateLayout` result. Postfix `?` and
+  `throw` now reject an acquired process through the same typed failure
+  transfer used by state fields, functions, retries, and `selectProcess`.
+- Retain a rejected process handle inert until that exact instance closes,
+  preventing immediate rediscovery and repeated initialization every tick.
+  Successful layout and attachment-global paths keep their existing definite
+  initialization analysis; rejection paths are terminal and need not invent
+  values.
+- Made the attachment readiness flag authoritative for lifecycle delivery.
+  `onDetach` now runs only after complete provider preparation and successful
+  `onAttach`; rejection, pending initialization, and process-lifetime
+  cancellation clear their state without synthesizing a detach event.
+- Documented the error boundary, retained-process behavior, and lifecycle
+  ordering in the compiler-owned language reference and guide, with runtime
+  coverage for read propagation, explicit throws, pending cancellation,
+  explicit layouts, attachment globals, implicit initialization, and ordinary
+  successful detach.

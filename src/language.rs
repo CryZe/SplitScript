@@ -1930,8 +1930,8 @@ define_language_catalog! {
         OnDetach,
         OnDetach,
         "onDetach",
-        "Handles closure of a previously attached process.",
-        "Runs synchronously once when an attached process closes, after its unusable handle, provider state, selected layout, and pending continuations are cleared. It never runs for the initial detached state; use [`setup`] for one-time script initialization. Process and state snapshots are unavailable because closure may happen before initialization finishes.",
+        "Handles closure of a successfully initialized process.",
+        "Runs synchronously once when a process whose [`onAttach`] completed closes, after its unusable handle, provider state, selected layout, and pending continuations are cleared. It does not run when attachment initialization was still pending or rejected the process through postfix [`?`] or [`throw`], and it never runs for the initial detached state; use [`setup`] for one-time script initialization. Process and state snapshots are unavailable.",
         "onDetach {\n    timer.pauseGameTime()\n}"
     ),
     action_item!(
@@ -1939,9 +1939,9 @@ define_language_catalog! {
         OnAttach,
         "onAttach",
         "Initializes one attached process.",
-        "This action is implicitly suspending and owns process-lifetime cancellation for [`await`] and [`retry`] continuations. When the [`state`] declaration contains named [`layout`] declarations, it returns the generated layout variant that should be polled.",
+        "This action is implicitly suspending and owns process-lifetime cancellation for [`await`] and [`retry`] continuations. It is also an implicit error boundary: postfix [`?`] or [`throw`] rejects this process, keeps its handle inert until it closes, and never runs [`onDetach`] for the incomplete attachment. When the [`state`] declaration contains named [`layout`] declarations, a successful path returns the generated layout variant that should be polled.",
         "onAttach {\n    let module = await process.module(\"GameAssembly.dll\")\n}",
-        related: &[LanguageItemId::State, LanguageItemId::StateLayout, LanguageItemId::Await, LanguageItemId::Retry, LanguageItemId::OnStateReady]
+        related: &[LanguageItemId::State, LanguageItemId::StateLayout, LanguageItemId::Await, LanguageItemId::Retry, LanguageItemId::Propagate, LanguageItemId::Throw, LanguageItemId::OnStateReady]
     ),
     action_item!(
         OnStateReady,
@@ -2107,8 +2107,8 @@ impl LanguageCatalog {
             ActionKind::OnAttach => ActionReferenceFacts {
                 timing: "Once after acquiring and preparing a process",
                 available_context: "process, prepared provider roots, settings, and globals; layout when already selected",
-                suspension: "await and retry allowed; cancelled on detach",
-                result: "None, Layout, or StateLayout as required by state",
+                suspension: "await and retry allowed; ? and throw reject; cancelled on process close",
+                result: "None, Layout, or StateLayout on success; implicit error boundary",
                 fallthrough: "finish attachment when no layout result is required",
             },
             ActionKind::OnStateReady => ActionReferenceFacts {
@@ -2161,7 +2161,7 @@ impl LanguageCatalog {
                 fallthrough: "false; do not split",
             },
             ActionKind::OnDetach => ActionReferenceFacts {
-                timing: "Once after an attached process closes and its context is cleared",
+                timing: "Once after a successfully initialized process closes and its context is cleared",
                 available_context: "settings, module globals, and live attempt globals",
                 suspension: "not allowed",
                 result: "None",

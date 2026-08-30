@@ -55,6 +55,70 @@ fn process_selection_is_a_fallible_boolean_boundary() {
 }
 
 #[test]
+fn on_attach_is_a_fallible_boundary_without_changing_its_success_type() {
+    let source = r#"
+        state "game.exe" {}
+
+        onAttach {
+            let marker = process.read<u8>(0x1000)?
+            if marker != 7 {
+                throw "unsupported process build"
+            }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("attachment initialization may reject its acquired process");
+    let result = checked
+        .semantics()
+        .action_result(splitscript::compiler::ast::ActionKind::OnAttach)
+        .expect("onAttach has a semantic success type");
+    assert_eq!(
+        checked.semantics().types().kind(result),
+        &TypeKind::Builtin(splitscript::compiler::types::BuiltinType::None),
+        "the implicit failure boundary must not become a nested public result"
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("fallible attachment initialization should produce valid WebAssembly");
+
+    let layout = r#"
+        state "game.exe" {
+            layout Full { value: u8 at 0x1000 },
+            layout Demo { value: u8 at 0x2000 },
+        }
+
+        onAttach {
+            let marker = process.read<u8>(0x3000)?
+            if marker == 1 {
+                return StateLayout.Full
+            }
+            return StateLayout.Demo
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(layout).unwrap())
+        .expect("rejection paths do not need to manufacture a layout selection");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("fallible explicit layout selection should produce valid WebAssembly");
+
+    let attachment_global = r#"
+        let executable: Module
+        state "game.exe" {}
+
+        onAttach {
+            process.read<u8>(0x1000)?
+            executable = await process.mainModule()
+        }
+
+        whileAttached {
+            print(executable.address)
+        }
+    "#;
+    splitscript::compile(attachment_global)
+        .expect("a rejected path is terminal and need not initialize successful attachment state");
+}
+
+#[test]
 fn process_selection_exposes_only_the_synchronous_native_candidate_context() {
     let attachment_global = r#"
         let module: Module

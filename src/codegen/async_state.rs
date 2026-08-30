@@ -33,7 +33,8 @@ use super::{
         BareReturn, ExprContext, IntrinsicCapture, LocalStorage, LoopControl, MatchLayout,
         compile_assignment, compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
         compile_for_has_next, compile_for_init, compile_receiver, compile_statement_pattern,
-        compile_temporary_set, emit_managed_binding_field, store_match_binding,
+        compile_temporary_set, emit_failure_return, emit_managed_binding_field,
+        store_match_binding,
     },
     imports::Abi,
     memarg, plan_wasm_locals, resolved_intrinsic, semantic_type, unity_layout,
@@ -3831,8 +3832,13 @@ fn compile_async_flow(
             function.instruction(&Instruction::Br(loop_depth));
         }
         wasm_ir::Terminator::Throw { error, target } => match target {
-            crate::hir::FailureTarget::Return(_) => {
-                unreachable!("throw is rejected in async bodies without a retry boundary")
+            crate::hir::FailureTarget::Return(target) => {
+                let Type::Result(target_result) = context.ty(*target) else {
+                    unreachable!("throw targets are result values")
+                };
+                emit_failure_return(function, target_result, context, |function| {
+                    compile_expr(function, *error, context);
+                });
             }
             crate::hir::FailureTarget::Retry { .. } => {
                 compile_expr(function, *error, context);

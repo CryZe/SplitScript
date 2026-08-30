@@ -875,10 +875,13 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
         checker
             .semantics
             .resolve_action_result(action.kind, return_ty);
-        let failure = if action.kind == ActionKind::SelectProcess {
-            FailureContext::boundary(return_ty)
-        } else {
-            FailureContext::None
+        let failure = match action.kind {
+            ActionKind::SelectProcess => FailureContext::boundary(return_ty),
+            ActionKind::OnAttach => {
+                let boundary = Type::Result(checker.inference.result_type(return_ty));
+                FailureContext::boundary(boundary)
+            }
+            _ => FailureContext::None,
         };
         checker.with_callable_context(
             CallableContext::Action(action.kind),

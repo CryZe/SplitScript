@@ -930,14 +930,6 @@ remaining work is product hardening and distribution.
   threads or unconstrained background tasks. Keep bounded concurrent scanning
   as a separate scheduling decision rather than silently making an unbounded
   race array consume arbitrary work per update.
-- [ ] Make `onAttach` an ordinary fallible boundary. Postfix `?`, `throw`, or a
-  fallible final expression must abandon that process instance, leave the
-  script unattached, and wait for that exact process to close before discovery
-  resumes; retrying the same rejected live process every tick would turn a
-  stable rejection into an accidental busy loop. Because attachment never
-  completed, `onDetach` must not run. Reuse the candidate-rejection machinery
-  already established by `selectProcess`, while preserving `onAttach`'s typed
-  layout/global initialization analysis and documenting the lifecycle clearly.
 - [ ] Replace string-only errors with a structured identity plus human-readable
   message. Code must be able to distinguish compiler/runtime error kinds such
   as a future timeout from an operand's own failure without comparing display

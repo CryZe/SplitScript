@@ -10,7 +10,7 @@ use crate::{
 };
 
 use super::{
-    DocumentationIndexEntry, DocumentationPage,
+    DocumentationIndexEntry, DocumentationPage, code,
     reference::{
         append_reference_table_header, escape_markdown_table_cell, migration_concept_uri,
         migration_target_uri, relative_document_link,
@@ -107,9 +107,13 @@ pub(super) fn index() -> impl Iterator<Item = DocumentationIndexEntry> {
     })
 }
 
-pub(super) fn page(uri: &str) -> Option<DocumentationPage> {
+pub(super) fn page(
+    uri: &str,
+    library: &crate::stdlib::StandardLibrary,
+    semantic_examples: bool,
+) -> Option<DocumentationPage> {
     let guide = GUIDES.iter().find(|guide| guide.uri == uri)?;
-    let source = rendered_guide_source(guide.source);
+    let source = rendered_guide_source(guide.source, guide.uri, library, semantic_examples);
     let source = if guide.migration_overview {
         insert_migration_overview(guide.uri, &source, guide.source)
     } else {
@@ -298,8 +302,14 @@ fn overview_target(
 /// keeping them in the checked source. A line containing only `#` contributes
 /// a blank source line; `# code` contributes `code` to validation. Other
 /// Markdown and non-SplitScript fences are byte-for-byte ordinary content.
-fn rendered_guide_source(source: &str) -> String {
-    guide_parts(source).0
+fn rendered_guide_source(
+    source: &str,
+    uri: &str,
+    library: &crate::stdlib::StandardLibrary,
+    semantic_examples: bool,
+) -> String {
+    let (rendered, examples) = guide_parts(source);
+    render_guide_examples(&rendered, &examples, uri, library, semantic_examples)
 }
 
 #[cfg(test)]
@@ -350,6 +360,57 @@ fn guide_parts(source: &str) -> (String, Vec<String>) {
     (rendered, examples)
 }
 
+fn render_guide_examples(
+    source: &str,
+    validation_examples: &[String],
+    uri: &str,
+    library: &crate::stdlib::StandardLibrary,
+    semantic_examples: bool,
+) -> String {
+    let mut rendered = String::with_capacity(source.len());
+    let mut current_example = None::<String>;
+    let mut validations = validation_examples.iter();
+
+    for line in source.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let content = content.strip_suffix('\r').unwrap_or(content);
+        if current_example.is_none() && content == "```splitscript" {
+            current_example = Some(String::new());
+            continue;
+        }
+        if let Some(example) = current_example.as_mut() {
+            if content == "```" {
+                let example = current_example.take().expect("example is present");
+                let validation = validations
+                    .next()
+                    .expect("every visible guide example has validation source");
+                rendered.push_str(&code::checked_fragment(
+                    &example,
+                    validation,
+                    uri,
+                    library,
+                    semantic_examples,
+                ));
+                rendered.push('\n');
+            } else {
+                example.push_str(line);
+            }
+            continue;
+        }
+        rendered.push_str(line);
+    }
+
+    assert!(
+        current_example.is_none(),
+        "unclosed rendered SplitScript guide fence"
+    );
+    assert!(
+        validations.next().is_none(),
+        "every validation example is rendered exactly once"
+    );
+    rendered
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,10 +444,17 @@ mod tests {
     #[test]
     fn hidden_example_context_is_checked_but_not_rendered() {
         let source = "before\n```splitscript\n# state \"game.exe\" {}\n# onAttach {\nprint(7)\n# }\n```\nafter\n";
-        assert_eq!(
-            rendered_guide_source(source),
-            "before\n```splitscript\nprint(7)\n```\nafter\n"
+        let rendered = rendered_guide_source(
+            source,
+            "/guides/test.md",
+            &crate::stdlib::StandardLibrary::new(),
+            true,
         );
+        assert!(rendered.starts_with("before\n<pre class=\"hljs splitscript-code\">"));
+        assert!(rendered.contains(">print</span>"));
+        assert!(!rendered.contains("game.exe"));
+        assert!(!rendered.contains("onAttach"));
+        assert!(rendered.ends_with("after\n"));
         assert_eq!(
             validation_examples(source),
             ["state \"game.exe\" {}\nonAttach {\nprint(7)\n}\n"]
@@ -428,8 +496,30 @@ mod tests {
     }
 
     #[test]
+    fn bundled_guides_render_semantic_code_with_symbol_links() {
+        let page = page(
+            "/guides/from-rust.md",
+            &crate::stdlib::StandardLibrary::new(),
+            true,
+        )
+        .expect("Rust guide exists");
+        assert!(
+            page.markdown
+                .contains("<pre class=\"hljs splitscript-code\">")
+        );
+        assert!(page.markdown.contains("data-splitscript-token=\"keyword\""));
+        assert!(page.markdown.contains("href=\"../language/"));
+        assert!(!page.markdown.contains("```splitscript"));
+    }
+
+    #[test]
     fn asl_guide_has_a_catalog_owned_migration_map() {
-        let page = page("/guides/asl-porting.md").expect("ASL guide exists");
+        let page = page(
+            "/guides/asl-porting.md",
+            &crate::stdlib::StandardLibrary::new(),
+            true,
+        )
+        .expect("ASL guide exists");
         assert!(page.markdown.contains("## Quick migration map"));
         assert!(page.markdown.contains("### Common ASL concepts"));
         assert!(
@@ -458,7 +548,8 @@ mod tests {
             "/guides/from-javascript.md",
             "/guides/from-rust.md",
         ] {
-            let page = page(uri).unwrap_or_else(|| panic!("missing bundled guide `{uri}`"));
+            let page = page(uri, &crate::stdlib::StandardLibrary::new(), true)
+                .unwrap_or_else(|| panic!("missing bundled guide `{uri}`"));
             assert!(page.markdown.starts_with("[SplitScript reference]"));
             assert!(!page.markdown.contains("## Quick migration map"));
         }
@@ -466,7 +557,12 @@ mod tests {
 
     #[test]
     fn decision_guide_uses_the_catalog_owned_lifecycle_matrix() {
-        let page = page("/guides/decision-guides.md").expect("decision guide is bundled");
+        let page = page(
+            "/guides/decision-guides.md",
+            &crate::stdlib::StandardLibrary::new(),
+            true,
+        )
+        .expect("decision guide is bundled");
         assert!(!page.markdown.contains("<!-- lifecycle-matrix -->"));
         for heading in [
             "## Choose a lifecycle block",

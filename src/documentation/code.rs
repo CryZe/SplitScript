@@ -49,6 +49,20 @@ pub(super) fn lexical_example(
     )
 }
 
+pub(super) fn checked_fragment(
+    source: &str,
+    validation_program: &str,
+    current_uri: &str,
+    library: &StandardLibrary,
+    semantic: bool,
+) -> String {
+    let annotations = semantic
+        .then(|| semantic_fragment_annotations(source, validation_program, current_uri, library))
+        .flatten()
+        .unwrap_or_else(|| lexical_annotations(source, current_uri, None, library));
+    render(source, &annotations)
+}
+
 fn semantic_example_annotations(
     example: Example,
     current_uri: &str,
@@ -78,6 +92,76 @@ fn semantic_example_annotations(
         });
     }
     Some(annotations)
+}
+
+fn semantic_fragment_annotations(
+    source: &str,
+    validation_program: &str,
+    current_uri: &str,
+    library: &StandardLibrary,
+) -> Option<Vec<Annotation>> {
+    let mappings = source_mappings(source, validation_program)?;
+    let context = crate::CompilerContext::default().without_standard_library_bodies();
+    let mut database = CompilerDatabase::with_context_and_source_name(
+        context,
+        "guide-example.split",
+        validation_program.to_owned(),
+    );
+    let highlights = database.semantic_highlights().ok()?;
+    let mut annotations = Vec::new();
+    for highlight in highlights.highlights() {
+        let Some(mapping) = mappings.iter().find(|mapping| {
+            mapping.validation_start <= highlight.span.start
+                && highlight.span.end <= mapping.validation_end
+        }) else {
+            continue;
+        };
+        let target = is_linkable(highlight.kind)
+            .then(|| database.definition_at(highlight.span.start).ok().flatten())
+            .flatten()
+            .and_then(|target| target_uri(target, current_uri, library));
+        annotations.push(Annotation {
+            start: mapping.visible_start + highlight.span.start - mapping.validation_start,
+            end: mapping.visible_start + highlight.span.end - mapping.validation_start,
+            kind: highlight.kind,
+            target,
+        });
+    }
+    Some(annotations)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SourceMapping {
+    validation_start: usize,
+    validation_end: usize,
+    visible_start: usize,
+}
+
+fn source_mappings(source: &str, validation_program: &str) -> Option<Vec<SourceMapping>> {
+    let mut mappings = Vec::<SourceMapping>::new();
+    let mut validation_cursor = 0;
+    let mut visible_cursor = 0;
+    for line in source.split_inclusive('\n') {
+        let offset = validation_program[validation_cursor..].find(line)?;
+        let validation_start = validation_cursor + offset;
+        let validation_end = validation_start + line.len();
+        if let Some(previous) = mappings.last_mut()
+            && previous.validation_end == validation_start
+            && previous.visible_start + (previous.validation_end - previous.validation_start)
+                == visible_cursor
+        {
+            previous.validation_end = validation_end;
+        } else {
+            mappings.push(SourceMapping {
+                validation_start,
+                validation_end,
+                visible_start: visible_cursor,
+            });
+        }
+        validation_cursor = validation_end;
+        visible_cursor += line.len();
+    }
+    Some(mappings)
 }
 
 fn lexical_annotations(

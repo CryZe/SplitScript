@@ -501,7 +501,7 @@ impl DocumentationReference {
             return Some(self.migration_index_page());
         }
 
-        if let Some(mut page) = bundled::page(uri) {
+        if let Some(mut page) = bundled::page(uri, &self.library, self.semantic_examples) {
             page.markdown = intra_doc::render_links(&page.markdown, uri, &self.library);
             return Some(page);
         }

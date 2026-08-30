@@ -5,6 +5,12 @@ numbers, [`as`] casts, exhaustive [`match`], postfix [`?`], and strong inference
 It removes ownership syntax and exposes autosplitter lifecycle and process
 attachment directly, targeting WebAssembly GC rather than native code.
 
+Keep these important spelling and semantic changes in mind:
+
+- Rust `()` becomes SplitScript [`None`].
+- A Rust function tail expression becomes an explicit SplitScript [`return`].
+- Rust `impl Display` becomes an inferred default or a `Type.toString` method.
+
 ## Bindings and inferred capabilities
 
 Use [`let`] without `mut`; ordinary bindings are mutable, while values such as
@@ -189,3 +195,10 @@ Process reads are fallible and require a concrete [`MemoryReadable`] layout.
 Prefer state pointer paths for values polled every tick and direct reads or
 signature scans for attachment-time discovery. Settings are a typed
 declaration DSL, not a map assembled at runtime.
+
+## Next step
+
+Open **Getting started** from the documentation index and build its first
+autosplitter workflow. Use **Search Documentation** for exact capabilities,
+language forms, and migration concepts rather than assuming a Rust trait or
+runtime API has a one-to-one equivalent.

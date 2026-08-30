@@ -5,6 +5,12 @@ but it is statically typed and deliberately has fewer overlapping concepts.
 The compiler infers most types from both definitions and uses, while process
 memory remains explicit enough to preserve exact layouts.
 
+Keep these common spelling changes in mind:
+
+- JavaScript `const`, <code>let</code>, and `var` become one SplitScript [`let`].
+- JavaScript `===` and `!==` become typed [`==`] and [`!=`].
+- JavaScript `${value}` becomes `{value}` inside a backtick string.
+
 ## One declaration style, static types
 
 Use [`let`] for mutable locals and globals and [`fn`] for functions. There is no
@@ -204,3 +210,9 @@ onAttach {
 
 Use [`settings`] declarations rather than dynamic JavaScript objects. They
 produce typed members, stable host keys, and documentation tooltips.
+
+## Next step
+
+Open **Getting started** from the documentation index and build its first
+autosplitter workflow. Use **Search Documentation** with a familiar JavaScript
+spelling when the compiler's typed replacement is not obvious.

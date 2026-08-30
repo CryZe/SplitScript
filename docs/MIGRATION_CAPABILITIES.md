@@ -1,93 +1,200 @@
 <!-- Generated from the compiler-owned migration catalog. -->
-# ASL migration capability index
+# Migration by source
 
-This index maps common source-language concepts to canonical SplitScript APIs and patterns. It does not redeclare the standard library.
+Find the source concept or task first, then follow its canonical SplitScript direction. Exact APIs remain documented by the compiler-owned language and standard-library reference.
 
-| Foreign concept | Source | Status | SplitScript direction |
-| --- | --- | --- | --- |
-| `numeric.byte-order` — Numeric byte order | Rust, C# | Supported directly | Use `Numeric.swapBytes` to reverse a numeric value's raw bytes after reading data stored in the opposite byte order. It preserves the exact integer or floating-point type; eight-bit values are unchanged. Canonical targets: `Numeric.swapBytes`. |
-| `declaration.let` — Variable declarations | C#, JavaScript, Rust | Supported directly | Use one inferred `let` declaration; SplitScript has no const/let split. Canonical targets: `let`. |
-| `value.none` — Absent optional values | JavaScript | Supported directly | `None` is SplitScript's zero-sized unit value and the absent side of an option. Canonical targets: `None`. |
-| `declaration.function` — Function declarations | C#, JavaScript | Supported directly | Functions and methods use the `fn` declaration keyword. Canonical targets: `fn`. |
-| `type.string` — String type | C# | Supported directly | The immutable UTF-8 string type is named `String`. Canonical targets: `String`. |
-| `string.ascii-lowercase` — ASCII string lowercasing | C# | Supported directly | Use `toAsciiLowerCase` when game identifiers require ASCII-only normalization; this is not culture-sensitive Unicode lowercasing. Canonical targets: `String.toAsciiLowerCase`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `string.ascii-uppercase` — ASCII string uppercasing | C# | Supported directly | Use `toAsciiUpperCase` when game identifiers require ASCII-only normalization; this is not culture-sensitive Unicode uppercasing. Canonical targets: `String.toAsciiUpperCase`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `string.equality` — String equality | C# | Supported directly | Use `==` or `!=` for exact string content equality; use `equalsIgnoreAsciiCase` only when ASCII-insensitive matching is intended. Canonical targets: `String`, `String.equalsIgnoreAsciiCase`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `operator.strict-equality` — Strict equality operators | JavaScript | Supported directly | Use typed `==` and `!=`; SplitScript has no coercing equality operators, so JavaScript's extra `=` is unnecessary. Canonical targets: `==`, `!=`. |
-| `operator.bitwise-complement` — Bitwise complement | C#, JavaScript | Supported directly | Use type-directed `!`: it is logical negation for booleans and width-preserving bitwise complement for integers. Canonical targets: `Integer.bitNot`. |
-| `iteration.range` — Bounded integer ranges | ASL, C#, Rust | Supported directly | Use `..<` for an exclusive upper endpoint or `..=` for an inclusive one; SplitScript rejects bare `..` so the endpoint policy is explicit. Canonical targets: `range`. [Recipe](ASL_PORTING.md#bounded-integer-iteration). |
-| `string.substring` — Substring extraction | C# | Use a typed pattern | Use fallible `slice(start, exclusiveEnd)` only after translating C#'s length argument and verifying that UTF-16 source positions are valid UTF-8 byte offsets. Canonical targets: `String.slice`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `string.index-of` — Substring position | C# | Use a typed pattern | Use `indexOf` for an optional UTF-8 byte offset; review C# UTF-16 index arithmetic and replace the `-1` sentinel with `T?` handling. Canonical targets: `String.indexOf`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `string.last-index-of` — Last substring position | C# | Use a typed pattern | Use `lastIndexOf` for an optional final UTF-8 byte offset; review C# UTF-16 index arithmetic and replace the `-1` sentinel with `T?` handling. Canonical targets: `String.lastIndexOf`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `string.replacement` — Exact string replacement | C# | Use a typed pattern | Use fallible `replaceAll` for immutable exact replacement; explicitly handle failure and translate a null C# replacement to an empty string only when deletion was intended. Canonical targets: `String.replaceAll`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `string.ascii-trim` — ASCII whitespace trimming | C# | Use a typed pattern | Use `trimAsciiWhitespace` for text known to use ASCII boundary whitespace; review Unicode and character-set trimming explicitly. Canonical targets: `String.trimAsciiWhitespace`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `string.padding` — String padding | C# | Use a typed pattern | Use `padStart(width, fill)` or `padEnd(width, fill)` with an explicit character; review C# UTF-16 widths against SplitScript's Unicode-scalar widths. Canonical targets: `String.padStart`, `String.padEnd`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `string.null-or-empty` — Nullable string emptiness | C# | Use a typed pattern | Use `String.isEmpty` for required strings and match `String?` explicitly when absence should also count as empty. Canonical targets: `String.isEmpty`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `string.null-or-white-space` — Nullable blank strings | C# | Use a typed pattern | Use `String.isBlank` for required strings and match `String?` explicitly when absence should also count as blank. Canonical targets: `String.isBlank`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `string.length` — String length | C# | Use a typed pattern | Use `isEmpty()` for emptiness and `byteLength()` only for UTF-8 byte-oriented or proven ASCII logic; C# `Length` counts UTF-16 code units. Canonical targets: `String.isEmpty`, `String.byteLength`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `array.length` — Array length | C# | Supported directly | Call `values.length()` for the `u32` element count of dynamic and fixed arrays. Canonical targets: `[T].length`. [Recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets). |
-| `array.extend` — Bulk array extension | C# | Supported directly | Call `values.extend(moreValues)` to append a typed array in order; extending an array with itself duplicates its original contents once. Canonical targets: `[T].extend`. [Recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets). |
-| `collection.count` — Collection count | C# | Supported directly | After choosing an array or set from the source's ordering and uniqueness requirements, call `values.length()` for its `u32` count. Canonical targets: `[T].length`, `Set.length`. [Recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets). |
-| `string.join` — String collection joining | C# | Use a typed pattern | Use `String.join(values, separator)` for a typed string array; convert C# object, variadic, enumerable, and range overloads explicitly. Canonical targets: `String.join`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `math.square-root` — Floating-point square root | C# | Use a typed pattern | Use `value.sqrt()` with an explicit f32 or f64 boundary when preserving C# Math versus MathF semantics. Canonical targets: `Float.sqrt`. |
-| `math.truncate` — Floating-point truncation | C# | Use a typed pattern | Use `value.truncate()` with an explicit f32 or f64 boundary when preserving C# Math versus MathF semantics. Canonical targets: `Float.truncate`. |
-| `math.round` — Floating-point rounding | C# | Use a typed pattern | Use `value.round()` or `value.roundTo(digits)` for midpoint-to-even floating-point rounding; review result width, decimal inputs, and explicit midpoint modes. Canonical targets: `Float.round`, `Float.roundTo`. |
-| `math.floor` — Floating-point floor | C# | Use a typed pattern | Use `value.floor()` with an explicit f32 or f64 boundary; review C# decimal inputs separately. Canonical targets: `Float.floor`. |
-| `math.ceiling` — Floating-point ceiling | C# | Use a typed pattern | Use `value.ceil()` with an explicit f32 or f64 boundary; review C# decimal inputs separately. Canonical targets: `Float.ceil`. |
-| `math.minimum` — Numeric minimum | C# | Use a typed pattern | Use `left.min(right)` after establishing one intended numeric type; review C# implicit conversions and decimal overloads. Canonical targets: `Numeric.min`. |
-| `math.maximum` — Numeric maximum | C# | Use a typed pattern | Use `left.max(right)` after establishing one intended numeric type; review C# implicit conversions and decimal overloads. Canonical targets: `Numeric.max`. |
-| `math.absolute-value` — Signed absolute value | C# | Use a typed pattern | Use `value.abs()` after establishing a signed numeric type; review C# signed-minimum overflow, unsigned conversions, and decimal inputs. Canonical targets: `Signed.abs`. |
-| `math.power` — Numeric powers | C# | Use a typed pattern | Use `value.squared()` for the corpus-proven exponent two and an explicit typed shift for power-of-two masks; general floating powers remain planned. Canonical targets: `Numeric.squared`. |
-| `string.numeric-parse` — Numeric string parsing | C# | Supported directly | Replace static Parse/TryParse calls and output parameters with fallible `text.parse()` and ordinary `T!` handling. Canonical targets: `String.parse`. [Recipe](ASL_PORTING.md#c-string-operations). |
-| `conversion.integer` — Integer conversion | C# | Use a typed pattern | Choose fixed-width `as`, midpoint-to-even rounding, strict string parsing, or an explicit boolean mapping from the source type; C# checked overflow is not SplitScript cast behavior. Canonical targets: `as`, `if`, `String.parse`, `Float.round`. [Recipe](ASL_PORTING.md#c-convert-operations). |
-| `conversion.float` — Floating-point conversion | C# | Use a typed pattern | Use an explicit f32/f64 `as` cast for numbers, `String.parse` for text, or an `if` expression for booleans. Canonical targets: `as`, `if`, `String.parse`. [Recipe](ASL_PORTING.md#c-convert-operations). |
-| `conversion.boolean` — Boolean conversion | C# | Use a typed pattern | Use `value != 0` for numbers, the value itself for bool, and explicit trimmed ASCII-insensitive true/false handling for strings. Canonical targets: `if`, `String.trimAsciiWhitespace`, `String.equalsIgnoreAsciiCase`. [Recipe](ASL_PORTING.md#c-convert-operations). |
-| `conversion.string` — Display conversion | C# | Use a typed pattern | Use `value as String` for ordinary Display conversion and `integer.toString(radix)` for bases 2 through 36; culture, null, and object overloads require separate policies. Canonical targets: `as`, `Integer.toString`. [Recipe](ASL_PORTING.md#c-convert-operations). |
-| `type.duration` — Timer durations | C# | Supported directly | Use `Duration` instead of C#'s `TimeSpan`. Canonical targets: `Duration`. |
-| `duration.parse` — Text duration parsing | C# | Use a typed pattern | Replace `TimeSpan.Parse` according to whether the input is fixed data or an already-typed timer value; do not preserve culture-sensitive parsing by default. Canonical targets: `Duration.fromSeconds`, `Duration.fromMilliseconds`, `Duration.fromParts`. |
-| `duration.csharp-ticks` — C# duration ticks | C# | Use a typed pattern | Convert 100-nanosecond C# ticks to a source unit explicitly, with range review; SplitScript does not expose C# ticks as a native duration unit. Canonical targets: `Duration.fromNanoseconds`. |
-| `asl.time.monotonic-delay` — Monotonic delays and debouncing | ASL, C# | Use a typed pattern | Replace elapsed-time uses of `DateTime.Now` or `Stopwatch` with an `Instant` captured at the source event and an exact `Duration` comparison. Canonical targets: `Instant`, `Duration`. [Recipe](ASL_PORTING.md#monotonic-delays-and-debouncing). |
-| `type.fixed-width-number` — Fixed-width numeric types | C# | Supported directly | Memory-facing numbers use explicit signedness and bit widths. Canonical targets: `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `f32`, `f64`. |
-| `asl.state.attachment` — Attachment state declaration | ASL | Use a typed pattern | Declare one native process name, an array of alternate process names, or a typed emulator provider per autosplitter file. An ASL declaration listing multiple processes becomes alternate names for one attachment, not concurrent attachments. Names are exact host identities, so Windows executable candidates currently include `.exe`. The declaration owns attachment and defines the fields polled into `old` and `current`. Canonical targets: `state`. [Recipe](ASL_PORTING.md#attachment-state-declarations). |
-| `asl.state.string-n` — Bounded native stringN state | ASL | Use a typed pattern | Choose the native encoding explicitly: `utf8` bounds bytes and `utf16le` bounds two-byte code units. Canonical targets: `state`. [Recipe](ASL_PORTING.md#bounded-native-stringn-state). |
-| `asl.state.version-label` — Version-labelled state blocks | ASL | Use a typed pattern | Use named layouts in one state block and return the selected layout from `onAttach`. Canonical targets: `state`. [Recipe](ASL_PORTING.md#version-labelled-asl-states). |
-| `asl.state.contiguous-aggregate` — Contiguous memory aggregates | ASL | Use a typed pattern | Read physically contiguous values as one naturally aligned record or fixed-length `[T; N]` array when that type exactly matches the target-memory layout. Canonical targets: `record`, `[T; N]`, `state`, `Process.read`. [Recipe](ASL_PORTING.md#contiguous-records-and-fixed-arrays). |
-| `asl.state.helper-snapshots` — State snapshots in helper functions | ASL | Supported directly | Helpers may read `old` and `current` directly or accept caller-selected snapshots as inferred parameters. The compiler propagates direct snapshot requirements and rejects calls before committed snapshots exist. Canonical targets: `fn`, `old`, `current`. [Recipe](ASL_PORTING.md#snapshot-dependent-helper-functions). |
-| `asl.memory.deep-pointer` — DeepPointer | ASL | Supported directly | Use typed state paths for polled fields or `process.follow` for discovered paths. Canonical targets: `state`, `Process.follow`. |
-| `asl.memory.background-scan` — Background signature scans | ASL | Use a typed pattern | Remove legacy worker threads and await a module, explicit-range, or process-wide scan. Scans inspect a bounded window per tick and process closure cancels pending discovery. Canonical targets: `Module.scan`, `Module.scanAny`, `Process.scan`, `Process.scanMemory`, `Process.scanMemoryAny`. [Recipe](ASL_PORTING.md#background-signature-scans). |
-| `asl.async.task-run` — Task.Run | ASL, C# | Use a typed pattern | Replace worker threads with cooperative `await` discovery or a bounded `retry` transaction so timer updates keep yielding predictably. Canonical targets: `await`, `retry`. [Recipe](ASL_PORTING.md#background-signature-scans). |
-| `asl.process.identity` — Attached process identity | ASL | Supported directly | Use `process.name()` to read the exact process candidate that matched during attachment; use module metadata when the executable name alone does not identify a build. Canonical targets: `Process.name`. [Recipe](ASL_PORTING.md#attached-process-identity). |
-| `asl.process.modules` — Loaded module discovery | ASL | Use a typed pattern | Replace the enumerable ASL module bag with the narrow typed probe that matches the source intent: main executable discovery, a known optional module, a required module, or typed build identity. Preserve genuine unknown-name enumeration as an explicit host-runtime gap. Canonical targets: `Process.mainModule`, `Process.loadedModule`, `Process.module`, `Module.fileVersion`, `Module.productVersion`, `Module.versionInfo`. [Recipe](ASL_PORTING.md#attached-process-identity). |
-| `asl.state.memory-watcher` — MemoryWatcher | ASL | Use a typed pattern | Declare polled memory in `state`; use a trailing field `if` with `value` and return `Err(message)` when a transient candidate should retain its last accepted value. Canonical targets: `state`. [Recipe](ASL_PORTING.md#retaining-the-last-accepted-field-value). |
-| `asl.state.memory-watcher-list` — MemoryWatcherList | ASL, C# | Use a typed pattern | Use `state` for a fixed set of named transactional reads or retain runtime-discovered homogeneous addresses in an array; managed collection enumeration remains a distinct provider requirement. Canonical targets: `state`. |
-| `asl.lifecycle.startup` — startup lifecycle block | ASL | Use a typed pattern | Use settings and global declarations for data, then `setup` for remaining process-independent startup statements. Canonical targets: `setup`. [Recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks). |
-| `asl.lifecycle.init` — init lifecycle block | ASL | Use a typed pattern | Use `onAttach` for pre-poll process discovery and `onStateReady` for post-refresh snapshot initialization. Canonical targets: `onAttach`, `onStateReady`. [Recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks). |
-| `asl.lifecycle.update` — update lifecycle block | ASL | Use a typed pattern | Use `whileAttached`; returning false skips the remaining timer decisions for that update. Canonical targets: `whileAttached`. [Recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks). |
-| `asl.lifecycle.exit` — exit lifecycle block | ASL | Use a typed pattern | Use `onDetach` for cleanup that runs exactly once after an attached process closes. Canonical targets: `onDetach`. [Recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks). |
-| `asl.lifecycle.exit-game-time-cleanup` — Exit-time game-time cleanup | ASL | Supported directly | Use `onDetach` for process-exit cleanup and explicitly pause or resume game time only when the original exit block changes that host state. Canonical targets: `onDetach`, `timer.pauseGameTime`, `timer.resumeGameTime`. [Recipe](ASL_PORTING.md#process-exit-game-time-cleanup). |
-| `asl.lifecycle.shutdown` — shutdown lifecycle block | ASL | Planned | Exact script teardown needs the planned host shutdown notification; `onDetach` is not equivalent. [Recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks). |
-| `asl.timer.start-reset-events` — start and reset timer event handlers | ASL | Supported directly | Keep `onStart` and `onReset`; SplitScript samples timer transitions before process attachment so both actions also run while detached. Canonical targets: `onStart`, `onReset`. [Recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks). |
-| `asl.state.attempt-scoped` — Attempt-scoped and run-scoped variables | ASL | Supported directly | Declare a bare top-level `let` and assign it on every completing `onStart` path. The inferred attempt-scoped value remains available across process detach and is cleared after `onReset`, replacing manually reset run-owned state in polling code. Canonical targets: `let`, `onStart`, `onReset`. [Recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks). |
-| `asl.timer.events` — split timer event handler | ASL | Planned | Exact `onSplit` delivery still needs an ordered host event contract that can distinguish splits, skips, and undos between updates. [Recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks). |
-| `asl.timer.state` — Current timer state | ASL | Supported directly | Replace `timer.CurrentPhase` with `timer.state()` and compare the exhaustive `TimerState` enum instead of relying on legacy numeric phase values. Canonical targets: `timer.state`, `TimerState`. [Recipe](ASL_PORTING.md#timer-state). |
-| `asl.timer.current-split-index` — Current timer split index | ASL | Supported directly | Call `timer.currentSplitIndex()` and handle its optional `u64` result so the host's negative no-attempt sentinel cannot become a route index. Canonical targets: `timer.currentSplitIndex`. [Recipe](ASL_PORTING.md#timer-split-index). |
-| `asl.timer.load-removal` — Load removal | ASL | Supported directly | Return the game's known loading state from `isLoading`; fall through or return `None` when the script has no new loading-state observation. Canonical targets: `isLoading`. [Recipe](ASL_PORTING.md#load-removal-and-computed-game-time). |
-| `asl.timer.computed-game-time` — Script-computed game time | ASL | Supported directly | Return a typed `Duration` from `gameTime` when the game exposes its own elapsed clock; fall through or return `None` when no new value is available. Canonical targets: `gameTime`, `Duration`, `Duration.fromFrames`. [Recipe](ASL_PORTING.md#load-removal-and-computed-game-time). |
-| `asl.timer.current-real-time` — LiveSplit current real time | ASL | Planned | Use `Instant` only for independent elapsed-time checks; exact `timer.CurrentTime.RealTime` metadata requires additional host support. [Recipe](ASL_PORTING.md#monotonic-delays-and-debouncing). |
-| `asl.timer.current-game-time` — LiveSplit current game time | ASL | Planned | Keep script-computed game time as a typed `Duration`; reading the host's coherent optional game-time snapshot requires additional runtime support. [Recipe](ASL_PORTING.md#livesplit-timer-metadata-and-control). |
-| `asl.timer.run-metadata` — LiveSplit run and segment metadata | ASL | Planned | Current segment identity, route length, category/game names, and splits-file metadata require a typed read-only host snapshot. [Recipe](ASL_PORTING.md#livesplit-timer-metadata-and-control). |
-| `asl.timer.controlled-mutation` — LiveSplit timer configuration | ASL | Planned | Run-offset and timing-method access needs an ordered least-privilege host contract; ports must not silently omit these user-visible mutations. [Recipe](ASL_PORTING.md#livesplit-timer-metadata-and-control). |
-| `asl.settings.dynamic-lookup` — Dynamic settings lookup | ASL | Supported directly | Replace `settings[key]` with `settings.enabled(key)` and `settings.ContainsKey(key)` with `settings.contains(key)`. Declare exact host strings with `key "..."`; choice and file settings remain statically typed. Canonical targets: `settings`, `oldSettings`. [Recipe](ASL_PORTING.md#static-settings-declarations). |
-| `asl.settings.registration` — Runtime settings registration | ASL | Use a typed pattern | Move `settings.Add` calls into the static `settings` declaration, preserving the display label, stable host key, default, hierarchy, and tooltip explicitly. A bounded `settings.Add` loop becomes a compile-time `settings family` instead of hand-expanded declarations. Canonical targets: `settings`, `oldSettings`, `stable setting key`, `settings family`. [Recipe](ASL_PORTING.md#static-settings-declarations). |
-| `asl.settings.finite-family` — Finite startup-generated settings | ASL | Supported directly | Use a compile-time settings family for bounded integer-keyed booleans; it lowers to ordinary declarations and remains available through `settings.enabled(key)`. Canonical targets: `settings family`. [Recipe](ASL_PORTING.md#finite-settings-families). |
-| `asl.collection.list` — List<T> collections | ASL, C# | Use a typed pattern | Use `[T]` for C# ordered list semantics; size-changing operations belong on variable-length arrays, while `[T; N]` remains fixed and no separate List type is planned. Canonical targets: `[T].length`, `[T].contains`, `[T].indexOf`, `[T].set`, `[T].push`, `[T].extend`, `[T].remove`, `[T].removeAt`, `[T].pop`, `[T].clear`. [Recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets). |
-| `asl.state.mutable-current` — Assignments to current | ASL | Supported directly | Assign directly to `current.field` for an explicit post-read override; `old` remains read-only. Use a trailing state-field `if` when rejection must happen at the transactional acceptance boundary, including the first snapshot. Canonical targets: `current`. [Recipe](ASL_PORTING.md#retaining-the-last-accepted-field-value). |
-| `asl.runtime.refresh-rate` — refreshRate | ASL | Supported directly | Use the declarative `tickRate` policy for stable attached and detached polling rates; reserve `setTickRate` for temporary dynamic changes. Canonical targets: `tickRate`. |
-| `asr.emulator.gba` — GBA emulator attachment and memory mapping | ASL, Rust | Supported directly | Use `GBA` for VisualBoyAdvance or VBA-M, mGBA, NO$GBA, Mednafen, supported RetroArch cores, and mGBA-based BizHawk. The provider owns emulator discovery and the `gba` root reads original EWRAM and IWRAM addresses without manual `DeepPointer` mappings. Canonical targets: `GBA`. |
-| `asr.emulator.ps1` — PlayStation emulator attachment and memory mapping | ASL, Rust | Supported directly | Use `PS1` for ePSXe, pSX, DuckStation, Mednafen, PCSX-Redux, XEBRA, and supported RetroArch cores. The provider owns emulator discovery and the `ps1` root reads original PlayStation addresses. Canonical targets: `PS1`. |
-| `asr.emulator.ps2` — PlayStation 2 emulator attachment and memory mapping | ASL, Rust | Supported directly | Use `PS2` for PCSX2 and the supported RetroArch PCSX2 core. The provider owns emulator discovery and the `ps2` root reads original PlayStation 2 addresses without manual host-memory mappings. Canonical targets: `PS2`. |
-| `asr.emulator.sms` — Master System and Game Gear emulator attachment | ASL, Rust | Supported directly | Use `SMS` for Fusion, BlastEm, Mednafen, and supported RetroArch Master System or Game Gear cores. The provider owns emulator discovery and the `sms` root reads original work-RAM addresses. Canonical targets: `SMS`. |
-| `asr.emulator.genesis` — Genesis emulator attachment and memory mapping | ASL, Rust | Supported directly | Use `Genesis` for Fusion, Gens, BlastEm, Sega Game Room or Genesis Classics, and supported RetroArch cores. The provider owns discovery, normalizes emulator storage and byte order, and reads original work-RAM offsets through `genesis`. Canonical targets: `Genesis`. |
-| `asr.emulator.gcn` — GameCube emulator attachment and memory mapping | ASL, Rust | Supported directly | Use `GCN` for Dolphin and the supported RetroArch Dolphin core. The provider owns emulator discovery, address translation, and big-endian decoding, so `gcn` reads original GameCube addresses without manual byte swapping. Canonical targets: `GCN`. |
-| `asr.emulator.wii` — Wii emulator attachment and memory mapping | ASL, Rust | Supported directly | Use `Wii` for Dolphin and the supported RetroArch Dolphin core. The provider owns emulator discovery, MEM1 and MEM2 translation, and big-endian decoding, so `wii` reads original Wii addresses without manual byte swapping. Canonical targets: `Wii`. |
-| `asl.unity.managed-schema` — UnityASL, mono.Make, and managed metadata | ASL, C# | Supported directly | Use the `Unity` state provider with top-level `image`, `namespace`, and `class` schemas instead of manually discovering Mono or IL2CPP metadata with `UnityASL`, `mono.Make<T>`, or `mono.MakeString`. Canonical targets: `Unity`, `image`, `namespace`, `class`, `static`, `from`. [Recipe](ASL_PORTING.md#unityasl-and-managed-metadata). |
+## ASL
+
+Start with the [complete ASL porting guide](ASL_PORTING.md) for lifecycle and semantic context.
+
+### Attachment and state
+
+- **Attachment state declaration** (*Use a typed pattern*): Declare one native process name, an array of alternate process names, or a typed emulator provider per autosplitter file. An ASL declaration listing multiple processes becomes alternate names for one attachment, not concurrent attachments. Names are exact host identities, so Windows executable candidates currently include `.exe`. The declaration owns attachment and defines the fields polled into `old` and `current`. Canonical: `state`. [Porting recipe](ASL_PORTING.md#attachment-state-declarations).
+
+- **Bounded native stringN state** (*Use a typed pattern*): Choose the native encoding explicitly: `utf8` bounds bytes and `utf16le` bounds two-byte code units. Canonical: `state`. [Porting recipe](ASL_PORTING.md#bounded-native-stringn-state).
+
+- **Version-labelled state blocks** (*Use a typed pattern*): Use named layouts in one state block and return the selected layout from `onAttach`. Canonical: `state`. [Porting recipe](ASL_PORTING.md#version-labelled-asl-states).
+
+- **Contiguous memory aggregates** (*Use a typed pattern*): Read physically contiguous values as one naturally aligned record or fixed-length `[T; N]` array when that type exactly matches the target-memory layout. Canonical: `record`, `[T; N]`, `state`, `Process.read`. [Porting recipe](ASL_PORTING.md#contiguous-records-and-fixed-arrays).
+
+- **State snapshots in helper functions** (*Supported directly*): Helpers may read `old` and `current` directly or accept caller-selected snapshots as inferred parameters. The compiler propagates direct snapshot requirements and rejects calls before committed snapshots exist. Canonical: `fn`, `old`, `current`. [Porting recipe](ASL_PORTING.md#snapshot-dependent-helper-functions).
+
+- **MemoryWatcher** (*Use a typed pattern*): Declare polled memory in `state`; use a trailing field `if` with `value` and return `Err(message)` when a transient candidate should retain its last accepted value. Canonical: `state`. [Porting recipe](ASL_PORTING.md#retaining-the-last-accepted-field-value).
+
+- **MemoryWatcherList** (*Use a typed pattern*): Use `state` for a fixed set of named transactional reads or retain runtime-discovered homogeneous addresses in an array; managed collection enumeration remains a distinct provider requirement. Canonical: `state`.
+
+- **Attempt-scoped and run-scoped variables** (*Supported directly*): Declare a bare top-level `let` and assign it on every completing `onStart` path. The inferred attempt-scoped value remains available across process detach and is cleared after `onReset`, replacing manually reset run-owned state in polling code. Canonical: `let`, `onStart`, `onReset`. [Porting recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks).
+
+- **Assignments to current** (*Supported directly*): Assign directly to `current.field` for an explicit post-read override; `old` remains read-only. Use a trailing state-field `if` when rejection must happen at the transactional acceptance boundary, including the first snapshot. Canonical: `current`. [Porting recipe](ASL_PORTING.md#retaining-the-last-accepted-field-value).
+
+### Process and memory
+
+- **DeepPointer** (*Supported directly*): Use typed state paths for polled fields or `process.follow` for discovered paths. Canonical: `state`, `Process.follow`.
+
+- **Background signature scans** (*Use a typed pattern*): Remove legacy worker threads and await a module, explicit-range, or process-wide scan. Scans inspect a bounded window per tick and process closure cancels pending discovery. Canonical: `Module.scan`, `Module.scanAny`, `Process.scan`, `Process.scanMemory`, `Process.scanMemoryAny`. [Porting recipe](ASL_PORTING.md#background-signature-scans).
+
+- **Task.Run** (*Use a typed pattern*): Replace worker threads with cooperative `await` discovery or a bounded `retry` transaction so timer updates keep yielding predictably. Canonical: `await`, `retry`. [Porting recipe](ASL_PORTING.md#background-signature-scans).
+
+- **Attached process identity** (*Supported directly*): Use `process.name()` to read the exact process candidate that matched during attachment; use module metadata when the executable name alone does not identify a build. Canonical: `Process.name`. [Porting recipe](ASL_PORTING.md#attached-process-identity).
+
+- **Loaded module discovery** (*Use a typed pattern*): Replace the enumerable ASL module bag with the narrow typed probe that matches the source intent: main executable discovery, a known optional module, a required module, or typed build identity. Preserve genuine unknown-name enumeration as an explicit host-runtime gap. Canonical: `Process.mainModule`, `Process.loadedModule`, `Process.module`, `Module.fileVersion`, `Module.productVersion`, `Module.versionInfo`. [Porting recipe](ASL_PORTING.md#attached-process-identity).
+
+### Lifecycle and timer
+
+- **Monotonic delays and debouncing** (*Use a typed pattern*): Replace elapsed-time uses of `DateTime.Now` or `Stopwatch` with an `Instant` captured at the source event and an exact `Duration` comparison. Canonical: `Instant`, `Duration`. [Porting recipe](ASL_PORTING.md#monotonic-delays-and-debouncing).
+
+- **startup lifecycle block** (*Use a typed pattern*): Use settings and global declarations for data, then `setup` for remaining process-independent startup statements. Canonical: `setup`. [Porting recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks).
+
+- **init lifecycle block** (*Use a typed pattern*): Use `onAttach` for pre-poll process discovery and `onStateReady` for post-refresh snapshot initialization. Canonical: `onAttach`, `onStateReady`. [Porting recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks).
+
+- **update lifecycle block** (*Use a typed pattern*): Use `whileAttached`; returning false skips the remaining timer decisions for that update. Canonical: `whileAttached`. [Porting recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks).
+
+- **exit lifecycle block** (*Use a typed pattern*): Use `onDetach` for cleanup that runs exactly once after an attached process closes. Canonical: `onDetach`. [Porting recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks).
+
+- **Exit-time game-time cleanup** (*Supported directly*): Use `onDetach` for process-exit cleanup and explicitly pause or resume game time only when the original exit block changes that host state. Canonical: `onDetach`, `timer.pauseGameTime`, `timer.resumeGameTime`. [Porting recipe](ASL_PORTING.md#process-exit-game-time-cleanup).
+
+- **start and reset timer event handlers** (*Supported directly*): Keep `onStart` and `onReset`; SplitScript samples timer transitions before process attachment so both actions also run while detached. Canonical: `onStart`, `onReset`. [Porting recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks).
+
+- **Current timer state** (*Supported directly*): Replace `timer.CurrentPhase` with `timer.state()` and compare the exhaustive `TimerState` enum instead of relying on legacy numeric phase values. Canonical: `timer.state`, `TimerState`. [Porting recipe](ASL_PORTING.md#timer-state).
+
+- **Current timer split index** (*Supported directly*): Call `timer.currentSplitIndex()` and handle its optional `u64` result so the host's negative no-attempt sentinel cannot become a route index. Canonical: `timer.currentSplitIndex`. [Porting recipe](ASL_PORTING.md#timer-split-index).
+
+- **Load removal** (*Supported directly*): Return the game's known loading state from `isLoading`; fall through or return `None` when the script has no new loading-state observation. Canonical: `isLoading`. [Porting recipe](ASL_PORTING.md#load-removal-and-computed-game-time).
+
+- **Script-computed game time** (*Supported directly*): Return a typed `Duration` from `gameTime` when the game exposes its own elapsed clock; fall through or return `None` when no new value is available. Canonical: `gameTime`, `Duration`, `Duration.fromFrames`. [Porting recipe](ASL_PORTING.md#load-removal-and-computed-game-time).
+
+- **refreshRate** (*Supported directly*): Use the declarative `tickRate` policy for stable attached and detached polling rates; reserve `setTickRate` for temporary dynamic changes. Canonical: `tickRate`.
+
+### Settings
+
+- **Dynamic settings lookup** (*Supported directly*): Replace `settings[key]` with `settings.enabled(key)` and `settings.ContainsKey(key)` with `settings.contains(key)`. Declare exact host strings with `key "..."`; choice and file settings remain statically typed. Canonical: `settings`, `oldSettings`. [Porting recipe](ASL_PORTING.md#static-settings-declarations).
+
+- **Runtime settings registration** (*Use a typed pattern*): Move `settings.Add` calls into the static `settings` declaration, preserving the display label, stable host key, default, hierarchy, and tooltip explicitly. A bounded `settings.Add` loop becomes a compile-time `settings family` instead of hand-expanded declarations. Canonical: `settings`, `oldSettings`, `stable setting key`, `settings family`. [Porting recipe](ASL_PORTING.md#static-settings-declarations).
+
+- **Finite startup-generated settings** (*Supported directly*): Use a compile-time settings family for bounded integer-keyed booleans; it lowers to ordinary declarations and remains available through `settings.enabled(key)`. Canonical: `settings family`. [Porting recipe](ASL_PORTING.md#finite-settings-families).
+
+### Collections and text
+
+- **Bounded integer ranges** (*Supported directly*): Use `..<` for an exclusive upper endpoint or `..=` for an inclusive one; SplitScript rejects bare `..` so the endpoint policy is explicit. Canonical: `range`. [Porting recipe](ASL_PORTING.md#bounded-integer-iteration).
+
+- **List<T> collections** (*Use a typed pattern*): Use `[T]` for C# ordered list semantics; size-changing operations belong on variable-length arrays, while `[T; N]` remains fixed and no separate List type is planned. Canonical: `[T].length`, `[T].contains`, `[T].indexOf`, `[T].set`, `[T].push`, `[T].extend`, `[T].remove`, `[T].removeAt`, `[T].pop`, `[T].clear`. [Porting recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets).
+
+### Unity and emulators
+
+- **GBA emulator attachment and memory mapping** (*Supported directly*): Use `GBA` for VisualBoyAdvance or VBA-M, mGBA, NO$GBA, Mednafen, supported RetroArch cores, and mGBA-based BizHawk. The provider owns emulator discovery and the `gba` root reads original EWRAM and IWRAM addresses without manual `DeepPointer` mappings. Canonical: `GBA`.
+
+- **PlayStation emulator attachment and memory mapping** (*Supported directly*): Use `PS1` for ePSXe, pSX, DuckStation, Mednafen, PCSX-Redux, XEBRA, and supported RetroArch cores. The provider owns emulator discovery and the `ps1` root reads original PlayStation addresses. Canonical: `PS1`.
+
+- **PlayStation 2 emulator attachment and memory mapping** (*Supported directly*): Use `PS2` for PCSX2 and the supported RetroArch PCSX2 core. The provider owns emulator discovery and the `ps2` root reads original PlayStation 2 addresses without manual host-memory mappings. Canonical: `PS2`.
+
+- **Master System and Game Gear emulator attachment** (*Supported directly*): Use `SMS` for Fusion, BlastEm, Mednafen, and supported RetroArch Master System or Game Gear cores. The provider owns emulator discovery and the `sms` root reads original work-RAM addresses. Canonical: `SMS`.
+
+- **Genesis emulator attachment and memory mapping** (*Supported directly*): Use `Genesis` for Fusion, Gens, BlastEm, Sega Game Room or Genesis Classics, and supported RetroArch cores. The provider owns discovery, normalizes emulator storage and byte order, and reads original work-RAM offsets through `genesis`. Canonical: `Genesis`.
+
+- **GameCube emulator attachment and memory mapping** (*Supported directly*): Use `GCN` for Dolphin and the supported RetroArch Dolphin core. The provider owns emulator discovery, address translation, and big-endian decoding, so `gcn` reads original GameCube addresses without manual byte swapping. Canonical: `GCN`.
+
+- **Wii emulator attachment and memory mapping** (*Supported directly*): Use `Wii` for Dolphin and the supported RetroArch Dolphin core. The provider owns emulator discovery, MEM1 and MEM2 translation, and big-endian decoding, so `wii` reads original Wii addresses without manual byte swapping. Canonical: `Wii`.
+
+- **UnityASL, mono.Make, and managed metadata** (*Supported directly*): Use the `Unity` state provider with top-level `image`, `namespace`, and `class` schemas instead of manually discovering Mono or IL2CPP metadata with `UnityASL`, `mono.Make<T>`, or `mono.MakeString`. Canonical: `Unity`, `image`, `namespace`, `class`, `static`, `from`. [Porting recipe](ASL_PORTING.md#unityasl-and-managed-metadata).
+
+### Unsupported host behavior
+
+- **shutdown lifecycle block** (*Planned*): Exact script teardown needs the planned host shutdown notification; `onDetach` is not equivalent. [Porting recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks).
+
+- **split timer event handler** (*Planned*): Exact `onSplit` delivery still needs an ordered host event contract that can distinguish splits, skips, and undos between updates. [Porting recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks).
+
+- **LiveSplit current real time** (*Planned*): Use `Instant` only for independent elapsed-time checks; exact `timer.CurrentTime.RealTime` metadata requires additional host support. [Porting recipe](ASL_PORTING.md#monotonic-delays-and-debouncing).
+
+- **LiveSplit current game time** (*Planned*): Keep script-computed game time as a typed `Duration`; reading the host's coherent optional game-time snapshot requires additional runtime support. [Porting recipe](ASL_PORTING.md#livesplit-timer-metadata-and-control).
+
+- **LiveSplit run and segment metadata** (*Planned*): Current segment identity, route length, category/game names, and splits-file metadata require a typed read-only host snapshot. [Porting recipe](ASL_PORTING.md#livesplit-timer-metadata-and-control).
+
+- **LiveSplit timer configuration** (*Planned*): Run-offset and timing-method access needs an ordered least-privilege host contract; ports must not silently omit these user-visible mutations. [Porting recipe](ASL_PORTING.md#livesplit-timer-metadata-and-control).
+
+## C#
+
+- **Variable declarations** (*Supported directly*): Use one inferred `let` declaration; SplitScript has no const/let split. Canonical: `let`.
+
+- **Function declarations** (*Supported directly*): Functions and methods use the `fn` declaration keyword. Canonical: `fn`.
+
+- **String type** (*Supported directly*): The immutable UTF-8 string type is named `String`. Canonical: `String`.
+
+- **ASCII string lowercasing** (*Supported directly*): Use `toAsciiLowerCase` when game identifiers require ASCII-only normalization; this is not culture-sensitive Unicode lowercasing. Canonical: `String.toAsciiLowerCase`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **ASCII string uppercasing** (*Supported directly*): Use `toAsciiUpperCase` when game identifiers require ASCII-only normalization; this is not culture-sensitive Unicode uppercasing. Canonical: `String.toAsciiUpperCase`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **String equality** (*Supported directly*): Use `==` or `!=` for exact string content equality; use `equalsIgnoreAsciiCase` only when ASCII-insensitive matching is intended. Canonical: `String`, `String.equalsIgnoreAsciiCase`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **Bitwise complement** (*Supported directly*): Use type-directed `!`: it is logical negation for booleans and width-preserving bitwise complement for integers. Canonical: `Integer.bitNot`.
+
+- **Substring extraction** (*Use a typed pattern*): Use fallible `slice(start, exclusiveEnd)` only after translating C#'s length argument and verifying that UTF-16 source positions are valid UTF-8 byte offsets. Canonical: `String.slice`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **Substring position** (*Use a typed pattern*): Use `indexOf` for an optional UTF-8 byte offset; review C# UTF-16 index arithmetic and replace the `-1` sentinel with `T?` handling. Canonical: `String.indexOf`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **Last substring position** (*Use a typed pattern*): Use `lastIndexOf` for an optional final UTF-8 byte offset; review C# UTF-16 index arithmetic and replace the `-1` sentinel with `T?` handling. Canonical: `String.lastIndexOf`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **Exact string replacement** (*Use a typed pattern*): Use fallible `replaceAll` for immutable exact replacement; explicitly handle failure and translate a null C# replacement to an empty string only when deletion was intended. Canonical: `String.replaceAll`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **ASCII whitespace trimming** (*Use a typed pattern*): Use `trimAsciiWhitespace` for text known to use ASCII boundary whitespace; review Unicode and character-set trimming explicitly. Canonical: `String.trimAsciiWhitespace`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **String padding** (*Use a typed pattern*): Use `padStart(width, fill)` or `padEnd(width, fill)` with an explicit character; review C# UTF-16 widths against SplitScript's Unicode-scalar widths. Canonical: `String.padStart`, `String.padEnd`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **Nullable string emptiness** (*Use a typed pattern*): Use `String.isEmpty` for required strings and match `String?` explicitly when absence should also count as empty. Canonical: `String.isEmpty`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **Nullable blank strings** (*Use a typed pattern*): Use `String.isBlank` for required strings and match `String?` explicitly when absence should also count as blank. Canonical: `String.isBlank`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **String length** (*Use a typed pattern*): Use `isEmpty()` for emptiness and `byteLength()` only for UTF-8 byte-oriented or proven ASCII logic; C# `Length` counts UTF-16 code units. Canonical: `String.isEmpty`, `String.byteLength`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **Array length** (*Supported directly*): Call `values.length()` for the `u32` element count of dynamic and fixed arrays. Canonical: `[T].length`. [Porting recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets).
+
+- **Bulk array extension** (*Supported directly*): Call `values.extend(moreValues)` to append a typed array in order; extending an array with itself duplicates its original contents once. Canonical: `[T].extend`. [Porting recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets).
+
+- **Collection count** (*Supported directly*): After choosing an array or set from the source's ordering and uniqueness requirements, call `values.length()` for its `u32` count. Canonical: `[T].length`, `Set.length`. [Porting recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets).
+
+- **String collection joining** (*Use a typed pattern*): Use `String.join(values, separator)` for a typed string array; convert C# object, variadic, enumerable, and range overloads explicitly. Canonical: `String.join`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **Floating-point square root** (*Use a typed pattern*): Use `value.sqrt()` with an explicit f32 or f64 boundary when preserving C# Math versus MathF semantics. Canonical: `Float.sqrt`.
+
+- **Floating-point truncation** (*Use a typed pattern*): Use `value.truncate()` with an explicit f32 or f64 boundary when preserving C# Math versus MathF semantics. Canonical: `Float.truncate`.
+
+- **Floating-point rounding** (*Use a typed pattern*): Use `value.round()` or `value.roundTo(digits)` for midpoint-to-even floating-point rounding; review result width, decimal inputs, and explicit midpoint modes. Canonical: `Float.round`, `Float.roundTo`.
+
+- **Floating-point floor** (*Use a typed pattern*): Use `value.floor()` with an explicit f32 or f64 boundary; review C# decimal inputs separately. Canonical: `Float.floor`.
+
+- **Floating-point ceiling** (*Use a typed pattern*): Use `value.ceil()` with an explicit f32 or f64 boundary; review C# decimal inputs separately. Canonical: `Float.ceil`.
+
+- **Numeric minimum** (*Use a typed pattern*): Use `left.min(right)` after establishing one intended numeric type; review C# implicit conversions and decimal overloads. Canonical: `Numeric.min`.
+
+- **Numeric maximum** (*Use a typed pattern*): Use `left.max(right)` after establishing one intended numeric type; review C# implicit conversions and decimal overloads. Canonical: `Numeric.max`.
+
+- **Signed absolute value** (*Use a typed pattern*): Use `value.abs()` after establishing a signed numeric type; review C# signed-minimum overflow, unsigned conversions, and decimal inputs. Canonical: `Signed.abs`.
+
+- **Numeric powers** (*Use a typed pattern*): Use `value.squared()` for the corpus-proven exponent two and an explicit typed shift for power-of-two masks; general floating powers remain planned. Canonical: `Numeric.squared`.
+
+- **Numeric string parsing** (*Supported directly*): Replace static Parse/TryParse calls and output parameters with fallible `text.parse()` and ordinary `T!` handling. Canonical: `String.parse`. [Porting recipe](ASL_PORTING.md#c-string-operations).
+
+- **Integer conversion** (*Use a typed pattern*): Choose fixed-width `as`, midpoint-to-even rounding, strict string parsing, or an explicit boolean mapping from the source type; C# checked overflow is not SplitScript cast behavior. Canonical: `as`, `if`, `String.parse`, `Float.round`. [Porting recipe](ASL_PORTING.md#c-convert-operations).
+
+- **Floating-point conversion** (*Use a typed pattern*): Use an explicit f32/f64 `as` cast for numbers, `String.parse` for text, or an `if` expression for booleans. Canonical: `as`, `if`, `String.parse`. [Porting recipe](ASL_PORTING.md#c-convert-operations).
+
+- **Boolean conversion** (*Use a typed pattern*): Use `value != 0` for numbers, the value itself for bool, and explicit trimmed ASCII-insensitive true/false handling for strings. Canonical: `if`, `String.trimAsciiWhitespace`, `String.equalsIgnoreAsciiCase`. [Porting recipe](ASL_PORTING.md#c-convert-operations).
+
+- **Display conversion** (*Use a typed pattern*): Use `value as String` for ordinary Display conversion and `integer.toString(radix)` for bases 2 through 36; culture, null, and object overloads require separate policies. Canonical: `as`, `Integer.toString`. [Porting recipe](ASL_PORTING.md#c-convert-operations).
+
+- **Timer durations** (*Supported directly*): Use `Duration` instead of C#'s `TimeSpan`. Canonical: `Duration`.
+
+- **Text duration parsing** (*Use a typed pattern*): Replace `TimeSpan.Parse` according to whether the input is fixed data or an already-typed timer value; do not preserve culture-sensitive parsing by default. Canonical: `Duration.fromSeconds`, `Duration.fromMilliseconds`, `Duration.fromParts`.
+
+- **C# duration ticks** (*Use a typed pattern*): Convert 100-nanosecond C# ticks to a source unit explicitly, with range review; SplitScript does not expose C# ticks as a native duration unit. Canonical: `Duration.fromNanoseconds`.
+
+- **Fixed-width numeric types** (*Supported directly*): Memory-facing numbers use explicit signedness and bit widths. Canonical: `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `f32`, `f64`.
+
+## JavaScript
+
+- **Absent optional values** (*Supported directly*): `None` is SplitScript's zero-sized unit value and the absent side of an option. Canonical: `None`.
+
+- **Strict equality operators** (*Supported directly*): Use typed `==` and `!=`; SplitScript has no coercing equality operators, so JavaScript's extra `=` is unnecessary. Canonical: `==`, `!=`.
+
+## Rust
+
+- **Numeric byte order** (*Supported directly*): Use `Numeric.swapBytes` to reverse a numeric value's raw bytes after reading data stored in the opposite byte order. It preserves the exact integer or floating-point type; eight-bit values are unchanged. Canonical: `Numeric.swapBytes`.

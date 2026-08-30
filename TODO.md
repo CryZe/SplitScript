@@ -448,7 +448,7 @@ concepts rather than maintaining a parallel inventory.
   to generated exact symbol pages. Move its catalog IDs, inference internals,
   HIR/Wasm IR, compiler context, and backend dispatch material to compiler
   architecture, and remove manually maintained public-member inventories.
-- [ ] Replace the flat migration capability table and repeated alphabetical
+- [x] Replace the flat migration capability table and repeated alphabetical
   catalog renderings with source-first, task-grouped navigation. Within ASL,
   group attachment/state, process/memory, lifecycle/timer, settings,
   collections/text, Unity/emulators, and unsupported host behavior. Detailed

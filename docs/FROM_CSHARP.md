@@ -6,6 +6,12 @@ general .NET environment. Its lifecycle, process access, error values, and
 settings are language features, so translating only the spelling is not
 enough.
 
+Keep these common spelling changes in mind:
+
+- C# `int` becomes SplitScript [`i32`].
+- C# `string` becomes SplitScript [`String`].
+- C# `TimeSpan` becomes SplitScript [`Duration`].
+
 ## Declarations and types
 
 Use [`let`] for every local and global variable and [`fn`] for functions. Bindings
@@ -199,3 +205,10 @@ split {
     return settings.completionSplit && !old.completed && current.completed
 }
 ```
+
+## Next step
+
+Open **Getting started** from the documentation index and build its first
+autosplitter workflow. When a particular C# API does not translate directly,
+use **Search Documentation** with the original spelling; migration results link
+to the canonical SplitScript symbol or focused porting recipe.

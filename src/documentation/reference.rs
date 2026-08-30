@@ -8,7 +8,10 @@ use std::{
 use crate::{
     catalog::Documentation,
     language::{LanguageCatalog, LanguageItem, LanguageItemId, LanguageItemKind},
-    migration::{MigrationCatalog, MigrationConcept, MigrationConceptId, MigrationTarget},
+    migration::{
+        ForeignSpellingReplacement, MigrationCatalog, MigrationConcept, MigrationConceptId,
+        MigrationNavigationGroup, MigrationSupport, MigrationTarget, migration_navigation_group,
+    },
     stdlib::{
         CoreTypeId, FieldVisibility, ItemKind, StandardLibrary, StdlibOwner, StdlibSymbolId,
         StdlibTypeKind, TypeRef,
@@ -1101,20 +1104,43 @@ impl DocumentationReference {
     fn migration_index_page(&self) -> DocumentationPage {
         let uri = "/migration/index.md";
         let migration = MigrationCatalog::default();
-        let mut concepts = migration.concepts().iter().collect::<Vec<_>>();
-        concepts.sort_by_key(|concept| concept.name.to_ascii_lowercase());
         let mut markdown = format!(
-            "{}\n\n# Migration\n\nCompiler-owned guidance from ASL, C#, JavaScript, and Rust to canonical SplitScript syntax and APIs.\n",
+            "{}\n\n# Migration\n\nChoose the source language first, then the task or source concept. Stable catalog identities remain searchable, but the navigation follows the way a porter approaches the work.\n",
             reference_breadcrumb(uri, Vec::new(), "Migration")
         );
-        append_reference_table_header(&mut markdown, &["Concept", "Description"]);
-        for concept in concepts {
-            markdown.push_str(&format!(
-                "\n| [{}]({}) | {} |",
-                escape_markdown_table_cell(concept.name),
-                relative_document_link(uri, &migration_concept_uri(concept.id)),
-                table_prose(concept.summary, uri, &self.library),
-            ));
+        let mut current_source = None;
+        for group in MigrationNavigationGroup::ALL {
+            let mut concepts = migration
+                .concepts()
+                .iter()
+                .filter(|concept| migration_navigation_group(concept) == *group)
+                .collect::<Vec<_>>();
+            if concepts.is_empty() {
+                continue;
+            }
+            concepts.sort_by_key(|concept| concept.name.to_ascii_lowercase());
+            if current_source != Some(group.source()) {
+                current_source = Some(group.source());
+                markdown.push_str(&format!("\n\n## {}", group.source().name()));
+                if group.source() == crate::migration::SourceLanguage::Asl {
+                    markdown.push_str(&format!(
+                        "\n\nFor lifecycle and semantic context, start with the [complete ASL porting guide]({}).",
+                        relative_document_link(uri, "/guides/asl-porting.md"),
+                    ));
+                }
+            }
+            if let Some(task) = group.task() {
+                markdown.push_str(&format!("\n\n### {task}"));
+            }
+            for concept in concepts {
+                markdown.push_str(&format!(
+                    "\n\n- [{}]({}): {} _{}_",
+                    concept.name,
+                    relative_document_link(uri, &migration_concept_uri(concept.id)),
+                    intra_doc::render_links(concept.summary, uri, &self.library),
+                    concept.support.label(),
+                ));
+            }
         }
         DocumentationPage {
             uri: uri.to_owned(),
@@ -1137,51 +1163,113 @@ impl DocumentationReference {
             .join(", ");
         let summary = intra_doc::render_links(concept.summary, &uri, &self.library);
         let mut markdown = format!(
-            "{}\n\n# {}\n\n_Migration from {sources}_\n\n**Status:** {}\n\n{}",
+            "{}\n\n# {}\n\n_Migration from {sources}_",
             reference_breadcrumb(
                 &uri,
                 vec![("Migration".to_owned(), "/migration/index.md".to_owned())],
                 concept.name,
             ),
             concept.name,
-            concept.support.label(),
-            summary,
         );
-        if !concept.targets.is_empty() {
-            markdown.push_str("\n\n## Canonical SplitScript\n");
-            append_reference_table_header(&mut markdown, &["Symbol", "Kind"]);
-            for target in concept.targets {
-                let label = migration.target_display(*target);
-                let rendered = migration_target_uri(*target, &self.library).map_or_else(
-                    || format!("`{}`", escape_markdown_table_cell(&label)),
-                    |target_uri| {
-                        format!(
-                            "[{}]({})",
-                            escape_markdown_table_cell(&label),
-                            relative_document_link(&uri, &target_uri),
-                        )
-                    },
-                );
+
+        markdown.push_str("\n\n## Source pattern");
+        if concept.spellings.is_empty() {
+            markdown.push_str(&format!(
+                "\n\nLook for the {} concept **{}** in the source. The semantic difference below is more important than a token-for-token rewrite.",
+                sources, concept.name,
+            ));
+        } else {
+            for spelling in concept.spellings {
                 markdown.push_str(&format!(
-                    "\n| {rendered} | {} |",
-                    migration_target_kind(*target),
+                    "\n\n- {}: {}",
+                    spelling.source.name(),
+                    migration_source_code(spelling.spelling),
                 ));
             }
         }
+
+        markdown.push_str("\n\n## Canonical SplitScript");
+        let replacements = concept
+            .spellings
+            .iter()
+            .filter(|spelling| spelling.replacement != ForeignSpellingReplacement::Remove)
+            .collect::<Vec<_>>();
+        if !replacements.is_empty() {
+            for spelling in replacements {
+                markdown.push_str(&format!(
+                    "\n\n- {} becomes {}.",
+                    migration_source_code(spelling.spelling),
+                    migration_source_code(spelling.replacement.text()),
+                ));
+            }
+        }
+        if concept.targets.is_empty() {
+            markdown
+                .push_str("\n\nThere is no currently supported canonical API for this behavior.");
+        } else {
+            markdown.push_str("\n\nUse the canonical language and API symbols linked below.");
+        }
+
+        markdown.push_str(&format!("\n\n## Semantic difference\n\n{summary}"));
+
+        markdown.push_str("\n\n## Supported hosts\n\n");
+        match concept.support {
+            MigrationSupport::Direct | MigrationSupport::TypedPattern
+                if concept
+                    .targets
+                    .iter()
+                    .any(|target| matches!(target, MigrationTarget::StateProvider(_))) =>
+            {
+                markdown.push_str(
+                    "The linked state-provider page is the canonical list of supported runtimes or emulators. The compiler rejects unsupported provider forms.",
+                );
+            }
+            MigrationSupport::Direct | MigrationSupport::TypedPattern => markdown.push_str(
+                "This uses the standard SplitScript runtime contract. Any provider-specific requirements are documented by the linked canonical API.",
+            ),
+            MigrationSupport::Planned => markdown.push_str(
+                "No supported host currently exposes the complete behavior required by this source pattern.",
+            ),
+            MigrationSupport::SandboxNonGoal => markdown.push_str(
+                "SplitScript intentionally does not expose this behavior through its sandboxed host contract.",
+            ),
+        }
+
+        markdown.push_str("\n\n## Related reference");
+        for target in concept.targets {
+            let label = migration.target_display(*target);
+            let rendered = migration_target_uri(*target, &self.library).map_or_else(
+                || format!("`{label}`"),
+                |target_uri| format!("[{}]({})", label, relative_document_link(&uri, &target_uri),),
+            );
+            markdown.push_str(&format!(
+                "\n\n- {rendered} ({})",
+                migration_target_kind(*target),
+            ));
+        }
         if let Some(anchor) = concept.cookbook_anchor {
             markdown.push_str(&format!(
-                "\n\n[Open the complete porting recipe]({}#{anchor})",
+                "\n\n- [Complete porting recipe]({}#{anchor})",
                 relative_document_link(&uri, "/guides/asl-porting.md"),
             ));
         }
-        if !concept.spellings.is_empty() {
-            markdown.push_str("\n\n## Recognized spellings\n");
-            append_reference_table_header(&mut markdown, &["Source", "Spelling"]);
-            for spelling in concept.spellings {
+        if concept.targets.is_empty() && concept.cookbook_anchor.is_none() {
+            markdown.push_str("\n\nNo additional reference page is available yet.");
+        }
+        if concept
+            .spellings
+            .iter()
+            .any(|spelling| spelling.replacement == ForeignSpellingReplacement::Remove)
+        {
+            markdown.push_str("\n\nThe compiler also recognizes source-only syntax that should be removed rather than replaced.");
+            for spelling in concept
+                .spellings
+                .iter()
+                .filter(|spelling| spelling.replacement == ForeignSpellingReplacement::Remove)
+            {
                 markdown.push_str(&format!(
-                    "\n| {} | `{}` |",
-                    spelling.source.name(),
-                    escape_markdown_table_cell(spelling.spelling),
+                    "\n\n- Remove {}.",
+                    migration_source_code(spelling.spelling)
                 ));
             }
         }
@@ -1623,6 +1711,16 @@ fn table_prose(value: &str, current_uri: &str, library: &StandardLibrary) -> Str
 
 fn compact_prose(value: &str) -> String {
     intra_doc::strip_links(value)
+}
+
+fn migration_source_code(value: &str) -> String {
+    format!(
+        "<code>{}</code>",
+        value
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    )
 }
 
 fn migration_search_text(concept: &MigrationConcept, migration: &MigrationCatalog) -> String {
@@ -2400,6 +2498,18 @@ mod tests {
         assert_eq!(update.uri, "/migration/asl/lifecycle/update.md");
         let migration_page = reference.page(&update.uri).expect("migration page exists");
         assert!(migration_page.markdown.contains("# update lifecycle block"));
+        for heading in [
+            "## Source pattern",
+            "## Canonical SplitScript",
+            "## Semantic difference",
+            "## Supported hosts",
+            "## Related reference",
+        ] {
+            assert!(
+                migration_page.markdown.contains(heading),
+                "migration page is missing `{heading}`"
+            );
+        }
         assert!(
             migration_page
                 .markdown
@@ -2410,6 +2520,29 @@ mod tests {
                 .markdown
                 .contains("../../../guides/asl-porting.md#legacy-asl-lifecycle-blocks")
         );
+
+        let migration_index = reference
+            .page("/migration/index.md")
+            .expect("migration index exists");
+        for heading in [
+            "## ASL",
+            "### Attachment and state",
+            "### Process and memory",
+            "### Lifecycle and timer",
+            "### Settings",
+            "### Collections and text",
+            "### Unity and emulators",
+            "### Unsupported host behavior",
+            "## C#",
+            "## JavaScript",
+            "## Rust",
+        ] {
+            assert!(
+                migration_index.markdown.contains(heading),
+                "migration index is missing `{heading}`"
+            );
+        }
+        assert!(!migration_index.markdown.contains("| Concept |"));
 
         let guide = reference
             .page("/guides/asl-porting.md")

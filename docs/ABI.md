@@ -43,6 +43,8 @@ describes only the contract that generated modules implement today.
 | `runtime_set_tick_rate` | `(f64) -> ()` |
 | `clock_time_get` | `(i32, i64, i32) -> i32` |
 | `process_attach` | `(i32, i32) -> i64` |
+| `process_attach_by_pid` | `(i64) -> i64` |
+| `process_list_by_name` | `(i32, i32, i32, i32) -> i32` |
 | `process_detach` | `(i64) -> ()` |
 | `process_is_open` | `(i64) -> i32` |
 | `process_read` | `(i64, i64, i32, i32) -> i32` |
@@ -81,6 +83,17 @@ the small lifecycle baseline; optional facilities such as process reads,
 settings, logging, and the monotonic clock are imported only when reachable
 source needs them. Import identities and ordering remain deterministic through
 the ABI catalog.
+
+Ordinary scripts import `process_attach(name)` and preserve the host's efficient
+single-candidate attachment path. A script declaring `selectProcess` instead
+imports `process_list_by_name` and `process_attach_by_pid`. The generated update
+loop first queries the complete candidate count, grows linear memory, and then
+requests the full PID list. A process-set change that outgrows that buffer is
+retried on a later tick rather than selecting from a truncated list. Candidate
+order is deliberately unspecified. Every candidate receives a temporary owned
+handle; `false` or an uncaught selector error detaches it immediately, while
+`true` promotes it to the one compiler-owned attachment lifetime. PIDs and
+temporary handles never enter the source language.
 
 `_start` initializes globals and GC state, registers the complete settings GUI
 including nested titles, tooltips, choices, and file filters, loads the initial

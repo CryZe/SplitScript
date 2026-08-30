@@ -99,7 +99,7 @@ zero.
 
 ## State and pointer paths
 
-```text
+```splitscript
 state "game.exe" {
     level: u16 at "game.exe", 0x1234, -0x20;
     score: u32 at 0x7ff612341000;
@@ -1551,6 +1551,30 @@ again on that instance's first update.
 This is deliberately distinct from `onAttach`, which runs once for every
 selected process and may suspend while performing discovery.
 
+When multiple running processes can have the same configured name,
+`selectProcess` examines each candidate before provider discovery and
+`onAttach`:
+
+```text
+selectProcess {
+    let path = process.path()?
+    return path.endsWith("/wanted/game.exe")
+}
+```
+
+The candidate is available through the ordinary native `process` value even
+when the state provider is Unity or an emulator. Return `true` to promote that
+candidate to the script's one attachment lifetime, or `false` to detach it and
+try another. Falling through is `false`. This block is an implicit error
+boundary, so postfix `?` and `throw` also reject only the current candidate;
+they do not abort the update or prevent another PID from being tried. `None`
+remains an ordinary optional value and is not a selection result. The block is
+synchronous and runs before provider roots, `layout`, attachment-scoped
+globals, `current`, or `old` exist. Candidate ordering is unspecified, so the
+predicate should identify the desired process from stable process evidence.
+Scripts without this block retain the host's direct name-attachment path and
+pay no PID-enumeration cost.
+
 `onDetach` runs exactly once when a real attached process closes. It does not
 run during initial detached startup or repeat on detached ticks:
 
@@ -1660,6 +1684,7 @@ domain default:
 
 | Action | Fallthrough result | Runtime meaning |
 | --- | --- | --- |
+| `selectProcess` | `false` | Reject this same-name process candidate |
 | `start`, `split`, `reset` | `false` | Do not perform the timer action |
 | `isLoading` | `None` | Leave the current game-time pause state unchanged |
 | `gameTime` | `None` | Do not set a new game time |
@@ -2203,7 +2228,9 @@ The generated loop follows this order:
 
 1. Refresh settings, sample timer state when `onStart` or `onReset` exists, and
    dispatch one observed lifecycle transition.
-2. Attach to the configured process, or return and retry next tick.
+2. Attach to the configured process, first running `selectProcess` for each
+   same-name candidate when declared; return and retry next tick if none is
+   accepted.
 3. Detect a closed process, detach, and return.
 4. Commit the first complete state as equal `old` and `current` snapshots, run
    `onStateReady`, and return; or rotate and refresh an initialized snapshot.

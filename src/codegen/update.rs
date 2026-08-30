@@ -19,7 +19,8 @@ use super::{
     global_plan::RuntimeGlobals,
     imports::Abi,
     managed_state_reads::ManagedStateReadCache,
-    memory_plan::AbiReadScratch,
+    memarg,
+    memory_plan::RuntimeScratch,
     pointer_prefixes::{
         PointerPrefixPlan, PrefixEmissionContext, PrefixEmissionState, PrefixLocals,
     },
@@ -40,7 +41,7 @@ pub(super) struct UpdateContext<'a> {
     pub managed: &'a crate::managed::ManagedBindingPlan,
     pub managed_state_reads: &'a ManagedStateReadCache,
     pub pointer_prefixes: &'a PointerPrefixPlan,
-    pub abi_read: AbiReadScratch,
+    pub scratch: RuntimeScratch,
     pub explicit_layout_selection: bool,
     pub globals: &'a HashMap<ValueId, u32>,
     pub global_types: &'a HashMap<ValueId, Type>,
@@ -92,6 +93,260 @@ struct SnapshotPollContext<'a> {
     pointer_prefix_locals: &'a PrefixLocals,
     pointer_emission: PrefixEmissionContext<'a>,
     lowering: &'a UpdateContext<'a>,
+}
+
+#[derive(Clone, Copy)]
+struct ProcessSelectionLocals {
+    result: u32,
+    capacity: u32,
+    count: u32,
+    index: u32,
+    required_pages: u32,
+    pid: u32,
+}
+
+fn emit_process_attachment(
+    function: &mut Function,
+    strings: &StringPool,
+    actions: &HashMap<ActionKind, u32>,
+    selection_locals: Option<ProcessSelectionLocals>,
+    newly_attached: u32,
+    lowering: &UpdateContext<'_>,
+) {
+    let Some(selector) = actions.get(&ActionKind::SelectProcess).copied() else {
+        emit_default_process_attachment(function, strings, newly_attached, lowering);
+        return;
+    };
+    emit_selected_process_attachment(
+        function,
+        strings,
+        selector,
+        selection_locals.expect("selectProcess has selection locals"),
+        newly_attached,
+        lowering,
+    );
+}
+
+fn emit_default_process_attachment(
+    function: &mut Function,
+    strings: &StringPool,
+    newly_attached: u32,
+    lowering: &UpdateContext<'_>,
+) {
+    let globals = lowering.runtime_globals;
+    function
+        .instruction(&Instruction::GlobalGet(globals.process))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    for (process_index, process) in lowering.process_names.iter().enumerate() {
+        let (process_ptr, process_len) = strings.get(process);
+        function
+            .instruction(&Instruction::GlobalGet(globals.process))
+            .instruction(&Instruction::I64Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::I32Const(process_ptr as i32))
+            .instruction(&Instruction::I32Const(process_len as i32))
+            .instruction(&Instruction::Call(
+                lowering.abi.function(AbiImportId::ProcessAttach),
+            ))
+            .instruction(&Instruction::GlobalSet(globals.process))
+            .instruction(&Instruction::GlobalGet(globals.process))
+            .instruction(&Instruction::I64Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Else)
+            .instruction(&Instruction::I32Const(process_index as i32))
+            .instruction(&Instruction::GlobalSet(globals.process_name))
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::LocalSet(newly_attached))
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::End);
+    }
+    function.instruction(&Instruction::End);
+}
+
+fn emit_selected_process_attachment(
+    function: &mut Function,
+    strings: &StringPool,
+    selector: u32,
+    locals: ProcessSelectionLocals,
+    newly_attached: u32,
+    lowering: &UpdateContext<'_>,
+) {
+    let globals = lowering.runtime_globals;
+    let abi = lowering.abi;
+    let length_pointer = lowering.scratch.settings_length.start();
+    let list_pointer = lowering.scratch.host_strings_start;
+    // The zero-capacity sizing call still receives a non-null aligned
+    // one-past pointer, matching Rust's empty-slice validity requirements.
+    let empty_list_pointer = list_pointer;
+    // Reserve enough headroom for the page-rounding calculation below.
+    let maximum_count = (u32::MAX - list_pointer as u32) / 8;
+    let result = lowering
+        .semantics
+        .action_result(ActionKind::SelectProcess)
+        .expect("checked selectProcess has a result type");
+    let crate::types::TypeKind::Result { layout, .. } = lowering.semantics.types().kind(result)
+    else {
+        unreachable!("selectProcess has a fallible boolean ABI result")
+    };
+    let result_struct = lowering.gc.index(Type::Result(*layout));
+
+    function
+        .instruction(&Instruction::GlobalGet(globals.process))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    for (process_index, process) in lowering.process_names.iter().enumerate() {
+        let (process_ptr, process_len) = strings.get(process);
+        function
+            .instruction(&Instruction::GlobalGet(globals.process))
+            .instruction(&Instruction::I64Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            // First query only obtains the complete candidate count.
+            .instruction(&Instruction::I32Const(length_pointer))
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::I32Store(memarg()))
+            .instruction(&Instruction::I32Const(process_ptr as i32))
+            .instruction(&Instruction::I32Const(process_len as i32))
+            .instruction(&Instruction::I32Const(empty_list_pointer))
+            .instruction(&Instruction::I32Const(length_pointer))
+            .instruction(&Instruction::Call(
+                abi.function(AbiImportId::ProcessListByName),
+            ))
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::I32Const(length_pointer))
+            .instruction(&Instruction::I32Load(memarg()))
+            .instruction(&Instruction::LocalTee(locals.capacity))
+            .instruction(&Instruction::I32Const(maximum_count as i32))
+            .instruction(&Instruction::I32LeU)
+            .instruction(&Instruction::If(BlockType::Empty))
+            // Grow the unbounded host staging area to hold every returned PID.
+            .instruction(&Instruction::LocalGet(locals.capacity))
+            .instruction(&Instruction::I32Const(3))
+            .instruction(&Instruction::I32Shl)
+            .instruction(&Instruction::I32Const(list_pointer))
+            .instruction(&Instruction::I32Add)
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::I32Sub)
+            .instruction(&Instruction::I32Const(16))
+            .instruction(&Instruction::I32ShrU)
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::I32Add)
+            .instruction(&Instruction::LocalTee(locals.required_pages))
+            .instruction(&Instruction::MemorySize(0))
+            .instruction(&Instruction::I32GtU)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::LocalGet(locals.required_pages))
+            .instruction(&Instruction::MemorySize(0))
+            .instruction(&Instruction::I32Sub)
+            .instruction(&Instruction::MemoryGrow(0))
+            .instruction(&Instruction::I32Const(-1))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::End)
+            // Re-query into the correctly sized buffer. If the process set
+            // grew between calls, ignore the partial list until the next tick.
+            .instruction(&Instruction::I32Const(length_pointer))
+            .instruction(&Instruction::LocalGet(locals.capacity))
+            .instruction(&Instruction::I32Store(memarg()))
+            .instruction(&Instruction::I32Const(process_ptr as i32))
+            .instruction(&Instruction::I32Const(process_len as i32))
+            .instruction(&Instruction::I32Const(list_pointer))
+            .instruction(&Instruction::I32Const(length_pointer))
+            .instruction(&Instruction::Call(
+                abi.function(AbiImportId::ProcessListByName),
+            ))
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::I32Const(length_pointer))
+            .instruction(&Instruction::I32Load(memarg()))
+            .instruction(&Instruction::LocalTee(locals.count))
+            .instruction(&Instruction::LocalGet(locals.capacity))
+            .instruction(&Instruction::I32LeU)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::LocalSet(locals.index))
+            .instruction(&Instruction::Block(BlockType::Empty))
+            .instruction(&Instruction::Loop(BlockType::Empty))
+            .instruction(&Instruction::GlobalGet(globals.process))
+            .instruction(&Instruction::I64Eqz)
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::BrIf(1))
+            .instruction(&Instruction::LocalGet(locals.index))
+            .instruction(&Instruction::LocalGet(locals.count))
+            .instruction(&Instruction::I32GeU)
+            .instruction(&Instruction::BrIf(1))
+            .instruction(&Instruction::I32Const(list_pointer))
+            .instruction(&Instruction::LocalGet(locals.index))
+            .instruction(&Instruction::I32Const(3))
+            .instruction(&Instruction::I32Shl)
+            .instruction(&Instruction::I32Add)
+            .instruction(&Instruction::I64Load(memarg()))
+            .instruction(&Instruction::LocalSet(locals.pid))
+            .instruction(&Instruction::LocalGet(locals.pid))
+            .instruction(&Instruction::Call(
+                abi.function(AbiImportId::ProcessAttachByPid),
+            ))
+            .instruction(&Instruction::GlobalSet(globals.process))
+            .instruction(&Instruction::GlobalGet(globals.process))
+            .instruction(&Instruction::I64Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Else)
+            .instruction(&Instruction::I32Const(process_index as i32))
+            .instruction(&Instruction::GlobalSet(globals.process_name))
+            .instruction(&Instruction::Call(selector))
+            .instruction(&Instruction::LocalSet(locals.result))
+            // Both an uncaught error and `false` reject only this candidate.
+            .instruction(&Instruction::LocalGet(locals.result))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::StructGet {
+                struct_type_index: result_struct,
+                field_index: 1,
+            })
+            .instruction(&Instruction::If(BlockType::Empty));
+        emit_reject_process_candidate(function, lowering);
+        function
+            .instruction(&Instruction::Else)
+            .instruction(&Instruction::LocalGet(locals.result))
+            .instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(function, result_struct, 0, Type::Bool);
+        function
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::LocalSet(newly_attached))
+            .instruction(&Instruction::Else);
+        emit_reject_process_candidate(function, lowering);
+        function
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::LocalGet(locals.index))
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::I32Add)
+            .instruction(&Instruction::LocalSet(locals.index))
+            .instruction(&Instruction::Br(0))
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::End);
+    }
+    function.instruction(&Instruction::End);
+}
+
+fn emit_reject_process_candidate(function: &mut Function, lowering: &UpdateContext<'_>) {
+    let globals = lowering.runtime_globals;
+    function
+        .instruction(&Instruction::GlobalGet(globals.process))
+        .instruction(&Instruction::Call(
+            lowering.abi.function(AbiImportId::ProcessDetach),
+        ))
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::GlobalSet(globals.process))
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::GlobalSet(globals.process_name));
 }
 
 pub(super) fn compile_update(
@@ -161,7 +416,29 @@ pub(super) fn compile_update(
         );
         locals.push((1, lowering.gc.val_type(poll_result)));
     }
-    let first_prefix_local = first_poll_result + all_fields.len() as u32;
+    let first_selection_local = first_poll_result + all_fields.len() as u32;
+    let selection_locals = actions.contains_key(&ActionKind::SelectProcess).then(|| {
+        let result = semantics
+            .action_result(ActionKind::SelectProcess)
+            .expect("checked selectProcess has a result type");
+        locals.push((
+            1,
+            lowering
+                .gc
+                .val_type(semantic_type(result, lowering.semantics)),
+        ));
+        locals.push((4, ValType::I32));
+        locals.push((1, ValType::I64));
+        ProcessSelectionLocals {
+            result: first_selection_local,
+            capacity: first_selection_local + 1,
+            count: first_selection_local + 2,
+            index: first_selection_local + 3,
+            required_pages: first_selection_local + 4,
+            pid: first_selection_local + 5,
+        }
+    });
+    let first_prefix_local = first_selection_local + u32::from(selection_locals.is_some()) * 6;
     let (prefix_local_declarations, pointer_prefix_locals) = lowering
         .pointer_prefixes
         .allocate_locals(first_prefix_local);
@@ -176,7 +453,7 @@ pub(super) fn compile_update(
             strings,
             abi: lowering.abi,
             process_global: lowering.runtime_globals.process,
-            abi_read: lowering.abi_read,
+            abi_read: lowering.scratch.abi_read,
         },
         lowering,
     };
@@ -193,33 +470,15 @@ pub(super) fn compile_update(
             lowering,
         );
     }
+    emit_process_attachment(
+        &mut function,
+        strings,
+        actions,
+        selection_locals,
+        newly_attached,
+        lowering,
+    );
     function
-        .instruction(&Instruction::GlobalGet(globals.process))
-        .instruction(&Instruction::I64Eqz)
-        .instruction(&Instruction::If(BlockType::Empty));
-    for (process_index, process) in lowering.process_names.iter().enumerate() {
-        let (process_ptr, process_len) = strings.get(process);
-        function
-            .instruction(&Instruction::GlobalGet(globals.process))
-            .instruction(&Instruction::I64Eqz)
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::I32Const(process_ptr as i32))
-            .instruction(&Instruction::I32Const(process_len as i32))
-            .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessAttach)))
-            .instruction(&Instruction::GlobalSet(globals.process))
-            .instruction(&Instruction::GlobalGet(globals.process))
-            .instruction(&Instruction::I64Eqz)
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::Else)
-            .instruction(&Instruction::I32Const(process_index as i32))
-            .instruction(&Instruction::GlobalSet(globals.process_name))
-            .instruction(&Instruction::I32Const(1))
-            .instruction(&Instruction::LocalSet(newly_attached))
-            .instruction(&Instruction::End)
-            .instruction(&Instruction::End);
-    }
-    function
-        .instruction(&Instruction::End)
         .instruction(&Instruction::GlobalGet(globals.process))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty))

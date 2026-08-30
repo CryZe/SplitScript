@@ -46,6 +46,13 @@ const COMPILE_FIXTURES: &[CompileFixture] = &[
 
 const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
     RuntimeFixture {
+        source: "tests/process_selection.split",
+        output: "process_selection.wasm",
+        profile: "release",
+        harness: "tests/process_selection_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "examples/neon_white.split",
         output: "neon_white.wasm",
         profile: "release",

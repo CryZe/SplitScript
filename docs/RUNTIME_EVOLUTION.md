@@ -154,12 +154,17 @@ not call.
 
 **Priority:** P1, promoted by port evidence
 
-**Status:** Individual requirements are known; no combined host proposal yet.
+**Status:** Same-name PID selection is implemented; other identity probes remain.
 
 Ports need more stable process identity than an executable name in several
 cases. Candidate host-owned facilities are:
 
-- bounded process enumeration with stable process IDs and start ordering;
+- Same-name process enumeration now uses the runtime's official
+  `process_list_by_name` and `process_attach_by_pid` ABI behind the
+  compiler-owned `selectProcess` lifecycle block. Source sees only a temporary
+  `process`; PIDs, handles, enumeration buffers, and detach ownership remain
+  backend details. Host order is unspecified, so predicates must use stable
+  process evidence rather than relying on start order.
 - module enumeration for scripts that genuinely inspect unknown names. Known
   required names use the waiting `process.module(name)` API, while known
   optional names now use synchronous `process.loadedModule(name)` over the

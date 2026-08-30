@@ -29,6 +29,7 @@ pub enum AbiOwnership {
     OwnedHandle,
     InputMemory,
     OutputMemory,
+    InputOutputMemory,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,6 +100,14 @@ const fn output(name: &'static str) -> AbiValue {
         name,
         ty: AbiType::I32,
         ownership: AbiOwnership::OutputMemory,
+    }
+}
+
+const fn input_output(name: &'static str) -> AbiValue {
+    AbiValue {
+        name,
+        ty: AbiType::I32,
+        ownership: AbiOwnership::InputOutputMemory,
     }
 }
 
@@ -323,6 +332,29 @@ abi_catalog! {
         PROCESS_MANAGEMENT,
         "The returned nonzero handle is owned by the guest until process_detach.",
         "Attempts to attach to a named process."
+    ),
+    import!(
+        ProcessAttachByPid,
+        "process_attach_by_pid",
+        &[value("process_id", AbiType::I64)],
+        &[owned("process", AbiType::I64)],
+        PROCESS_MANAGEMENT,
+        "The returned nonzero handle is owned by the guest until process_detach.",
+        "Attempts to attach to a process by its process ID."
+    ),
+    import!(
+        ProcessListByName,
+        "process_list_by_name",
+        &[
+            input("name_pointer"),
+            value("name_length", AbiType::I32),
+            output("process_ids_pointer"),
+            input_output("process_ids_length_pointer")
+        ],
+        &[value("success", AbiType::I32)],
+        PROCESS_MANAGEMENT,
+        "The name and capacity are borrowed for the call. The host writes up to the input capacity and replaces the length with the total candidate count; candidate order is unspecified.",
+        "Lists process IDs whose process name matches."
     ),
     import!(
         ProcessDetach,

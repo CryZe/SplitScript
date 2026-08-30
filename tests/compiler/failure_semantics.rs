@@ -3,6 +3,104 @@
 use super::*;
 
 #[test]
+fn process_selection_is_a_fallible_boolean_boundary() {
+    let source = r#"
+        state "game.exe" {
+            marker: u8 at 0x1000
+        }
+
+        selectProcess {
+            return process.read<u8>(0x2000)? == 42
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("a selector may propagate a candidate-specific process error");
+    let result = checked
+        .semantics()
+        .action_result(splitscript::compiler::ast::ActionKind::SelectProcess)
+        .expect("the selector has an ABI result");
+    let TypeKind::Result { value, .. } = checked.semantics().types().kind(result) else {
+        panic!("selectProcess must use the ordinary Result representation");
+    };
+    assert_eq!(
+        checked.semantics().types().kind(*value),
+        &TypeKind::Builtin(splitscript::compiler::types::BuiltinType::Bool)
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("fallible process selection should produce valid WebAssembly");
+
+    let unity = r#"
+        state Unity ["game.exe"] {}
+        selectProcess {
+            let path = process.path()?
+            return path.endsWith("game.exe")
+        }
+    "#;
+    let unity = splitscript::check(splitscript::parse(unity).unwrap())
+        .expect("provider setup must not hide the native candidate process");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&unity))
+        .expect("provider-backed process selection should produce valid WebAssembly");
+
+    let invalid = r#"
+        state "game.exe" {}
+        selectProcess { return None }
+    "#;
+    let diagnostics =
+        splitscript::compile(invalid).expect_err("None is not a process-selection decision");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("expected") && diagnostic.message.contains("bool")
+    }));
+}
+
+#[test]
+fn process_selection_exposes_only_the_synchronous_native_candidate_context() {
+    let attachment_global = r#"
+        let module: Module
+        state "game.exe" {}
+        selectProcess { return module.address != 0 }
+        onAttach { module = await process.mainModule() }
+    "#;
+    let diagnostics = splitscript::compile(attachment_global)
+        .expect_err("candidate selection runs before attachment globals are initialized");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message == "attachment-scoped global `module` is unavailable in `selectProcess`"
+    }));
+
+    let provider_context = r#"
+        state Unity ["game.exe"] {}
+        selectProcess {
+            unity.scenes.active()
+            return true
+        }
+    "#;
+    let diagnostics = splitscript::compile(provider_context)
+        .expect_err("Unity provider context does not exist before candidate acceptance");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("unknown") && diagnostic.message.contains("unity")
+    }));
+
+    let suspension = r#"
+        state "game.exe" {}
+        selectProcess {
+            await process.mainModule()
+            return true
+        }
+    "#;
+    let diagnostics = splitscript::compile(suspension)
+        .expect_err("candidate selection must finish synchronously");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("onAttach")
+                && (diagnostic.message.contains("await")
+                    || diagnostic.message.contains("mainModule"))
+        }),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
 fn bounded_native_string_reads_are_fallible_and_state_sugar_infers_string() {
     use splitscript::compiler::{
         ast::{StateMemoryDecoder, StateSource},
@@ -816,7 +914,7 @@ fn question_mark_propagates_to_function_and_state_field_boundaries() {
     assert!(errors.iter().any(|error| {
         error
             .message
-            .contains("state-field boundary or a function returning `T!`")
+            .contains("state-field boundary, `selectProcess`, or a function returning `T!`")
     }));
 
     let invalid_throw = r#"
@@ -828,7 +926,7 @@ fn question_mark_propagates_to_function_and_state_field_boundaries() {
     assert!(errors.iter().any(|error| {
         error
             .message
-            .contains("function returning `T!` or an explicit catch boundary")
+            .contains("fallible function, `selectProcess`, or an explicit catch boundary")
     }));
 }
 

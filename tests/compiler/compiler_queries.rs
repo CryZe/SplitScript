@@ -184,6 +184,18 @@ fn vscode_manifest_tracks_the_lsp_semantic_token_legend() {
         grammar_source.contains("Some|None|Ok|Err"),
         "fallback grammar should recognize wrapper enum variants"
     );
+    for action in splitscript::tooling::language::LanguageCatalog::new()
+        .items()
+        .filter_map(|item| match item.kind {
+            splitscript::tooling::language::LanguageItemKind::Action(_) => Some(item.name),
+            _ => None,
+        })
+    {
+        assert!(
+            grammar_source.contains(action),
+            "fallback grammar is missing catalog action `{action}`"
+        );
+    }
     assert_eq!(
         manifest["contributes"]["configurationDefaults"]["[splitscript]"]["editor.semanticHighlighting.enabled"],
         true

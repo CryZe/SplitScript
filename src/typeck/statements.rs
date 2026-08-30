@@ -595,6 +595,7 @@ impl Checker {
                         self.callable.action(),
                         Some(
                             ActionKind::Start
+                                | ActionKind::SelectProcess
                                 | ActionKind::WhileAttached
                                 | ActionKind::Split
                                 | ActionKind::Reset

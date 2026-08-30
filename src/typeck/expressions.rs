@@ -1053,7 +1053,7 @@ impl Checker {
                     );
                 } else {
                     self.error(
-                        "`throw` needs a function returning `T!` or an explicit catch boundary",
+                        "`throw` needs a fallible function, `selectProcess`, or an explicit catch boundary",
                         expr.span,
                     );
                 }
@@ -1164,7 +1164,7 @@ impl Checker {
                 };
                 let Some(boundary) = self.failure.propagate() else {
                     self.error(
-                        "`?` needs a state-field boundary or a function returning `T!`",
+                        "`?` needs a state-field boundary, `selectProcess`, or a function returning `T!`",
                         expr.span,
                     );
                     return None;

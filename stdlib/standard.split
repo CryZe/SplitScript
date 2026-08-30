@@ -572,6 +572,9 @@ intrinsic type SettingsView {
 /// Accesses the attached game process.
 ///
 /// Process operations discover modules, read memory, follow pointers, and scan signatures.
+/// Inside [`selectProcess`], this same value refers to the temporary same-name
+/// candidate being inspected. Returning `true` promotes that candidate;
+/// returning `false` or propagating an error detaches it before provider setup.
 ///
 /// # Example
 ///
@@ -587,7 +590,9 @@ intrinsic type Process {
     ///
     /// This is the exact candidate written in the state declaration, not a
     /// filesystem path. It lets attachment discovery distinguish executable
-    /// variants without granting file access.
+    /// variants without granting file access. Same-name candidates therefore
+    /// have the same value; use [`Process.path`] or another stable probe inside
+    /// [`selectProcess`] when they must be distinguished.
     ///
     /// # Example
     ///
@@ -604,7 +609,8 @@ intrinsic type Process {
     ///
     /// The runtime uses a portable WASI spelling, such as `/mnt/c/game.exe`
     /// for a Windows path. The path is metadata only; obtaining it does not
-    /// grant unrestricted host filesystem access.
+    /// grant unrestricted host filesystem access. It is available while
+    /// inspecting a candidate in [`selectProcess`] as well as after attachment.
     ///
     /// # Example
     ///

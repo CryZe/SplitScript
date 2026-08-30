@@ -1759,6 +1759,22 @@ onAttach {
     }
 
     #[test]
+    fn formats_process_selection_as_an_ordinary_lifecycle_block() {
+        let source = r#"state Unity["game.exe"]{}
+selectProcess{let path=process.path()?;return path.endsWith("/wanted/game.exe")}"#;
+        let expected = r#"state Unity ["game.exe"] {}
+selectProcess {
+    let path = process.path()?;
+    return path.endsWith("/wanted/game.exe")
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn formats_managed_schemas_as_vertical_semicolon_delimited_declarations() {
         let source = r#"enum Edition{Base,DlcDemo}
 state"game.exe"{layout{edition:Edition}}

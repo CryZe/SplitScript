@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{
-        ArrayTypeId, AssignmentId, EnumVariantId, ExprId, FunctionId, ManagedClassId,
+        ActionKind, ArrayTypeId, AssignmentId, EnumVariantId, ExprId, FunctionId, ManagedClassId,
         ManagedFieldId, OptionTypeId, PatternId, RecordFieldId, RecordId, ResultTypeId,
         SettingChoiceOptionId, TypeApplicationId, ValueId,
     },
@@ -388,6 +388,7 @@ pub struct SemanticModel {
     function_values: HashMap<ExprId, FunctionInstance>,
     values: HashMap<ExprId, ResolvedValue>,
     value_types: HashMap<ValueId, TypeId>,
+    action_results: HashMap<ActionKind, TypeId>,
     function_results: HashMap<FunctionId, TypeId>,
     function_completions: HashMap<FunctionId, TypeId>,
     function_parameter_types: HashMap<FunctionId, Vec<TypeId>>,
@@ -483,6 +484,11 @@ impl SemanticModel {
 
     pub fn value_types(&self) -> impl Iterator<Item = (ValueId, TypeId)> + '_ {
         self.value_types.iter().map(|(value, ty)| (*value, *ty))
+    }
+
+    /// The checked ABI result of a lifecycle action.
+    pub fn action_result(&self, action: ActionKind) -> Option<TypeId> {
+        self.action_results.get(&action).copied()
     }
 
     /// Physical fields in the generated StateSnapshot GC struct.
@@ -1338,6 +1344,7 @@ pub(crate) struct SemanticBuilder {
     function_values: HashMap<ExprId, PendingFunctionValue>,
     values: HashMap<ExprId, ResolvedValue>,
     value_types: HashMap<ValueId, Type>,
+    action_results: HashMap<ActionKind, Type>,
     function_results: HashMap<FunctionId, Type>,
     function_completions: HashMap<FunctionId, Type>,
     record_field_types: HashMap<RecordFieldId, Type>,
@@ -1500,6 +1507,11 @@ impl SemanticBuilder {
     pub(crate) fn resolve_value_type(&mut self, value: ValueId, ty: Type) {
         let previous = self.value_types.insert(value, ty);
         debug_assert!(previous.is_none(), "value IDs must be unique");
+    }
+
+    pub(crate) fn resolve_action_result(&mut self, action: ActionKind, ty: Type) {
+        let previous = self.action_results.insert(action, ty);
+        debug_assert!(previous.is_none(), "action kinds must be unique");
     }
 
     pub(crate) fn resolve_state_layout(
@@ -1734,6 +1746,7 @@ impl SemanticBuilder {
             function_values,
             values,
             value_types,
+            action_results,
             function_results,
             function_completions,
             record_field_types,
@@ -1926,6 +1939,10 @@ impl SemanticBuilder {
             .into_iter()
             .map(|(value, ty)| (value, types.intern_inferred(resolve(ty), constructed)))
             .collect();
+        let action_results = action_results
+            .into_iter()
+            .map(|(action, ty)| (action, types.intern_inferred(resolve(ty), constructed)))
+            .collect();
         let function_results = function_results
             .into_iter()
             .map(|(function, ty)| (function, types.intern_inferred(resolve(ty), constructed)))
@@ -2029,6 +2046,7 @@ impl SemanticBuilder {
             function_values,
             values,
             value_types,
+            action_results,
             function_results,
             function_completions,
             function_parameter_types: HashMap::new(),

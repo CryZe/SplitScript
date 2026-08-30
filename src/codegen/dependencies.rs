@@ -28,7 +28,16 @@ impl BackendDependencies {
         automatic_layout: Option<&crate::layout_selection::LayoutSelectionPlan>,
     ) -> Self {
         let mut dependencies = Self::default();
-        dependencies.require_import(AbiImportId::ProcessAttach);
+        if program
+            .actions
+            .iter()
+            .any(|action| action.kind == ActionKind::SelectProcess)
+        {
+            dependencies.require_import(AbiImportId::ProcessAttachByPid);
+            dependencies.require_import(AbiImportId::ProcessListByName);
+        } else {
+            dependencies.require_import(AbiImportId::ProcessAttach);
+        }
         dependencies.require_import(AbiImportId::ProcessDetach);
         dependencies.require_import(AbiImportId::ProcessIsOpen);
         // Polling rates are lifecycle policy even when source never calls the
@@ -115,6 +124,7 @@ impl BackendDependencies {
                     dependencies.require_import(AbiImportId::TimerSetGameTime);
                 }
                 ActionKind::Setup
+                | ActionKind::SelectProcess
                 | ActionKind::OnAttach
                 | ActionKind::OnDetach
                 | ActionKind::OnStateReady

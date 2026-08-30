@@ -650,7 +650,7 @@ fn compile_block_with_loop(
                 };
                 compile_expr(function, *value, &return_context);
             } else if let Some(action) = action {
-                emit_action_default(function, action, context.gc);
+                emit_action_default(function, action, context.semantics, context.gc);
             }
             function.instruction(&Instruction::Return);
         }
@@ -5221,7 +5221,7 @@ fn compile_return_expression(
             if let Some(value) = value {
                 compile_expr(function, value, context);
             } else {
-                emit_action_default(function, action, context.gc);
+                emit_action_default(function, action, context.semantics, context.gc);
             }
         }
     }

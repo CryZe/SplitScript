@@ -152,6 +152,7 @@ fn insert_lifecycle_matrix(uri: &str, source: &str) -> String {
     );
     for action in [
         crate::ast::ActionKind::Setup,
+        crate::ast::ActionKind::SelectProcess,
         crate::ast::ActionKind::OnStart,
         crate::ast::ActionKind::OnReset,
         crate::ast::ActionKind::OnAttach,

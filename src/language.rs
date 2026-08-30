@@ -579,6 +579,7 @@ whileAttached {
 const LIFECYCLE_SOURCE: &str = r#"state "game.exe" {}
 
 setup {}
+selectProcess {}
 onDetach {}
 onAttach {}
 onStart {}
@@ -1917,6 +1918,15 @@ define_language_catalog! {
         "setup {\n    print(\"Autosplitter loaded\")\n}"
     ),
     action_item!(
+        SelectProcess,
+        SelectProcess,
+        "selectProcess",
+        "Chooses among same-name process candidates.",
+        "Runs synchronously for each candidate before provider setup and [`onAttach`]. The candidate is exposed as [`process`](provider@Native). Return `true` to accept it or `false` to try another candidate. This block is an implicit error boundary: postfix [`?`] and [`throw`] reject only the current candidate. Falling through also rejects the candidate. State snapshots, provider roots, [`layout`], and attachment-scoped globals are not initialized yet.",
+        "selectProcess {\n    let path = process.path()?\n    return path.endsWith(\"/wanted/game.exe\")\n}",
+        related: &[LanguageItemId::ResultType, LanguageItemId::Propagate, LanguageItemId::Throw, LanguageItemId::OnAttach]
+    ),
+    action_item!(
         OnDetach,
         OnDetach,
         "onDetach",
@@ -2073,6 +2083,13 @@ impl LanguageCatalog {
                 result: "None",
                 fallthrough: "complete setup",
             },
+            ActionKind::SelectProcess => ActionReferenceFacts {
+                timing: "For each same-name candidate before provider setup and onAttach",
+                available_context: "the temporary process candidate, settings, and initialized module globals",
+                suspension: "not allowed; postfix ? and throw reject the candidate",
+                result: "bool with an implicit error boundary",
+                fallthrough: "false; reject this candidate",
+            },
             ActionKind::OnStart => ActionReferenceFacts {
                 timing: "After an observed timer transition out of NotRunning",
                 available_context: "settings, module globals, and globals initialized here",
@@ -2211,6 +2228,7 @@ impl LanguageCatalog {
         }
         for action in [
             ActionKind::Setup,
+            ActionKind::SelectProcess,
             ActionKind::OnDetach,
             ActionKind::OnAttach,
             ActionKind::OnStateReady,

@@ -1732,6 +1732,10 @@ fn abi_catalog_drives_wasm_imports_and_the_internal_reference() {
         catalog.import(AbiImportId::ProcessAttach).results[0].ownership,
         AbiOwnership::OwnedHandle
     );
+    assert_eq!(
+        catalog.import(AbiImportId::ProcessListByName).parameters[3].ownership,
+        AbiOwnership::InputOutputMemory
+    );
 
     let wasm = splitscript::compile("state \"game.exe\" {}").unwrap();
     let mut emitted = Vec::new();
@@ -1756,6 +1760,33 @@ fn abi_catalog_drives_wasm_imports_and_the_internal_reference() {
         .map(|import| (import.module.to_owned(), import.name.to_owned()))
         .collect::<Vec<_>>();
     assert_eq!(emitted, declared);
+
+    let selected =
+        splitscript::compile(r#"state "game.exe" {} selectProcess { return true }"#).unwrap();
+    let selected_imports = Parser::new(0)
+        .parse_all(&selected)
+        .filter_map(|payload| match payload.unwrap() {
+            Payload::ImportSection(section) => Some(
+                section
+                    .into_imports()
+                    .map(|import| import.unwrap().name.to_owned())
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+    assert!(
+        selected_imports
+            .iter()
+            .any(|name| name == "process_list_by_name")
+    );
+    assert!(
+        selected_imports
+            .iter()
+            .any(|name| name == "process_attach_by_pid")
+    );
+    assert!(!selected_imports.iter().any(|name| name == "process_attach"));
 
     let abi_document = include_str!("../../docs/ABI.md");
     let table_start = abi_document
@@ -2234,6 +2265,7 @@ fn language_catalog_is_valid_documented_and_compilable() {
 
     for action in [
         splitscript::compiler::ast::ActionKind::Setup,
+        splitscript::compiler::ast::ActionKind::SelectProcess,
         splitscript::compiler::ast::ActionKind::OnDetach,
         splitscript::compiler::ast::ActionKind::OnAttach,
         splitscript::compiler::ast::ActionKind::OnStateReady,

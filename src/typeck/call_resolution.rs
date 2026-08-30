@@ -496,6 +496,10 @@ impl Checker {
         if let Some((active_provider, _)) = self.provider_value
             && !matches!(
                 self.callable,
+                CallableContext::Action(ActionKind::SelectProcess)
+            )
+            && !matches!(
+                self.callable,
                 CallableContext::LibraryFunction(_) | CallableContext::CompilerGenerated
             )
             && let Some(native_provider) = self.standard_library.default_state_provider()
@@ -2066,7 +2070,32 @@ impl Checker {
                 members: Some(Vec::new()),
             }),
             [name, fields @ ..]
-                if self.provider_value.is_some_and(|(provider, _)| {
+                if matches!(
+                    self.callable,
+                    CallableContext::Action(ActionKind::SelectProcess)
+                ) && self
+                    .standard_library
+                    .default_state_provider()
+                    .is_some_and(|provider| provider.value_name == name) =>
+            {
+                let provider = self
+                    .standard_library
+                    .default_state_provider()
+                    .expect("the selector root matched the native provider");
+                let provider_type = self.standard_type(provider.process_type);
+                let (ty, members) =
+                    self.resolve_members_or_defer(provider_type, fields, span, expression)?;
+                Some(PathResolution {
+                    ty,
+                    value: Some(ResolvedValue::ProviderValue(provider.id)),
+                    members,
+                })
+            }
+            [name, fields @ ..]
+                if !matches!(
+                    self.callable,
+                    CallableContext::Action(ActionKind::SelectProcess)
+                ) && self.provider_value.is_some_and(|(provider, _)| {
                     self.standard_library.state_provider(provider).value_name == name
                 }) =>
             {
@@ -2080,7 +2109,10 @@ impl Checker {
                 })
             }
             [name, fields @ ..]
-                if self.provider_value.is_some_and(|(provider, _)| {
+                if !matches!(
+                    self.callable,
+                    CallableContext::Action(ActionKind::SelectProcess)
+                ) && self.provider_value.is_some_and(|(provider, _)| {
                     self.standard_library
                         .state_provider(provider)
                         .contexts
@@ -2261,6 +2293,9 @@ impl Checker {
         {
             let message = match action {
                 ActionKind::Setup => "state snapshots are not available during `setup`",
+                ActionKind::SelectProcess => {
+                    "state snapshots are unavailable while selecting a process candidate"
+                }
                 ActionKind::OnAttach => {
                     "state snapshots are not available until `onAttach` completes"
                 }

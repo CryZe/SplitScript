@@ -516,9 +516,16 @@ pub(super) fn encode<'a>(
     for action in &program.actions {
         let (params, results) = match action.kind {
             ActionKind::Setup
+            | ActionKind::SelectProcess
             | ActionKind::OnDetach
             | ActionKind::OnStart
-            | ActionKind::OnReset => (vec![], vec![]),
+            | ActionKind::OnReset => {
+                let results = (action.kind == ActionKind::SelectProcess)
+                    .then(|| action_result_val_type(action.kind, semantics, gc))
+                    .into_iter()
+                    .collect();
+                (vec![], results)
+            }
             ActionKind::OnAttach => (vec![ValType::I64], vec![ValType::I32]),
             action => (
                 vec![state_ref, state_ref],
@@ -529,7 +536,7 @@ pub(super) fn encode<'a>(
                         | ActionKind::OnStart
                         | ActionKind::OnReset
                 ))
-                .then(|| action_result_val_type(action, gc))
+                .then(|| action_result_val_type(action, semantics, gc))
                 .into_iter()
                 .collect(),
             ),

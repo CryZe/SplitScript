@@ -1253,6 +1253,7 @@ pub struct VariableDecl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ActionKind {
     Setup,
+    SelectProcess,
     OnDetach,
     OnAttach,
     OnStateReady,
@@ -1270,6 +1271,7 @@ impl ActionKind {
     pub fn parse(name: &str) -> Option<Self> {
         Some(match name {
             "setup" => Self::Setup,
+            "selectProcess" => Self::SelectProcess,
             "onDetach" => Self::OnDetach,
             "onAttach" => Self::OnAttach,
             "onStateReady" => Self::OnStateReady,
@@ -1288,6 +1290,7 @@ impl ActionKind {
     pub fn name(self) -> &'static str {
         match self {
             Self::Setup => "setup",
+            Self::SelectProcess => "selectProcess",
             Self::OnDetach => "onDetach",
             Self::OnAttach => "onAttach",
             Self::OnStateReady => "onStateReady",

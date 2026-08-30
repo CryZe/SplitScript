@@ -532,12 +532,20 @@ concepts rather than maintaining a parallel inventory.
   and product versions are available through one shared source-defined
   `VS_FIXEDFILEINFO` traversal. Prefer host metadata over unrestricted
   filesystem access or hashing an entire module inside Wasm.
+- [x] Add compiler-owned same-name process selection without exposing PIDs or
+  handles. `selectProcess` now evaluates each candidate through the ordinary
+  native `process` value before provider setup and `onAttach`; `true` promotes
+  the handle, while `false`, fallthrough, postfix `?`, or `throw` rejects and
+  detaches only that candidate. The generated module uses the official
+  two-pass `process_list_by_name` plus `process_attach_by_pid` ABI only when the
+  block exists, rejects truncated process-set snapshots, and preserves the
+  direct `process_attach(name)` path otherwise. Candidate order remains
+  intentionally unspecified.
 - [ ] Finish the remaining official host ABI as typed language facilities,
   preserving semantics without exposing owned numeric handles or manual
   `free` calls. Timer segment history, skip/undo, executable path, host OS, and
-  host architecture are available now. Design PID discovery/attachment around
-  the language's single process-lifetime boundary. Mapped ranges are now
-  exposed as a synchronous GC-owned `[MemoryRange]` snapshot with typed
+  host architecture and same-name process selection are available now. Mapped
+  ranges are exposed as a synchronous GC-owned `[MemoryRange]` snapshot with typed
   readable, writable, and executable flags. Dynamic declaration membership is
   available through `settings.contains(key)` without exposing host values;
   represent recursive settings maps/lists/values as GC-owned collections

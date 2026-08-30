@@ -181,7 +181,7 @@
         },
         {
           "name": "keyword.other.lifecycle.splitscript",
-          "match": "\\b(setup|onDetach|onAttach|onStateReady|onStart|onReset|whileAttached|start|split|reset|isLoading|gameTime)\\b"
+          "match": "\\b(setup|selectProcess|onDetach|onAttach|onStateReady|onStart|onReset|whileAttached|start|split|reset|isLoading|gameTime)\\b"
         },
         {
           "name": "storage.type.splitscript",

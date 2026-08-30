@@ -95,15 +95,17 @@ pub struct StateSnapshotViolation {
     pub standard_library_name: Option<&'static str>,
 }
 
-/// Whether code in this lifecycle action executes with a selected process
-/// provider. Keep this as the shared source of truth for semantic validation
-/// and editor candidate filtering as new lifecycle contexts are introduced.
+/// Whether code in this lifecycle action has a usable process handle.
+/// `selectProcess` owns only a temporary native candidate; provider context is
+/// still unavailable there. Keep this as the shared source of truth for
+/// process-effect validation and editor filtering as contexts are introduced.
 pub const fn action_has_attached_process(action: ActionKind) -> bool {
     match action {
         ActionKind::Setup | ActionKind::OnDetach | ActionKind::OnStart | ActionKind::OnReset => {
             false
         }
-        ActionKind::OnAttach
+        ActionKind::SelectProcess
+        | ActionKind::OnAttach
         | ActionKind::OnStateReady
         | ActionKind::WhileAttached
         | ActionKind::Start

@@ -1270,8 +1270,11 @@ fn validate_uses(
     let layout_value = syntax.state.as_ref().and_then(|state| state.layout_value);
     let mut diagnostics = Vec::new();
     for action in hir.action_bodies() {
-        let detached_action =
-            (!crate::effects::action_has_attached_process(action.action)).then_some(action.action);
+        // Candidate selection owns a temporary process handle, but it runs
+        // before any attachment-scoped global has been initialized.
+        let detached_action = (action.action == ActionKind::SelectProcess
+            || !crate::effects::action_has_attached_process(action.action))
+        .then_some(action.action);
         let mut validator = Validator {
             syntax,
             analysis,

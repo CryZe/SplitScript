@@ -1,0 +1,11 @@
+state "game.exe" {
+    marker: u8 at 0x1000
+}
+
+selectProcess {
+    return process.read<u8>(0x2000)? == 42
+}
+
+start {
+    return current.marker == 7
+}

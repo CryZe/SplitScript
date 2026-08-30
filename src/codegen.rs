@@ -617,7 +617,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         managed: &managed,
         managed_state_reads: &managed_state_reads,
         pointer_prefixes: &pointer_prefixes,
-        abi_read: static_data.layout().scratch().abi_read,
+        scratch: static_data.layout().scratch(),
         explicit_layout_selection,
         globals: &global_indices,
         global_types: &global_types,
@@ -1451,15 +1451,20 @@ fn is_wasm_global_constant(expression: ExprId, wasm_ir: &wasm_ir::Program) -> bo
         })
 }
 
-fn action_result_val_type(action: ActionKind, gc: &GcLayout) -> ValType {
+fn action_result_val_type(action: ActionKind, semantics: &SemanticModel, gc: &GcLayout) -> ValType {
     if action == ActionKind::GameTime {
-        ValType::Ref(RefType {
+        return ValType::Ref(RefType {
             nullable: true,
             heap_type: HeapType::Concrete(gc.standard_index(StdlibTypeId::Duration)),
-        })
-    } else {
-        ValType::I32
+        });
     }
+    if action != ActionKind::SelectProcess {
+        return ValType::I32;
+    }
+    let result = semantics
+        .action_result(action)
+        .expect("checked actions have semantic result types");
+    gc.val_type(semantic_type(result, semantics))
 }
 
 fn memarg() -> MemArg {

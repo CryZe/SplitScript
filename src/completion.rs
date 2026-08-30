@@ -74,6 +74,7 @@ pub struct CompletionList {
 struct ContextAvailability {
     attached_process: bool,
     state_snapshots: bool,
+    process_selection: bool,
 }
 
 pub(crate) fn complete(
@@ -144,6 +145,7 @@ pub(crate) fn complete(
             ContextAvailability {
                 attached_process: has_attached_process,
                 state_snapshots: has_state_snapshots,
+                process_selection: action == Some(crate::ast::ActionKind::SelectProcess),
             },
             effects.as_ref(),
             top_level,
@@ -535,7 +537,11 @@ fn complete_root(
             builder.add(completion);
         }
     }
-    let provider = selected_provider(syntax, &standard_library);
+    let provider = if availability.process_selection {
+        standard_library.default_state_provider()
+    } else {
+        selected_provider(syntax, &standard_library)
+    };
     add_root_standard_library(
         &mut builder,
         &standard_library,
@@ -781,7 +787,7 @@ fn complete_member(
                     });
                 }
             }
-            if let Some(provider) = selected_provider(syntax, &standard_library)
+            if let Some(provider) = selected_provider_at(syntax, &standard_library, context.dot)
                 && provider.value_name == *name
             {
                 add_inferred_fields(
@@ -799,8 +805,8 @@ fn complete_member(
                     &standard_library,
                 );
             }
-            if let Some(context) =
-                selected_provider(syntax, &standard_library).and_then(|provider| {
+            if let Some(context) = selected_provider_at(syntax, &standard_library, context.dot)
+                .and_then(|provider| {
                     provider
                         .contexts
                         .iter()
@@ -933,6 +939,21 @@ fn selected_provider(
                 .then(|| standard_library.default_state_provider())
                 .flatten()
         })
+}
+
+fn selected_provider_at(
+    syntax: &Program,
+    standard_library: &StandardLibrary,
+    offset: usize,
+) -> Option<&'static crate::stdlib::StdlibStateProvider> {
+    if syntax.actions.iter().any(|action| {
+        action.kind == crate::ast::ActionKind::SelectProcess
+            && contains_offset(action.body.span, offset)
+    }) {
+        standard_library.default_state_provider()
+    } else {
+        selected_provider(syntax, standard_library)
+    }
 }
 
 fn language_completion(item: &LanguageItem) -> Option<CompletionItem> {
@@ -2868,6 +2889,7 @@ fn inspect() {
             "settings",
             "tickRate",
             "setup",
+            "selectProcess",
             "onAttach",
             "whileAttached",
             "split",
@@ -3411,6 +3433,19 @@ fn masked(value) {
                 );
             }
         }
+    }
+
+    #[test]
+    fn process_selection_completes_the_native_candidate_before_provider_setup() {
+        let source = "state Unity [\"game.exe\"] {}\nselectProcess { pro }";
+        let mut database = CompilerDatabase::new(source);
+        let roots = labels(&mut database, "{ pro");
+        assert!(roots.contains(&"process".to_owned()));
+        assert!(!roots.contains(&"unity".to_owned()));
+
+        let source = "state Unity [\"game.exe\"] {}\nselectProcess { process.pa }";
+        let mut database = CompilerDatabase::new(source);
+        assert!(labels(&mut database, "process.pa").contains(&"path".to_owned()));
     }
 
     #[test]

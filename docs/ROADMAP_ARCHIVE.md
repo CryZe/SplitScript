@@ -4258,3 +4258,24 @@ language catalog document the refinement rule.
 - Kept lazy independent rendering for valid pages while proving that one
   thousand distinct invalid requests retain no cache state and that every
   indexed route still renders through the validated documentation graph.
+
+# 2026-08-30: compiler-owned same-name process selection
+
+- Added the synchronous `selectProcess` lifecycle block before provider setup
+  and `onAttach`. Each candidate is exposed through the ordinary native
+  `process` value; `true` promotes it, while `false` and fallthrough detach it.
+- Reused the ordinary `Result<bool>` compiler representation as the block's
+  implicit failure boundary. Postfix `?` and `throw` therefore reject only the
+  current candidate without a selector-specific propagation mechanism;
+  `None` remains an ordinary optional value and is not accepted as a decision.
+- Lowered candidate discovery through the official two-pass
+  `process_list_by_name` and `process_attach_by_pid` ABI. Dynamic staging grows
+  to the complete list, process-set growth rejects the partial snapshot, and
+  candidate order is explicitly unspecified. Scripts without a selector keep
+  the original direct name-attachment code and imports.
+- Kept PIDs, raw handles, enumeration storage, and detach ownership out of the
+  language. Provider roots, layout values, snapshots, and attachment globals
+  remain unavailable until a candidate has been promoted.
+- Added native and Unity-backed compiler coverage plus a runtime fixture where
+  `false`, a propagated read error, and `true` candidates are tried in order;
+  only the accepted process proceeds into state polling and timer decisions.

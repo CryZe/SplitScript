@@ -2255,6 +2255,21 @@ split { return layout == StateLayout.Steam }
     }
 
     #[test]
+    fn process_selection_hover_describes_candidate_and_error_semantics() {
+        let source = r#"state Unity ["game.exe"] {}
+selectProcess { return process.path()?.endsWith("game.exe") }"#;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(source.find("selectProcess").unwrap() + 1)
+            .unwrap()
+            .expect("selectProcess hover");
+        assert!(hover.markdown.contains("same-name process candidates"));
+        assert!(hover.markdown.contains("implicit error boundary"));
+        assert!(hover.markdown.contains("reject only the current candidate"));
+        assert!(hover.documentation_uri.is_some());
+    }
+
+    #[test]
     fn dynamic_tick_rate_hover_explains_the_declarative_lifecycle_policy() {
         let source = "state \"game.exe\" {}\nonAttach { setTickRate(30) }";
         let mut database = CompilerDatabase::new(source);

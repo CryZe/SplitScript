@@ -872,10 +872,18 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
         }
         let return_ty =
             action_return_type(checker, program, action.kind, automatic_attachment_layout);
+        checker
+            .semantics
+            .resolve_action_result(action.kind, return_ty);
+        let failure = if action.kind == ActionKind::SelectProcess {
+            FailureContext::boundary(return_ty)
+        } else {
+            FailureContext::None
+        };
         checker.with_callable_context(
             CallableContext::Action(action.kind),
             return_ty,
-            FailureContext::None,
+            failure,
             |checker| {
                 checker.scopes.clear();
                 checker.scopes.push(HashMap::new());
@@ -1114,12 +1122,16 @@ fn expression_is_never(checker: &mut Checker, expression: &crate::ast::Expr) -> 
 }
 
 fn action_return_type(
-    checker: &Checker,
+    checker: &mut Checker,
     program: &Program,
     action: ActionKind,
     automatic_attachment_layout: bool,
 ) -> Type {
     match action {
+        ActionKind::SelectProcess => {
+            let boolean = checker.core_type(CoreTypeId::Bool);
+            Type::Result(checker.inference.result_type(boolean))
+        }
         ActionKind::Setup
         | ActionKind::OnDetach
         | ActionKind::OnStateReady

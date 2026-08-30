@@ -443,6 +443,14 @@ impl Reachability {
                 .iter()
                 .filter_map(|setting| semantics.value_type(setting.id)),
         );
+        // Lifecycle ABI results are emitted even when the source body falls
+        // through without constructing that value explicitly.
+        type_roots.extend(
+            program
+                .actions
+                .iter()
+                .filter_map(|action| semantics.action_result(action.kind)),
+        );
 
         for body in wasm_ir
             .bodies()

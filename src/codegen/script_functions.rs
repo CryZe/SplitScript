@@ -1157,6 +1157,7 @@ pub(super) fn compile_action(
             parameter_count: if matches!(
                 action.kind,
                 ActionKind::Setup
+                    | ActionKind::SelectProcess
                     | ActionKind::OnDetach
                     | ActionKind::OnStart
                     | ActionKind::OnReset
@@ -1228,13 +1229,28 @@ pub(super) fn compile_action(
     };
     emit_snapshot_projection_prologue(&mut function, &wasm_body.locals, &context);
     compile_block(&mut function, &wasm_body.entry, &context, Some(action.kind));
-    emit_action_default(&mut function, action.kind, lowering.gc);
+    emit_action_default(&mut function, action.kind, lowering.semantics, lowering.gc);
     function.instruction(&Instruction::End);
     function
 }
 
-pub(super) fn emit_action_default(function: &mut Function, action: ActionKind, gc: &GcLayout) {
+pub(super) fn emit_action_default(
+    function: &mut Function,
+    action: ActionKind,
+    semantics: &SemanticModel,
+    gc: &GcLayout,
+) {
     match action {
+        ActionKind::SelectProcess => {
+            let ty = semantics
+                .action_result(action)
+                .expect("checked actions have result types");
+            let crate::types::TypeKind::Result { layout, .. } = semantics.types().kind(ty) else {
+                unreachable!("selectProcess has a fallible boolean ABI result")
+            };
+            function.instruction(&Instruction::I32Const(0));
+            emit_result_success(function, *layout, gc);
+        }
         ActionKind::Start | ActionKind::Split | ActionKind::Reset => {
             function.instruction(&Instruction::I32Const(0));
         }

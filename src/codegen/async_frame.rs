@@ -250,7 +250,7 @@ impl AsyncFrameLayout {
                         wasm_ir::ExpressionKind::Call {
                             target: wasm_ir::CallTarget::Intrinsic { intrinsic, .. },
                             ..
-                        } if crate::intrinsic_registry::contract(intrinsic).async_state.is_none()
+                        } if crate::intrinsic_registry::contract(intrinsic).async_state.is_empty()
                     );
                     let ty = self.owner.map_or(expression.ty, |owner| {
                         self.semantics.specialize_type(owner, expression.ty)
@@ -405,7 +405,7 @@ impl AsyncFrameLayouts {
                         wasm_ir::ExpressionKind::Call {
                             target: wasm_ir::CallTarget::Intrinsic { intrinsic, .. },
                             ..
-                        } if crate::intrinsic_registry::contract(intrinsic).async_state.is_none()
+                        } if crate::intrinsic_registry::contract(intrinsic).async_state.is_empty()
                     )
                 {
                     self.values.insert(LeafFutureInstance {
@@ -521,9 +521,7 @@ impl AsyncFrameLayouts {
             let mut state = Vec::new();
             match target {
                 wasm_ir::CallTarget::Intrinsic { intrinsic, .. } => {
-                    if let Some(policy) =
-                        crate::intrinsic_registry::contract(*intrinsic).async_state
-                    {
+                    for policy in crate::intrinsic_registry::contract(*intrinsic).async_state {
                         let ty = match policy.ty {
                             crate::intrinsic_registry::ScratchType::Core(core) => {
                                 semantic_type(semantics.types().id_for_core(core), semantics)
@@ -536,6 +534,7 @@ impl AsyncFrameLayouts {
                             }
                             crate::intrinsic_registry::ScratchType::Expression
                             | crate::intrinsic_registry::ScratchType::ResultValue
+                            | crate::intrinsic_registry::ScratchType::AsyncArgumentValue(_)
                             | crate::intrinsic_registry::ScratchType::Receiver => {
                                 unreachable!("intrinsic future state currently uses concrete types")
                             }

@@ -6,6 +6,7 @@ use crate::{
     Diagnostic,
     ast::{ActionKind, ArrayTypeId, Expr, ExprId, ExprKind, Span},
     inference::{InferenceError, Requirements, Type, type_may_have_capability},
+    intrinsic_registry::FailureChannelPolicy,
     migration::{
         ASL_SETTINGS_ADD_DIAGNOSTIC, ASL_SETTINGS_LOOKUP_DIAGNOSTIC, ForeignSpellingContext,
         foreign_spelling, legacy_array_field_diagnostic, legacy_managed_method_diagnostic,
@@ -1500,28 +1501,6 @@ impl Checker {
             }
         }
         let operation = self.standard_library.operation_semantics(item.id);
-        let expected_result = expected.map(|ty| self.shallow_type(ty));
-        let expected_completion = expected_result.map(|expected| match expected {
-            Type::Async(future) => self.inference.async_value(future),
-            expected => expected,
-        });
-        let completion_type = if let (Some(value), Some(Type::Result(result))) = (
-            catalog_type_argument(item.signature.result, StdlibTypeConstructorId::Result),
-            expected_completion,
-        ) {
-            let declared_value = self.catalog_type(value, &variables);
-            let expected_value = self.inference.result_value(result);
-            self.unify(declared_value, expected_value, span)?;
-            Type::Result(result)
-        } else {
-            self.catalog_type(item.signature.result, &variables)
-        };
-        let result_type = if item.signature.result_is_async {
-            Type::Async(self.inference.async_type(completion_type))
-        } else {
-            completion_type
-        };
-        let result = self.expect_expression(expression, result_type, expected, span)?;
         if args.len() != item.signature.parameters.len() {
             self.error(
                 format!(
@@ -1534,12 +1513,72 @@ impl Checker {
             );
             return None;
         }
-        for (argument, parameter) in args.iter().zip(item.signature.parameters) {
-            let parameter_type = self.catalog_type(parameter.ty, &variables);
-            self.expr(argument, Some(parameter_type));
-            self.validate_catalog_argument(argument, parameter.rule, item);
-            concrete_signature.push(parameter_type);
-        }
+        let failure_channel = match item.implementation {
+            crate::stdlib::Implementation::Intrinsic(intrinsic) => {
+                crate::intrinsic_registry::contract(intrinsic).failure_channel
+            }
+            _ => FailureChannelPolicy::Declared,
+        };
+        let (result_type, result) =
+            if let FailureChannelPolicy::ReuseAsyncArgument(index) = failure_channel {
+                // Failure-augmenting operations use the language's one ordinary
+                // error channel. Let every argument constrain the signature first,
+                // then reuse an async operand's existing `U!` completion rather
+                // than manufacturing an inferred `U!!`.
+                let mut argument_types = Vec::with_capacity(args.len());
+                for (argument, parameter) in args.iter().zip(item.signature.parameters) {
+                    let parameter_type = self.catalog_type(parameter.ty, &variables);
+                    let argument_type = self
+                        .expr(argument, Some(parameter_type))
+                        .unwrap_or(parameter_type);
+                    argument_types.push(argument_type);
+                    self.validate_catalog_argument(argument, parameter.rule, item);
+                    concrete_signature.push(parameter_type);
+                }
+                let argument_type = self.shallow_type(argument_types[usize::from(index)]);
+                let Type::Async(future) = argument_type else {
+                    unreachable!("failure-channel metadata must select an async argument")
+                };
+                let value = self.inference.async_value(future);
+                let value = self.shallow_type(value);
+                let completion_type = match value {
+                    Type::Result(result) => Type::Result(result),
+                    value => Type::Result(self.inference.result_type(value)),
+                };
+                let result_type = Type::Async(self.inference.async_type(completion_type));
+                let result = self.expect_expression(expression, result_type, expected, span)?;
+                (result_type, result)
+            } else {
+                let expected_result = expected.map(|ty| self.shallow_type(ty));
+                let expected_completion = expected_result.map(|expected| match expected {
+                    Type::Async(future) => self.inference.async_value(future),
+                    expected => expected,
+                });
+                let completion_type = if let (Some(value), Some(Type::Result(result))) = (
+                    catalog_type_argument(item.signature.result, StdlibTypeConstructorId::Result),
+                    expected_completion,
+                ) {
+                    let declared_value = self.catalog_type(value, &variables);
+                    let expected_value = self.inference.result_value(result);
+                    self.unify(declared_value, expected_value, span)?;
+                    Type::Result(result)
+                } else {
+                    self.catalog_type(item.signature.result, &variables)
+                };
+                let result_type = if item.signature.result_is_async {
+                    Type::Async(self.inference.async_type(completion_type))
+                } else {
+                    completion_type
+                };
+                let result = self.expect_expression(expression, result_type, expected, span)?;
+                for (argument, parameter) in args.iter().zip(item.signature.parameters) {
+                    let parameter_type = self.catalog_type(parameter.ty, &variables);
+                    self.expr(argument, Some(parameter_type));
+                    self.validate_catalog_argument(argument, parameter.rule, item);
+                    concrete_signature.push(parameter_type);
+                }
+                (result_type, result)
+            };
         if matches!(
             item.id,
             StdlibItemId::SettingsViewEnabled | StdlibItemId::SettingsViewContains

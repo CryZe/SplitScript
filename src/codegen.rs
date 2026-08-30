@@ -67,6 +67,7 @@ use self::display_plan::DisplayFunctions;
 use self::equality_plan::EqualityFunctions;
 use self::gc_layout::GcLayout;
 use self::global_plan::SettingStorage;
+use self::imports::Abi;
 use self::module_start::compile_start;
 use self::runtime_helper_registry::RuntimeHelperPlan;
 use self::script_functions::{
@@ -1079,6 +1080,25 @@ fn emit_typed_struct_get(
     function.instruction(&instruction);
 }
 
+fn emit_frame_typed_struct_get(
+    function: &mut Function,
+    struct_type_index: u32,
+    field_index: u32,
+    ty: Type,
+    gc: &GcLayout,
+) {
+    emit_typed_struct_get(function, struct_type_index, field_index, ty);
+    if matches!(
+        gc.val_type(ty),
+        ValType::Ref(RefType {
+            nullable: false,
+            ..
+        })
+    ) {
+        function.instruction(&Instruction::RefAsNonNull);
+    }
+}
+
 fn emit_array_get(function: &mut Function, array_type_index: u32, element: Type, gc: &GcLayout) {
     function.instruction(&match element {
         Type::Bool | Type::U8 | Type::U16 => Instruction::ArrayGetU(array_type_index),
@@ -1238,6 +1258,26 @@ fn emit_default(function: &mut Function, ty: Type, gc: &GcLayout) {
         ValType::Ref(reference) => Instruction::RefNull(reference.heap_type),
         ValType::V128 => unreachable!(),
     });
+}
+
+/// Reads the WASI monotonic clock and leaves its nanosecond timestamp on the
+/// operand stack. Keeping this host boundary shared prevents `Instant.now()`
+/// and future combinators from drifting to different clock IDs or precision.
+fn emit_monotonic_nanoseconds(function: &mut Function, abi: &Abi, destination: i32) {
+    function
+        // WASI clock ID 1 is the monotonic clock. A precision of one requests
+        // the finest available nanosecond reading.
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I32Const(destination))
+        .instruction(&Instruction::Call(
+            abi.function(crate::abi::AbiImportId::WasiClockTimeGet),
+        ))
+        .instruction(&Instruction::If(wasm_encoder::BlockType::Empty))
+        .instruction(&Instruction::Unreachable)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(destination))
+        .instruction(&Instruction::I64Load(memarg()));
 }
 
 /// Wraps the value already on the operand stack in a successful `T!`.

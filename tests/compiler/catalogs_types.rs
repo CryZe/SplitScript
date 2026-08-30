@@ -1914,6 +1914,10 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         "future.race<T>(operations: [async T]) -> async T"
     );
     assert_eq!(
+        library.render_signature(StdlibItemId::FutureTimeout),
+        "future.timeout<T>(operation: async T, duration: Duration) -> async T!"
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::DurationFromSeconds),
         "Duration.fromSeconds<T>(seconds: T) -> Duration where T: Numeric"
     );

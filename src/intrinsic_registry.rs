@@ -209,6 +209,7 @@ pub(crate) enum ScratchType {
     Standard(StdlibTypeId),
     Expression,
     ResultValue,
+    AsyncArgumentValue(u8),
     Receiver,
 }
 
@@ -331,10 +332,22 @@ pub(crate) struct IntrinsicContract {
     pub(crate) availability: Availability,
     pub(crate) lowering: LoweringClass,
     pub(crate) dependency_roots: &'static [DependencyRoot],
-    pub(crate) async_scratch: Option<ScratchPolicy>,
+    pub(crate) async_scratch: &'static [ScratchPolicy],
     /// Values retained inside a compiler-generated future between polls.
-    pub(crate) async_state: Option<ScratchPolicy>,
+    pub(crate) async_state: &'static [ScratchPolicy],
     pub(crate) synchronous_scratch: Option<ScratchPolicy>,
+    /// How an intrinsic composes its declared error result with an operand's
+    /// existing ordinary failure channel.
+    pub(crate) failure_channel: FailureChannelPolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FailureChannelPolicy {
+    /// Use the result constructor written in the standard-library signature.
+    Declared,
+    /// If this async argument already completes with `T!`, reuse that result
+    /// instead of manufacturing a second, indistinguishable error layer.
+    ReuseAsyncArgument(u8),
 }
 
 impl IntrinsicContract {
@@ -357,6 +370,7 @@ impl IntrinsicContract {
             async_scratch: async_scratch(id),
             async_state: async_state(id),
             synchronous_scratch: synchronous_scratch(id),
+            failure_channel: failure_channel(id),
         }
     }
 
@@ -369,42 +383,94 @@ impl IntrinsicContract {
     }
 }
 
+const fn failure_channel(id: IntrinsicId) -> FailureChannelPolicy {
+    match id {
+        IntrinsicId::FutureTimeout => FailureChannelPolicy::ReuseAsyncArgument(0),
+        _ => FailureChannelPolicy::Declared,
+    }
+}
+
 const fn scratch(ty: ScratchType, slots: u8) -> Option<ScratchPolicy> {
     Some(ScratchPolicy { ty, slots })
 }
 
-const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
+const fn async_scratch(id: IntrinsicId) -> &'static [ScratchPolicy] {
     match id {
-        IntrinsicId::FutureRace => scratch(ScratchType::Core(CoreTypeId::U32), 3),
-        IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule => {
-            scratch(ScratchType::Core(CoreTypeId::U64), 2)
-        }
-        IntrinsicId::ProcessFindMemoryRange => scratch(ScratchType::Core(CoreTypeId::U64), 5),
-        IntrinsicId::ProcessScan => scratch(ScratchType::Core(CoreTypeId::U64), 5),
-        IntrinsicId::ModuleScanRelative32Target => scratch(ScratchType::Core(CoreTypeId::U64), 7),
-        IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 7),
-        IntrinsicId::ProcessScanMemoryAny => scratch(ScratchType::Core(CoreTypeId::U64), 8),
-        IntrinsicId::ModuleScan => scratch(ScratchType::Core(CoreTypeId::U64), 5),
-        IntrinsicId::ModuleScanAny => scratch(ScratchType::Core(CoreTypeId::U64), 5),
+        IntrinsicId::FutureRace => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U32),
+            slots: 3,
+        }],
+        IntrinsicId::FutureTimeout => &[
+            ScratchPolicy {
+                ty: ScratchType::AsyncArgumentValue(0),
+                slots: 1,
+            },
+            ScratchPolicy {
+                ty: ScratchType::Core(CoreTypeId::I64),
+                slots: 3,
+            },
+            ScratchPolicy {
+                ty: ScratchType::Core(CoreTypeId::I32),
+                slots: 1,
+            },
+        ],
+        IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 2,
+        }],
+        IntrinsicId::ProcessFindMemoryRange => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 5,
+        }],
+        IntrinsicId::ProcessScan => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 5,
+        }],
+        IntrinsicId::ModuleScanRelative32Target => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 7,
+        }],
+        IntrinsicId::ProcessScanMemory => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 7,
+        }],
+        IntrinsicId::ProcessScanMemoryAny => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 8,
+        }],
+        IntrinsicId::ModuleScan => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 5,
+        }],
+        IntrinsicId::ModuleScanAny => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 5,
+        }],
         IntrinsicId::ProcessFollow
         | IntrinsicId::ProcessReadRelative32
         | IntrinsicId::UnityClassField
         | IntrinsicId::UnityClassStaticInstance
-        | IntrinsicId::UnityClassStaticTable => scratch(ScratchType::Core(CoreTypeId::U64), 1),
-        IntrinsicId::UnityModuleImage | IntrinsicId::UnityImageClass => {
-            scratch(ScratchType::Expression, 1)
-        }
-        IntrinsicId::UnityImageClassAny => {
-            scratch(ScratchType::Standard(StdlibTypeId::UnityClass), 1)
-        }
-        IntrinsicId::UnityClassProbeFieldAny => {
-            scratch(ScratchType::Standard(StdlibTypeId::UnityField), 1)
-        }
-        _ => None,
+        | IntrinsicId::UnityClassStaticTable => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 1,
+        }],
+        IntrinsicId::UnityModuleImage | IntrinsicId::UnityImageClass => &[ScratchPolicy {
+            ty: ScratchType::Expression,
+            slots: 1,
+        }],
+        IntrinsicId::UnityImageClassAny => &[ScratchPolicy {
+            ty: ScratchType::Standard(StdlibTypeId::UnityClass),
+            slots: 1,
+        }],
+        IntrinsicId::UnityClassProbeFieldAny => &[ScratchPolicy {
+            ty: ScratchType::Standard(StdlibTypeId::UnityField),
+            slots: 1,
+        }],
+        _ => &[],
     }
 }
 
-const fn async_state(id: IntrinsicId) -> Option<ScratchPolicy> {
+const fn async_state(id: IntrinsicId) -> &'static [ScratchPolicy] {
     match id {
         // A completed scan is delivered on the poll after the bounded window
         // that found it. Besides making the operation observably async, the
@@ -412,12 +478,31 @@ const fn async_state(id: IntrinsicId) -> Option<ScratchPolicy> {
         // windows during one host update.
         IntrinsicId::ProcessScan
         | IntrinsicId::ModuleScanRelative32Target
-        | IntrinsicId::ModuleScan => scratch(ScratchType::Core(CoreTypeId::U64), 2),
-        IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 3),
-        IntrinsicId::ProcessScanMemoryAny => scratch(ScratchType::Core(CoreTypeId::U64), 5),
-        IntrinsicId::ModuleScanAny => scratch(ScratchType::Core(CoreTypeId::U64), 4),
-        IntrinsicId::ProcessFindMemoryRange => scratch(ScratchType::Core(CoreTypeId::U64), 5),
-        _ => None,
+        | IntrinsicId::ModuleScan => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 2,
+        }],
+        IntrinsicId::ProcessScanMemory => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 3,
+        }],
+        IntrinsicId::ProcessScanMemoryAny => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 5,
+        }],
+        IntrinsicId::ModuleScanAny => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 4,
+        }],
+        IntrinsicId::ProcessFindMemoryRange => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 5,
+        }],
+        IntrinsicId::FutureTimeout => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::I64),
+            slots: 2,
+        }],
+        _ => &[],
     }
 }
 
@@ -479,7 +564,9 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::RuntimeSetTickRate => &[HostImport(Host::RuntimeSetTickRate)],
         IntrinsicId::SettingsEnabled => &[Helper(Runtime::SettingsEnabled)],
         IntrinsicId::SettingsContains => &[Helper(Runtime::SettingsContains)],
-        IntrinsicId::InstantNow => &[HostImport(Host::WasiClockTimeGet)],
+        IntrinsicId::InstantNow | IntrinsicId::FutureTimeout => {
+            &[HostImport(Host::WasiClockTimeGet)]
+        }
         IntrinsicId::TimerState => &[HostImport(Host::TimerGetState)],
         IntrinsicId::TimerCurrentSplitIndex => &[HostImport(Host::TimerCurrentSplitIndex)],
         IntrinsicId::TimerSegmentWasSplit => &[HostImport(Host::TimerSegmentWasSplit)],
@@ -627,6 +714,7 @@ const PROCESS_SUSPEND: EffectSet = PROCESS
 const NEXT_TICK: EffectSet = EffectSet::one(Effect::RequiresAttachedProcess)
     .with(Effect::Suspends)
     .with(Effect::CancelsOnProcessClose);
+const TIMEOUT: EffectSet = NEXT_TICK.with(Effect::ReadsRuntime);
 
 const NONE: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::None);
 const NEVER: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Never);
@@ -640,6 +728,7 @@ const F32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::F32);
 const F64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::F64);
 const ADDRESS: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Address);
 const STRING: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::String);
+const DURATION: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Duration);
 const SETTINGS_VIEW: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::SettingsView);
 const PROCESS_TYPE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Process);
 const SIGNATURE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Signature);
@@ -907,6 +996,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Function,
             signature(UNCONSTRAINED_T, None, params![value(T_ASYNC_ARRAY)], T,),
             NEXT_TICK,
+            OnAttach,
+            Suspension
+        ),
+        IntrinsicId::FutureTimeout => contract!(
+            FutureTimeout,
+            Function,
+            signature(
+                UNCONSTRAINED_T,
+                None,
+                params![value(T_ASYNC), value(DURATION)],
+                T_RESULT,
+            ),
+            TIMEOUT,
             OnAttach,
             Suspension
         ),

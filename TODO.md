@@ -920,16 +920,31 @@ remaining work is product hardening and distribution.
   `timer.CurrentSplit.Name`, `timer.Run.Offset`, category, and timing-method
   ports as the evidence ledger; coordinate the host side through R5 in
   [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
-- [ ] Add structured future combinators as the shared alternative to
-  operation-specific `Once` and `Any` families: race/select, timeout, and
-  explicit cancellation semantics. Hades provides an immediate small case:
-  wait for the first of several known module names without an infinite
-  hand-written polling loop. Start from ordinary `async T` values, preserve
-  lazy construction, bound the work performed by one poll, and reuse one
-  producer-agnostic polling path for source functions, closures, and intrinsic
-  futures. Do not expose threads or unconstrained background tasks. Keep
-  bounded concurrent scanning as a separate scheduling decision rather than
-  silently making an unbounded race array consume arbitrary work per update.
+- [ ] Complete structured future composition with explicit cancellation
+  semantics. `future.race([async T])` and
+  `future.timeout(async T, Duration) -> async T!` are implemented with lazy
+  construction and one producer-agnostic polling path for source functions,
+  closures, and intrinsic futures. Timeout starts its monotonic deadline on
+  first poll, gives a ready operation deadline priority, and reuses an
+  operand's existing fallible channel instead of creating `T!!`. Do not expose
+  threads or unconstrained background tasks. Keep bounded concurrent scanning
+  as a separate scheduling decision rather than silently making an unbounded
+  race array consume arbitrary work per update.
+- [ ] Make `onAttach` an ordinary fallible boundary. Postfix `?`, `throw`, or a
+  fallible final expression must abandon that process instance, leave the
+  script unattached, and wait for that exact process to close before discovery
+  resumes; retrying the same rejected live process every tick would turn a
+  stable rejection into an accidental busy loop. Because attachment never
+  completed, `onDetach` must not run. Reuse the candidate-rejection machinery
+  already established by `selectProcess`, while preserving `onAttach`'s typed
+  layout/global initialization analysis and documenting the lifecycle clearly.
+- [ ] Replace string-only errors with a structured identity plus human-readable
+  message. Code must be able to distinguish compiler/runtime error kinds such
+  as a future timeout from an operand's own failure without comparing display
+  text, while `T!`, `?`, `retry`, `throw`, and existing fallback syntax retain
+  one ergonomic propagation channel. Decide the user construction, matching,
+  querying, and custom-error story together rather than reserving ad hoc
+  strings or special cases for `future.timeout`.
 - [ ] Broaden suspending control flow incrementally from real ports and add a
   host-executed conformance fixture for each new shape.
 - [ ] Finish first-class function values and lexical closures for iterator

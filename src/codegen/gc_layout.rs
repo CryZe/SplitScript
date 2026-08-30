@@ -623,6 +623,20 @@ impl GcLayout {
         }
     }
 
+    /// Continuation frames are allocated before every live value has been
+    /// produced. Their reference slots therefore need a nullable physical
+    /// representation even when the source type is non-null; frame reads
+    /// restore the source guarantee after control-flow proves initialization.
+    pub(super) fn frame_storage_type(&self, ty: Type) -> StorageType {
+        match self.storage_type(ty) {
+            StorageType::Val(ValType::Ref(mut reference)) => {
+                reference.nullable = true;
+                StorageType::Val(ValType::Ref(reference))
+            }
+            storage => storage,
+        }
+    }
+
     /// Returns defaultable storage for an array element.
     ///
     /// Growable arrays allocate spare capacity with `array.new_default`.

@@ -26,7 +26,9 @@ use super::{
     call_target,
     context::AttachContext,
     data_plan::StringPool,
-    emit_array_get, emit_default, emit_memory_value, emit_string_literal, emit_typed_struct_get,
+    emit_array_get, emit_default, emit_frame_typed_struct_get, emit_memory_value,
+    emit_monotonic_nanoseconds, emit_result_error, emit_result_success, emit_string_literal,
+    emit_typed_struct_get,
     expression::{
         BareReturn, ExprContext, IntrinsicCapture, LocalStorage, LoopControl, MatchLayout,
         compile_assignment, compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
@@ -562,7 +564,7 @@ fn intrinsic_state(context: &ExprContext<'_>, slot: usize) -> (AsyncFrameRef, u3
 fn emit_intrinsic_state_get(function: &mut Function, context: &ExprContext<'_>, slot: usize) {
     let (frame, field, ty) = intrinsic_state(context, slot);
     frame.emit(function);
-    emit_typed_struct_get(function, frame.struct_type, field, ty);
+    emit_frame_typed_struct_get(function, frame.struct_type, field, ty, context.gc);
 }
 
 fn emit_intrinsic_state_set_local(
@@ -1787,9 +1789,9 @@ fn compile_suspension_poll(
         wasm_ir::ExpressionKind::Call {
             target: wasm_ir::CallTarget::Intrinsic { intrinsic, .. },
             ..
-        } => crate::intrinsic_registry::contract(*intrinsic)
+        } => !crate::intrinsic_registry::contract(*intrinsic)
             .async_state
-            .is_some(),
+            .is_empty(),
         wasm_ir::ExpressionKind::Call {
             target: wasm_ir::CallTarget::ManagedInstances { .. },
             ..
@@ -1835,6 +1837,18 @@ fn compile_suspension_poll(
         Some(IntrinsicId::NextTick) => {}
         Some(IntrinsicId::FutureRace) => {
             emit_future_race_poll(function, args[0], destination, layout, scratch, context);
+        }
+        Some(IntrinsicId::FutureTimeout) => {
+            emit_future_timeout_poll(
+                function,
+                value,
+                args[0],
+                args[1],
+                destination,
+                layout,
+                scratch,
+                context,
+            );
         }
         Some(IntrinsicId::ProcessClosed) => {
             compile_receiver(function, target, context);
@@ -2430,6 +2444,206 @@ fn compile_suspension_poll(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn emit_future_timeout_poll(
+    function: &mut Function,
+    timeout: ExprId,
+    operation: ExprId,
+    duration: ExprId,
+    destination: wasm_ir::SuspensionDestination,
+    layout: &AsyncFrameLayout,
+    scratch: &[u32],
+    context: &ExprContext<'_>,
+) {
+    let [
+        operation_value,
+        now,
+        duration_seconds,
+        elapsed,
+        duration_nanoseconds,
+        ..,
+    ] = scratch
+    else {
+        unreachable!("future.timeout reserves operation and duration scratch locals")
+    };
+    let TypeKind::Async {
+        value: operation_completion,
+        ..
+    } = context
+        .semantics
+        .types()
+        .kind(context.expression_type_id(operation))
+    else {
+        unreachable!("future.timeout accepts an async operation")
+    };
+    let operation_completion = semantic_type(*operation_completion, context.semantics);
+    let TypeKind::Async {
+        value: timeout_completion,
+        ..
+    } = context
+        .semantics
+        .types()
+        .kind(context.expression_type_id(timeout))
+    else {
+        unreachable!("future.timeout produces an async result")
+    };
+    let TypeKind::Result {
+        layout: timeout_result,
+        value: timeout_value,
+    } = context.semantics.types().kind(*timeout_completion)
+    else {
+        unreachable!("future.timeout completes through a Result")
+    };
+    let timeout_value = semantic_type(*timeout_value, context.semantics);
+    let operation_is_already_fallible = operation_completion == Type::Result(*timeout_result);
+
+    let poll_destination = if operation_completion.has_runtime_value() {
+        FuturePollDestination::Local {
+            local: *operation_value,
+            ty: operation_completion,
+        }
+    } else {
+        FuturePollDestination::Discard
+    };
+    emit_future_poll_status(
+        function,
+        context.expression_type(operation),
+        poll_destination,
+        context,
+        |function| compile_expr(function, operation, context),
+    );
+    function.instruction(&Instruction::If(BlockType::Empty));
+
+    // A completed fallible operation already has the exact result layout used
+    // by timeout. Infallible values are lifted into that one shared channel.
+    if let Some((field, destination_type)) = layout.field(destination) {
+        debug_assert_eq!(destination_type, Type::Result(*timeout_result));
+        context.locals.frame().emit(function);
+        if operation_is_already_fallible {
+            function.instruction(&Instruction::LocalGet(*operation_value));
+        } else {
+            if operation_completion.has_runtime_value() {
+                function.instruction(&Instruction::LocalGet(*operation_value));
+            } else {
+                emit_default(function, operation_completion, context.gc);
+            }
+            emit_result_success(function, *timeout_result, context.gc);
+        }
+        function.instruction(&Instruction::StructSet {
+            struct_type_index: context.locals.frame().struct_type,
+            field_index: field,
+        });
+    }
+
+    function.instruction(&Instruction::Else);
+
+    // Start the monotonic deadline on the first poll that actually observes a
+    // pending operation. Immediate completion therefore needs no clock read.
+    let clock_destination = context.abi_read.destination(8);
+    emit_monotonic_nanoseconds(function, context.abi, clock_destination);
+    function.instruction(&Instruction::LocalSet(*now));
+    emit_intrinsic_state_get(function, context, 0);
+    function
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_intrinsic_state_set_local(function, context, 1, *now);
+    let (frame, initialized_field, _) = intrinsic_state(context, 0);
+    frame.emit(function);
+    function
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::StructSet {
+            struct_type_index: frame.struct_type,
+            field_index: initialized_field,
+        })
+        .instruction(&Instruction::End);
+
+    compile_expr(function, duration, context);
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: context.gc.standard_index(StdlibTypeId::Duration),
+            field_index: context
+                .gc
+                .standard_field_index(StdlibFieldId::DurationSeconds),
+        })
+        .instruction(&Instruction::LocalSet(*duration_seconds));
+    compile_expr(function, duration, context);
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: context.gc.standard_index(StdlibTypeId::Duration),
+            field_index: context
+                .gc
+                .standard_field_index(StdlibFieldId::DurationNanoseconds),
+        })
+        .instruction(&Instruction::LocalSet(*duration_nanoseconds));
+
+    function.instruction(&Instruction::LocalGet(*now));
+    emit_intrinsic_state_get(function, context, 1);
+    function
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalSet(*elapsed));
+
+    // Non-positive durations expire after the operation's first immediate
+    // poll. Positive durations compare normalized seconds/nanoseconds without
+    // multiplying an i64 duration by one billion and risking overflow.
+    function
+        .instruction(&Instruction::LocalGet(*duration_seconds))
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::I64LtS)
+        .instruction(&Instruction::LocalGet(*duration_seconds))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::LocalGet(*duration_nanoseconds))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32LeS)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(*elapsed))
+        .instruction(&Instruction::I64Const(1_000_000_000))
+        .instruction(&Instruction::I64DivU)
+        .instruction(&Instruction::LocalGet(*duration_seconds))
+        .instruction(&Instruction::I64GtU)
+        .instruction(&Instruction::LocalGet(*elapsed))
+        .instruction(&Instruction::I64Const(1_000_000_000))
+        .instruction(&Instruction::I64DivU)
+        .instruction(&Instruction::LocalGet(*duration_seconds))
+        .instruction(&Instruction::I64Eq)
+        .instruction(&Instruction::LocalGet(*elapsed))
+        .instruction(&Instruction::I64Const(1_000_000_000))
+        .instruction(&Instruction::I64RemU)
+        .instruction(&Instruction::I32WrapI64)
+        .instruction(&Instruction::LocalGet(*duration_nanoseconds))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::If(BlockType::Empty));
+    if let Some((field, destination_type)) = layout.field(destination) {
+        debug_assert_eq!(destination_type, Type::Result(*timeout_result));
+        context.locals.frame().emit(function);
+        emit_result_error(
+            function,
+            *timeout_result,
+            timeout_value,
+            "future timed out",
+            context.gc,
+        );
+        function.instruction(&Instruction::StructSet {
+            struct_type_index: context.locals.frame().struct_type,
+            field_index: field,
+        });
+    }
+    function.instruction(&Instruction::Else);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+}
+
 fn emit_future_race_poll(
     function: &mut Function,
     operations: ExprId,
@@ -2492,8 +2706,10 @@ fn emit_future_race_poll(
     emit_future_poll_status(
         function,
         future_type,
-        destination,
-        layout,
+        FuturePollDestination::Frame {
+            destination,
+            layout,
+        },
         context,
         |function| {
             compile_expr(function, operations, context);
@@ -2548,8 +2764,10 @@ fn compile_source_future_poll(
     emit_future_poll_status(
         function,
         child_type,
-        destination,
-        parent_layout,
+        FuturePollDestination::Frame {
+            destination,
+            layout: parent_layout,
+        },
         context,
         |function| {
             parent.emit(function);
@@ -2574,11 +2792,23 @@ fn compile_source_future_poll(
 /// combinators cannot accidentally support only source, closure, or intrinsic
 /// futures. A pending handle already polled during this host update is not
 /// advanced again through another alias.
+#[derive(Clone, Copy)]
+enum FuturePollDestination<'a> {
+    Frame {
+        destination: wasm_ir::SuspensionDestination,
+        layout: &'a AsyncFrameLayout,
+    },
+    Local {
+        local: u32,
+        ty: Type,
+    },
+    Discard,
+}
+
 fn emit_future_poll_status(
     function: &mut Function,
     future_type: Type,
-    destination: wasm_ir::SuspensionDestination,
-    destination_layout: &AsyncFrameLayout,
+    destination: FuturePollDestination<'_>,
     context: &ExprContext<'_>,
     mut emit_future: impl FnMut(&mut Function),
 ) {
@@ -2727,21 +2957,44 @@ fn emit_future_poll_status(
             .instruction(&Instruction::Br(2))
             .instruction(&Instruction::End);
 
-        if let Some((destination_field, destination_type)) = destination_layout.field(destination) {
-            parent.emit(function);
+        let mut emit_completion = |function: &mut Function| {
             if let Some((completion_field, completion_type)) = completion {
-                debug_assert_eq!(destination_type, completion_type);
                 emit_future(function);
                 function.instruction(&Instruction::RefCastNonNull(HeapType::Concrete(frame_type)));
-                emit_typed_struct_get(function, frame_type, completion_field, completion_type);
+                emit_frame_typed_struct_get(
+                    function,
+                    frame_type,
+                    completion_field,
+                    completion_type,
+                    context.gc,
+                );
+                completion_type
             } else {
-                debug_assert_eq!(destination_type, Type::None);
                 emit_default(function, Type::None, context.gc);
+                Type::None
             }
-            function.instruction(&Instruction::StructSet {
-                struct_type_index: parent.struct_type,
-                field_index: destination_field,
-            });
+        };
+        match destination {
+            FuturePollDestination::Frame {
+                destination,
+                layout,
+            } => {
+                if let Some((destination_field, destination_type)) = layout.field(destination) {
+                    parent.emit(function);
+                    let completion_type = emit_completion(function);
+                    debug_assert_eq!(destination_type, completion_type);
+                    function.instruction(&Instruction::StructSet {
+                        struct_type_index: parent.struct_type,
+                        field_index: destination_field,
+                    });
+                }
+            }
+            FuturePollDestination::Local { local, ty } => {
+                let completion_type = emit_completion(function);
+                debug_assert_eq!(ty, completion_type);
+                function.instruction(&Instruction::LocalSet(local));
+            }
+            FuturePollDestination::Discard => {}
         }
 
         function

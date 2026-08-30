@@ -172,7 +172,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                 element_type: if frame_layout.capture_cell_fields.contains(&field) {
                     layout.capture_cell_storage_type(*ty)
                 } else {
-                    layout.storage_type(*ty)
+                    layout.frame_storage_type(*ty)
                 },
                 mutable: true,
             }
@@ -693,7 +693,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                             element_type: if frame.capture_cell_fields.contains(&field) {
                                 layout.capture_cell_storage_type(*ty)
                             } else {
-                                layout.storage_type(*ty)
+                                layout.frame_storage_type(*ty)
                             },
                             mutable: true,
                         }
@@ -748,7 +748,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                             element_type: if frame.capture_cell_fields.contains(&field) {
                                 layout.capture_cell_storage_type(*ty)
                             } else {
-                                layout.storage_type(*ty)
+                                layout.frame_storage_type(*ty)
                             },
                             mutable: true,
                         }
@@ -788,7 +788,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                     ]
                     .into_iter()
                     .chain(frame.types.iter().map(|ty| FieldType {
-                        element_type: layout.storage_type(*ty),
+                        element_type: layout.frame_storage_type(*ty),
                         mutable: true,
                     }))
                     .collect(),

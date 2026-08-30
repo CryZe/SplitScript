@@ -4644,6 +4644,14 @@ struct LocalPlanner<'a> {
     locals: Vec<Local>,
 }
 
+struct IntrinsicScratchSource<'a> {
+    expression: ExprId,
+    expression_ty: TypeId,
+    receiver_ty: Option<TypeId>,
+    arguments: &'a [ExprId],
+    program: &'a Program,
+}
+
 impl<'a> LocalPlanner<'a> {
     fn new(
         semantics: &'a SemanticModel,
@@ -4674,28 +4682,45 @@ impl<'a> LocalPlanner<'a> {
 
     fn push_intrinsic_scratch(
         &mut self,
-        expression: ExprId,
-        expression_ty: TypeId,
-        receiver_ty: Option<TypeId>,
+        source: IntrinsicScratchSource<'_>,
+        slot_base: u8,
         policy: ScratchPolicy,
     ) {
         let ty = match policy.ty {
             ScratchType::Core(core) => self.semantics.types().id_for_core(core),
             ScratchType::Standard(standard) => self.semantics.types().id_for_standard(standard),
-            ScratchType::Expression => expression_ty,
+            ScratchType::Expression => source.expression_ty,
             ScratchType::ResultValue => {
-                let TypeKind::Result { value, .. } = self.semantics.types().kind(expression_ty)
+                let TypeKind::Result { value, .. } =
+                    self.semantics.types().kind(source.expression_ty)
                 else {
                     unreachable!("result-value scratch requires a Result expression")
                 };
                 *value
             }
-            ScratchType::Receiver => {
-                receiver_ty.expect("receiver scratch requires a method-shaped intrinsic")
+            ScratchType::AsyncArgumentValue(index) => {
+                let argument = source
+                    .arguments
+                    .get(index as usize)
+                    .and_then(|argument| source.program.expression(*argument))
+                    .expect("async-argument scratch requires a declared call argument");
+                let TypeKind::Async { value, .. } = self.semantics.types().kind(argument.ty) else {
+                    unreachable!("async-argument scratch requires an async argument")
+                };
+                *value
             }
+            ScratchType::Receiver => source
+                .receiver_ty
+                .expect("receiver scratch requires a method-shaped intrinsic"),
         };
         for slot in 0..policy.slots {
-            self.push(ty, LocalPurpose::IntrinsicScratch { expression, slot });
+            self.push(
+                ty,
+                LocalPurpose::IntrinsicScratch {
+                    expression: source.expression,
+                    slot: slot_base + slot,
+                },
+            );
         }
     }
 
@@ -4720,11 +4745,26 @@ pub(crate) fn leaf_future_locals(
         .expression(expression)
         .expect("leaf future expressions belong to Wasm IR");
     let mut planner = LocalPlanner::new(semantics, capabilities);
-    if let Some(intrinsic) = resolved_intrinsic(program, expression)
-        && let Some(policy) = intrinsic_registry::contract(intrinsic).async_scratch
-    {
+    if let Some(intrinsic) = resolved_intrinsic(program, expression) {
+        let ExpressionKind::Call { arguments, .. } = &lowered.kind else {
+            unreachable!("intrinsic expressions are calls")
+        };
         let completion = planner.awaited_value_type(lowered.ty);
-        planner.push_intrinsic_scratch(expression, completion, None, policy);
+        let mut slot_base = 0;
+        for policy in intrinsic_registry::contract(intrinsic).async_scratch {
+            planner.push_intrinsic_scratch(
+                IntrinsicScratchSource {
+                    expression,
+                    expression_ty: completion,
+                    receiver_ty: None,
+                    arguments,
+                    program,
+                },
+                slot_base,
+                *policy,
+            );
+            slot_base += policy.slots;
+        }
     }
     planner.locals
 }
@@ -4846,11 +4886,30 @@ impl Visitor for LocalPlanner<'_> {
             }
             if *mode == SuspensionMode::Retry {
                 self.push(operand_type, LocalPurpose::SuspensionScratch(*value));
-            } else if let Some(intrinsic) = resolved_intrinsic(program, *value)
-                && let Some(policy) = intrinsic_registry::contract(intrinsic).async_scratch
-            {
+            } else if let Some(intrinsic) = resolved_intrinsic(program, *value) {
                 let completion_type = self.awaited_value_type(operand_type);
-                self.push_intrinsic_scratch(*value, completion_type, None, policy);
+                let ExpressionKind::Call { arguments, .. } = &program
+                    .expression(*value)
+                    .expect("intrinsic suspension operands belong to Wasm IR")
+                    .kind
+                else {
+                    unreachable!("intrinsic expressions are calls")
+                };
+                let mut slot_base = 0;
+                for policy in intrinsic_registry::contract(intrinsic).async_scratch {
+                    self.push_intrinsic_scratch(
+                        IntrinsicScratchSource {
+                            expression: *value,
+                            expression_ty: completion_type,
+                            receiver_ty: None,
+                            arguments,
+                            program,
+                        },
+                        slot_base,
+                        *policy,
+                    );
+                    slot_base += policy.slots;
+                }
             }
         } else if let Terminator::RetryComplete {
             destination, value, ..
@@ -5021,7 +5080,20 @@ impl Visitor for LocalPlanner<'_> {
         if let Some((intrinsic, receiver_ty)) = intrinsic
             && let Some(policy) = intrinsic_registry::contract(intrinsic).synchronous_scratch
         {
-            self.push_intrinsic_scratch(expression.id, expression.ty, receiver_ty, policy);
+            let ExpressionKind::Call { arguments, .. } = &expression.kind else {
+                unreachable!("intrinsic expressions are calls")
+            };
+            self.push_intrinsic_scratch(
+                IntrinsicScratchSource {
+                    expression: expression.id,
+                    expression_ty: expression.ty,
+                    receiver_ty,
+                    arguments,
+                    program,
+                },
+                0,
+                policy,
+            );
         }
     }
 }

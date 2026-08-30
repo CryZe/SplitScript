@@ -27,9 +27,9 @@ use super::{
     DisplayFunctions, EqualityFunctions, GcLayout, MemoryByteOrder, RuntimeHelperPlan, STATE_TYPE,
     SetFunctions, SettingStorage, Type, application_type_argument, array_element_type,
     async_frame::{AsyncFrameRef, LeafFutureInstance, LeafFutureLayout},
-    emit_array_get, emit_default, emit_failure_transfer, emit_int, emit_memory_value,
-    emit_result_error, emit_result_success, emit_string_literal, emit_struct_get,
-    emit_typed_struct_get, enum_variant_payload,
+    emit_array_get, emit_default, emit_failure_transfer, emit_frame_typed_struct_get, emit_int,
+    emit_memory_value, emit_monotonic_nanoseconds, emit_result_error, emit_result_success,
+    emit_string_literal, emit_struct_get, emit_typed_struct_get, enum_variant_payload,
     global_plan::RuntimeGlobals,
     imports::Abi,
     managed_state_reads::ManagedStateReadCache,
@@ -1097,7 +1097,7 @@ pub(super) fn compile_assignment(
             frame.emit(function);
             compile_assignment_value(function, operation, value, ty, context, |function| {
                 frame.emit(function);
-                emit_typed_struct_get(function, frame.struct_type, field, ty);
+                emit_frame_typed_struct_get(function, frame.struct_type, field, ty, context.gc);
             });
             function.instruction(&Instruction::StructSet {
                 struct_type_index: frame.struct_type,
@@ -1302,7 +1302,7 @@ fn compile_temporary_get(
             }
             let frame = context.locals.frame();
             frame.emit(function);
-            emit_typed_struct_get(function, frame.struct_type, field, ty);
+            emit_frame_typed_struct_get(function, frame.struct_type, field, ty, context.gc);
         }
         LocalStorage::Hybrid {
             wasm_temporaries, ..
@@ -1429,7 +1429,13 @@ pub(super) fn compile_receiver(
     {
         debug_assert_eq!(captured_type, receiver_type);
         capture.frame.emit(function);
-        emit_typed_struct_get(function, capture.frame.struct_type, field, captured_type);
+        emit_frame_typed_struct_get(
+            function,
+            capture.frame.struct_type,
+            field,
+            captured_type,
+            context.gc,
+        );
         return receiver_type;
     }
     match receiver {
@@ -1676,7 +1682,13 @@ pub(super) fn compile_resolved_path(
                                 });
                                 emit_capture_cell_get(function, ty, context.gc);
                             } else {
-                                emit_typed_struct_get(function, frame.struct_type, field, ty);
+                                emit_frame_typed_struct_get(
+                                    function,
+                                    frame.struct_type,
+                                    field,
+                                    ty,
+                                    context.gc,
+                                );
                             }
                         }
                         ty
@@ -2800,7 +2812,7 @@ pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context:
     {
         if ty != Type::None || context.materialize_none {
             capture.frame.emit(function);
-            emit_typed_struct_get(function, capture.frame.struct_type, field, ty);
+            emit_frame_typed_struct_get(function, capture.frame.struct_type, field, ty, context.gc);
         }
         return;
     }
@@ -4320,23 +4332,10 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::InstantNow => {
                 let destination = context.abi_read.destination(8);
-                function
-                    // WASI clock ID 1 is the monotonic clock. A precision of
-                    // one requests the finest available nanosecond reading.
-                    .instruction(&Instruction::I32Const(1))
-                    .instruction(&Instruction::I64Const(1))
-                    .instruction(&Instruction::I32Const(destination))
-                    .instruction(&Instruction::Call(
-                        context.abi.function(AbiImportId::WasiClockTimeGet),
-                    ))
-                    .instruction(&Instruction::If(BlockType::Empty))
-                    .instruction(&Instruction::Unreachable)
-                    .instruction(&Instruction::End)
-                    .instruction(&Instruction::I32Const(destination))
-                    .instruction(&Instruction::I64Load(memarg()))
-                    .instruction(&Instruction::StructNew(
-                        context.gc.standard_index(StdlibTypeId::Instant),
-                    ));
+                emit_monotonic_nanoseconds(function, context.abi, destination);
+                function.instruction(&Instruction::StructNew(
+                    context.gc.standard_index(StdlibTypeId::Instant),
+                ));
             }
             IntrinsicId::ProcessName => {
                 // Evaluate the written receiver exactly once even though the
@@ -4408,6 +4407,7 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::NextTick
             | IntrinsicId::FutureRace
+            | IntrinsicId::FutureTimeout
             | IntrinsicId::ProcessClosed
             | IntrinsicId::ProcessMainModule
             | IntrinsicId::ProcessModule

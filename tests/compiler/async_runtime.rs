@@ -121,6 +121,7 @@ fn never_can_appear_as_an_uninhabited_aggregate_payload() {
 struct AsyncTestHost {
     process_open: bool,
     timer_state: i32,
+    monotonic_nanoseconds: i64,
     messages: Vec<String>,
     memory_regions: Vec<(u64, Vec<u8>)>,
     module_lookups: usize,
@@ -174,6 +175,17 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
                         }
                         "timer_start" => caller.data_mut().timer_state = 1,
                         "timer_reset" => caller.data_mut().timer_state = 0,
+                        "clock_time_get" => {
+                            let pointer = parameters[2].unwrap_i32() as usize;
+                            let timestamp = caller.data().monotonic_nanoseconds.to_le_bytes();
+                            let memory = caller
+                                .get_export("memory")
+                                .and_then(wasmtime::Extern::into_memory)
+                                .expect("generated modules export memory");
+                            memory
+                                .write(&mut caller, pointer, &timestamp)
+                                .expect("clock output should belong to guest memory");
+                        }
                         "process_get_module_address" => {
                             caller.data_mut().module_lookups += 1;
                             results[0] = Val::I64(0x1000);
@@ -256,6 +268,7 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
         AsyncTestHost {
             process_open: true,
             timer_state: 0,
+            monotonic_nanoseconds: 0,
             messages: Vec::new(),
             memory_regions: Vec::new(),
             module_lookups: 0,
@@ -2239,6 +2252,180 @@ fn future_race_polls_shared_handles_at_most_once_per_update() {
     assert_eq!(store.data().messages, ["first poll"]);
     update.call(&mut store, ()).unwrap();
     assert_eq!(store.data().messages, ["first poll", "second poll", "7"]);
+}
+
+#[test]
+fn future_timeout_is_lazy_and_gives_ready_operations_deadline_priority() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn afterTick() -> async u32 {
+            print("operation polled")
+            await nextTick()
+            return 7
+        }
+
+        onAttach {
+            let operation = future.timeout(
+                afterTick(),
+                Duration.fromNanoseconds(10),
+            )
+            print("timeout created")
+            print(await operation else 0)
+            await process.closed()
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    store.data_mut().monotonic_nanoseconds = 100;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        ["timeout created", "operation polled"],
+        "constructing timeout must not poll before the returned future is awaited"
+    );
+
+    store.data_mut().monotonic_nanoseconds = 110;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        ["timeout created", "operation polled", "7"],
+        "an operation ready exactly at the deadline must win"
+    );
+}
+
+#[test]
+fn future_timeout_supports_intrinsic_and_closure_future_producers() {
+    let source = r#"
+        state "game.exe" {}
+
+        onAttach {
+            let closure: () -> async u32 = () -> async u32 => {
+                await nextTick()
+                return 11
+            }
+
+            print(await future.timeout(
+                closure(),
+                Duration.fromSeconds(1),
+            ) else 0)
+            await future.timeout(
+                nextTick(),
+                Duration.fromSeconds(1),
+            ) else {
+                print("unexpected timeout")
+            }
+            print("done")
+            await process.closed()
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    assert!(store.data().messages.is_empty());
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["11"]);
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["11", "done"]);
+}
+
+#[test]
+fn future_timeout_expires_pending_operations_and_flattens_existing_failures() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn pending() -> async u32 {
+            await process.closed()
+        }
+
+        fn fails() -> async u32! {
+            await nextTick()
+            return process.read<u32>(0xdead)
+        }
+
+        onAttach {
+            let value = await future.timeout(
+                pending(),
+                Duration.fromNanoseconds(10),
+            ) else 99
+            print(value)
+
+            let failed: u32! = await future.timeout(
+                fails(),
+                Duration.fromSeconds(1),
+            )
+            match failed {
+                Ok(value) => print(value),
+                Err(error) => print(error),
+            }
+            await process.closed()
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    store.data_mut().monotonic_nanoseconds = 50;
+    update.call(&mut store, ()).unwrap();
+    store.data_mut().monotonic_nanoseconds = 59;
+    update.call(&mut store, ()).unwrap();
+    assert!(store.data().messages.is_empty());
+
+    store.data_mut().monotonic_nanoseconds = 60;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["99"]);
+    store.data_mut().monotonic_nanoseconds = 61;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        ["99", "process read failed"],
+        "timeout and operand failures should use one ordinary result channel"
+    );
+}
+
+#[test]
+fn non_positive_future_timeouts_allow_one_immediate_poll() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn immediate() -> async u32 {
+            if true {
+                return 4
+            }
+            await process.closed()
+        }
+
+        fn pending() -> async u32 {
+            await process.closed()
+        }
+
+        onAttach {
+            print(await future.timeout(immediate(), Duration.zero()) else 0)
+            print(await future.timeout(
+                pending(),
+                Duration.fromNanoseconds(-1),
+            ) else 8)
+            await process.closed()
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["4", "8"]);
 }
 
 #[test]

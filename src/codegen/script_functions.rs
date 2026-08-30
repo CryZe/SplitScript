@@ -1341,6 +1341,9 @@ pub(super) fn plan_wasm_locals(
                     };
                     *value
                 }
+                ScratchType::AsyncArgumentValue(_) => {
+                    unreachable!("synchronous scratch cannot depend on an async argument value")
+                }
                 ScratchType::Receiver => {
                     receiver_ty.expect("receiver scratch requires a method-shaped intrinsic")
                 }

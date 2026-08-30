@@ -494,6 +494,49 @@ namespace future {
         /// Lazy operations with the same completion type.
         operations: [async T],
     ) -> async T;
+
+    /// Waits for an operation until a duration has elapsed.
+    ///
+    /// Calling this function is lazy: the deadline starts when the returned
+    /// future is first polled. Each runtime update polls `operation` before
+    /// checking the monotonic deadline, so a value that becomes ready exactly
+    /// at the deadline wins. A zero or negative duration permits one immediate
+    /// poll and then fails if the operation is still pending.
+    ///
+    /// A timeout uses the ordinary [`T!`] error channel. If `operation` already
+    /// completes with a fallible value, its error and the timeout share that
+    /// single channel. The error text is intended for display, not for
+    /// programmatic classification. Once this wrapper times out, it no longer
+    /// polls `operation`; a future handle stored elsewhere remains valid and
+    /// may still be awaited independently.
+    ///
+    /// # Example
+    ///
+    /// Bound module discovery
+    ///
+    /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// let executable = await future.timeout(
+    ///     process.module("game.exe"),
+    ///     Duration.fromSeconds(5),
+    /// ) else {
+    ///     print("the game module was not discovered in time")
+    ///     await process.closed()
+    /// }
+    /// # print(executable.address)
+    /// # }
+    /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
+    @intrinsic(FutureTimeout)
+    fn timeout<T>(
+        /// The lazy operation to poll.
+        operation: async T,
+        /// The maximum time for which the operation may remain pending.
+        duration: Duration,
+    ) -> async T!;
 }
 
 /// Reads metadata about the autosplitting runtime host.

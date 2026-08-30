@@ -1328,6 +1328,31 @@ impl StandardLibrary {
                             item.qualified_name,
                         ));
                     }
+                    if let intrinsic_registry::FailureChannelPolicy::ReuseAsyncArgument(index) =
+                        contract.failure_channel
+                    {
+                        let argument_is_async = item
+                            .signature
+                            .parameters
+                            .get(usize::from(index))
+                            .is_some_and(|parameter| matches!(parameter.ty, TypeRef::Async(_)));
+                        let result_is_fallible = matches!(
+                            item.signature.result,
+                            TypeRef::Application {
+                                constructor: StdlibTypeConstructorId::Result,
+                                ..
+                            }
+                        );
+                        if !item.signature.result_is_async
+                            || !argument_is_async
+                            || !result_is_fallible
+                        {
+                            errors.push(format!(
+                                "`{}` has failure-channel metadata that requires an async argument and fallible async result",
+                                item.qualified_name,
+                            ));
+                        }
+                    }
                     let Some(declared) = item.intrinsic_context else {
                         errors.push(format!(
                             "`{}` has no source-declared intrinsic context metadata",

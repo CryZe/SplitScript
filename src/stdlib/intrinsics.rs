@@ -16,6 +16,7 @@ macro_rules! trusted_intrinsics {
             InstantNow,
             NextTick,
             FutureRace,
+            FutureTimeout,
             BoolNot,
             IntegerBitNot,
             NumericSwapBytes,

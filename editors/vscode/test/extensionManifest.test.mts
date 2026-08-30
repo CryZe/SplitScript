@@ -31,6 +31,10 @@ interface ExtensionManifest {
 const manifest = JSON.parse(
     readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
 ) as ExtensionManifest;
+const documentationStyles = readFileSync(
+    fileURLToPath(new URL('../styles/documentation.css', import.meta.url)),
+    'utf8',
+);
 
 test('documentation has direct, contextual, and searchable commands', () => {
     const commands = new Set(manifest.contributes.commands.map(command => command.command));
@@ -73,4 +77,11 @@ test('SplitScript inherits the user formatting policy', () => {
     const defaults = manifest.contributes.configurationDefaults['[splitscript]'];
     assert(!Object.hasOwn(defaults, 'editor.formatOnSave'));
     assert(!Object.hasOwn(defaults, 'editor.defaultFormatter'));
+});
+
+test('documentation gives enum variants their dedicated palette color', () => {
+    assert.match(
+        documentationStyles,
+        /\[data-splitscript-token="enumMember"\]\s*\{\s*color:\s*#F397FF;/,
+    );
 });

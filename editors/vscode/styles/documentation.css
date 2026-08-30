@@ -51,6 +51,10 @@
     color: var(--vscode-symbolIcon-propertyForeground, #9cdcfe);
 }
 
+.splitscript-code [data-splitscript-token="enumMember"] {
+    color: #F397FF;
+}
+
 .splitscript-code .splitscript-token-operator {
     color: var(--vscode-symbolIcon-operatorForeground, inherit);
 }

@@ -684,7 +684,9 @@ fn code_style(kind: Option<SemanticTokenKind>, color_depth: ColorDepth) -> Color
                 .set_italic(true);
         }
         Some(SemanticTokenKind::EnumMember) => {
-            style.set_fg(Some(color_depth.color(Color::Magenta, 197)));
+            style
+                .set_fg(Some(color_depth.color(Color::Magenta, 213)))
+                .set_intense(true);
         }
         Some(
             SemanticTokenKind::Constant | SemanticTokenKind::Number | SemanticTokenKind::Version,
@@ -956,7 +958,7 @@ mod tests {
             (SemanticTokenKind::Capability, 208),
             (SemanticTokenKind::Type, 81),
             (SemanticTokenKind::Enum, 81),
-            (SemanticTokenKind::EnumMember, 197),
+            (SemanticTokenKind::EnumMember, 213),
             (SemanticTokenKind::Function, 148),
             (SemanticTokenKind::Method, 148),
             (SemanticTokenKind::Property, 193),
@@ -990,6 +992,9 @@ mod tests {
             code_style(Some(SemanticTokenKind::String), ColorDepth::Ansi16).fg(),
             Some(&Color::Yellow),
         );
+        let variant = code_style(Some(SemanticTokenKind::EnumMember), ColorDepth::Ansi16);
+        assert_eq!(variant.fg(), Some(&Color::Magenta));
+        assert!(variant.intense());
         assert_eq!(
             code_style(Some(SemanticTokenKind::Type), ColorDepth::Ansi16).fg(),
             Some(&Color::Cyan),

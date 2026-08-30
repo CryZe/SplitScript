@@ -124,6 +124,7 @@ fn diagnostics_expose_stable_stage_codes_and_severity() {
     assert_eq!(DiagnosticCode::AmbiguousRetryFallback.as_str(), "SS1006");
     assert_eq!(DiagnosticCode::StaticSettingLookup.as_str(), "SS1007");
     assert_eq!(DiagnosticCode::SuspiciousInterpolation.as_str(), "SS1008");
+    assert_eq!(DiagnosticCode::DebugOnlyUse.as_str(), "SS1009");
 }
 
 #[test]

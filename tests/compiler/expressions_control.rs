@@ -861,6 +861,174 @@ fn unused_declarations_follow_reachable_calls_and_global_reads() {
 }
 
 #[test]
+fn debug_only_reachability_warns_transitively_and_offers_erasure_fixes() {
+    let source = r#"
+        let diagnosticValue = makeDiagnosticValue()
+
+        state "game.exe" {}
+
+        fn makeDiagnosticValue() -> String {
+            return diagnosticLeaf()
+        }
+
+        fn diagnosticLeaf() -> String {
+            return "debug-profile-marker"
+        }
+
+        fn callback(value: i32) -> i32 {
+            return value + 1
+        }
+
+        fn debugReachedContainer() {
+            let nestedOnlyDebug = 8
+            debug print(nestedOnlyDebug)
+        }
+
+        debug fn alreadyDebug() {
+            let nestedDebugLocal = 9
+            print(nestedDebugLocal)
+        }
+
+        whileAttached {
+            let localValue = 7
+            debug print(localValue)
+            debug print(diagnosticValue)
+            debug let callbackValue = callback
+            debug print(callbackValue(1))
+            debug debugReachedContainer()
+            debug alreadyDebug()
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("profile-aware unused diagnostics should be non-fatal warnings");
+    let warnings = checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::DebugOnlyUse)
+        .collect::<Vec<_>>();
+
+    for name in [
+        "diagnosticValue",
+        "makeDiagnosticValue",
+        "diagnosticLeaf",
+        "callback",
+        "debugReachedContainer",
+        "localValue",
+    ] {
+        let warning = warnings
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains(&format!("`{name}`")))
+            .unwrap_or_else(|| panic!("missing debug-only-use warning for {name}: {warnings:#?}"));
+        let [fix] = warning.fixes.as_slice() else {
+            panic!("{name} should have one safe debug-modifier fix: {warning:#?}");
+        };
+        assert_eq!(
+            fix.applicability,
+            splitscript::FixApplicability::MachineApplicable
+        );
+        assert_eq!(fix.edits[0].replacement, "debug ");
+        assert_eq!(fix.edits[0].span.start, fix.edits[0].span.end);
+    }
+
+    assert!(
+        warnings.iter().all(|diagnostic| {
+            !diagnostic.message.contains("callbackValue")
+                && !diagnostic.message.contains("alreadyDebug")
+                && !diagnostic.message.contains("nestedDebugLocal")
+                && !diagnostic.message.contains("nestedOnlyDebug")
+        }),
+        "declarations already inside debug-only code must not receive redundant guidance"
+    );
+    assert!(checked.diagnostics().iter().all(|diagnostic| {
+        !matches!(
+            diagnostic.code,
+            splitscript::DiagnosticCode::UnusedBinding
+                | splitscript::DiagnosticCode::UnusedDeclaration
+        )
+    }));
+
+    let mut fixed = source.to_owned();
+    let mut edits = warnings
+        .iter()
+        .flat_map(|warning| warning.fixes.iter())
+        .flat_map(|fix| fix.edits.iter())
+        .collect::<Vec<_>>();
+    edits.sort_by_key(|edit| std::cmp::Reverse(edit.span.start));
+    for edit in edits {
+        fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    }
+    let release = splitscript::compile_with_options(
+        &fixed,
+        splitscript::CompilerOptions {
+            profile: splitscript::BuildProfile::Release,
+            ..splitscript::CompilerOptions::default()
+        },
+    )
+    .expect("applying the suggested modifiers should produce a release build");
+    assert!(
+        !release
+            .windows(b"debug-profile-marker".len())
+            .any(|bytes| bytes == b"debug-profile-marker"),
+        "release reachability should erase the complete debug-only helper chain"
+    );
+}
+
+#[test]
+fn release_visible_consumers_keep_profile_aware_unused_analysis_quiet() {
+    let source = r#"
+        let shared = 1
+
+        state "game.exe" {}
+
+        fn sharedHelper() -> i32 { return shared }
+
+        whileAttached {
+            print(sharedHelper())
+            debug print(sharedHelper())
+            let local = shared
+            print(local)
+            debug print(local)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
+    assert!(
+        checked
+            .diagnostics()
+            .iter()
+            .all(|diagnostic| diagnostic.code != splitscript::DiagnosticCode::DebugOnlyUse),
+        "release-visible reads must suppress debug-only-use warnings: {:#?}",
+        checked.diagnostics()
+    );
+}
+
+#[test]
+fn release_visible_writes_prevent_an_unsafe_debug_modifier_fix() {
+    let source = r#"
+        let detail = 0
+        state "game.exe" {}
+        whileAttached {
+            detail = 1
+            debug print(detail)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
+    let warning = checked
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::DebugOnlyUse)
+        .expect("the release-retained global should still receive guidance");
+    assert_eq!(
+        warning.message,
+        "global `detail` is only read by debug code"
+    );
+    assert!(
+        warning.fixes.is_empty(),
+        "the release assignment would become invalid"
+    );
+    assert!(warning.notes.iter().any(|note| note.contains("assigned")));
+}
+
+#[test]
 fn unused_state_fields_follow_snapshot_reads_and_candidate_dependencies() {
     let source = r#"
         state "game.exe" {

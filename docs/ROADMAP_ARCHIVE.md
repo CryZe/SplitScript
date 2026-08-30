@@ -1,5 +1,20 @@
 # SplitScript roadmap
 
+## 2026-08-30: profile-aware unused guidance shares declaration reachability
+
+- Added configurable warning `SS1009` for normal locals, globals, and
+  functions consumed exclusively by debug-only code. Ordinary unused warnings
+  remain profile-stable, while authors now see work unnecessarily retained in
+  release builds.
+- Labelled the existing declaration graph with debug/release reachability and
+  propagated those profiles through transitive helpers, capability bodies, and
+  named function values. This avoids a separate debug-only name scan and also
+  corrects function-value reachability for ordinary unused analysis.
+- Added machine-applicable `debug` modifier insertions where erasing the whole
+  declaration is safe. Release-visible assignments keep the warning but
+  suppress an unsafe edit. Compiler, release-Wasm, warning-policy, and LSP
+  quick-fix coverage exercise the shared behavior.
+
 ## 2026-08-30: unused state values become visible without changing execution
 
 - Added `SS1004` warnings for state fields whose produced snapshot values never

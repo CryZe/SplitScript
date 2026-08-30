@@ -613,6 +613,53 @@ fn publishes_unused_binding_warnings_without_rejecting_the_document() {
 }
 
 #[test]
+fn debug_only_use_warning_offers_a_debug_modifier_quick_fix() {
+    let source =
+        "state \"game.exe\" {}\nwhileAttached {\n    let detail = 1\n    debug print(detail)\n}";
+    let uri = "file:///debug-only-use.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    let diagnostics = server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+    let published = diagnostics[0]["params"]["diagnostics"].as_array().unwrap();
+    let warning = published
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "SS1009")
+        .expect("debug-only use warning should be published");
+    assert_eq!(warning["severity"], 2);
+
+    let actions = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 240,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": uri },
+            "range": warning["range"],
+            "context": {
+                "diagnostics": [warning],
+                "only": ["quickfix"]
+            }
+        }
+    }));
+    let quick_fixes = actions[0]["result"].as_array().unwrap();
+    assert_eq!(quick_fixes.len(), 1, "{quick_fixes:#?}");
+    assert_eq!(quick_fixes[0]["title"], "mark `detail` as debug-only");
+    assert_eq!(quick_fixes[0]["isPreferred"], true);
+    assert_eq!(
+        quick_fixes[0]["edit"]["changes"][uri][0]["newText"],
+        "debug "
+    );
+}
+
+#[test]
 fn value_block_tail_warning_survives_analysis_and_offers_its_parser_fix() {
     let source = "state \"game.exe\" {} setup { let value: u32 = { 1; }; print(value) }";
     let uri = "file:///value-block-warning.split";

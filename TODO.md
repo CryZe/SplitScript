@@ -882,15 +882,6 @@ remaining work is product hardening and distribution.
 
 ## P1 — remaining language and runtime breadth
 
-- [ ] Make unused analysis aware of debug erasure. When a retained local,
-  global, function, or other erasable declaration is reachable or referenced
-  only from `debug` code, warn that it is compiled into release builds despite
-  having no release consumer and suggest marking the declaration `debug`.
-  Compute this from one profile-aware use/reachability graph, including
-  transitive helper calls, rather than a second debug-only name scan. Offer a
-  machine-applicable modifier insertion only where erasing the whole
-  declaration is valid, keep genuinely release-reachable uses quiet, and test
-  both debug and release diagnostics plus release-Wasm elimination.
 - [ ] Add shorthand record field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename

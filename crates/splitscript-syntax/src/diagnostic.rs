@@ -18,10 +18,11 @@ pub enum DiagnosticCode {
     AmbiguousRetryFallback,
     StaticSettingLookup,
     SuspiciousInterpolation,
+    DebugOnlyUse,
 }
 
 impl DiagnosticCode {
-    pub const WARNINGS: [Self; 8] = [
+    pub const WARNINGS: [Self; 9] = [
         Self::MustUse,
         Self::UnusedBinding,
         Self::UnusedDeclaration,
@@ -30,6 +31,7 @@ impl DiagnosticCode {
         Self::AmbiguousRetryFallback,
         Self::StaticSettingLookup,
         Self::SuspiciousInterpolation,
+        Self::DebugOnlyUse,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -46,6 +48,7 @@ impl DiagnosticCode {
             Self::AmbiguousRetryFallback => "SS1006",
             Self::StaticSettingLookup => "SS1007",
             Self::SuspiciousInterpolation => "SS1008",
+            Self::DebugOnlyUse => "SS1009",
         }
     }
 
@@ -60,6 +63,7 @@ impl DiagnosticCode {
                 | Self::AmbiguousRetryFallback
                 | Self::StaticSettingLookup
                 | Self::SuspiciousInterpolation
+                | Self::DebugOnlyUse
         )
     }
 }
@@ -81,6 +85,7 @@ impl FromStr for DiagnosticCode {
             "SS1006" => Ok(Self::AmbiguousRetryFallback),
             "SS1007" => Ok(Self::StaticSettingLookup),
             "SS1008" => Ok(Self::SuspiciousInterpolation),
+            "SS1009" => Ok(Self::DebugOnlyUse),
             _ => Err(()),
         }
     }

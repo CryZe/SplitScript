@@ -493,6 +493,16 @@ statements participate in this analysis in both build profiles so editor
 warnings do not change when publishing a release build. Prefix an intentionally
 reserved declaration with `_` to suppress its warning.
 
+That stable ordinary-unused result is paired with profile-aware guidance. A
+normal local, global, or function that is reachable, but only through `debug`
+statements, produces `SS1009`: release builds retain work that no release code
+can consume. The analysis propagates profile reachability through helper calls
+and named function values, so an entire diagnostics-only helper chain is
+identified rather than only its first function. A quick fix inserts `debug`
+when erasing the whole declaration is safe. If release-visible code still
+assigns a global or local, the warning remains but no unsafe edit is offered.
+Declarations already nested in debug-only code do not warn.
+
 Reachable records and enums receive member-level checks without cascading from
 an entirely dead type. Accessing a record member reads that field; merely
 constructing or deserializing the record does not. Constructing or matching an
@@ -513,9 +523,10 @@ explicit host key, which keeps existing saved settings compatible.
 
 Warning codes are stable tooling identifiers: `SS1001` denotes a discarded
 must-use value, `SS1002` an unread local binding, `SS1003` an unreachable
-declaration, and `SS1004` an unused state field, setting, record field, or enum
-variant. The wording may improve without requiring editor integrations to
-classify messages by text.
+declaration, `SS1004` an unused state field, setting, record field, or enum
+variant, and `SS1009` a declaration consumed only by debug code. The wording
+may improve without requiring editor integrations to classify messages by
+text.
 
 Compiler hosts can configure every warning code as `allow`, `warn`, or `deny`.
 Allowing suppresses that diagnostic, while denying makes the configured build

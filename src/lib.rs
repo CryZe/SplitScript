@@ -108,6 +108,7 @@ pub struct WarningPolicy {
     ambiguous_retry_fallback: WarningLevel,
     static_setting_lookup: WarningLevel,
     suspicious_interpolation: WarningLevel,
+    debug_only_use: WarningLevel,
 }
 
 impl WarningPolicy {
@@ -121,6 +122,7 @@ impl WarningPolicy {
             DiagnosticCode::AmbiguousRetryFallback => Some(self.ambiguous_retry_fallback),
             DiagnosticCode::StaticSettingLookup => Some(self.static_setting_lookup),
             DiagnosticCode::SuspiciousInterpolation => Some(self.suspicious_interpolation),
+            DiagnosticCode::DebugOnlyUse => Some(self.debug_only_use),
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
             | DiagnosticCode::Type
@@ -139,6 +141,7 @@ impl WarningPolicy {
             DiagnosticCode::AmbiguousRetryFallback => &mut self.ambiguous_retry_fallback,
             DiagnosticCode::StaticSettingLookup => &mut self.static_setting_lookup,
             DiagnosticCode::SuspiciousInterpolation => &mut self.suspicious_interpolation,
+            DiagnosticCode::DebugOnlyUse => &mut self.debug_only_use,
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
             | DiagnosticCode::Type

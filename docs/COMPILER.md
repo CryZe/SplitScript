@@ -151,7 +151,9 @@ lexing, `SS0002` for parsing, `SS0003` for type checking, and `SS0004` for
 post-type semantic validation. Actionable warnings use their own `SS1xxx`
 namespace: `SS1001` for discarded must-use values, `SS1002` for unread local
 bindings, `SS1003` for unreachable declarations, and `SS1004` for unused state
-fields, settings, record fields, or enum variants. Clients can therefore
+fields, settings, record fields, or enum variants. `SS1009` identifies normal
+locals, globals, and functions reached exclusively from debug-only code, where
+release builds retain work without a release consumer. Clients can therefore
 configure and present a warning without parsing its human-readable message.
 The same value owns its primary and secondary labels, notes, and fixes. Fixes
 have an explicit applicability and may contain multiple source edits. The
@@ -171,6 +173,14 @@ to a particular presentation library. Formatter failures and watch-mode
 rebuilds use the same renderer. Spans remain byte offsets within the one source
 file; a `FileId` and source map are deliberately deferred until the language
 gains modules or another feature that accepts multiple sources.
+
+Unused declarations use one profile-labelled reachability graph. Ordinary
+unused warnings inspect whether any profile reaches a declaration, while
+`SS1009` checks whether that same path includes release. Edge profiles are
+intersected as reachability crosses debug statements and source declarations,
+which makes transitive helpers and named function values behave consistently.
+The compiler offers a machine-applicable `debug` insertion only when erasing
+the declaration cannot leave a release-visible assignment behind.
 
 `WarningPolicy` independently configures each `SS100x` code as `allow`, `warn`,
 or `deny`. Policy is deliberately applied after semantic checking. `allow`

@@ -66,13 +66,13 @@ pub(crate) fn validate(
     diagnostics.extend(validate_function_instances(syntax, hir, semantics));
     diagnostics.extend(validate_future_storage(syntax, semantics, enum_types));
     diagnostics.extend(validate_must_use(&standard_library, hir, semantics));
-    diagnostics.extend(validate_unused_bindings(syntax, hir));
-    diagnostics.extend(validate_unused_declarations(
+    let unused_declarations = validate_unused_declarations(syntax, hir, semantics, &capabilities);
+    diagnostics.extend(validate_unused_bindings(
         syntax,
         hir,
-        semantics,
-        &capabilities,
+        &unused_declarations.function_profiles,
     ));
+    diagnostics.extend(unused_declarations.diagnostics);
     diagnostics.extend(validate_static_setting_lookups(syntax, hir));
     diagnostics.extend(validate_async_function_results(
         &standard_library,
@@ -1137,7 +1137,11 @@ impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
     }
 }
 
-fn validate_unused_bindings(syntax: &Program, hir: &TypedProgram) -> Vec<Diagnostic> {
+fn validate_unused_bindings(
+    syntax: &Program,
+    hir: &TypedProgram,
+    function_profiles: &HashMap<ast::FunctionId, UseProfiles>,
+) -> Vec<Diagnostic> {
     let visible_functions = hir
         .function_bodies()
         .map(|body| body.function.function)
@@ -1173,40 +1177,39 @@ fn validate_unused_bindings(syntax: &Program, hir: &TypedProgram) -> Vec<Diagnos
         .chain(syntax.globals.iter().map(|global| global.name.clone()))
         .collect::<HashSet<_>>();
 
-    let mut reads = HashSet::new();
-    for expression in hir.expressions() {
-        if let Some(ExpressionResolution::DynamicCall(DynamicCallCallee::Value(value))) =
-            expression.resolution
-        {
-            reads.insert(value);
-        }
-        let root = hir
-            .value_path(expression.id)
-            .and_then(|(root, _)| root)
-            .or_else(|| {
-                hir.call(expression.id).and_then(|call| {
-                    call.receiver()
-                        .and_then(|receiver| receiver.path().map(|(root, _)| root))
-                })
-            });
-        if let Some(value) = root.and_then(|root| root.source_value()) {
-            reads.insert(value);
-        }
-    }
-
-    let mut writes = HashMap::<ast::ValueId, Vec<ast::Span>>::new();
+    let mut usage = LocalUsageCollector::default();
     for body in hir.function_bodies() {
-        collect_assignment_usage(&body.body, &mut reads, &mut writes);
+        usage.active_profiles = function_profiles
+            .get(&body.function.function)
+            .copied()
+            .unwrap_or({
+                if body.debug_only {
+                    UseProfiles::DEBUG
+                } else {
+                    // Preserve ordinary binding diagnostics inside unreachable
+                    // functions without inventing a debug-only execution path.
+                    UseProfiles::ALL
+                }
+            });
+        usage.visit_block(&body.body, hir);
     }
     for body in hir.action_bodies() {
-        collect_assignment_usage(&body.body, &mut reads, &mut writes);
+        usage.active_profiles = UseProfiles::ALL;
+        usage.visit_block(&body.body, hir);
     }
 
-    let mut diagnostics = collector
+    let mut diagnostics = Vec::new();
+    for binding in collector
         .bindings
         .into_iter()
-        .filter(|binding| !binding.name.starts_with('_') && !reads.contains(&binding.id))
-        .map(|binding| {
+        .filter(|binding| !binding.name.starts_with('_'))
+    {
+        let read_profiles = usage
+            .reads
+            .get(&binding.id)
+            .copied()
+            .unwrap_or(UseProfiles(0));
+        if read_profiles.is_empty() {
             let mut replacement = format!("_{}", binding.name);
             while occupied_names.contains(&replacement) {
                 replacement.insert(0, '_');
@@ -1216,11 +1219,12 @@ fn validate_unused_bindings(syntax: &Program, hir: &TypedProgram) -> Vec<Diagnos
                 replacement: replacement.clone(),
             }];
             edits.extend(
-                writes
+                usage
+                    .writes
                     .get(&binding.id)
                     .into_iter()
                     .flatten()
-                    .map(|span| TextEdit {
+                    .map(|(span, _)| TextEdit {
                         span: ast::Span {
                             start: span.start,
                             end: span.start + binding.name.len(),
@@ -1228,59 +1232,173 @@ fn validate_unused_bindings(syntax: &Program, hir: &TypedProgram) -> Vec<Diagnos
                         replacement: replacement.clone(),
                     }),
             );
-            Diagnostic::warning(
-                DiagnosticCode::UnusedBinding,
-                format!("unused {} `{}`", binding.kind.description(), binding.name),
+            diagnostics.push(
+                Diagnostic::warning(
+                    DiagnosticCode::UnusedBinding,
+                    format!("unused {} `{}`", binding.kind.description(), binding.name),
+                    binding.name_span,
+                )
+                .with_primary_label("this binding is never read")
+                .with_note("prefix the name with `_` to indicate that this is intentional")
+                .with_fix(DiagnosticFix {
+                    title: format!("rename `{}` to `{replacement}`", binding.name),
+                    applicability: FixApplicability::MachineApplicable,
+                    edits,
+                }),
+            );
+            continue;
+        }
+
+        let Some(declaration) = usage.declarations.get(&binding.id) else {
+            continue;
+        };
+        if declaration.profiles.contains(UseProfiles::RELEASE)
+            && read_profiles.contains(UseProfiles::DEBUG)
+            && !read_profiles.contains(UseProfiles::RELEASE)
+        {
+            let release_write = usage
+                .writes
+                .get(&binding.id)
+                .into_iter()
+                .flatten()
+                .any(|(_, profiles)| profiles.contains(UseProfiles::RELEASE));
+            let mut diagnostic = Diagnostic::warning(
+                DiagnosticCode::DebugOnlyUse,
+                format!("local `{}` is only read by debug code", binding.name),
                 binding.name_span,
             )
-            .with_primary_label("this binding is never read")
-            .with_note("prefix the name with `_` to indicate that this is intentional")
-            .with_fix(DiagnosticFix {
-                title: format!("rename `{}` to `{replacement}`", binding.name),
-                applicability: FixApplicability::MachineApplicable,
-                edits,
-            })
-        })
-        .collect::<Vec<_>>();
+            .with_primary_label("this local and its initializer are retained in release builds")
+            .with_note(
+                "mark declarations used exclusively for diagnostics as `debug` so release builds can erase them",
+            );
+            if release_write {
+                diagnostic = diagnostic.with_note(
+                    "this local is also assigned by release-visible code, so the compiler cannot safely apply that change",
+                );
+            } else {
+                diagnostic = diagnostic.with_machine_applicable_fix(
+                    format!("mark `{}` as debug-only", binding.name),
+                    declaration.insertion,
+                    "debug ",
+                );
+            }
+            diagnostics.push(diagnostic);
+        }
+    }
     diagnostics.sort_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
     diagnostics
 }
 
-fn collect_assignment_usage(
-    block: &TypedBlock,
-    reads: &mut HashSet<ast::ValueId>,
-    writes: &mut HashMap<ast::ValueId, Vec<ast::Span>>,
-) {
-    for statement in &block.statements {
+#[derive(Debug, Clone, Copy)]
+struct ErasableLocalDeclaration {
+    profiles: UseProfiles,
+    insertion: ast::Span,
+}
+
+struct LocalUsageCollector {
+    active_profiles: UseProfiles,
+    reads: HashMap<ast::ValueId, UseProfiles>,
+    writes: HashMap<ast::ValueId, Vec<(ast::Span, UseProfiles)>>,
+    declarations: HashMap<ast::ValueId, ErasableLocalDeclaration>,
+}
+
+impl Default for LocalUsageCollector {
+    fn default() -> Self {
+        Self {
+            active_profiles: UseProfiles::ALL,
+            reads: HashMap::new(),
+            writes: HashMap::new(),
+            declarations: HashMap::new(),
+        }
+    }
+}
+
+impl LocalUsageCollector {
+    fn record_read(&mut self, value: ast::ValueId) {
+        merge_profiled(&mut self.reads, value, self.active_profiles);
+    }
+}
+
+impl TypedVisitor for LocalUsageCollector {
+    fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
+        let inherited_profiles = self.active_profiles;
+        if statement.debug_only {
+            self.active_profiles = self.active_profiles.intersect(UseProfiles::DEBUG);
+        }
+        if self.active_profiles.is_empty() {
+            self.active_profiles = inherited_profiles;
+            return;
+        }
+
         match &statement.kind {
-            TypedStatementKind::Assign { assignment, op, .. } => {
-                writes
-                    .entry(assignment.target)
-                    .or_default()
-                    .push(assignment.span);
-                if op.is_some() {
-                    reads.insert(assignment.target);
-                }
+            TypedStatementKind::Variable { value, .. } => {
+                self.declarations.insert(
+                    *value,
+                    ErasableLocalDeclaration {
+                        profiles: self.active_profiles,
+                        insertion: ast::Span {
+                            start: statement.span.start,
+                            end: statement.span.start,
+                        },
+                    },
+                );
             }
-            TypedStatementKind::If {
-                then_block,
-                else_block,
+            TypedStatementKind::Suspend {
+                binding: Some(value),
                 ..
             } => {
-                collect_assignment_usage(then_block, reads, writes);
-                if let Some(else_block) = else_block {
-                    collect_assignment_usage(else_block, reads, writes);
+                self.declarations.insert(
+                    *value,
+                    ErasableLocalDeclaration {
+                        profiles: self.active_profiles,
+                        insertion: ast::Span {
+                            start: statement.span.start,
+                            end: statement.span.start,
+                        },
+                    },
+                );
+            }
+            TypedStatementKind::Assign { assignment, op, .. } => {
+                self.writes
+                    .entry(assignment.target)
+                    .or_default()
+                    .push((assignment.span, self.active_profiles));
+                if op.is_some() {
+                    self.record_read(assignment.target);
                 }
             }
-            TypedStatementKind::While { body, .. } | TypedStatementKind::For { body, .. } => {
-                collect_assignment_usage(body, reads, writes);
-            }
-            TypedStatementKind::Variable { .. }
-            | TypedStatementKind::StateAssign { .. }
+            TypedStatementKind::StateAssign { .. }
             | TypedStatementKind::IndexAssign { .. }
-            | TypedStatementKind::Suspend { .. }
+            | TypedStatementKind::If { .. }
+            | TypedStatementKind::While { .. }
+            | TypedStatementKind::For { .. }
+            | TypedStatementKind::Suspend { binding: None, .. }
             | TypedStatementKind::Expression(_) => {}
         }
+
+        hir::walk_typed_statement(self, statement, program);
+        self.active_profiles = inherited_profiles;
+    }
+
+    fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
+        if let Some(ExpressionResolution::DynamicCall(DynamicCallCallee::Value(value))) =
+            expression.resolution
+        {
+            self.record_read(value);
+        }
+        let root = program
+            .value_path(expression.id)
+            .and_then(|(root, _)| root)
+            .or_else(|| {
+                program.call(expression.id).and_then(|call| {
+                    call.receiver()
+                        .and_then(|receiver| receiver.path().map(|(root, _)| root))
+                })
+            });
+        if let Some(value) = root.and_then(ResolvedValue::source_value) {
+            self.record_read(value);
+        }
+        hir::walk_typed_expression(self, expression, program);
     }
 }
 
@@ -1290,9 +1408,57 @@ enum DeclarationWorkItem {
     Function(ast::FunctionId),
 }
 
+/// Build profiles in which a use is retained.
+///
+/// Keeping this on dependency edges lets ordinary unused analysis and
+/// release-erasure guidance share one reachability graph. A debug-only edge
+/// can never make the declaration behind it release-reachable, including
+/// through an arbitrary chain of otherwise ordinary helper functions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct UseProfiles(u8);
+
+impl UseProfiles {
+    const DEBUG: Self = Self(1 << 0);
+    const RELEASE: Self = Self(1 << 1);
+    const ALL: Self = Self(Self::DEBUG.0 | Self::RELEASE.0);
+
+    fn intersect(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+
+    fn difference(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+fn merge_profiled<K: Eq + std::hash::Hash + Copy>(
+    values: &mut HashMap<K, UseProfiles>,
+    key: K,
+    profiles: UseProfiles,
+) {
+    values
+        .entry(key)
+        .and_modify(|existing| *existing = existing.union(profiles))
+        .or_insert(profiles);
+}
+
 struct DeclarationDependencyCollector<'a> {
     semantics: &'a SemanticModel,
-    dependencies: HashSet<DeclarationWorkItem>,
+    active_profiles: UseProfiles,
+    dependencies: HashMap<DeclarationWorkItem, UseProfiles>,
+    writes: HashMap<ast::ValueId, UseProfiles>,
     types: HashSet<crate::types::TypeId>,
     observed_state_fields: HashSet<ast::ValueId>,
     observed_settings: HashSet<ast::ValueId>,
@@ -1301,14 +1467,20 @@ struct DeclarationDependencyCollector<'a> {
     observed_record_fields: HashSet<ast::RecordFieldId>,
     observed_enum_variants: HashSet<ast::EnumVariantId>,
     fully_observed_types: HashSet<crate::types::TypeId>,
-    capability_calls: HashSet<(crate::types::TypeId, StdlibItemId)>,
+    capability_calls: HashMap<(crate::types::TypeId, StdlibItemId), UseProfiles>,
 }
 
 impl<'a> DeclarationDependencyCollector<'a> {
     fn new(semantics: &'a SemanticModel) -> Self {
+        Self::with_profiles(semantics, UseProfiles::ALL)
+    }
+
+    fn with_profiles(semantics: &'a SemanticModel, active_profiles: UseProfiles) -> Self {
         Self {
             semantics,
-            dependencies: HashSet::new(),
+            active_profiles,
+            dependencies: HashMap::new(),
+            writes: HashMap::new(),
             types: HashSet::new(),
             observed_state_fields: HashSet::new(),
             observed_settings: HashSet::new(),
@@ -1317,7 +1489,7 @@ impl<'a> DeclarationDependencyCollector<'a> {
             observed_record_fields: HashSet::new(),
             observed_enum_variants: HashSet::new(),
             fully_observed_types: HashSet::new(),
-            capability_calls: HashSet::new(),
+            capability_calls: HashMap::new(),
         }
     }
 
@@ -1326,14 +1498,15 @@ impl<'a> DeclarationDependencyCollector<'a> {
         capabilities: &CapabilityAnalysis,
         semantics: &SemanticModel,
     ) {
-        for (receiver, requirement) in std::mem::take(&mut self.capability_calls) {
+        for ((receiver, requirement), profiles) in std::mem::take(&mut self.capability_calls) {
             let dependencies = capabilities.method_dependencies(receiver, requirement, semantics);
-            self.dependencies.extend(
-                dependencies
-                    .source_functions
-                    .into_iter()
-                    .map(DeclarationWorkItem::Function),
-            );
+            for function in dependencies.source_functions {
+                merge_profiled(
+                    &mut self.dependencies,
+                    DeclarationWorkItem::Function(function),
+                    profiles,
+                );
+            }
             self.fully_observed_types
                 .extend(dependencies.derived_aggregates);
         }
@@ -1342,6 +1515,17 @@ impl<'a> DeclarationDependencyCollector<'a> {
 
 impl TypedVisitor for DeclarationDependencyCollector<'_> {
     fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
+        let inherited_profiles = self.active_profiles;
+        if statement.debug_only {
+            self.active_profiles = self.active_profiles.intersect(UseProfiles::DEBUG);
+        }
+        if self.active_profiles.is_empty() {
+            self.active_profiles = inherited_profiles;
+            return;
+        }
+        if let TypedStatementKind::Assign { assignment, .. } = &statement.kind {
+            merge_profiled(&mut self.writes, assignment.target, self.active_profiles);
+        }
         if let TypedStatementKind::StateAssign {
             op: None, value, ..
         } = &statement.kind
@@ -1356,18 +1540,22 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
                     .expect("state assignment value belongs to typed HIR"),
                 program,
             );
+            self.active_profiles = inherited_profiles;
             return;
         }
         hir::walk_typed_statement(self, statement, program);
+        self.active_profiles = inherited_profiles;
     }
 
     fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
         self.types.insert(expression.ty);
-        self.capability_calls.extend(
-            hir::implicit_display_types(expression, program, self.semantics)
-                .into_iter()
-                .map(|ty| (ty, StdlibItemId::DisplayToString)),
-        );
+        for ty in hir::implicit_display_types(expression, program, self.semantics) {
+            merge_profiled(
+                &mut self.capability_calls,
+                (ty, StdlibItemId::DisplayToString),
+                self.active_profiles,
+            );
+        }
         let mut observe_members = |members: &[ResolvedMember]| {
             self.observed_state_fields
                 .extend(members.iter().filter_map(|member| match member {
@@ -1403,7 +1591,13 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
                 }
             }
             Some(ExpressionResolution::DynamicCall(_)) => {}
-            Some(ExpressionResolution::FunctionValue(_)) => {}
+            Some(ExpressionResolution::FunctionValue(function)) => {
+                merge_profiled(
+                    &mut self.dependencies,
+                    DeclarationWorkItem::Function(function.function),
+                    self.active_profiles,
+                );
+            }
             Some(ExpressionResolution::EnumConstructor {
                 variant: ResolvedEnumVariantId::Source(variant),
             }) => {
@@ -1439,7 +1633,11 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
             });
         let source_value = resolved_root.and_then(ResolvedValue::source_value);
         if let Some(value) = source_value {
-            self.dependencies.insert(DeclarationWorkItem::Global(value));
+            merge_profiled(
+                &mut self.dependencies,
+                DeclarationWorkItem::Global(value),
+                self.active_profiles,
+            );
         }
 
         if let Some(
@@ -1484,8 +1682,11 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
             ResolvedCall::UserFunction { function, .. } | ResolvedCall::UserMethod { function, .. },
         ) = program.call(expression.id)
         {
-            self.dependencies
-                .insert(DeclarationWorkItem::Function(*function));
+            merge_profiled(
+                &mut self.dependencies,
+                DeclarationWorkItem::Function(*function),
+                self.active_profiles,
+            );
         }
 
         if let Some(ResolvedCall::StandardLibrary {
@@ -1498,7 +1699,11 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
             if declaration.implementation == Implementation::CapabilityRequirement
                 && matches!(declaration.owner, StdlibOwner::Capability(_))
             {
-                self.capability_calls.insert((*receiver, *item));
+                merge_profiled(
+                    &mut self.capability_calls,
+                    (*receiver, *item),
+                    self.active_profiles,
+                );
             }
         }
 
@@ -1519,12 +1724,17 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
 /// roots here. An initializer becomes reachable only after its global is read,
 /// which lets this user-facing analysis diagnose a dead global together with
 /// helper declarations used exclusively by that initializer.
+struct UnusedDeclarationValidation {
+    diagnostics: Vec<Diagnostic>,
+    function_profiles: HashMap<ast::FunctionId, UseProfiles>,
+}
+
 fn validate_unused_declarations(
     syntax: &Program,
     hir: &TypedProgram,
     semantics: &SemanticModel,
     capabilities: &CapabilityAnalysis,
-) -> Vec<Diagnostic> {
+) -> UnusedDeclarationValidation {
     let globals = syntax
         .globals
         .iter()
@@ -1539,7 +1749,8 @@ fn validate_unused_declarations(
         .map(|body| (body.function.function, body))
         .collect::<HashMap<_, _>>();
 
-    let mut reachable = HashSet::new();
+    let mut reachable = HashMap::<DeclarationWorkItem, UseProfiles>::new();
+    let mut declaration_writes = HashMap::<ast::ValueId, UseProfiles>::new();
     let mut reachable_types = HashSet::new();
     let mut observed_state_fields = HashSet::new();
     let mut observed_settings = HashSet::new();
@@ -1554,6 +1765,9 @@ fn validate_unused_declarations(
         roots.visit_block(&action.body, hir);
     }
     roots.expand_capability_dependencies(capabilities, semantics);
+    for (value, profiles) in roots.writes {
+        merge_profiled(&mut declaration_writes, value, profiles);
+    }
     reachable_types.extend(roots.types.iter().copied());
     observed_state_fields.extend(roots.observed_state_fields.iter().copied());
     observed_settings.extend(roots.observed_settings.iter().copied());
@@ -1585,6 +1799,9 @@ fn validate_unused_declarations(
         );
     }
     state_execution_roots.expand_capability_dependencies(capabilities, semantics);
+    for (value, profiles) in state_execution_roots.writes {
+        merge_profiled(&mut declaration_writes, value, profiles);
+    }
     reachable_types.extend(state_execution_roots.types.iter().copied());
     observed_settings.extend(state_execution_roots.observed_settings.iter().copied());
     literal_setting_keys.extend(state_execution_roots.literal_setting_keys.iter().cloned());
@@ -1650,12 +1867,36 @@ fn validate_unused_declarations(
         }
     }
 
-    while let Some(item) = pending.pop_front() {
-        if !reachable.insert(item) {
+    while let Some((item, incoming_profiles)) = pending.pop_front() {
+        let declaration_profiles = match item {
+            DeclarationWorkItem::Global(value) => {
+                globals.get(&value).map_or(UseProfiles::ALL, |global| {
+                    if global.debug_only {
+                        UseProfiles::DEBUG
+                    } else {
+                        UseProfiles::ALL
+                    }
+                })
+            }
+            DeclarationWorkItem::Function(function) => {
+                functions.get(&function).map_or(UseProfiles::ALL, |body| {
+                    if body.debug_only {
+                        UseProfiles::DEBUG
+                    } else {
+                        UseProfiles::ALL
+                    }
+                })
+            }
+        };
+        let incoming_profiles = incoming_profiles.intersect(declaration_profiles);
+        let previous_profiles = reachable.get(&item).copied().unwrap_or(UseProfiles(0));
+        let new_profiles = incoming_profiles.difference(previous_profiles);
+        if new_profiles.is_empty() {
             continue;
         }
+        merge_profiled(&mut reachable, item, new_profiles);
 
-        let mut collector = DeclarationDependencyCollector::new(semantics);
+        let mut collector = DeclarationDependencyCollector::with_profiles(semantics, new_profiles);
         match item {
             DeclarationWorkItem::Global(value) => {
                 let Some(expression) = initializers.get(&value).copied() else {
@@ -1687,6 +1928,9 @@ fn validate_unused_declarations(
             }
         }
         collector.expand_capability_dependencies(capabilities, semantics);
+        for (value, profiles) in collector.writes {
+            merge_profiled(&mut declaration_writes, value, profiles);
+        }
         reachable_types.extend(collector.types.iter().copied());
         observed_state_fields.extend(collector.observed_state_fields.iter().copied());
         observed_settings.extend(collector.observed_settings.iter().copied());
@@ -1794,9 +2038,13 @@ fn validate_unused_declarations(
         }
     }
     for global in globals.values() {
-        if !global.name.starts_with('_')
-            && !reachable.contains(&DeclarationWorkItem::Global(global.id))
-        {
+        if global.name.starts_with('_') {
+            continue;
+        }
+        let profiles = reachable
+            .get(&DeclarationWorkItem::Global(global.id))
+            .copied();
+        if profiles.is_none() {
             diagnostics.push(
                 Diagnostic::warning(
                     DiagnosticCode::UnusedDeclaration,
@@ -1806,22 +2054,83 @@ fn validate_unused_declarations(
                 .with_primary_label("this global is never read from reachable code")
                 .with_note("prefix the name with `_` to indicate that this is intentional"),
             );
+        } else if !global.debug_only
+            && profiles.is_some_and(|profiles| {
+                profiles.contains(UseProfiles::DEBUG) && !profiles.contains(UseProfiles::RELEASE)
+            })
+        {
+            let release_write = declaration_writes
+                .get(&global.id)
+                .is_some_and(|profiles| profiles.contains(UseProfiles::RELEASE));
+            let mut diagnostic = Diagnostic::warning(
+                DiagnosticCode::DebugOnlyUse,
+                format!("global `{}` is only read by debug code", global.name),
+                global.name_span,
+            )
+            .with_primary_label("this global is retained in release builds")
+            .with_note(
+                "mark declarations used exclusively for diagnostics as `debug` so release builds can erase them",
+            );
+            if release_write {
+                diagnostic = diagnostic.with_note(
+                    "this global is also assigned by release-visible code, so the compiler cannot safely apply that change",
+                );
+            } else {
+                diagnostic = diagnostic.with_machine_applicable_fix(
+                    format!("mark `{}` as debug-only", global.name),
+                    ast::Span {
+                        start: global.span.start,
+                        end: global.span.start,
+                    },
+                    "debug ",
+                );
+            }
+            diagnostics.push(diagnostic);
         }
     }
-    for function in syntax.functions.iter().filter(|function| {
-        functions.contains_key(&function.id)
-            && !function.name.starts_with('_')
-            && !reachable.contains(&DeclarationWorkItem::Function(function.id))
-    }) {
-        diagnostics.push(
-            Diagnostic::warning(
-                DiagnosticCode::UnusedDeclaration,
-                format!("unused function `{}`", function.name),
-                function.name_span,
-            )
-            .with_primary_label("this function is never called from reachable code")
-            .with_note("prefix the name with `_` to indicate that this is intentional"),
-        );
+    for function in syntax
+        .functions
+        .iter()
+        .filter(|function| functions.contains_key(&function.id) && !function.name.starts_with('_'))
+    {
+        let profiles = reachable
+            .get(&DeclarationWorkItem::Function(function.id))
+            .copied();
+        if profiles.is_none() {
+            diagnostics.push(
+                Diagnostic::warning(
+                    DiagnosticCode::UnusedDeclaration,
+                    format!("unused function `{}`", function.name),
+                    function.name_span,
+                )
+                .with_primary_label("this function is never called from reachable code")
+                .with_note("prefix the name with `_` to indicate that this is intentional"),
+            );
+        } else if !function.debug_only
+            && profiles.is_some_and(|profiles| {
+                profiles.contains(UseProfiles::DEBUG) && !profiles.contains(UseProfiles::RELEASE)
+            })
+        {
+            diagnostics.push(
+                Diagnostic::warning(
+                    DiagnosticCode::DebugOnlyUse,
+                    format!("function `{}` is only used by debug code", function.name),
+                    function.name_span,
+                )
+                .with_primary_label("this function is retained in release builds")
+                .with_note(
+                    "mark declarations used exclusively for diagnostics as `debug` so release builds can erase them",
+                )
+                .with_machine_applicable_fix(
+                    format!("mark `{}` as debug-only", function.name),
+                    ast::Span {
+                        start: function.span.start,
+                        end: function.span.start,
+                    },
+                    "debug ",
+                ),
+            );
+        }
     }
     for record in &syntax.records {
         if !record.name.starts_with('_') && !reachable_records.contains(&record.id) {
@@ -1898,7 +2207,17 @@ fn validate_unused_declarations(
         }
     }
     diagnostics.sort_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
-    diagnostics
+    let function_profiles = reachable
+        .into_iter()
+        .filter_map(|(declaration, profiles)| match declaration {
+            DeclarationWorkItem::Function(function) => Some((function, profiles)),
+            DeclarationWorkItem::Global(_) => None,
+        })
+        .collect();
+    UnusedDeclarationValidation {
+        diagnostics,
+        function_profiles,
+    }
 }
 
 fn quote_string_literal(value: &str) -> String {

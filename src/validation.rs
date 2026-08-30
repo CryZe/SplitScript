@@ -1294,6 +1294,7 @@ struct DeclarationDependencyCollector<'a> {
     semantics: &'a SemanticModel,
     dependencies: HashSet<DeclarationWorkItem>,
     types: HashSet<crate::types::TypeId>,
+    observed_state_fields: HashSet<ast::ValueId>,
     observed_settings: HashSet<ast::ValueId>,
     literal_setting_keys: HashSet<String>,
     has_dynamic_setting_lookup: bool,
@@ -1309,6 +1310,7 @@ impl<'a> DeclarationDependencyCollector<'a> {
             semantics,
             dependencies: HashSet::new(),
             types: HashSet::new(),
+            observed_state_fields: HashSet::new(),
             observed_settings: HashSet::new(),
             literal_setting_keys: HashSet::new(),
             has_dynamic_setting_lookup: false,
@@ -1339,6 +1341,26 @@ impl<'a> DeclarationDependencyCollector<'a> {
 }
 
 impl TypedVisitor for DeclarationDependencyCollector<'_> {
+    fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
+        if let TypedStatementKind::StateAssign {
+            op: None, value, ..
+        } = &statement.kind
+        {
+            // Replacing `current.field` writes the snapshot slot but does not
+            // observe the value produced by polling it. Compound assignment
+            // still walks its target through the ordinary visitor because it
+            // reads the previous value before writing the result.
+            self.visit_expression(
+                program
+                    .expression(*value)
+                    .expect("state assignment value belongs to typed HIR"),
+                program,
+            );
+            return;
+        }
+        hir::walk_typed_statement(self, statement, program);
+    }
+
     fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
         self.types.insert(expression.ty);
         self.capability_calls.extend(
@@ -1347,6 +1369,14 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
                 .map(|ty| (ty, StdlibItemId::DisplayToString)),
         );
         let mut observe_members = |members: &[ResolvedMember]| {
+            self.observed_state_fields
+                .extend(members.iter().filter_map(|member| match member {
+                    ResolvedMember::StateField(field) => Some(*field),
+                    ResolvedMember::SettingField(_)
+                    | ResolvedMember::RecordField(_)
+                    | ResolvedMember::ManagedField(_)
+                    | ResolvedMember::StandardField(_) => None,
+                }));
             self.observed_settings
                 .extend(members.iter().filter_map(|member| match member {
                     ResolvedMember::SettingField(setting) => Some(*setting),
@@ -1410,6 +1440,15 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
         let source_value = resolved_root.and_then(ResolvedValue::source_value);
         if let Some(value) = source_value {
             self.dependencies.insert(DeclarationWorkItem::Global(value));
+        }
+
+        if let Some(
+            ResolvedValue::CurrentState(field)
+            | ResolvedValue::OldState(field)
+            | ResolvedValue::StateCandidate(field),
+        ) = resolved_root
+        {
+            self.observed_state_fields.insert(field);
         }
 
         if let Some(ResolvedValue::Setting(setting) | ResolvedValue::OldSetting(setting)) =
@@ -1502,6 +1541,7 @@ fn validate_unused_declarations(
 
     let mut reachable = HashSet::new();
     let mut reachable_types = HashSet::new();
+    let mut observed_state_fields = HashSet::new();
     let mut observed_settings = HashSet::new();
     let mut literal_setting_keys = HashSet::new();
     let mut has_dynamic_setting_lookup = false;
@@ -1513,15 +1553,9 @@ fn validate_unused_declarations(
     for action in hir.action_bodies() {
         roots.visit_block(&action.body, hir);
     }
-    for (_, expression) in hir.state_sources() {
-        roots.visit_expression(
-            hir.expression(expression)
-                .expect("state source belongs to typed HIR"),
-            hir,
-        );
-    }
     roots.expand_capability_dependencies(capabilities, semantics);
     reachable_types.extend(roots.types.iter().copied());
+    observed_state_fields.extend(roots.observed_state_fields.iter().copied());
     observed_settings.extend(roots.observed_settings.iter().copied());
     literal_setting_keys.extend(roots.literal_setting_keys.iter().cloned());
     has_dynamic_setting_lookup |= roots.has_dynamic_setting_lookup;
@@ -1530,9 +1564,40 @@ fn validate_unused_declarations(
     fully_observed_types.extend(roots.fully_observed_types.iter().copied());
     pending.extend(roots.dependencies);
 
-    // State and settings are host-visible declarations even when user code
-    // never names their snapshots. Their complete value types therefore seed
-    // nominal type reachability.
+    // Every state source and filter executes while its physical field is
+    // active, even when the resulting snapshot value is never consumed. Keep
+    // calls, globals, settings, types, and other effects in declaration
+    // reachability, but do not mistake evaluating a field for observing the
+    // value that it produces.
+    let mut state_execution_roots = DeclarationDependencyCollector::new(semantics);
+    for (_, expression) in hir.state_sources() {
+        state_execution_roots.visit_expression(
+            hir.expression(expression)
+                .expect("state source belongs to typed HIR"),
+            hir,
+        );
+    }
+    for transform in hir.state_transforms() {
+        state_execution_roots.visit_expression(
+            hir.expression(transform.expression)
+                .expect("state transform belongs to typed HIR"),
+            hir,
+        );
+    }
+    state_execution_roots.expand_capability_dependencies(capabilities, semantics);
+    reachable_types.extend(state_execution_roots.types.iter().copied());
+    observed_settings.extend(state_execution_roots.observed_settings.iter().copied());
+    literal_setting_keys.extend(state_execution_roots.literal_setting_keys.iter().cloned());
+    has_dynamic_setting_lookup |= state_execution_roots.has_dynamic_setting_lookup;
+    observed_record_fields.extend(state_execution_roots.observed_record_fields.iter().copied());
+    observed_enum_variants.extend(state_execution_roots.observed_enum_variants.iter().copied());
+    fully_observed_types.extend(state_execution_roots.fully_observed_types.iter().copied());
+    pending.extend(state_execution_roots.dependencies);
+
+    // State storage and settings declarations exist at runtime even when user
+    // code never reads their values. Their complete value types therefore
+    // seed nominal type reachability. This does not make the internal state
+    // snapshot a host-observable interface.
     if let Some(state) = &syntax.state {
         reachable_types.extend(
             state
@@ -1623,6 +1688,7 @@ fn validate_unused_declarations(
         }
         collector.expand_capability_dependencies(capabilities, semantics);
         reachable_types.extend(collector.types.iter().copied());
+        observed_state_fields.extend(collector.observed_state_fields.iter().copied());
         observed_settings.extend(collector.observed_settings.iter().copied());
         literal_setting_keys.extend(collector.literal_setting_keys.iter().cloned());
         has_dynamic_setting_lookup |= collector.has_dynamic_setting_lookup;
@@ -1638,11 +1704,50 @@ fn validate_unused_declarations(
         fully_observed_types,
         syntax,
         semantics,
+        &mut observed_state_fields,
         &mut observed_record_fields,
         &mut observed_enum_variants,
     );
+    expand_observed_state_field_dependencies(&mut observed_state_fields, syntax, semantics);
 
     let mut diagnostics = Vec::new();
+    if let Some(state) = &syntax.state {
+        for storage in semantics.state_storage_fields() {
+            if observed_state_fields.contains(storage) {
+                continue;
+            }
+            let declarations = state
+                .all_fields()
+                .filter(|field| semantics.state_storage_field(field.id) == Some(*storage))
+                .collect::<Vec<_>>();
+            let Some(field) = declarations.first().copied() else {
+                continue;
+            };
+            if field.name.starts_with('_') {
+                continue;
+            }
+            let mut diagnostic = Diagnostic::warning(
+                DiagnosticCode::UnusedMember,
+                format!("unused state field `{}`", field.name),
+                state_field_name_span(field),
+            )
+            .with_primary_label("this field is polled, but its value is never read from reachable code")
+            .with_note(
+                "polling still runs; this warning does not remove process reads or other effects",
+            )
+            .with_note(
+                "read the field through `current`, `old`, or another used state field to make its value observable",
+            )
+            .with_note("prefix the field name with `_` to indicate that this is intentional");
+            for declaration in declarations.iter().skip(1) {
+                diagnostic = diagnostic.with_secondary_label(
+                    state_field_name_span(declaration),
+                    "this layout declaration shares the same snapshot field",
+                );
+            }
+            diagnostics.push(diagnostic);
+        }
+    }
     if !has_dynamic_setting_lookup {
         observed_settings.extend(
             syntax
@@ -1814,10 +1919,56 @@ fn quote_string_literal(value: &str) -> String {
     quoted
 }
 
+fn state_field_name_span(field: &ast::StateField) -> ast::Span {
+    ast::Span {
+        start: field.span.start,
+        end: field.span.start + field.name.len(),
+    }
+}
+
+/// Closes state-value observation over the physical candidate dependency
+/// graph. Shared named-layout declarations map to one storage field, so reading
+/// the public field keeps the dependencies of every runtime-selected physical
+/// source observable without producing duplicate warnings.
+fn expand_observed_state_field_dependencies(
+    observed: &mut HashSet<ast::ValueId>,
+    syntax: &Program,
+    semantics: &SemanticModel,
+) {
+    let Some(state) = &syntax.state else {
+        observed.clear();
+        return;
+    };
+    let mut normalized = std::mem::take(observed)
+        .into_iter()
+        .map(|field| semantics.state_storage_field(field).unwrap_or(field))
+        .collect::<HashSet<_>>();
+    let mut pending = normalized.iter().copied().collect::<VecDeque<_>>();
+
+    while let Some(storage) = pending.pop_front() {
+        for declaration in state
+            .all_fields()
+            .filter(|field| semantics.state_storage_field(field.id) == Some(storage))
+        {
+            for dependency in semantics.state_dependencies(declaration.id) {
+                let dependency = semantics
+                    .state_storage_field(*dependency)
+                    .unwrap_or(*dependency);
+                if normalized.insert(dependency) {
+                    pending.push_back(dependency);
+                }
+            }
+        }
+    }
+
+    *observed = normalized;
+}
+
 fn expand_fully_observed_types(
     roots: HashSet<crate::types::TypeId>,
     syntax: &Program,
     semantics: &SemanticModel,
+    observed_state_fields: &mut HashSet<ast::ValueId>,
     observed_record_fields: &mut HashSet<ast::RecordFieldId>,
     observed_enum_variants: &mut HashSet<ast::EnumVariantId>,
 ) {
@@ -1842,11 +1993,13 @@ fn expand_fully_observed_types(
             TypeKind::Error => {}
             TypeKind::StateSnapshot => {
                 if let Some(state) = &syntax.state {
-                    pending.extend(
-                        state
-                            .all_fields()
-                            .filter_map(|field| semantics.value_type(field.id)),
-                    );
+                    for field in state.all_fields() {
+                        observed_state_fields
+                            .insert(semantics.state_storage_field(field.id).unwrap_or(field.id));
+                        if let Some(ty) = semantics.value_type(field.id) {
+                            pending.push_back(ty);
+                        }
+                    }
                 }
             }
             TypeKind::SettingsView => pending.extend(

@@ -472,14 +472,26 @@ a compound assignment also reads the previous value. Prefix an intentionally
 unused name with `_`. The warning's quick fix chooses a non-conflicting
 underscore-prefixed name and updates writes to that same binding.
 
+The compiler separately warns when a state field's produced snapshot value is
+never read by reachable code. Reads through `current`, `old`, and sibling state
+fields count and propagate through sibling dependencies. A shared field in
+several named layouts produces one warning with every physical declaration
+labelled. Displaying a field through `print` or `setVariable` is an ordinary
+read and does not warn. Polling still executes when this warning is present, so
+the compiler does not silently remove process reads or other effects. Prefix an
+intentionally observation-only field with `_`; the editor's validated rename
+fix updates every shared layout declaration.
+
 The compiler also warns about private globals, functions, records, and enums
-that cannot be reached from lifecycle behavior or the host-visible state and
-settings interface. Reachability is transitive and follows resolved identities:
-a helper called only by another dead helper is still unused, while types in a
-reachable function signature and types nested inside a reachable record or enum
-remain live. Debug statements participate in this analysis in both build
-profiles so editor warnings do not change when publishing a release build.
-Prefix an intentionally reserved declaration with `_` to suppress its warning.
+that cannot be reached from lifecycle behavior, state polling expressions, or
+the host-visible settings interface. Reachability is transitive and follows
+resolved identities: a helper called only by another dead helper is still
+unused, while a helper called by an unused state field still executes and
+remains reachable. Types in a reachable function signature and types nested
+inside runtime state storage or a reachable record or enum remain live. Debug
+statements participate in this analysis in both build profiles so editor
+warnings do not change when publishing a release build. Prefix an intentionally
+reserved declaration with `_` to suppress its warning.
 
 Reachable records and enums receive member-level checks without cascading from
 an entirely dead type. Accessing a record member reads that field; merely
@@ -501,9 +513,9 @@ explicit host key, which keeps existing saved settings compatible.
 
 Warning codes are stable tooling identifiers: `SS1001` denotes a discarded
 must-use value, `SS1002` an unread local binding, `SS1003` an unreachable
-declaration, and `SS1004` an unused setting, record field, or enum variant. The
-wording may improve without requiring editor integrations to classify messages
-by text.
+declaration, and `SS1004` an unused state field, setting, record field, or enum
+variant. The wording may improve without requiring editor integrations to
+classify messages by text.
 
 Compiler hosts can configure every warning code as `allow`, `warn`, or `deny`.
 Allowing suppresses that diagnostic, while denying makes the configured build
@@ -514,12 +526,13 @@ features remain available for denied warnings. With `splitc`, repeat
 all warning codes. Later arguments override earlier selectors.
 
 The language server offers preferred quick fixes that apply the `_`
-suppression convention. For ordinary declarations and nominal members, the
-action is a complete validated rename: references in dead helper code and
-record-literal labels are updated as well, name collisions gain additional
-underscores, and the edited program must still preserve every resolved
-declaration identity. An unused setting instead retains or introduces its
-original host key while changing only its statically accessible source name.
+suppression convention. For ordinary declarations, state fields, and nominal
+members, the action is a complete validated rename: references in dead helper
+code, shared layout declarations, and record-literal labels are updated as
+well, name collisions gain additional underscores, and the edited program must
+still preserve every resolved declaration identity. An unused setting instead
+retains or introduces its original host key while changing only its statically
+accessible source name.
 
 Supported value types are:
 

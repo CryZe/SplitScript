@@ -14,7 +14,7 @@ record AxiomVergeLayout {
 
 state ["AxiomVerge.exe", "RandomAV.exe"] {
     /// The player's current maximum health.
-    maxHealth: i32 = process.read(resolvePath(selectedLayout()?.maxHealth)?)?;
+    _maxHealth: i32 = process.read(resolvePath(selectedLayout()?.maxHealth)?)?;
     /// The game's elapsed time measured in sixty-hertz ticks.
     ticks: f64 = process.read(resolvePath(selectedLayout()?.ticks)?)?;
     /// The number of checkpoint identifiers currently stored by the game.

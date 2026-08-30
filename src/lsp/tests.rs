@@ -2236,3 +2236,67 @@ fn unused_member_code_actions_apply_validated_multi_edit_suppressions() {
     assert_eq!(edits.len(), 2);
     assert!(edits.iter().all(|edit| edit["newText"] == "_unused"));
 }
+
+#[test]
+fn unused_shared_state_field_has_one_validated_multi_layout_suppression() {
+    let source = concat!(
+        "state \"game.exe\" {\n",
+        "    layout Steam { level: u32 at 0x100; spare: u32 at 0x104; },\n",
+        "    layout GOG { level: u32 at 0x200; spare: u32 at 0x204; },\n",
+        "}\n",
+        "onAttach { return StateLayout.Steam }\n",
+        "split { return current.level != old.level }\n"
+    );
+    let uri = "file:///unused-state-field.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    let diagnostics = server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+    let published = diagnostics[0]["params"]["diagnostics"].as_array().unwrap();
+    assert_eq!(published.len(), 1, "{published:#?}");
+    assert_eq!(published[0]["code"], "SS1004", "{published:#?}");
+    assert!(
+        published[0]["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("unused state field `spare`"),
+        "{published:#?}"
+    );
+    assert_eq!(
+        published[0]["relatedInformation"].as_array().unwrap().len(),
+        2,
+        "{published:#?}"
+    );
+
+    let actions = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 24,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": position(source, source.len())
+            },
+            "context": {
+                "diagnostics": published,
+                "only": ["quickfix"]
+            }
+        }
+    }));
+    let quick_fixes = actions[0]["result"].as_array().unwrap();
+    assert_eq!(quick_fixes.len(), 1, "{quick_fixes:#?}");
+    assert_eq!(quick_fixes[0]["title"], "rename `spare` to `_spare`");
+    assert_eq!(quick_fixes[0]["isPreferred"], true);
+    let edits = quick_fixes[0]["edit"]["changes"][uri].as_array().unwrap();
+    assert_eq!(edits.len(), 2, "{edits:#?}");
+    assert!(edits.iter().all(|edit| edit["newText"] == "_spare"));
+}

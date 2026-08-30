@@ -469,14 +469,14 @@ fn saveDataOffsets(layout) {
 
 state "HatinTimeGame" {
     timerState: i32 = process.read(timerBase + 0x04)?;
-    unpauseTime: f64 = process.read(timerBase + 0x08)?;
+    _unpauseTime: f64 = process.read(timerBase + 0x08)?;
     gameTimerIsPaused: i32 = process.read(timerBase + 0x10)?;
-    actTimerIsPaused: i32 = process.read(timerBase + 0x14)?;
+    _actTimerIsPaused: i32 = process.read(timerBase + 0x14)?;
     actTimerIsVisible: i32 = process.read(timerBase + 0x18)?;
-    unpauseTimeIsDirty: i32 = process.read(timerBase + 0x1c)?;
+    _unpauseTimeIsDirty: i32 = process.read(timerBase + 0x1c)?;
     justGotTimePiece: i32 = process.read(timerBase + 0x20)?;
     gameTime: f64 = process.read(timerBase + 0x24)?;
-    actTime: f64 = process.read(timerBase + 0x2c)?;
+    _actTime: f64 = process.read(timerBase + 0x2c)?;
     realGameTime: f64 = process.read(timerBase + 0x34)?;
     realActTime: f64 = process.read(timerBase + 0x3c)?;
     timePieceCount: i32 = process.read(timerBase + 0x44)?;

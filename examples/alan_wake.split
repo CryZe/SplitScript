@@ -48,7 +48,7 @@ fn selectedLayout() {
 state "AlanWake.exe" {
     isLoading: bool = process.read<bool>(selectedLayout().isLoading.resolve()?)?;
     level: u8 = process.read<u8>(selectedLayout().level.resolve()?)?;
-    video: i32 = process.read<i32>(selectedLayout().video.resolve()?)?;
+    _video: i32 = process.read<i32>(selectedLayout().video.resolve()?)?;
 }
 
 let build = AlanWakeBuild.Steam

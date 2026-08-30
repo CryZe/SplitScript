@@ -1,5 +1,21 @@
 # SplitScript roadmap
 
+## 2026-08-30: unused state values become visible without changing execution
+
+- Added `SS1004` warnings for state fields whose produced snapshot values never
+  reach `current`, `old`, or another observed state field. Candidate-field
+  dependencies close transitively, while shared named-layout declarations
+  produce one logical diagnostic with every physical declaration labelled.
+- Kept polling execution separate from value observation. An unused field's
+  process reads, effects, and called helpers still execute and remain reachable;
+  the warning never silently changes runtime behavior.
+- Added the ordinary `_` suppression convention with a validated editor rename
+  that updates shared layout declarations together. Displaying a value through
+  `print` or `setVariable` is an ordinary read and does not warn.
+- Corrected the documentation boundary: state snapshots are internal runtime
+  storage, not an implicitly host-visible interface. The settings UI remains
+  host-visible through its explicit ABI.
+
 ## 2026-08-30: self-contained first build journey
 
 - Added a compiler-owned Getting Started guide that takes a new author through

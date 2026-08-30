@@ -150,26 +150,27 @@ They carry a stable code and severity. Compiler-stage errors use `SS0001` for
 lexing, `SS0002` for parsing, `SS0003` for type checking, and `SS0004` for
 post-type semantic validation. Actionable warnings use their own `SS1xxx`
 namespace: `SS1001` for discarded must-use values, `SS1002` for unread local
-bindings, `SS1003` for unreachable declarations, and `SS1004` for unused
-settings, record fields, or enum variants. Clients can therefore configure and
-present a warning without parsing its human-readable message. The same value
-owns its primary and secondary labels, notes, and fixes. Fixes have
-an explicit applicability and may contain multiple source edits. The repeated
-optional/result-postfix diagnostic already supplies a machine-applicable edit
-that removes the extra postfix, while unused local bindings provide a
-multi-edit underscore-suppression action. For unused declarations and nominal
-members, the LSP reuses the identity-aware Rename query to update every
-reference, tries extra underscores on collisions, and type-checks the candidate
-before offering the action. Unused settings receive a targeted source-name edit
-that preserves their host-visible key. The LSP publishes the same diagnostic
-codes as the CLI/compiler service. The native CLI converts this shared value to
-`codespan-reporting` only at its terminal boundary. Errors and warnings are
-therefore rendered with annotated source snippets, terminal-aware color, and
-every primary and secondary label without coupling compiler passes to a
-particular presentation library. Formatter failures and watch-mode rebuilds
-use the same renderer. Spans remain byte offsets within the one source file; a
-`FileId` and source map are deliberately deferred until the language gains
-modules or another feature that accepts multiple sources.
+bindings, `SS1003` for unreachable declarations, and `SS1004` for unused state
+fields, settings, record fields, or enum variants. Clients can therefore
+configure and present a warning without parsing its human-readable message.
+The same value owns its primary and secondary labels, notes, and fixes. Fixes
+have an explicit applicability and may contain multiple source edits. The
+repeated optional/result-postfix diagnostic already supplies a
+machine-applicable edit that removes the extra postfix, while unused local
+bindings provide a multi-edit underscore-suppression action. For unused
+declarations, state fields, and nominal members, the LSP reuses the
+identity-aware Rename query to update every reference and shared layout
+declaration, tries extra underscores on collisions, and type-checks the
+candidate before offering the action. Unused settings receive a targeted
+source-name edit that preserves their host-visible key. The LSP publishes the
+same diagnostic codes as the CLI/compiler service. The native CLI converts this
+shared value to `codespan-reporting` only at its terminal boundary. Errors and
+warnings are therefore rendered with annotated source snippets, terminal-aware
+color, and every primary and secondary label without coupling compiler passes
+to a particular presentation library. Formatter failures and watch-mode
+rebuilds use the same renderer. Spans remain byte offsets within the one source
+file; a `FileId` and source map are deliberately deferred until the language
+gains modules or another feature that accepts multiple sources.
 
 `WarningPolicy` independently configures each `SS100x` code as `allow`, `warn`,
 or `deny`. Policy is deliberately applied after semantic checking. `allow`

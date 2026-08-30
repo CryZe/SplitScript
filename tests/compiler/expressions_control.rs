@@ -861,6 +861,97 @@ fn unused_declarations_follow_reachable_calls_and_global_reads() {
 }
 
 #[test]
+fn unused_state_fields_follow_snapshot_reads_and_candidate_dependencies() {
+    let source = r#"
+        state "game.exe" {
+            base = 1;
+            observed = base + 1;
+            unusedBase = 2;
+            unusedDerived = unusedBase + 1;
+            effectOnly = pollOnly();
+            replaced = 4;
+            compounded = 5;
+            _intentional = 0;
+        }
+
+        fn pollOnly() {
+            print("the polling expression still executes")
+            return 3
+        }
+
+        whileAttached {
+            current.replaced = 6
+            current.compounded += 1
+            setVariable("Observed", current.observed)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("unused state fields should be non-fatal warnings");
+    let unused = checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.message.starts_with("unused state field"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(unused.len(), 4, "{unused:#?}");
+    for name in ["unusedBase", "unusedDerived", "effectOnly", "replaced"] {
+        let diagnostic = unused
+            .iter()
+            .find(|diagnostic| diagnostic.message.ends_with(&format!("`{name}`")))
+            .unwrap_or_else(|| panic!("missing unused warning for {name}: {unused:#?}"));
+        assert_eq!(diagnostic.code, splitscript::DiagnosticCode::UnusedMember);
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], name);
+        assert!(diagnostic.fixes.is_empty());
+    }
+    for name in ["base", "observed", "compounded", "_intentional"] {
+        assert!(
+            unused
+                .iter()
+                .all(|diagnostic| !diagnostic.message.ends_with(&format!("`{name}`"))),
+            "unexpected unused warning for {name}: {unused:#?}"
+        );
+    }
+    assert!(
+        checked
+            .diagnostics()
+            .iter()
+            .all(|diagnostic| diagnostic.message != "unused function `pollOnly`"),
+        "an effectful helper called by polling remains execution-reachable"
+    );
+}
+
+#[test]
+fn shared_layout_state_fields_produce_one_logical_unused_warning() {
+    let source = r#"
+        state "game.exe" {
+            layout Steam {
+                level: u32 at 0x100;
+                spare: u32 at 0x104;
+            },
+            layout GOG {
+                level: u32 at 0x200;
+                spare: u32 at 0x204;
+            },
+        }
+
+        onAttach { return StateLayout.Steam }
+        split { return current.level != old.level }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("shared layout fields should be analyzed by logical identity");
+    let unused = checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.message.starts_with("unused state field"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(unused.len(), 1, "{unused:#?}");
+    assert_eq!(unused[0].message, "unused state field `spare`");
+    assert_eq!(unused[0].labels.len(), 2, "{unused:#?}");
+    assert_eq!(&source[unused[0].span.start..unused[0].span.end], "spare");
+}
+
+#[test]
 fn structural_equality_observes_complete_record_and_enum_shapes() {
     let source = r#"
         record Pair {

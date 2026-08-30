@@ -377,9 +377,6 @@ or assumptions tied to one generated corpus.
 
 ### Prevent clean-compiling semantic drift
 
-- [ ] Decide whether and how to diagnose state fields that never influence
-  reachable behavior. Intentional display-only state and host observation need
-  explicit semantics before enabling that warning by default.
 - [x] Add a review checklist and compiler-query fixture for ports that compile
   while bypassing a canonical provider. Check process identity, selected build,
   provider choice, byte order, lifecycle ownership, settings reachability,

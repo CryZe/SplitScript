@@ -303,7 +303,9 @@ impl Checker {
                         .resolve_record_literal(expr.id, ResolvedRecordId::Source(declaration.id));
                     let mut seen = HashSet::new();
                     let mut resolved_fields = Vec::with_capacity(fields.len());
-                    for (name, value) in fields {
+                    for literal_field in fields {
+                        let name = &literal_field.name;
+                        let value = &literal_field.value;
                         if !seen.insert(name.clone()) {
                             self.error(format!("duplicate record field `{name}`"), value.span);
                             continue;
@@ -384,7 +386,9 @@ impl Checker {
                         .collect::<Vec<_>>();
                     let mut seen = HashSet::new();
                     let mut resolved_fields = Vec::with_capacity(fields.len());
-                    for (name, value) in fields {
+                    for literal_field in fields {
+                        let name = &literal_field.name;
+                        let value = &literal_field.value;
                         if !seen.insert(name.clone()) {
                             self.error(format!("duplicate record field `{name}`"), value.span);
                             continue;
@@ -460,7 +464,9 @@ impl Checker {
                         .collect::<Vec<_>>();
                     let mut seen = HashSet::new();
                     let mut resolved_fields = Vec::with_capacity(fields.len());
-                    for (name, value) in fields {
+                    for literal_field in fields {
+                        let name = &literal_field.name;
+                        let value = &literal_field.value;
                         if !seen.insert(name.clone()) {
                             self.error(format!("duplicate record field `{name}`"), value.span);
                             continue;

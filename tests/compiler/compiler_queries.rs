@@ -1297,6 +1297,52 @@ fn rename_queries_validate_identifiers_reservations_and_binding_identity() {
 }
 
 #[test]
+fn record_shorthand_renames_expand_to_preserve_field_and_value_identity() {
+    use splitscript::tooling::database::CompilerDatabase;
+
+    let source = r#"
+        record Point { x: u32 }
+        state "game.exe" {}
+        fn point(x: u32) -> Point { return Point { x } }
+    "#;
+
+    let field_declaration = source.find("x: u32 }").unwrap();
+    let local_declaration = source.rfind("x: u32").unwrap();
+    let shorthand = source.rfind("{ x }").unwrap() + 2;
+
+    let mut field_database = CompilerDatabase::new(source);
+    let field_plan = field_database
+        .rename_at(field_declaration, "horizontal")
+        .expect("renaming a field should expand its shorthand references");
+    assert!(
+        field_plan
+            .edits
+            .iter()
+            .any(|edit| { edit.span.start == shorthand && edit.replacement == "horizontal: x" }),
+        "{field_plan:#?}"
+    );
+
+    let mut local_database = CompilerDatabase::new(source);
+    let local_plan = local_database
+        .rename_at(local_declaration, "coordinate")
+        .expect("renaming a local should expand its shorthand references");
+    assert!(
+        local_plan
+            .edits
+            .iter()
+            .any(|edit| { edit.span.start == shorthand && edit.replacement == "x: coordinate" }),
+        "{local_plan:#?}"
+    );
+
+    let mut shorthand_database = CompilerDatabase::new(source);
+    let shorthand_target = shorthand_database
+        .rename_target_at(shorthand)
+        .unwrap()
+        .expect("the shorthand token should remain renameable");
+    assert_eq!(shorthand_target.name, "x");
+}
+
+#[test]
 fn semantic_queries_use_exact_tokens_before_end_of_word_fallbacks() {
     use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget};
 

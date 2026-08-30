@@ -1238,7 +1238,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "record Name { field: Type }",
         "Declares an immutable nominal record.",
-        "Records provide named fields, structural equality when their fields support it, and fixed process-memory layouts when every field is readable.",
+        "Records provide named fields, structural equality when their fields support it, and fixed process-memory layouts when every field is readable. In a literal, `Name { field }` is shorthand for `Name { field: field }`; an explicit repeated initializer receives a safe shorthand fix, and renaming either identity expands the shorthand when needed.",
         RECORD_EXAMPLE
     ),
     language_item!(

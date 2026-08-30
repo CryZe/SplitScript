@@ -1439,7 +1439,7 @@ fn lower_expression_kind(
                 .expect("checked record literals resolve their nominal declaration"),
             fields: fields
                 .iter()
-                .map(|(name, value)| (name.clone(), value.id))
+                .map(|field| (field.name.clone(), field.value.id))
                 .collect(),
         },
         ExprKind::Match { value, arms } => TypedExpressionKind::Match {

@@ -1396,7 +1396,7 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
             ExprKind::Record { fields, .. } if !fields.is_empty() => {
                 self.mark_comma_for_items(
                     expression.span,
-                    fields.iter().map(|(_, value)| value.span),
+                    fields.iter().map(|field| field.value.span),
                     true,
                 );
             }

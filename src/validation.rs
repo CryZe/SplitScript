@@ -74,6 +74,7 @@ pub(crate) fn validate(
     ));
     diagnostics.extend(unused_declarations.diagnostics);
     diagnostics.extend(validate_static_setting_lookups(syntax, hir));
+    diagnostics.extend(validate_record_field_shorthand(syntax));
     diagnostics.extend(validate_async_function_results(
         &standard_library,
         syntax,
@@ -311,6 +312,56 @@ pub(crate) fn validate(
         effects,
         diagnostics,
     }
+}
+
+fn validate_record_field_shorthand(syntax: &Program) -> Vec<Diagnostic> {
+    #[derive(Default)]
+    struct Collector {
+        diagnostics: Vec<Diagnostic>,
+    }
+
+    impl<'ast> SyntaxVisitor<'ast> for Collector {
+        fn visit_expr(&mut self, expression: &'ast ast::Expr) {
+            if let ast::ExprKind::Record { fields, .. } = &expression.kind {
+                for field in fields {
+                    if field.shorthand
+                        || !matches!(
+                            &field.value.kind,
+                            ast::ExprKind::Path(path)
+                                if path.as_slice() == [field.name.as_str()]
+                        )
+                    {
+                        continue;
+                    }
+                    let span = field.name_span.join(field.value.span);
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            DiagnosticCode::RecordFieldShorthand,
+                            format!("record field `{}` repeats its initializer name", field.name),
+                            span,
+                        )
+                        .with_primary_label("use the shorthand field initializer")
+                        .with_fix(DiagnosticFix {
+                            title: format!("shorten to `{}`", field.name),
+                            applicability: FixApplicability::MachineApplicable,
+                            edits: vec![TextEdit {
+                                span: ast::Span {
+                                    start: field.name_span.end,
+                                    end: field.value.span.end,
+                                },
+                                replacement: String::new(),
+                            }],
+                        }),
+                    );
+                }
+            }
+            visit::walk_expr(self, expression);
+        }
+    }
+
+    let mut collector = Collector::default();
+    collector.visit_program(syntax);
+    collector.diagnostics
 }
 
 fn validate_global_initializers(

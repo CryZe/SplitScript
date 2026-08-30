@@ -379,8 +379,8 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
         }
         ExprKind::Block(block) | ExprKind::Loop(block) => visitor.visit_block(block),
         ExprKind::Record { fields, .. } => {
-            for (_, value) in fields {
-                visitor.visit_expr(value);
+            for field in fields {
+                visitor.visit_expr(&field.value);
             }
         }
         ExprKind::Match { value, arms } => {
@@ -826,8 +826,8 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
         }
         ExprKind::Block(block) | ExprKind::Loop(block) => folder.fold_block(block),
         ExprKind::Record { fields, .. } => {
-            for (_, value) in fields {
-                folder.fold_expr(value);
+            for field in fields {
+                folder.fold_expr(&mut field.value);
             }
         }
         ExprKind::Match { value, arms } => {

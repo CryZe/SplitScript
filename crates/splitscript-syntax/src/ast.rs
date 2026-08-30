@@ -1424,6 +1424,20 @@ impl Expr {
     }
 }
 
+/// One field supplied by a record literal.
+///
+/// Shorthand fields retain their source shape even though `value` contains the
+/// equivalent synthesized path expression. Downstream semantic passes can
+/// therefore treat both spellings uniformly, while formatting and refactoring
+/// can preserve the shorthand's two source identities.
+#[derive(Debug, Clone)]
+pub struct RecordLiteralField {
+    pub name: String,
+    pub name_span: Span,
+    pub value: Expr,
+    pub shorthand: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     /// A syntax-only placeholder inserted by the recovering parser.
@@ -1456,7 +1470,7 @@ pub enum ExprKind {
     Record {
         name: String,
         name_span: Span,
-        fields: Vec<(String, Expr)>,
+        fields: Vec<RecordLiteralField>,
     },
     Match {
         value: Box<Expr>,

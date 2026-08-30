@@ -1330,20 +1330,13 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                     .semantics
                     .record_literal_fields(expression.id)
                     .unwrap_or_default();
-                let mut start = expression.span.start;
-                for ((name, value), field) in fields.iter().zip(resolved) {
-                    let label_span = Span {
-                        start,
-                        end: value.span.start,
-                    };
-                    if let Some(span) = self.tokens_in(label_span).iter().rev().find_map(|token| {
-                        matches!(&token.kind, TokenKind::Ident(spelling) if spelling == name)
-                            .then_some(token.span)
-                    }) && let crate::semantic::ResolvedRecordFieldId::Source(field) = field
-                    {
-                        self.add_reference(SourceDefinitionId::RecordField(*field), span);
+                for (literal_field, field) in fields.iter().zip(resolved) {
+                    if let crate::semantic::ResolvedRecordFieldId::Source(field) = field {
+                        self.add_reference(
+                            SourceDefinitionId::RecordField(*field),
+                            literal_field.name_span,
+                        );
                     }
-                    start = value.span.end;
                 }
             }
             ExprKind::Cast { target, .. } => {

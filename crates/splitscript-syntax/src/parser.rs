@@ -108,6 +108,7 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         next_pattern_id: 0,
         next_setting_choice_option_id: 0,
         generated_records: Vec::new(),
+        record_literals_allowed: true,
         diagnostics: Vec::new(),
         recovery_nodes: Vec::new(),
     }
@@ -156,6 +157,10 @@ struct Parser<'a> {
     /// ordinary record pipeline. They are merged by stable ID before parsing
     /// completes so downstream consumers never need a parallel type registry.
     generated_records: Vec<RecordDecl>,
+    /// Whether an immediately following `{ ... }` may form a record literal.
+    /// Header expressions disable this at their outer level so their following
+    /// block remains unambiguous; nested delimiters enable it again.
+    record_literals_allowed: bool,
     diagnostics: Vec<Diagnostic>,
     recovery_nodes: Vec<RecoveryNode>,
 }
@@ -182,6 +187,17 @@ impl DelimiterDepth {
 }
 
 impl Parser<'_> {
+    fn with_record_literals<T>(
+        &mut self,
+        allowed: bool,
+        operation: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let previous = std::mem::replace(&mut self.record_literals_allowed, allowed);
+        let output = operation(self);
+        self.record_literals_allowed = previous;
+        output
+    }
+
     fn new_expr(&mut self, kind: ExprKind, span: Span) -> Expr {
         let id = ExprId::from_index(self.next_expression_id);
         self.next_expression_id += 1;

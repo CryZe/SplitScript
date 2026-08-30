@@ -1557,6 +1557,86 @@ fn final_if_else_supplies_the_value_of_a_multi_statement_block() {
 }
 
 #[test]
+fn record_field_shorthand_compiles_formats_and_guides_repeated_initializers() {
+    let source = r#"
+        record Point {
+            x: u32,
+            y: u32,
+        }
+        state "game.exe" {}
+        fn point(x: u32, y: u32) -> Point {
+            return Point { x, y }
+        }
+        setup { print(point(1, 2)) }
+    "#;
+    splitscript::compile(source).expect("shorthand fields should initialize like `x: x`");
+
+    let formatted = splitscript::format_source(source).expect("shorthand fields should format");
+    assert!(
+        formatted.contains("return Point {\n        x, y\n    }"),
+        "{formatted}"
+    );
+    splitscript::compile(&formatted).expect("formatted shorthand should remain valid");
+
+    let repeated = r#"
+        record Point { x: u32, y: u32 }
+        state "game.exe" {}
+        fn point(x: u32, y: u32) -> Point {
+            return Point { x: x, y: y + 1 }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(repeated).unwrap())
+        .expect("repeated initializer guidance is a warning");
+    let warning = checked
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::RecordFieldShorthand)
+        .expect("an exact `x: x` initializer should suggest shorthand");
+    assert_eq!(warning.fixes.len(), 1, "{warning:#?}");
+    assert_eq!(
+        warning.fixes[0].applicability,
+        splitscript::FixApplicability::MachineApplicable
+    );
+    assert_eq!(warning.fixes[0].edits[0].replacement, "");
+    assert_eq!(
+        &repeated[warning.fixes[0].edits[0].span.start..warning.fixes[0].edits[0].span.end],
+        ": x"
+    );
+    assert_eq!(
+        checked
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code == splitscript::DiagnosticCode::RecordFieldShorthand
+            })
+            .count(),
+        1,
+        "a nontrivial `y + 1` initializer must remain explicit"
+    );
+}
+
+#[test]
+fn record_shorthand_does_not_consume_control_flow_blocks() {
+    let source = r#"
+        record Point { x: u32 }
+        state "game.exe" {}
+
+        fn valid(point: Point) -> bool { return point.x > 0 }
+        fn choose(enabled: bool, value: u32, values: [u32]) -> u32 {
+            if enabled { print(value) }
+            while enabled { return value }
+            for item in values { print(item) }
+            if valid(Point { x: value }) { print(value) }
+            if (Point { x: value }).x > 0 { print(value) }
+            return if enabled { value } else { 0 }
+        }
+    "#;
+    splitscript::compile(source).expect(
+        "a header's outer brace starts its body while nested delimiters still accept records",
+    );
+}
+
+#[test]
 fn while_loops_typecheck_lower_and_validate() {
     let source = include_str!("../while_loop.split");
     let checked = splitscript::check(splitscript::parse(source).unwrap())

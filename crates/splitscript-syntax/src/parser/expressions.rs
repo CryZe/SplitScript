@@ -7,6 +7,7 @@ use super::{
     MatchArm, MatchPattern, Parser, PatternBinding, Span, TokenKind, TypeRef, UnaryOp,
     ambiguous_range_diagnostic, assignment_operator, parse_integer,
 };
+use crate::ast::RecordLiteralField;
 use crate::diagnostic::{DiagnosticCode, DiagnosticFix, FixApplicability, TextEdit};
 
 impl Parser<'_> {
@@ -84,7 +85,8 @@ impl Parser<'_> {
                 continue;
             }
             if let Some(opening) = self.eat(&TokenKind::LBracket) {
-                let index = self.required_expression(0)?;
+                let index =
+                    self.with_record_literals(true, |parser| parser.required_expression(0))?;
                 let closing = self.expect(TokenKind::RBracket, "expected `]` after the index")?;
                 let span = left.span.join(closing);
                 left = self.new_expr(
@@ -425,7 +427,7 @@ impl Parser<'_> {
         }
         if self.eat_ident("match").is_some() {
             let start = self.previous().span;
-            let value = self.required_expression(0)?;
+            let value = self.required_expression_before_block()?;
             self.expect(TokenKind::LBrace, "expected `{` after the matched value")?;
             let body_depth = self.brace_depth_before(self.cursor.position());
             let mut arms = Vec::new();
@@ -505,7 +507,8 @@ impl Parser<'_> {
         if self.eat(&TokenKind::LParen).is_some() {
             let start = self.previous().span;
             let target_depth = self.delimiter_depth_before(self.cursor.position());
-            let mut expr = self.required_expression(0)?;
+            let mut expr =
+                self.with_record_literals(true, |parser| parser.required_expression(0))?;
             let end = if let Some(end) = self.eat(&TokenKind::RParen) {
                 end
             } else {
@@ -653,11 +656,15 @@ impl Parser<'_> {
                         token.span.join(version_span),
                     ));
                 }
-                let begins_record_literal = self.at(&TokenKind::LBrace)
+                let begins_record_literal = self.record_literals_allowed
+                    && self.at(&TokenKind::LBrace)
                     && (matches!(self.peek(1).kind, TokenKind::RBrace)
                         || matches!(
                             (&self.peek(1).kind, &self.peek(2).kind),
-                            (TokenKind::Ident(_), TokenKind::Colon)
+                            (
+                                TokenKind::Ident(_),
+                                TokenKind::Colon | TokenKind::Comma | TokenKind::RBrace,
+                            )
                         ));
                 if begins_record_literal && self.eat(&TokenKind::LBrace).is_some() {
                     let body_depth = self.brace_depth_before(self.cursor.position());
@@ -830,11 +837,27 @@ impl Parser<'_> {
         }
     }
 
-    pub(super) fn record_literal_field(&mut self) -> Result<(String, Expr), Diagnostic> {
-        let (name, _) = self.expect_any_ident("expected a record field name")?;
-        self.expect(TokenKind::Colon, "expected `:` after the field name")?;
-        let value = self.expression(0)?;
-        Ok((name, value))
+    pub(super) fn record_literal_field(&mut self) -> Result<RecordLiteralField, Diagnostic> {
+        let (name, name_span) = self.expect_any_ident("expected a record field name")?;
+        let (value, shorthand) = if self.eat(&TokenKind::Colon).is_some() {
+            (self.expression(0)?, false)
+        } else if self.at(&TokenKind::Comma) || self.at(&TokenKind::RBrace) {
+            (
+                self.new_expr(ExprKind::Path(vec![name.clone()]), name_span),
+                true,
+            )
+        } else {
+            return Err(Diagnostic::new(
+                "expected `:`, `,`, or `}` after the field name",
+                self.current().span,
+            ));
+        };
+        Ok(RecordLiteralField {
+            name,
+            name_span,
+            value,
+            shorthand,
+        })
     }
 
     /// Recognizes a complete `name<T>(...)` call before committing `<` to the
@@ -984,6 +1007,10 @@ impl Parser<'_> {
         self.recover_root_expression(parsed, expression_start)
     }
 
+    pub(super) fn root_expression_before_block(&mut self) -> Expr {
+        self.with_record_literals(false, Self::root_expression)
+    }
+
     pub(super) fn recover_root_expression(
         &mut self,
         parsed: Result<Expr, Diagnostic>,
@@ -1051,6 +1078,10 @@ impl Parser<'_> {
             self.expression(min_precedence)
         };
         self.recover_required_expression(parsed, expression_start)
+    }
+
+    fn required_expression_before_block(&mut self) -> Result<Expr, Diagnostic> {
+        self.with_record_literals(false, |parser| parser.required_expression(0))
     }
 
     pub(super) fn expression_is_missing_before_statement(&self) -> bool {
@@ -1261,6 +1292,17 @@ impl Parser<'_> {
         missing_closing_message: &'static str,
         allow_trailing_comma: bool,
     ) -> (Vec<Expr>, Span) {
+        self.with_record_literals(true, |parser| {
+            parser.expression_list_inner(closing, missing_closing_message, allow_trailing_comma)
+        })
+    }
+
+    fn expression_list_inner(
+        &mut self,
+        closing: TokenKind,
+        missing_closing_message: &'static str,
+        allow_trailing_comma: bool,
+    ) -> (Vec<Expr>, Span) {
         let target_depth = self.delimiter_depth_before(self.cursor.position());
         let mut expressions = Vec::new();
         loop {
@@ -1385,7 +1427,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn if_expression(&mut self, start: Span) -> Result<Expr, Diagnostic> {
-        let condition = self.required_expression(0)?;
+        let condition = self.required_expression_before_block()?;
         let then_expr = self.value_block_expression("expected `{` after the `if` condition")?;
         let else_expr = if self.eat_ident("else").is_none() {
             let error = Diagnostic::new(

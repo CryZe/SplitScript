@@ -21,7 +21,7 @@ pub(crate) fn is_constant(expression: &Expr, resolutions: &ProgramResolutions) -
         }
         ExprKind::Record { fields, .. } => fields
             .iter()
-            .all(|(_, value)| is_constant(value, resolutions)),
+            .all(|field| is_constant(&field.value, resolutions)),
         ExprKind::Path(_) => resolutions.expression_enum(expression.id).is_some(),
         ExprKind::Call { args, .. } => {
             args.is_empty() && resolutions.expression_enum(expression.id).is_some()

@@ -118,7 +118,7 @@ impl Parser<'_> {
         }
         if self.eat_ident("while").is_some() {
             let start = self.previous().span.start;
-            let condition = self.root_expression();
+            let condition = self.root_expression_before_block();
             let body = self.block()?;
             let end = body.span.end;
             return Ok(Stmt::While {
@@ -131,7 +131,7 @@ impl Parser<'_> {
             let start = self.previous().span.start;
             let (name, name_span) = self.expect_declared_ident("expected a binding after `for`")?;
             let in_span = self.expect_ident("in")?;
-            let iterable = self.root_expression();
+            let iterable = self.root_expression_before_block();
             let body = self.block()?;
             let end = body.span.end;
             return Ok(Stmt::For {
@@ -258,7 +258,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn if_statement(&mut self, start: usize) -> Result<Stmt, Diagnostic> {
-        let condition = self.root_expression();
+        let condition = self.root_expression_before_block();
         let then_block = self.block()?;
         let else_block = if self.eat_ident("else").is_some() {
             if self.eat_ident("if").is_some() {

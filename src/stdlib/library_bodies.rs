@@ -376,21 +376,19 @@ fn managed_backend_binding_source(
     }
     source.push_str(&format!("            {PROVIDER_BINDINGS_TYPE} {{\n"));
     push_provider_context_initializers(&mut source, contexts, "                ");
-    source.push_str(&format!(
-        "                {MANAGED_POINTER_SIZE_FIELD}: {MANAGED_POINTER_SIZE_FIELD},\n"
-    ));
+    source.push_str(&format!("                {MANAGED_POINTER_SIZE_FIELD},\n"));
     for class in classes {
         if instance_classes.contains(&class.class.id) {
             let name = managed_instance_header_name(class.class.id.index());
-            source.push_str(&format!("                {name}: {name},\n"));
+            source.push_str(&format!("                {name},\n"));
         }
         if class_fields(class.class).any(|field| field.is_static) {
             let name = managed_static_table_name(class.class.id.index());
-            source.push_str(&format!("                {name}: {name},\n"));
+            source.push_str(&format!("                {name},\n"));
         }
         for field in class_fields(class.class) {
             let name = managed_field_offset_name(field.id.index());
-            source.push_str(&format!("                {name}: {name},\n"));
+            source.push_str(&format!("                {name},\n"));
         }
         for field in class
             .class
@@ -399,7 +397,7 @@ fn managed_backend_binding_source(
             .flat_map(|group| &group.fields)
         {
             let name = managed_field_presence_name(field.id.index());
-            source.push_str(&format!("                {name}: {name},\n"));
+            source.push_str(&format!("                {name},\n"));
         }
     }
     source.push_str("            }\n");
@@ -413,7 +411,7 @@ fn push_provider_context_initializers(
 ) {
     for context in contexts {
         let name = provider_context_field_name(context.index);
-        source.push_str(&format!("{indentation}{name}: {name},\n"));
+        source.push_str(&format!("{indentation}{name},\n"));
     }
 }
 

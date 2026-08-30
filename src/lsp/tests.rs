@@ -2347,3 +2347,78 @@ fn unused_shared_state_field_has_one_validated_multi_layout_suppression() {
     assert_eq!(edits.len(), 2, "{edits:#?}");
     assert!(edits.iter().all(|edit| edit["newText"] == "_spare"));
 }
+
+#[test]
+fn record_field_shorthand_fixes_and_renames_preserve_both_identities() {
+    let source = concat!(
+        "record Point { x: u32 }\n",
+        "state \"game.exe\" {}\n",
+        "fn point(x: u32) -> Point { return Point { x: x } }\n",
+        "setup { print(point(1).x) }\n"
+    );
+    let uri = "file:///record-shorthand.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    let diagnostics = server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+    let published = diagnostics[0]["params"]["diagnostics"].as_array().unwrap();
+    let shorthand = published
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "SS1010")
+        .expect("the repeated field should publish shorthand guidance");
+    let actions = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 25,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": uri },
+            "range": shorthand["range"],
+            "context": {
+                "diagnostics": [shorthand],
+                "only": ["quickfix"]
+            }
+        }
+    }));
+    let quick_fixes = actions[0]["result"].as_array().unwrap();
+    assert_eq!(quick_fixes.len(), 1, "{quick_fixes:#?}");
+    assert_eq!(quick_fixes[0]["title"], "shorten to `x`");
+    assert_eq!(quick_fixes[0]["isPreferred"], true);
+    assert_eq!(quick_fixes[0]["edit"]["changes"][uri][0]["newText"], "");
+
+    let shorthand_source = source.replacen("x: x", "x", 1);
+    let shorthand_uri = "file:///record-shorthand-rename.split";
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": shorthand_uri,
+                "version": 1,
+                "text": shorthand_source
+            }
+        }),
+    ));
+    let field = shorthand_source.find("x: u32 }").unwrap();
+    let (line, character) = position_parts(&shorthand_source, field);
+    let renamed = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 26,
+        "method": "textDocument/rename",
+        "params": {
+            "textDocument": { "uri": shorthand_uri },
+            "position": { "line": line, "character": character },
+            "newName": "horizontal"
+        }
+    }));
+    let edits = renamed[0]["result"]["changes"][shorthand_uri]
+        .as_array()
+        .expect("field rename edits");
+    assert!(edits.iter().any(|edit| edit["newText"] == "horizontal: x"));
+}

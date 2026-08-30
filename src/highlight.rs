@@ -1291,11 +1291,9 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 fields,
             } => {
                 self.insert(*name_span, SemanticTokenKind::Struct, 0);
-                for (name, value) in fields {
-                    self.mark_last_ident_before(
-                        expression.span,
-                        value.span.start,
-                        name,
+                for field in fields {
+                    self.insert(
+                        field.name_span,
                         SemanticTokenKind::Property,
                         MODIFIER_READONLY,
                     );

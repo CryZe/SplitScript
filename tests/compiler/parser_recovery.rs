@@ -840,7 +840,7 @@ fn recovering_parse_keeps_valid_record_fields_and_template_interpolations() {
     assert_eq!(
         fields
             .iter()
-            .map(|(name, _)| name.as_str())
+            .map(|field| field.name.as_str())
             .collect::<Vec<_>>(),
         ["x", "y"]
     );

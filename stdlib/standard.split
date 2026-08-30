@@ -1288,9 +1288,9 @@ namespace Unity {
         let typeInformation = retry process.readRelative32(storeInstruction.offset(3))
 
         return UnityModule {
-            assemblies: assemblies,
+            assemblies,
             typeInfoTable: typeInformation,
-            version: version,
+            version,
             pointerSize: 8,
         }
     }
@@ -1356,7 +1356,7 @@ namespace Unity {
 
         return UnityScenes {
             address: managerAddress,
-            pointerSize: pointerSize,
+            pointerSize,
         }
     }
 }
@@ -2590,7 +2590,7 @@ capability Iterator<T> {
         /// Transformation applied to each yielded item.
         transform: (Item) -> U,
     ) -> MapIterator<T, Item, U> {
-        return MapIterator { source: self, transform: transform }
+        return MapIterator { source: self, transform }
     }
 
     /// Lazily retains the remaining items accepted by a predicate.
@@ -2613,7 +2613,7 @@ capability Iterator<T> {
         /// Predicate deciding whether an item is yielded.
         predicate: (Item) -> bool,
     ) -> FilterIterator<T, Item> {
-        return FilterIterator { source: self, predicate: predicate }
+        return FilterIterator { source: self, predicate }
     }
 }
 
@@ -3837,9 +3837,9 @@ extend address {
     ) -> MemoryPath {
         return MemoryPath {
             base: self,
-            dereferences: dereferences,
-            finalOffset: finalOffset,
-            pointerSize: pointerSize
+            dereferences,
+            finalOffset,
+            pointerSize
         }
     }
 }
@@ -5311,7 +5311,7 @@ struct MemoryPath {
         dereferences.push(self.finalOffset)
         return MemoryPath {
             base: self.base,
-            dereferences: dereferences,
+            dereferences,
             finalOffset: offset,
             pointerSize: self.pointerSize,
         }
@@ -5435,10 +5435,10 @@ struct FileVersion {
         privatePart: u16,
     ) -> FileVersion {
         return FileVersion {
-            major: major,
-            minor: minor,
-            build: build,
-            privatePart: privatePart,
+            major,
+            minor,
+            build,
+            privatePart,
         }
     }
 
@@ -6180,8 +6180,8 @@ struct UnityScenes {
             scenes: self,
             address: sceneAddress,
             index: process.read<i32>(sceneAddress.add(buildIndexOffset))?,
-            path: path,
-            name: name,
+            path,
+            name,
         })
     }
 
@@ -7178,9 +7178,9 @@ private struct MonoModule {
         )
         let assemblies = retry process.readRelative32(instruction.offset(3))
         return MonoModule {
-            assemblies: assemblies,
-            version: version,
-            pointerSize: pointerSize,
+            assemblies,
+            version,
+            pointerSize,
             layout: MonoLayout.forVersion(version),
         }
     }
@@ -7430,7 +7430,7 @@ private struct MonoModule {
         }
         return match selectedOffset {
             Some(offset) => Some(UnityField {
-                offset: offset,
+                offset,
                 index: selectedIndex,
             }),
             None => None,
@@ -8579,7 +8579,7 @@ struct GenesisEmulator {
                 backend: 1,
                 base: ramBase as address,
                 auxiliary: 0,
-                wordSwapped: wordSwapped,
+                wordSwapped,
             }
         }
 
@@ -8858,8 +8858,8 @@ struct CatalogRecordProbe {
         fallback: u32?,
     ) -> CatalogConstructedFieldProbe {
         return CatalogConstructedFieldProbe {
-            values: values,
-            fallback: fallback
+            values,
+            fallback
         }
     }
 

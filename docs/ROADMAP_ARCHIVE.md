@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-30: record literals gain identity-safe field shorthand
+
+- Added record field initializer shorthand: `Point { x }` lowers through the
+  same value-path semantics as `Point { x: x }`. Repeated explicit
+  initializers produce configurable warning `SS1010` with a machine-applicable
+  fix.
+- Formatter, highlighting, definitions, references, and identity-checked
+  rename understand the shorthand. Renaming only the field or only the local
+  expands it to preserve both meanings.
+
 ## 2026-08-30: profile-aware unused guidance shares declaration reachability
 
 - Added configurable warning `SS1009` for normal locals, globals, and

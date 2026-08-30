@@ -882,7 +882,7 @@ remaining work is product hardening and distribution.
 
 ## P1 — remaining language and runtime breadth
 
-- [ ] Add shorthand record field initializers: `Point { x }` means
+- [x] Add shorthand record field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename
   must preserve meaning in both directions: renaming either the field or the

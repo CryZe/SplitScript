@@ -4,10 +4,12 @@ use std::{fmt, sync::Arc};
 
 use crate::{
     Diagnostic,
-    ast::Span,
+    ast::{Expr, ExprKind, Span},
     diagnostic::TextEdit,
     language::LanguageCatalog,
+    semantic::{ResolvedRecordFieldId, SemanticModel},
     stdlib::{StandardLibrary, StdlibOwner},
+    visit::{self, Visitor},
 };
 
 use super::{CompilerDatabase, DefinitionTarget, SemanticQueryResult, SourceDefinitionId};
@@ -32,6 +34,14 @@ pub enum RenameError {
     InvalidIdentifier,
     ReservedIdentifier,
     ConflictingBinding,
+}
+
+#[derive(Debug, Clone)]
+struct RecordShorthandReference {
+    span: Span,
+    name: String,
+    field: SourceDefinitionId,
+    value: SourceDefinitionId,
 }
 
 impl fmt::Display for RenameError {
@@ -124,6 +134,7 @@ impl CompilerDatabase {
         }
 
         let definitions = self.definition_index().map_err(RenameError::Diagnostics)?;
+        let shorthand_references = self.record_shorthand_references()?;
         let target_ids = self.logical_rename_ids(target.id)?;
         let mut spans = target_ids
             .iter()
@@ -132,12 +143,28 @@ impl CompilerDatabase {
             .collect::<Vec<_>>();
         spans.sort_by_key(|span| (span.start, span.end));
         spans.dedup();
+        let mut expanded_shorthands = Vec::new();
         let mut edits = spans
             .iter()
             .copied()
-            .map(|span| TextEdit {
-                span,
-                replacement: new_name.to_owned(),
+            .map(|span| {
+                let shorthand = shorthand_references.iter().find(|reference| {
+                    reference.span == span
+                        && (target_ids.contains(&reference.field)
+                            || target_ids.contains(&reference.value))
+                });
+                let replacement = shorthand.map_or_else(
+                    || new_name.to_owned(),
+                    |reference| {
+                        expanded_shorthands.push(reference.clone());
+                        if target_ids.contains(&reference.field) {
+                            format!("{new_name}: {}", reference.name)
+                        } else {
+                            format!("{}: {new_name}", reference.name)
+                        }
+                    },
+                );
+                TextEdit { span, replacement }
             })
             .collect::<Vec<_>>();
         if new_name == target.name {
@@ -161,6 +188,12 @@ impl CompilerDatabase {
             .definition_index()
             .map_err(|_| RenameError::ConflictingBinding)?;
         for reference in definitions.syntax_references() {
+            if expanded_shorthands
+                .iter()
+                .any(|shorthand| shorthand.span == reference.span)
+            {
+                continue;
+            }
             let mapped = remap_span(reference.span, &edits);
             if !candidate_definitions
                 .reference_at(mapped.start)
@@ -172,10 +205,52 @@ impl CompilerDatabase {
                 return Err(RenameError::ConflictingBinding);
             }
         }
+        for shorthand in &expanded_shorthands {
+            let mapped = remap_span(shorthand.span, &edits);
+            let renamed_field = target_ids.contains(&shorthand.field);
+            let (field_name, value_name) = if renamed_field {
+                (new_name, shorthand.name.as_str())
+            } else {
+                (shorthand.name.as_str(), new_name)
+            };
+            let field_span = Span {
+                start: mapped.start,
+                end: mapped.start + field_name.len(),
+            };
+            let value_span = Span {
+                start: field_span.end + 2,
+                end: field_span.end + 2 + value_name.len(),
+            };
+            if !candidate_definitions
+                .reference_at(field_span.start)
+                .is_some_and(|reference| {
+                    reference.span == field_span && reference.target == shorthand.field
+                })
+                || !candidate_definitions
+                    .reference_at(value_span.start)
+                    .is_some_and(|reference| {
+                        reference.span == value_span && reference.target == shorthand.value
+                    })
+            {
+                return Err(RenameError::ConflictingBinding);
+            }
+        }
         Ok(RenamePlan {
             new_name: new_name.to_owned(),
             edits,
         })
+    }
+
+    fn record_shorthand_references(
+        &mut self,
+    ) -> Result<Vec<RecordShorthandReference>, RenameError> {
+        let checked = self.check().map_err(RenameError::Diagnostics)?;
+        let mut collector = RecordShorthandCollector {
+            semantics: checked.semantics(),
+            references: Vec::new(),
+        };
+        collector.visit_program(checked.syntax());
+        Ok(collector.references)
     }
 
     /// Preserves an external identity that would otherwise be inherited from
@@ -308,6 +383,44 @@ impl CompilerDatabase {
         matches!(id, SourceDefinitionId::Value(value) if state.layout_value == Some(value))
             || matches!(id, SourceDefinitionId::Enum(enumeration)
                 if state.layout_enum.as_ref().is_some_and(|layout| layout.id == enumeration))
+    }
+}
+
+struct RecordShorthandCollector<'a> {
+    semantics: &'a SemanticModel,
+    references: Vec<RecordShorthandReference>,
+}
+
+impl<'ast> Visitor<'ast> for RecordShorthandCollector<'_> {
+    fn visit_expr(&mut self, expression: &'ast Expr) {
+        if let ExprKind::Record { fields, .. } = &expression.kind {
+            let resolved = self
+                .semantics
+                .record_literal_fields(expression.id)
+                .unwrap_or_default();
+            for (field, resolved_field) in fields.iter().zip(resolved) {
+                if !field.shorthand {
+                    continue;
+                }
+                let ResolvedRecordFieldId::Source(record_field) = resolved_field else {
+                    continue;
+                };
+                let Some(value) = self
+                    .semantics
+                    .value(field.value.id)
+                    .and_then(|root| root.source_value())
+                else {
+                    continue;
+                };
+                self.references.push(RecordShorthandReference {
+                    span: field.name_span,
+                    name: field.name.clone(),
+                    field: SourceDefinitionId::RecordField(*record_field),
+                    value: SourceDefinitionId::Value(value),
+                });
+            }
+        }
+        visit::walk_expr(self, expression);
     }
 }
 

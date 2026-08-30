@@ -524,9 +524,9 @@ explicit host key, which keeps existing saved settings compatible.
 Warning codes are stable tooling identifiers: `SS1001` denotes a discarded
 must-use value, `SS1002` an unread local binding, `SS1003` an unreachable
 declaration, `SS1004` an unused state field, setting, record field, or enum
-variant, and `SS1009` a declaration consumed only by debug code. The wording
-may improve without requiring editor integrations to classify messages by
-text.
+variant, `SS1009` a declaration consumed only by debug code, and `SS1010` an
+explicit record initializer that can use field shorthand. The wording may
+improve without requiring editor integrations to classify messages by text.
 
 Compiler hosts can configure every warning code as `allow`, `warn`, or `deny`.
 Allowing suppresses that diagnostic, while denying makes the configured build
@@ -1133,6 +1133,13 @@ let digits = Digits {
     minutes: 0.0,
 }
 ```
+
+When a local has the same name as a field, the field name alone is shorthand
+for the repeated initializer: `Position { x, y }` means
+`Position { x: x, y: y }`. Writing the repeated form produces `SS1010` with a
+safe quick fix. The two names still have independent identities: renaming the
+record field expands the shorthand to `horizontal: x`, while renaming the
+local expands it to `x: horizontal`.
 
 Records may contain other records and strings, pass through functions, and
 remain live across `await`. Immutability keeps

@@ -176,7 +176,7 @@ impl Parser<'_> {
         let mut else_span = None;
         loop {
             let keyword_span = self.expect_ident("if")?;
-            let condition = Some(self.root_expression());
+            let condition = Some(self.root_expression_before_block());
             groups.push(self.managed_conditional_fields_branch(
                 documentation.take(),
                 else_span,
@@ -845,7 +845,7 @@ impl Parser<'_> {
         let mut else_span = None;
         loop {
             let keyword_span = self.expect_ident("if")?;
-            let condition = Some(self.root_expression());
+            let condition = Some(self.root_expression_before_block());
             groups.push(self.state_conditional_fields_branch(
                 documentation.take(),
                 else_span,

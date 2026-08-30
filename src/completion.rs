@@ -1397,8 +1397,8 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
             add_block_bindings(builder, block, offset)
         }
         ExprKind::Record { fields, .. } => {
-            for (_, value) in fields {
-                add_expression_bindings(builder, value, offset);
+            for field in fields {
+                add_expression_bindings(builder, &field.value, offset);
             }
         }
         ExprKind::If {

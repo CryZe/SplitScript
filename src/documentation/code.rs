@@ -3,8 +3,8 @@
 use crate::{
     catalog::Example,
     database::{CompilerDatabase, DefinitionTarget},
-    highlight::SemanticTokenKind,
-    language::{LanguageCatalog, LanguageItemId, LanguageItemKind},
+    highlight::{LanguageTokenContext, SemanticTokenKind, language_identifier_kind},
+    language::LanguageCatalog,
     lexer::{Lexeme, TokenKind, TriviaKind, lex_lossless},
     stdlib::{StandardLibrary, StdlibSymbolId},
 };
@@ -224,18 +224,14 @@ fn lexical_kind(
     library: &StandardLibrary,
 ) -> Option<SemanticTokenKind> {
     match token {
-        TokenKind::Ident(name) if matches!(name.as_str(), "true" | "false") => {
-            Some(SemanticTokenKind::Constant)
-        }
         TokenKind::Ident(name)
             if name == "None"
                 && !matches!(previous, Some(TokenKind::Colon | TokenKind::Gt))
                 && !matches!(next, Some(TokenKind::Dot))
                 && !(previous.is_none() && next.is_none()) =>
         {
-            Some(SemanticTokenKind::EnumMember)
+            language_identifier_kind(name, LanguageTokenContext::DocumentationFragment)
         }
-        TokenKind::Ident(name) if catalog_token_kind(name).is_some() => catalog_token_kind(name),
         TokenKind::Ident(name)
             if library
                 .capabilities()
@@ -267,7 +263,12 @@ fn lexical_kind(
         {
             Some(SemanticTokenKind::Type)
         }
-        TokenKind::Ident(name) if is_contextual_keyword(name) => Some(SemanticTokenKind::Keyword),
+        TokenKind::Ident(name)
+            if language_identifier_kind(name, LanguageTokenContext::DocumentationFragment)
+                .is_some() =>
+        {
+            language_identifier_kind(name, LanguageTokenContext::DocumentationFragment)
+        }
         TokenKind::Ident(_) if matches!(previous, Some(TokenKind::Ident(name)) if name == "class") => {
             Some(SemanticTokenKind::Struct)
         }
@@ -423,48 +424,6 @@ fn is_type_name(name: &str, library: &StandardLibrary) -> bool {
             .any(|capability| capability.name == name)
 }
 
-fn catalog_token_kind(name: &str) -> Option<SemanticTokenKind> {
-    let item = LanguageCatalog::new().item_by_name(name)?;
-    match item.kind {
-        LanguageItemKind::Keyword | LanguageItemKind::Declaration => Some(if name == "debug" {
-            SemanticTokenKind::Debug
-        } else {
-            SemanticTokenKind::Keyword
-        }),
-        LanguageItemKind::Action(_) => Some(SemanticTokenKind::Lifecycle),
-        LanguageItemKind::Syntax => match item.id {
-            LanguageItemId::ManagedStaticField
-            | LanguageItemId::ManagedMetadataNames
-            | LanguageItemId::ManagedStringMaxLength
-            | LanguageItemId::StatePointerField => Some(SemanticTokenKind::Keyword),
-            LanguageItemId::SomeConstructor
-            | LanguageItemId::IteratorItem
-            | LanguageItemId::IteratorEnd
-            | LanguageItemId::SuccessConstructor
-            | LanguageItemId::ErrorConstructor => Some(SemanticTokenKind::EnumMember),
-            LanguageItemId::SignatureLiteral => Some(SemanticTokenKind::Signature),
-            LanguageItemId::VersionLiteral => Some(SemanticTokenKind::Version),
-            LanguageItemId::NativeStringDecoder | LanguageItemId::NativeUtf16LeDecoder => {
-                Some(SemanticTokenKind::Function)
-            }
-            _ => None,
-        },
-        LanguageItemKind::BuiltinType(_) => Some(SemanticTokenKind::Type),
-        LanguageItemKind::SnapshotRoot => Some(SemanticTokenKind::Variable),
-    }
-}
-
-fn is_contextual_keyword(name: &str) -> bool {
-    // These words describe fields inside a surrounding declaration rather
-    // than independently documented language constructs. The full compiler
-    // assigns their roles from the AST; signatures deliberately have no
-    // synthetic AST, so the fragment highlighter supplies the same role here.
-    matches!(
-        name,
-        "in" | "where" | "attached" | "detached" | "key" | "choice" | "default" | "file" | "mime"
-    )
-}
-
 fn is_operator(kind: &TokenKind) -> bool {
     matches!(
         kind,
@@ -585,7 +544,10 @@ fn escape_html_attribute_into(output: &mut String, source: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stdlib::StdlibItemId;
+    use crate::{
+        language::{LanguageItemId, LanguageItemKind},
+        stdlib::StdlibItemId,
+    };
 
     #[test]
     fn signatures_highlight_and_link_catalog_symbols() {

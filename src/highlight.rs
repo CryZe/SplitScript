@@ -7,6 +7,7 @@ use crate::{
         Action, Expr, ExprKind, FunctionDecl, MatchPattern, Program, SettingFamilyDecl,
         SettingKind, SettingTextPart, Span, Stmt, TypeRef, ValueId, VariableDecl,
     },
+    language::{LanguageCatalog, LanguageItemId, LanguageItemKind},
     lexer::{Lexeme, Token, TokenKind, TriviaKind},
     semantic::{ResolvedCall, ResolvedMember, ResolvedValue, SemanticModel},
     stdlib::StandardLibrary,
@@ -118,6 +119,85 @@ pub const MODIFIER_READONLY: u32 = 1 << 1;
 pub const MODIFIER_DEFAULT_LIBRARY: u32 = 1 << 2;
 pub const MODIFIER_DEBUG: u32 = 1 << 3;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LanguageTokenContext {
+    Source,
+    DocumentationFragment,
+}
+
+/// Returns the canonical semantic role of a compiler-owned language word.
+///
+/// Complete source only colors contextual words after the parser proves their
+/// grammar role. Documentation signatures are intentionally incomplete
+/// fragments, so their renderer opts into all catalogued and contextual words.
+pub(crate) fn language_identifier_kind(
+    name: &str,
+    context: LanguageTokenContext,
+) -> Option<SemanticTokenKind> {
+    if matches!(name, "true" | "false") {
+        return Some(SemanticTokenKind::Constant);
+    }
+    if matches!(name, "Some" | "None" | "Ok" | "Err" | "Item" | "End") {
+        return Some(SemanticTokenKind::EnumMember);
+    }
+
+    let fragment = context == LanguageTokenContext::DocumentationFragment;
+    if fragment
+        && matches!(
+            name,
+            "in" | "where"
+                | "attached"
+                | "detached"
+                | "key"
+                | "choice"
+                | "default"
+                | "file"
+                | "mime"
+        )
+    {
+        return Some(SemanticTokenKind::Keyword);
+    }
+
+    let item = LanguageCatalog::new().item_by_name(name)?;
+    match item.kind {
+        LanguageItemKind::Keyword => Some(if name == "debug" {
+            SemanticTokenKind::Debug
+        } else {
+            SemanticTokenKind::Keyword
+        }),
+        LanguageItemKind::Declaration => {
+            let contextual = matches!(
+                item.id,
+                LanguageItemId::ManagedImage
+                    | LanguageItemId::ManagedNamespace
+                    | LanguageItemId::ManagedClass
+            );
+            (!contextual || fragment).then_some(SemanticTokenKind::Keyword)
+        }
+        LanguageItemKind::Action(_) => fragment.then_some(SemanticTokenKind::Lifecycle),
+        LanguageItemKind::Syntax => match item.id {
+            LanguageItemId::ManagedStaticField
+            | LanguageItemId::ManagedMetadataNames
+            | LanguageItemId::ManagedStringMaxLength
+            | LanguageItemId::StatePointerField
+                if fragment =>
+            {
+                Some(SemanticTokenKind::Keyword)
+            }
+            LanguageItemId::SignatureLiteral => Some(SemanticTokenKind::Signature),
+            LanguageItemId::VersionLiteral => Some(SemanticTokenKind::Version),
+            LanguageItemId::NativeStringDecoder | LanguageItemId::NativeUtf16LeDecoder
+                if fragment =>
+            {
+                Some(SemanticTokenKind::Function)
+            }
+            _ => None,
+        },
+        LanguageItemKind::BuiltinType(_) => None,
+        LanguageItemKind::SnapshotRoot => fragment.then_some(SemanticTokenKind::Variable),
+    }
+}
+
 pub const SEMANTIC_TOKEN_MODIFIERS: [&str; 4] =
     ["declaration", "readonly", "defaultLibrary", "debug"];
 
@@ -218,7 +298,8 @@ impl<'ast> Visitor<'ast> for ValueKindCollector {
         self.kinds.insert(
             parameter.id,
             if parameter.name == "self" {
-                SemanticTokenKind::Keyword
+                language_identifier_kind("self", LanguageTokenContext::Source)
+                    .expect("`self` has a canonical language role")
             } else {
                 SemanticTokenKind::Parameter
             },
@@ -282,6 +363,18 @@ struct HighlightCollector<'a> {
 }
 
 impl HighlightCollector<'_> {
+    fn insert_language_token(&mut self, span: Span, name: &str, modifiers: u32) {
+        let kind = language_identifier_kind(name, LanguageTokenContext::DocumentationFragment)
+            .unwrap_or_else(|| panic!("language token `{name}` has no canonical highlight role"));
+        self.insert(span, kind, modifiers);
+    }
+
+    fn mark_language_ident(&mut self, span: Span, name: &str, modifiers: u32) {
+        let kind = language_identifier_kind(name, LanguageTokenContext::DocumentationFragment)
+            .unwrap_or_else(|| panic!("language token `{name}` has no canonical highlight role"));
+        self.mark_ident(span, name, kind, modifiers);
+    }
+
     fn mark_managed_reference_types(&mut self) {
         for declaration in &self.syntax.managed_reference_types {
             for occurrence in &declaration.occurrences {
@@ -312,27 +405,11 @@ impl HighlightCollector<'_> {
                 Lexeme::Trivia(_) => {}
                 Lexeme::Token(token) => {
                     let kind = match &token.kind {
-                        TokenKind::Ident(name) if name == "debug" => Some(SemanticTokenKind::Debug),
-                        TokenKind::Ident(name) if name == "sig" => {
-                            Some(SemanticTokenKind::Signature)
-                        }
-                        TokenKind::Ident(name) if name == "v" => {
-                            Some(SemanticTokenKind::Version)
-                        }
-                        TokenKind::Ident(name) if matches!(name.as_str(), "true" | "false") =>
-                        {
-                            Some(SemanticTokenKind::Constant)
-                        }
                         TokenKind::Ident(name)
-                            if matches!(
-                                name.as_str(),
-                                "Some" | "None" | "Ok" | "Err" | "Item" | "End"
-                            ) =>
+                            if language_identifier_kind(name, LanguageTokenContext::Source)
+                                .is_some() =>
                         {
-                            Some(SemanticTokenKind::EnumMember)
-                        }
-                        TokenKind::Ident(name) if is_keyword(name) => {
-                            Some(SemanticTokenKind::Keyword)
+                            language_identifier_kind(name, LanguageTokenContext::Source)
                         }
                         TokenKind::Ident(name)
                             if is_capability(&self.standard_library, name) =>
@@ -797,12 +874,12 @@ impl HighlightCollector<'_> {
 impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     fn visit_program(&mut self, program: &'ast Program) {
         if let Some(policy) = program.tick_rate {
-            self.insert(policy.keyword_span, SemanticTokenKind::Keyword, 0);
+            self.insert_language_token(policy.keyword_span, "tickRate", 0);
             if let Some(rate) = policy.attached {
-                self.insert(rate.keyword_span, SemanticTokenKind::Keyword, 0);
+                self.insert_language_token(rate.keyword_span, "attached", 0);
             }
             if let Some(rate) = policy.detached {
-                self.insert(rate.keyword_span, SemanticTokenKind::Keyword, 0);
+                self.insert_language_token(rate.keyword_span, "detached", 0);
             }
         }
         if let Some(provider) = program
@@ -864,19 +941,14 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
         }
         if let crate::ast::StateSource::Pointer(path) = &field.source {
             if let Some(span) = path.at_span {
-                self.insert(span, SemanticTokenKind::Keyword, 0);
+                self.insert_language_token(span, "at", 0);
             }
             if let Some(decoder) = path.decoder {
                 let (span, name) = match decoder {
                     crate::ast::StateMemoryDecoder::Utf8 { span, .. } => (span, "utf8"),
                     crate::ast::StateMemoryDecoder::Utf16Le { span, .. } => (span, "utf16le"),
                 };
-                self.mark_ident(
-                    span,
-                    name,
-                    SemanticTokenKind::Function,
-                    MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY,
-                );
+                self.mark_language_ident(span, name, MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY);
             }
         }
         visit::walk_state_field(self, field);
@@ -884,7 +956,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
 
     fn visit_setting(&mut self, setting: &'ast crate::ast::SettingDecl) {
         if let Some(key) = &setting.external_key {
-            self.insert(key.keyword_span, SemanticTokenKind::Keyword, 0);
+            self.insert_language_token(key.keyword_span, "key", 0);
         }
         if matches!(setting.kind, SettingKind::Title { .. }) {
             self.mark_first_string(setting.span, SemanticTokenKind::SettingTitle);
@@ -901,10 +973,10 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                     options,
                     ..
                 } => {
-                    self.insert(*keyword_span, SemanticTokenKind::Keyword, 0);
+                    self.insert_language_token(*keyword_span, "choice", 0);
                     for option in options {
                         if let Some(default_span) = option.default_span {
-                            self.insert(default_span, SemanticTokenKind::Keyword, 0);
+                            self.insert_language_token(default_span, "default", 0);
                         }
                         let Some(variant) = self
                             .semantics
@@ -935,10 +1007,10 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                     keyword_span,
                     filters,
                 } => {
-                    self.insert(*keyword_span, SemanticTokenKind::Keyword, 0);
+                    self.insert_language_token(*keyword_span, "file", 0);
                     for filter in filters {
                         if let crate::ast::SettingFileFilter::Mime { keyword_span, .. } = filter {
-                            self.insert(*keyword_span, SemanticTokenKind::Keyword, 0);
+                            self.insert_language_token(*keyword_span, "mime", 0);
                         }
                     }
                 }
@@ -948,14 +1020,14 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 
     fn visit_setting_family(&mut self, family: &'ast SettingFamilyDecl) {
-        self.insert(family.in_span, SemanticTokenKind::Keyword, 0);
+        self.insert_language_token(family.in_span, "in", 0);
         self.insert(
             family.binding_span,
             SemanticTokenKind::Variable,
             MODIFIER_DECLARATION | MODIFIER_READONLY,
         );
         if let Some(span) = family.key_keyword_span {
-            self.insert(span, SemanticTokenKind::Keyword, 0);
+            self.insert_language_token(span, "key", 0);
         }
         for pattern in family.key.iter().chain(std::iter::once(&family.label)) {
             for part in &pattern.parts {
@@ -974,7 +1046,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             .and_then(|state| state.layout.as_ref())
             .filter(|layout| layout.record == record.id);
         if let Some(layout) = attachment_layout {
-            self.insert(layout.keyword_span, SemanticTokenKind::Keyword, 0);
+            self.insert_language_token(layout.keyword_span, "layout", 0);
         } else {
             self.mark_ident(
                 record.span,
@@ -1017,12 +1089,12 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 
     fn visit_managed_image(&mut self, image: &'ast crate::ast::ManagedImageDecl) {
-        self.insert(image.keyword_span, SemanticTokenKind::Keyword, 0);
+        self.insert_language_token(image.keyword_span, "image", 0);
         visit::walk_managed_image(self, image);
     }
 
     fn visit_managed_namespace(&mut self, namespace: &'ast crate::ast::ManagedNamespaceDecl) {
-        self.insert(namespace.keyword_span, SemanticTokenKind::Keyword, 0);
+        self.insert_language_token(namespace.keyword_span, "namespace", 0);
         self.insert(
             namespace.name_span,
             SemanticTokenKind::Namespace,
@@ -1032,27 +1104,27 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 
     fn visit_managed_class(&mut self, class: &'ast crate::ast::ManagedClassDecl) {
-        self.insert(class.keyword_span, SemanticTokenKind::Keyword, 0);
+        self.insert_language_token(class.keyword_span, "class", 0);
         self.insert(
             class.name_span,
             SemanticTokenKind::Struct,
             MODIFIER_DECLARATION,
         );
         if let Some(from) = class.metadata_names.keyword_span {
-            self.insert(from, SemanticTokenKind::Keyword, 0);
+            self.insert_language_token(from, "from", 0);
         }
         visit::walk_managed_class(self, class);
     }
 
     fn visit_managed_field(&mut self, field: &'ast crate::ast::ManagedFieldDecl) {
         if let Some(span) = field.static_span {
-            self.insert(span, SemanticTokenKind::Keyword, 0);
+            self.insert_language_token(span, "static", 0);
         }
         if let Some(span) = field.metadata_names.keyword_span {
-            self.insert(span, SemanticTokenKind::Keyword, 0);
+            self.insert_language_token(span, "from", 0);
         }
         if let Some(max_length) = field.max_length {
-            self.insert(max_length.keyword_span, SemanticTokenKind::Keyword, 0);
+            self.insert_language_token(max_length.keyword_span, "maxLength", 0);
             self.insert(max_length.value_span, SemanticTokenKind::Number, 0);
         }
         self.insert(
@@ -1089,7 +1161,8 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             parameter.name_span,
             &parameter.name,
             if parameter.name == "self" {
-                SemanticTokenKind::Keyword
+                language_identifier_kind("self", LanguageTokenContext::Source)
+                    .expect("`self` has a canonical language role")
             } else {
                 SemanticTokenKind::Parameter
             },
@@ -1102,12 +1175,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 
     fn visit_action(&mut self, action: &'ast Action) {
-        self.mark_ident(
-            action.span,
-            action.kind.name(),
-            SemanticTokenKind::Lifecycle,
-            MODIFIER_DECLARATION,
-        );
+        self.mark_language_ident(action.span, action.kind.name(), MODIFIER_DECLARATION);
         self.visit_block(&action.body);
     }
 
@@ -1161,7 +1229,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
 
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
         if let Stmt::For { in_span, .. } = statement {
-            self.insert(*in_span, SemanticTokenKind::Keyword, 0);
+            self.insert_language_token(*in_span, "in", 0);
         }
         visit::walk_stmt(self, statement);
     }
@@ -1244,35 +1312,6 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 }
 
-fn is_keyword(name: &str) -> bool {
-    matches!(
-        name,
-        "state"
-            | "tickRate"
-            | "layout"
-            | "settings"
-            | "record"
-            | "enum"
-            | "fn"
-            | "let"
-            | "if"
-            | "else"
-            | "while"
-            | "loop"
-            | "for"
-            | "break"
-            | "continue"
-            | "return"
-            | "throw"
-            | "async"
-            | "await"
-            | "retry"
-            | "match"
-            | "as"
-            | "self"
-    )
-}
-
 fn is_builtin_type(standard_library: &StandardLibrary, name: &str) -> bool {
     TypeRef::parse(name).is_some()
         || standard_library.type_by_name(name).is_some()
@@ -1345,7 +1384,7 @@ mod tests {
         for item in crate::language::LanguageCatalog::new().items() {
             if item.kind == crate::language::LanguageItemKind::Keyword {
                 assert!(
-                    item.name == "debug" || is_keyword(item.name),
+                    language_identifier_kind(item.name, LanguageTokenContext::Source).is_some(),
                     "documented keyword `{}` is missing from semantic highlighting",
                     item.name
                 );

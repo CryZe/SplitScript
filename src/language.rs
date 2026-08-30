@@ -150,9 +150,7 @@ image "Assembly-CSharp" {
 
         if layout.edition == Edition.BaseGame {
             u32 level;
-        }
-
-        else {
+        } else {
             u32 scene;
         }
     }

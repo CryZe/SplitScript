@@ -4,7 +4,7 @@ use crate::{
     catalog::Example,
     database::{CompilerDatabase, DefinitionTarget},
     highlight::SemanticTokenKind,
-    language::LanguageCatalog,
+    language::{LanguageCatalog, LanguageItemId, LanguageItemKind},
     lexer::{Lexeme, TokenKind, TriviaKind, lex_lossless},
     stdlib::{StandardLibrary, StdlibSymbolId},
 };
@@ -69,29 +69,7 @@ fn semantic_example_annotations(
     library: &StandardLibrary,
 ) -> Option<Vec<Annotation>> {
     let program = example.validation_program();
-    let visible_start = program.find(example.source)?;
-    let visible_end = visible_start.checked_add(example.source.len())?;
-    let context = crate::CompilerContext::default().without_standard_library_bodies();
-    let mut database =
-        CompilerDatabase::with_context_and_source_name(context, "stdlib-example.split", program);
-    let highlights = database.semantic_highlights().ok()?;
-    let mut annotations = Vec::new();
-    for highlight in highlights.highlights() {
-        if highlight.span.start < visible_start || highlight.span.end > visible_end {
-            continue;
-        }
-        let target = is_linkable(highlight.kind)
-            .then(|| database.definition_at(highlight.span.start).ok().flatten())
-            .flatten()
-            .and_then(|target| target_uri(target, current_uri, library));
-        annotations.push(Annotation {
-            start: highlight.span.start - visible_start,
-            end: highlight.span.end - visible_start,
-            kind: highlight.kind,
-            target,
-        });
-    }
-    Some(annotations)
+    semantic_fragment_annotations(example.source, &program, current_uri, library)
 }
 
 fn semantic_fragment_annotations(
@@ -142,20 +120,28 @@ fn source_mappings(source: &str, validation_program: &str) -> Option<Vec<SourceM
     let mut validation_cursor = 0;
     let mut visible_cursor = 0;
     for line in source.split_inclusive('\n') {
-        let offset = validation_program[validation_cursor..].find(line)?;
+        let line_without_newline = line.strip_suffix('\n').unwrap_or(line);
+        let content = line_without_newline.trim_start();
+        let visible_indent = line_without_newline.len() - content.len();
+        if content.is_empty() {
+            visible_cursor += line.len();
+            continue;
+        }
+        let offset = validation_program[validation_cursor..].find(content)?;
         let validation_start = validation_cursor + offset;
-        let validation_end = validation_start + line.len();
+        let validation_end = validation_start + content.len();
+        let visible_start = visible_cursor + visible_indent;
         if let Some(previous) = mappings.last_mut()
             && previous.validation_end == validation_start
             && previous.visible_start + (previous.validation_end - previous.validation_start)
-                == visible_cursor
+                == visible_start
         {
             previous.validation_end = validation_end;
         } else {
             mappings.push(SourceMapping {
                 validation_start,
                 validation_end,
-                visible_start: visible_cursor,
+                visible_start,
             });
         }
         validation_cursor = validation_end;
@@ -238,10 +224,18 @@ fn lexical_kind(
     library: &StandardLibrary,
 ) -> Option<SemanticTokenKind> {
     match token {
-        TokenKind::Ident(name) if matches!(name.as_str(), "true" | "false" | "None") => {
+        TokenKind::Ident(name) if matches!(name.as_str(), "true" | "false") => {
             Some(SemanticTokenKind::Constant)
         }
-        TokenKind::Ident(name) if is_keyword(name) => Some(SemanticTokenKind::Keyword),
+        TokenKind::Ident(name)
+            if name == "None"
+                && !matches!(previous, Some(TokenKind::Colon | TokenKind::Gt))
+                && !matches!(next, Some(TokenKind::Dot))
+                && !(previous.is_none() && next.is_none()) =>
+        {
+            Some(SemanticTokenKind::EnumMember)
+        }
+        TokenKind::Ident(name) if catalog_token_kind(name).is_some() => catalog_token_kind(name),
         TokenKind::Ident(name)
             if library
                 .capabilities()
@@ -272,6 +266,19 @@ fn lexical_kind(
                     || (previous.is_none() && next.is_none())) =>
         {
             Some(SemanticTokenKind::Type)
+        }
+        TokenKind::Ident(name) if is_contextual_keyword(name) => Some(SemanticTokenKind::Keyword),
+        TokenKind::Ident(_) if matches!(previous, Some(TokenKind::Ident(name)) if name == "class") => {
+            Some(SemanticTokenKind::Struct)
+        }
+        TokenKind::Ident(_) if matches!(previous, Some(TokenKind::Ident(name)) if name == "namespace") => {
+            Some(SemanticTokenKind::Namespace)
+        }
+        TokenKind::Ident(_) if matches!(previous, Some(TokenKind::Ident(name)) if name == "record") => {
+            Some(SemanticTokenKind::Struct)
+        }
+        TokenKind::Ident(_) if matches!(previous, Some(TokenKind::Ident(name)) if name == "enum") => {
+            Some(SemanticTokenKind::Enum)
         }
         TokenKind::Ident(_) if matches!(next, Some(TokenKind::Colon)) => {
             Some(SemanticTokenKind::Parameter)
@@ -416,35 +423,45 @@ fn is_type_name(name: &str, library: &StandardLibrary) -> bool {
             .any(|capability| capability.name == name)
 }
 
-fn is_keyword(name: &str) -> bool {
+fn catalog_token_kind(name: &str) -> Option<SemanticTokenKind> {
+    let item = LanguageCatalog::new().item_by_name(name)?;
+    match item.kind {
+        LanguageItemKind::Keyword | LanguageItemKind::Declaration => Some(if name == "debug" {
+            SemanticTokenKind::Debug
+        } else {
+            SemanticTokenKind::Keyword
+        }),
+        LanguageItemKind::Action(_) => Some(SemanticTokenKind::Lifecycle),
+        LanguageItemKind::Syntax => match item.id {
+            LanguageItemId::ManagedStaticField
+            | LanguageItemId::ManagedMetadataNames
+            | LanguageItemId::ManagedStringMaxLength
+            | LanguageItemId::StatePointerField => Some(SemanticTokenKind::Keyword),
+            LanguageItemId::SomeConstructor
+            | LanguageItemId::IteratorItem
+            | LanguageItemId::IteratorEnd
+            | LanguageItemId::SuccessConstructor
+            | LanguageItemId::ErrorConstructor => Some(SemanticTokenKind::EnumMember),
+            LanguageItemId::SignatureLiteral => Some(SemanticTokenKind::Signature),
+            LanguageItemId::VersionLiteral => Some(SemanticTokenKind::Version),
+            LanguageItemId::NativeStringDecoder | LanguageItemId::NativeUtf16LeDecoder => {
+                Some(SemanticTokenKind::Function)
+            }
+            _ => None,
+        },
+        LanguageItemKind::BuiltinType(_) => Some(SemanticTokenKind::Type),
+        LanguageItemKind::SnapshotRoot => Some(SemanticTokenKind::Variable),
+    }
+}
+
+fn is_contextual_keyword(name: &str) -> bool {
+    // These words describe fields inside a surrounding declaration rather
+    // than independently documented language constructs. The full compiler
+    // assigns their roles from the AST; signatures deliberately have no
+    // synthetic AST, so the fragment highlighter supplies the same role here.
     matches!(
         name,
-        "state"
-            | "tickRate"
-            | "layout"
-            | "settings"
-            | "record"
-            | "enum"
-            | "fn"
-            | "let"
-            | "if"
-            | "else"
-            | "while"
-            | "for"
-            | "in"
-            | "break"
-            | "continue"
-            | "return"
-            | "throw"
-            | "async"
-            | "await"
-            | "retry"
-            | "match"
-            | "as"
-            | "where"
-            | "Some"
-            | "Ok"
-            | "Err"
+        "in" | "where" | "attached" | "detached" | "key" | "choice" | "default" | "file" | "mime"
     )
 }
 
@@ -600,6 +617,101 @@ mod tests {
                 "data-splitscript-token=\"interface\" class=\"hljs-type\">MemoryReadable"
             ),
             "{html}"
+        );
+    }
+
+    #[test]
+    fn language_signatures_follow_catalogued_compiler_roles() {
+        let library = StandardLibrary::new();
+        for item in LanguageCatalog::new().items() {
+            let expected = match item.kind {
+                LanguageItemKind::Keyword | LanguageItemKind::Declaration => {
+                    Some(if item.name == "debug" {
+                        SemanticTokenKind::Debug
+                    } else {
+                        SemanticTokenKind::Keyword
+                    })
+                }
+                LanguageItemKind::Action(_) => Some(SemanticTokenKind::Lifecycle),
+                _ => None,
+            };
+            let Some(expected) = expected else {
+                continue;
+            };
+            let html = signature(item.form, "/language/test.md", None, &library);
+            assert!(
+                html.contains(&format!("data-splitscript-token=\"{}\"", expected.name())),
+                "`{}` signature did not contain its compiler role `{}`: {html}",
+                item.name,
+                expected.name(),
+            );
+        }
+    }
+
+    #[test]
+    fn fragment_highlighting_covers_contextual_syntax_and_wrapper_variants() {
+        let library = StandardLibrary::new();
+        let managed = signature(
+            "image \"Assembly-CSharp\" { namespace Game { class Player from \"RuntimePlayer\" { static String name maxLength 64; } } }",
+            "/language/image.md",
+            None,
+            &library,
+        );
+        for keyword in ["image", "namespace", "class", "from", "static", "maxLength"] {
+            assert!(
+                managed.contains(&format!(
+                    "data-splitscript-token=\"keyword\" class=\"hljs-keyword\">{keyword}</span>"
+                )),
+                "missing managed keyword `{keyword}` in {managed}",
+            );
+        }
+        assert!(
+            managed.contains(
+                "data-splitscript-token=\"namespace\" class=\"hljs-built_in\">Game</span>"
+            ),
+            "{managed}"
+        );
+        assert!(
+            managed.contains("data-splitscript-token=\"struct\" class=\"hljs-type\">Player</span>"),
+            "{managed}"
+        );
+
+        let wrappers = signature(
+            "let value: i32? = Some(Ok(1)) else None",
+            "/language/test.md",
+            None,
+            &library,
+        );
+        for variant in ["Some", "Ok", "None"] {
+            assert!(
+                wrappers.contains(&format!(
+                    "data-splitscript-token=\"enumMember\" class=\"hljs-literal\">{variant}</span>"
+                )),
+                "wrapper `{variant}` did not match compiler highlighting: {wrappers}",
+            );
+        }
+    }
+
+    #[test]
+    fn managed_image_example_uses_semantic_highlighting() {
+        let library = StandardLibrary::new();
+        let item = LanguageCatalog::new().item(LanguageItemId::ManagedImage);
+        let html = example(
+            item.documentation.examples[0],
+            "/language/image.md",
+            &library,
+        );
+        for keyword in ["image", "class", "from", "static"] {
+            assert!(
+                html.contains(&format!(
+                    "data-splitscript-token=\"keyword\" class=\"hljs-keyword\">{keyword}</span>"
+                )),
+                "missing semantic managed keyword `{keyword}` in {html}",
+            );
+        }
+        assert!(
+            html.contains("data-splitscript-token=\"property\" class=\"hljs-attr\">score</span>"),
+            "managed field should use the compiler's semantic role: {html}"
         );
     }
 

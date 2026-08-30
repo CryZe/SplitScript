@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-30: deduplicated runtime verification artifacts
+
+- Separated `cargo xtask check` artifact definitions from runtime scenarios.
+  The verifier now compiles and validates each unique output once, then runs
+  every scenario against that artifact; the current 93-scenario matrix needs
+  65 builds instead of 93.
+- Added deterministic fixture-plan validation. Reusing an output for a
+  different source or profile and repeating an exact runtime scenario now fail
+  before compilation begins.
+- Moved the proposed SNES provider to the ASR-dependent deferred roadmap after
+  confirming the current ASR tree has no SNES implementation to align with.
+
 ## 2026-08-30: record literals gain identity-safe field shorthand
 
 - Added record field initializer shorthand: `Point { x }` lowers through the

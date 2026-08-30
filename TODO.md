@@ -671,14 +671,6 @@ concepts rather than maintaining a parallel inventory.
 
 ### Engine and emulator providers
 
-- [ ] Propose a typed SNES provider from the Super Metroid evidence before
-  implementing it. Compare ASR's higan, bsnes, Snes9x, BizHawk, RetroArch, and
-  lsnes-bsnes discovery, moving mappings, address normalization, byte order,
-  region/timing differences, and core-unload behavior. The public shape should
-  match the existing `state GCN` / `state Genesis` provider model unless a
-  concrete SNES constraint justifies a change; bring that proposal to the user
-  first. A manual RetroArch memory root is an interim port, not the canonical
-  endpoint.
 - [ ] Decide the source-defined provider refresh lifecycle before claiming
   parity for emulator cores that unload without their host process exiting.
   `state PS2` validates RetroArch's core mapping on every read and fails safely
@@ -1011,11 +1003,13 @@ remaining work is product hardening and distribution.
   emitters with narrow inputs; separate call candidate collection, generic
   solving/selection, and diagnostic construction. Move one family at a time
   and do not replace one all-purpose context with nested bags of everything.
-- [ ] Compile each unique runtime `(source, output, profile)` artifact once in
+- [x] Compile each unique runtime `(source, output, profile)` artifact once in
   `cargo xtask check`, validate it once, and run all argument/scenario variants
-  against that artifact. Model compilation separately from runtime scenarios
-  and reject conflicting output definitions or duplicate scenarios without
-  reducing the maintained host coverage.
+  against that artifact. Compilation is modeled separately from runtime
+  scenarios; fixture planning rejects conflicting output definitions and exact
+  duplicate scenarios without reducing maintained host coverage. The current
+  matrix compiles and validates 65 artifacts for 93 runtime scenarios instead
+  of rebuilding 28 duplicate artifacts.
 - [ ] Add a small shared `instantiateRuntimeFixture` host for common Wasm
   loading, text/memory helpers, default imports, `_start`, and `update`, while
   keeping unusual host behavior and assertions local. Migrate harnesses only
@@ -1042,6 +1036,13 @@ remaining work is product hardening and distribution.
 
 ## P2 / deliberately deferred
 
+- [ ] After ASR has a tested SNES provider, align SplitScript with its higan,
+  bsnes, Snes9x, BizHawk, RetroArch, and lsnes-bsnes discovery and memory
+  semantics rather than independently inventing them from the Super Metroid
+  port. The eventual source design should normally match the existing
+  `state GCN` / `state Genesis` provider model, but must still be brought to the
+  user before implementation. A manual RetroArch memory root remains an interim
+  port, not the canonical endpoint.
 - [ ] Revisit native-state suggestions for typed emulator providers only if
   future porting evidence shows this remains a recurring source of incorrect
   scripts after the current provider documentation and search work. This is

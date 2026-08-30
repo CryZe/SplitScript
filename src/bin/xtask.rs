@@ -4,11 +4,13 @@
 mod documentation_site;
 
 use std::{
+    collections::{BTreeMap, BTreeSet},
     env, fs,
     path::{Path, PathBuf},
     process::{Command, ExitCode},
 };
 
+#[derive(Clone, Copy)]
 struct RuntimeFixture {
     source: &'static str,
     output: &'static str,
@@ -17,13 +19,30 @@ struct RuntimeFixture {
     extra_arguments: &'static [&'static str],
 }
 
+#[derive(Clone, Copy)]
 struct CompileFixture {
     source: &'static str,
     output: &'static str,
     profile: &'static str,
 }
 
-const COMPILE_FIXTURES: &[CompileFixture] = &[];
+const COMPILE_FIXTURES: &[CompileFixture] = &[
+    CompileFixture {
+        source: "examples/lunistice.split",
+        output: "lunistice.release.wasm",
+        profile: "release",
+    },
+    CompileFixture {
+        source: "tests/debug_profile.split",
+        output: "debug_profile.debug.wasm",
+        profile: "debug",
+    },
+    CompileFixture {
+        source: "tests/debug_profile.split",
+        output: "debug_profile.release.wasm",
+        profile: "release",
+    },
+];
 
 const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
     RuntimeFixture {
@@ -847,7 +866,13 @@ fn check() -> Result<(), String> {
     } else {
         "target/debug/splitc"
     });
-    for fixture in RUNTIME_FIXTURES {
+    let artifacts = verification_artifacts(RUNTIME_FIXTURES, COMPILE_FIXTURES)?;
+    println!(
+        "compiling {} unique verification artifacts for {} runtime scenarios",
+        artifacts.len(),
+        RUNTIME_FIXTURES.len()
+    );
+    for fixture in &artifacts {
         compile_once(
             &root,
             &compiler,
@@ -856,57 +881,14 @@ fn check() -> Result<(), String> {
             fixture.profile,
         )?;
     }
-    for fixture in COMPILE_FIXTURES {
-        compile_once(
-            &root,
-            &compiler,
-            fixture.source,
-            &outputs.join(fixture.output),
-            fixture.profile,
-        )?;
-    }
-    let lunistice_release = outputs.join("lunistice.release.wasm");
-    compile_once(
-        &root,
-        &compiler,
-        "examples/lunistice.split",
-        &lunistice_release,
-        "release",
-    )?;
     let debug = outputs.join("debug_profile.debug.wasm");
     let release = outputs.join("debug_profile.release.wasm");
-    compile_once(
-        &root,
-        &compiler,
-        "tests/debug_profile.split",
-        &debug,
-        "debug",
-    )?;
-    compile_once(
-        &root,
-        &compiler,
-        "tests/debug_profile.split",
-        &release,
-        "release",
-    )?;
 
-    let mut validated = RUNTIME_FIXTURES
-        .iter()
-        .map(|fixture| outputs.join(fixture.output))
-        .collect::<Vec<_>>();
-    validated.extend(
-        COMPILE_FIXTURES
-            .iter()
-            .map(|fixture| outputs.join(fixture.output)),
-    );
-    validated.extend([lunistice_release, debug.clone(), release.clone()]);
-    validated.sort();
-    validated.dedup();
-    for module in &validated {
+    for module in artifacts.iter().map(|fixture| outputs.join(fixture.output)) {
         run(
             &root,
             "wasm-tools",
-            &["validate", "--features", "all", path_text(module)?],
+            &["validate", "--features", "all", path_text(&module)?],
         )?;
     }
 
@@ -926,6 +908,57 @@ fn check() -> Result<(), String> {
         ],
     )?;
     println!("repository verification passed");
+    Ok(())
+}
+
+fn verification_artifacts(
+    runtime_fixtures: &[RuntimeFixture],
+    compile_fixtures: &[CompileFixture],
+) -> Result<Vec<CompileFixture>, String> {
+    let mut scenarios = BTreeSet::new();
+    for fixture in runtime_fixtures {
+        if !scenarios.insert((
+            fixture.source,
+            fixture.output,
+            fixture.profile,
+            fixture.harness,
+            fixture.extra_arguments,
+        )) {
+            return Err(format!(
+                "duplicate runtime scenario for `{}` with harness `{}` and arguments {:?}",
+                fixture.output, fixture.harness, fixture.extra_arguments
+            ));
+        }
+    }
+
+    let mut artifacts = BTreeMap::new();
+    for fixture in runtime_fixtures.iter().map(|fixture| CompileFixture {
+        source: fixture.source,
+        output: fixture.output,
+        profile: fixture.profile,
+    }) {
+        insert_artifact(&mut artifacts, fixture)?;
+    }
+    for &fixture in compile_fixtures {
+        insert_artifact(&mut artifacts, fixture)?;
+    }
+    Ok(artifacts.into_values().collect())
+}
+
+fn insert_artifact(
+    artifacts: &mut BTreeMap<&'static str, CompileFixture>,
+    fixture: CompileFixture,
+) -> Result<(), String> {
+    if let Some(previous) = artifacts.get(fixture.output) {
+        if previous.source != fixture.source || previous.profile != fixture.profile {
+            return Err(format!(
+                "conflicting artifact `{}`: `{}` ({}) and `{}` ({})",
+                fixture.output, previous.source, previous.profile, fixture.source, fixture.profile
+            ));
+        }
+    } else {
+        artifacts.insert(fixture.output, fixture);
+    }
     Ok(())
 }
 

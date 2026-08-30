@@ -12,6 +12,12 @@ use wasm_encoder::{Function, Instruction};
 
 use super::{Type, semantic_type};
 
+/// Common fields shared by every first-class future frame.
+pub(super) const FUTURE_STATE_FIELD: u32 = 0;
+pub(super) const FUTURE_TAG_FIELD: u32 = 1;
+pub(super) const FUTURE_POLL_EPOCH_FIELD: u32 = 2;
+pub(super) const FUTURE_BASE_FIELDS: u32 = 3;
+
 /// How an async body reaches the continuation frame it is currently polling.
 ///
 /// The host-owned `onAttach` frame lives in a global. Source-defined futures
@@ -64,7 +70,7 @@ impl AsyncFrameLayout {
     pub(super) fn for_leaf_completion(completion: Option<(u32, Type)>) -> Self {
         Self {
             completion,
-            base_fields: 2,
+            base_fields: FUTURE_BASE_FIELDS,
             ..Self::default()
         }
     }
@@ -123,7 +129,7 @@ impl AsyncFrameLayout {
             wasm_ir,
             semantics,
             Some(instance),
-            2,
+            FUTURE_BASE_FIELDS,
             declaration
                 .params
                 .iter()
@@ -164,7 +170,7 @@ impl AsyncFrameLayout {
             program,
             semantics,
             instance.owner.as_ref(),
-            2,
+            FUTURE_BASE_FIELDS,
             captures.chain(parameters),
         )
         .with_completion(completion)
@@ -487,7 +493,7 @@ impl AsyncFrameLayouts {
                         specialize(receiver_type.expect("method receivers have semantic types")),
                         semantics,
                     );
-                    let field = 2 + types.len() as u32;
+                    let field = FUTURE_BASE_FIELDS + types.len() as u32;
                     types.push(ty);
                     (field, ty)
                 }),
@@ -507,7 +513,7 @@ impl AsyncFrameLayouts {
                         continue;
                     }
                     let ty = semantic_type(specialize(argument_expression.ty), semantics);
-                    let field = 2 + types.len() as u32;
+                    let field = FUTURE_BASE_FIELDS + types.len() as u32;
                     types.push(ty);
                     captured_arguments.insert(*argument, (field, ty));
                 }
@@ -535,7 +541,7 @@ impl AsyncFrameLayouts {
                             }
                         };
                         for _ in 0..policy.slots {
-                            let field = 2 + types.len() as u32;
+                            let field = FUTURE_BASE_FIELDS + types.len() as u32;
                             types.push(ty);
                             state.push((field, ty));
                         }
@@ -550,7 +556,7 @@ impl AsyncFrameLayouts {
                     );
                     let result = semantic_type(*value, semantics);
                     for ty in [cursor, cursor, result] {
-                        let field = 2 + types.len() as u32;
+                        let field = FUTURE_BASE_FIELDS + types.len() as u32;
                         types.push(ty);
                         state.push((field, ty));
                     }
@@ -559,7 +565,7 @@ impl AsyncFrameLayouts {
             }
             let completion_type = semantic_type(specialize(*value), semantics);
             let completion = completion_type.has_runtime_value().then(|| {
-                let field = 2 + types.len() as u32;
+                let field = FUTURE_BASE_FIELDS + types.len() as u32;
                 types.push(completion_type);
                 (field, completion_type)
             });

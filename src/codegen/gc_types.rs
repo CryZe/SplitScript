@@ -642,6 +642,10 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                             element_type: StorageType::Val(ValType::I32),
                             mutable: false,
                         },
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I64),
+                            mutable: true,
+                        },
                     ]
                     .into(),
                 }),
@@ -676,6 +680,10 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                         FieldType {
                             element_type: StorageType::Val(ValType::I32),
                             mutable: false,
+                        },
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I64),
+                            mutable: true,
                         },
                     ]
                     .into_iter()
@@ -728,6 +736,10 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                             element_type: StorageType::Val(ValType::I32),
                             mutable: false,
                         },
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I64),
+                            mutable: true,
+                        },
                     ]
                     .into_iter()
                     .chain(frame.types.iter().enumerate().map(|(position, ty)| {
@@ -769,6 +781,10 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                             element_type: StorageType::Val(ValType::I32),
                             mutable: false,
                         },
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I64),
+                            mutable: true,
+                        },
                     ]
                     .into_iter()
                     .chain(frame.types.iter().map(|ty| FieldType {
@@ -806,6 +822,19 @@ pub(super) fn instantiated_catalog_type(
         TypeRef::Core(core) => semantics.types().id_for_core(core),
         TypeRef::Standard(standard) => semantics.types().id_for_standard(standard),
         TypeRef::Parameter(name) | TypeRef::Associated(name) => variables[name],
+        TypeRef::Async(value) => {
+            let value = instantiated_catalog_type(*value, variables, semantics);
+            semantics
+                .types()
+                .iter()
+                .find_map(|(id, kind)| match kind {
+                    TypeKind::Async {
+                        value: candidate, ..
+                    } if *candidate == value => Some(id),
+                    _ => None,
+                })
+                .expect("instantiated async types have semantic layouts")
+        }
         TypeRef::FixedArray { element, length } => {
             let element = instantiated_catalog_type(*element, variables, semantics);
             semantics

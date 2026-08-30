@@ -745,6 +745,16 @@ impl CapabilityAnalysis {
             }
             TypeRef::Parameter(_) => actual == receiver,
             TypeRef::Associated(_) => false,
+            TypeRef::Async(value) => {
+                let TypeKind::Async {
+                    value: actual_value,
+                    ..
+                } = semantics.types().kind(actual)
+                else {
+                    return false;
+                };
+                self.type_ref_matches(*value, *actual_value, receiver, semantics)
+            }
             TypeRef::Application {
                 constructor,
                 arguments: [element],

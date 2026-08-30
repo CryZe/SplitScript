@@ -110,6 +110,7 @@ pub struct WarningPolicy {
     suspicious_interpolation: WarningLevel,
     debug_only_use: WarningLevel,
     record_field_shorthand: WarningLevel,
+    empty_future_race: WarningLevel,
 }
 
 impl WarningPolicy {
@@ -125,6 +126,7 @@ impl WarningPolicy {
             DiagnosticCode::SuspiciousInterpolation => Some(self.suspicious_interpolation),
             DiagnosticCode::DebugOnlyUse => Some(self.debug_only_use),
             DiagnosticCode::RecordFieldShorthand => Some(self.record_field_shorthand),
+            DiagnosticCode::EmptyFutureRace => Some(self.empty_future_race),
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
             | DiagnosticCode::Type
@@ -145,6 +147,7 @@ impl WarningPolicy {
             DiagnosticCode::SuspiciousInterpolation => &mut self.suspicious_interpolation,
             DiagnosticCode::DebugOnlyUse => &mut self.debug_only_use,
             DiagnosticCode::RecordFieldShorthand => &mut self.record_field_shorthand,
+            DiagnosticCode::EmptyFutureRace => &mut self.empty_future_race,
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
             | DiagnosticCode::Type

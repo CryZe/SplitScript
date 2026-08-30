@@ -1078,7 +1078,8 @@ pub(super) fn compile_async_closure_init(
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::I32Const(
             lowering.gc.closure_frame_tag(instance) as i32,
-        ));
+        ))
+        .instruction(&Instruction::I64Const(-1));
     for (position, ty) in layout.types.iter().copied().enumerate() {
         let field = layout.base_fields + position as u32;
         if let Some((capture_index, capture)) =
@@ -1504,7 +1505,8 @@ pub(super) fn compile_async_function_init(
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::I32Const(
             lowering.gc.function_frame_tag(instance) as i32,
-        ));
+        ))
+        .instruction(&Instruction::I64Const(-1));
     for (position, ty) in layout.types.iter().copied().enumerate() {
         let field = position as u32 + layout.base_fields;
         let captured_cell = layout.capture_cell_fields.contains(&field);

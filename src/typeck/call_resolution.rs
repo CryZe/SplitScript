@@ -1629,6 +1629,7 @@ impl Checker {
                     })
                 }),
             CatalogTypeRef::Associated(_) => false,
+            CatalogTypeRef::Async(_) => matches!(receiver, Type::Async(_)),
             CatalogTypeRef::Callable { .. } => matches!(receiver, Type::Callable(_)),
         }
     }
@@ -1729,6 +1730,10 @@ impl Checker {
             CatalogTypeRef::Core(core) => self.declared_type(DeclaredTypeRef::Core(core)),
             CatalogTypeRef::Standard(standard) => self.standard_type(standard),
             CatalogTypeRef::Parameter(name) | CatalogTypeRef::Associated(name) => variables[name],
+            CatalogTypeRef::Async(value) => {
+                let value = self.catalog_type(*value, variables);
+                Type::Async(self.inference.async_type(value))
+            }
             CatalogTypeRef::FixedArray { element, length } => {
                 let element = self.catalog_type(*element, variables);
                 Type::Array(self.inference.array_type_with_length(element, Some(length)))

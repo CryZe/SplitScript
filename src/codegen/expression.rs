@@ -3688,7 +3688,8 @@ fn compile_expr_unconverted(
             .instruction(&Instruction::I32Const(0))
             .instruction(&Instruction::I32Const(
                 context.gc.leaf_frame_tag(&instance) as i32
-            ));
+            ))
+            .instruction(&Instruction::I64Const(-1));
         if layout.receiver.is_some() {
             compile_receiver(function, target, context);
         }
@@ -4406,6 +4407,7 @@ fn compile_expr_unconverted(
                     .instruction(&Instruction::End);
             }
             IntrinsicId::NextTick
+            | IntrinsicId::FutureRace
             | IntrinsicId::ProcessClosed
             | IntrinsicId::ProcessMainModule
             | IntrinsicId::ProcessModule

@@ -843,6 +843,10 @@ impl<'a> CatalogGenerator<'a> {
         associated_types: &[crate::AssociatedTypeDeclaration],
     ) -> String {
         match ty {
+            Type::Async(value) => format!(
+                "TypeRef::Async(&{})",
+                self.type_ref(value, parameters, associated_types)
+            ),
             Type::Option(value) => format!(
                 "TypeRef::Application {{ constructor: StdlibTypeConstructorId::Option, arguments: &[{}] }}",
                 self.type_ref(value, parameters, associated_types)
@@ -1792,6 +1796,9 @@ capability Integer<T: Numeric + Display> {}
         assert!(generated.contains("ItemKind::Method"));
         assert!(generated.contains(
             "TypeRef::FixedArray { element: &TypeRef::Core(CoreTypeId::U16), length: 3 }"
+        ));
+        assert!(generated.contains(
+            "TypeRef::Application { constructor: StdlibTypeConstructorId::Array, arguments: &[TypeRef::Async(&TypeRef::Parameter(\"T\"))] }"
         ));
         assert!(!generated.contains(&retired_invocation));
     }

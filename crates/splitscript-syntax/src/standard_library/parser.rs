@@ -754,7 +754,13 @@ impl Parser<'_> {
     }
 
     fn ty(&mut self) -> Result<Type, Error> {
-        let mut ty = if self.eat(&TokenKind::LParen) {
+        let mut ty = if self.eat_ident("async") {
+            let value = self.ty()?;
+            if matches!(value, Type::Async(_)) {
+                return Err(self.error("an async type cannot wrap another async type"));
+            }
+            Type::Async(Box::new(value))
+        } else if self.eat(&TokenKind::LParen) {
             let mut parameters = Vec::new();
             while !self.at(&TokenKind::RParen) {
                 parameters.push(self.ty()?);
@@ -1448,6 +1454,24 @@ root {
         let function = &root.functions[0];
         assert!(function.result_is_async);
         assert_eq!(function.result.to_string(), "None");
+    }
+
+    #[test]
+    fn parses_async_values_nested_inside_parameter_types() {
+        let source = r#"
+namespace future {
+    /// Waits for the first operation.
+    fn race<T>(operations: [async T]) -> async T;
+}
+"#;
+        let library = parse(source).expect("nested async parameter should parse");
+        let Declaration::Namespace(future) = &library.declarations[0] else {
+            panic!("expected the future namespace")
+        };
+        let function = &future.functions[0];
+        assert_eq!(function.parameters[0].ty.to_string(), "[async T]");
+        assert!(function.result_is_async);
+        assert_eq!(function.result.to_string(), "T");
     }
 
     #[test]

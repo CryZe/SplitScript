@@ -702,6 +702,10 @@ impl InferenceContext {
             CatalogTypeRef::Core(core) => self.known_core(core),
             CatalogTypeRef::Standard(standard) => self.known_standard(standard),
             CatalogTypeRef::Parameter(name) | CatalogTypeRef::Associated(name) => variables[name],
+            CatalogTypeRef::Async(value) => {
+                let value = self.catalog_type(*value, variables);
+                Type::Async(self.async_type(value))
+            }
             CatalogTypeRef::FixedArray { element, length } => {
                 let element = self.catalog_type(*element, variables);
                 Type::Array(self.array_type_with_length(element, Some(length)))

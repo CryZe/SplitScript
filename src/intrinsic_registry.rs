@@ -217,6 +217,7 @@ pub(crate) enum ContractTypeRef {
     Core(CoreTypeId),
     Standard(StdlibTypeId),
     Parameter(u8),
+    Async(&'static ContractTypeRef),
     Application {
         constructor: StdlibTypeConstructorId,
         arguments: &'static [ContractTypeRef],
@@ -291,6 +292,9 @@ fn matches_type(required: ContractTypeRef, declared: TypeRef, parameters: &[&str
         (ContractTypeRef::Parameter(required), TypeRef::Parameter(declared)) => parameters
             .get(required as usize)
             .is_some_and(|name| *name == declared),
+        (ContractTypeRef::Async(required), TypeRef::Async(declared)) => {
+            matches_type(*required, *declared, parameters)
+        }
         (
             ContractTypeRef::Application {
                 constructor: required_constructor,
@@ -371,6 +375,7 @@ const fn scratch(ty: ScratchType, slots: u8) -> Option<ScratchPolicy> {
 
 const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
     match id {
+        IntrinsicId::FutureRace => scratch(ScratchType::Core(CoreTypeId::U32), 3),
         IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule => {
             scratch(ScratchType::Core(CoreTypeId::U64), 2)
         }
@@ -549,6 +554,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::StringConcat | IntrinsicId::StringJoin => &[Helper(Runtime::JoinStrings)],
         IntrinsicId::UnityClassStaticTable => &[HostImport(Host::ProcessRead)],
         IntrinsicId::NextTick
+        | IntrinsicId::FutureRace
         | IntrinsicId::BoolNot
         | IntrinsicId::IntegerBitNot
         | IntrinsicId::NumericSwapBytes
@@ -668,6 +674,11 @@ const PS1_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS
 const SMS_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::SMSEmulator);
 const GENESIS_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GenesisEmulator);
 const T: ContractTypeRef = ContractTypeRef::Parameter(0);
+const T_ASYNC: ContractTypeRef = ContractTypeRef::Async(&T);
+const T_ASYNC_ARRAY: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Array,
+    arguments: &[T_ASYNC],
+};
 const T_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
     arguments: &[T],
@@ -891,6 +902,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 Suspension
             )
         }
+        IntrinsicId::FutureRace => contract!(
+            FutureRace,
+            Function,
+            signature(UNCONSTRAINED_T, None, params![value(T_ASYNC_ARRAY)], T,),
+            NEXT_TICK,
+            OnAttach,
+            Suspension
+        ),
         IntrinsicId::NumericMin => contract!(
             NumericMin,
             Method,

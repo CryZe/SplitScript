@@ -75,6 +75,7 @@ pub(crate) fn validate(
     diagnostics.extend(unused_declarations.diagnostics);
     diagnostics.extend(validate_static_setting_lookups(syntax, hir));
     diagnostics.extend(validate_record_field_shorthand(syntax));
+    diagnostics.extend(validate_empty_future_races(hir));
     diagnostics.extend(validate_async_function_results(
         &standard_library,
         syntax,
@@ -362,6 +363,37 @@ fn validate_record_field_shorthand(syntax: &Program) -> Vec<Diagnostic> {
     let mut collector = Collector::default();
     collector.visit_program(syntax);
     collector.diagnostics
+}
+
+fn validate_empty_future_races(hir: &TypedProgram) -> Vec<Diagnostic> {
+    hir.expressions()
+        .filter_map(|expression| {
+            let ResolvedCall::StandardLibrary { item, .. } = hir.call(expression.id)? else {
+                return None;
+            };
+            if *item != StdlibItemId::FutureRace {
+                return None;
+            }
+            let TypedExpressionKind::Call { arguments, .. } = &expression.kind else {
+                return None;
+            };
+            let operations = hir.expression(*arguments.first()?)?;
+            if !matches!(&operations.kind, TypedExpressionKind::Array(values) if values.is_empty()) {
+                return None;
+            }
+            Some(
+                Diagnostic::warning(
+                    DiagnosticCode::EmptyFutureRace,
+                    "an empty future race never completes",
+                    operations.span,
+                )
+                .with_primary_label("this array contains no operation that could win")
+                .with_note(
+                    "an empty `future.race` is valid and remains pending forever; add an operation unless that is intentional",
+                ),
+            )
+        })
+        .collect()
 }
 
 fn validate_global_initializers(

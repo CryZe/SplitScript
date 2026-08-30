@@ -220,6 +220,16 @@ impl SchemeMatcher<'_> {
             TypeRef::Associated(_) => {
                 Err("; source bodies cannot independently narrow an associated type".to_owned())
             }
+            TypeRef::Async(value) => {
+                let TypeKind::Async {
+                    value: actual_value,
+                    ..
+                } = self.semantics.types().kind(actual)
+                else {
+                    return Err(String::new());
+                };
+                self.ty(*value, *actual_value)
+            }
             TypeRef::Callable { parameters, result } => {
                 let TypeKind::Callable {
                     parameters: actual_parameters,
@@ -282,6 +292,7 @@ fn type_ref_contains(ty: TypeRef, parameter: &str) -> bool {
     match ty {
         TypeRef::Parameter(name) => name == parameter,
         TypeRef::Associated(_) => false,
+        TypeRef::Async(value) => type_ref_contains(*value, parameter),
         TypeRef::Application { arguments, .. } => arguments
             .iter()
             .any(|argument| type_ref_contains(*argument, parameter)),
@@ -367,6 +378,7 @@ fn declared_type_has_capability(
                 library.capabilities_satisfy(parameter.constraints, capability)
             }),
         TypeRef::Associated(_) => false,
+        TypeRef::Async(_) => false,
         TypeRef::Application {
             constructor,
             arguments: [element],

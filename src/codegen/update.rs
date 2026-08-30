@@ -458,6 +458,12 @@ pub(super) fn compile_update(
         lowering,
     };
 
+    function
+        .instruction(&Instruction::GlobalGet(globals.future_poll_epoch))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::GlobalSet(globals.future_poll_epoch));
+
     if let Some(refresh_settings) = refresh_settings {
         function.instruction(&Instruction::Call(refresh_settings));
     }

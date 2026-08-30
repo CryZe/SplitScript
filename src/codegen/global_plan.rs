@@ -66,6 +66,10 @@ pub(super) struct RuntimeGlobals {
     /// Current compiler-derived structural formatting depth. This bounds
     /// recursive container graphs without allocating traversal state.
     pub debug_depth: u32,
+    /// Monotonically wrapping identity of the current host update. First-class
+    /// future dispatch uses it to prevent aliased handles from advancing more
+    /// than once during one update.
+    pub future_poll_epoch: u32,
     pub async_frame: u32,
 }
 
@@ -300,6 +304,15 @@ pub(super) fn encode(
         },
         &ConstExpr::i32_const(0),
     );
+    let future_poll_epoch = section.len();
+    section.global(
+        GlobalType {
+            val_type: ValType::I64,
+            mutable: true,
+            shared: false,
+        },
+        &ConstExpr::i64_const(0),
+    );
     let async_frame = section.len();
     section.global(
         GlobalType {
@@ -401,6 +414,7 @@ pub(super) fn encode(
             observed_timer_state,
             attempt_ready,
             debug_depth,
+            future_poll_epoch,
             async_frame,
         },
         variables,

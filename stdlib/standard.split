@@ -446,6 +446,56 @@ root {
     fn nextTick() -> async None;
 }
 
+/// Coordinates lazy asynchronous values without exposing threads or background tasks.
+///
+/// Future combinators only make progress when their returned future is polled with
+/// [`await`]. They preserve the process-lifetime cancellation of their inputs.
+///
+/// # Example
+///
+/// Coordinate alternative asynchronous work
+///
+/// ```splitscript
+/// # state "game.exe" {}
+/// # onAttach {
+/// await future.race([nextTick(), nextTick()])
+/// print("one tick operation completed")
+/// # }
+/// ```
+namespace future {
+    /// Waits for the first operation that completes.
+    ///
+    /// Calling this function only captures the array. Polling the returned future
+    /// polls the operations in array order on each runtime update, and the first
+    /// ready value wins. When several operations become ready during the same
+    /// update, the lowest array index wins. An empty array remains pending forever.
+    /// After completion, this combinator stops polling the other operations; an
+    /// operation retained elsewhere remains available through that shared handle.
+    ///
+    /// # Example
+    ///
+    /// Race alternate module names
+    ///
+    /// ```splitscript
+    /// # state ["game.exe", "game-demo.exe"] {}
+    /// # onAttach {
+    /// let executable = await future.race([
+    ///     process.module("game.exe"),
+    ///     process.module("game-demo.exe"),
+    /// ])
+    /// # print(executable.address)
+    /// # }
+    /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
+    @intrinsic(FutureRace)
+    fn race<T>(
+        /// Lazy operations with the same completion type.
+        operations: [async T],
+    ) -> async T;
+}
+
 /// Reads metadata about the autosplitting runtime host.
 ///
 /// These values describe the system running the autosplitting runtime, not necessarily the

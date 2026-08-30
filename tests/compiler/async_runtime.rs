@@ -2151,6 +2151,154 @@ fn intrinsic_future_values_can_be_stored_and_awaited_later() {
 }
 
 #[test]
+fn future_race_is_lazy_left_biased_and_supports_every_future_producer() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn delayed(value: u32) -> async u32 {
+            print(`start {value}`)
+            await nextTick()
+            print(`complete {value}`)
+            return value
+        }
+
+        fn afterTick() -> async None {
+            await nextTick()
+        }
+
+        onAttach {
+            let first = delayed(1)
+            let second = delayed(2)
+            print("created")
+            await nextTick()
+            print("before race")
+            print(await future.race([first, second]))
+
+            let closure: () -> async None = () -> async None => {
+                await nextTick()
+            }
+            await future.race([afterTick(), closure(), nextTick()])
+            await process.closed()
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        ["created"],
+        "constructing futures and a race must not poll their bodies"
+    );
+
+    for _ in 0..5 {
+        update.call(&mut store, ()).unwrap();
+    }
+    assert_eq!(
+        store.data().messages,
+        [
+            "created",
+            "before race",
+            "start 1",
+            "start 2",
+            "complete 1",
+            "1"
+        ],
+        "the first ready array item must win without advancing later items again"
+    );
+}
+
+#[test]
+fn future_race_polls_shared_handles_at_most_once_per_update() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn counted() -> async u32 {
+            print("first poll")
+            await nextTick()
+            print("second poll")
+            return 7
+        }
+
+        onAttach {
+            let operation = counted()
+            print(await future.race([operation, operation]))
+            await process.closed()
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["first poll"]);
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["first poll", "second poll", "7"]);
+}
+
+#[test]
+fn empty_and_self_referential_future_races_remain_pending() {
+    let source = r#"
+        state "game.exe" {}
+
+        onAttach {
+            let operations: [async u32] = []
+            let pending = future.race(operations)
+            operations.push(pending)
+            print("waiting")
+            print(await pending)
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    for _ in 0..5 {
+        update.call(&mut store, ()).unwrap();
+    }
+    assert_eq!(store.data().messages, ["waiting"]);
+}
+
+#[test]
+fn literal_empty_future_races_warn_that_they_never_complete() {
+    let source = r#"
+        state "game.exe" {}
+
+        onAttach {
+            let pending: async u32 = future.race([])
+            print("waiting")
+            print(await pending)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("an empty race is valid even though it never completes");
+    let warning = checked
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::EmptyFutureRace)
+        .expect("a visible empty array should explain the forever-pending behavior");
+    assert_eq!(warning.severity, splitscript::DiagnosticSeverity::Warning);
+    assert!(warning.message.contains("never completes"));
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    for _ in 0..3 {
+        update.call(&mut store, ()).unwrap();
+    }
+    assert_eq!(store.data().messages, ["waiting"]);
+}
+
+#[test]
 fn stored_intrinsic_futures_cover_ticks_captured_arguments_and_method_receivers() {
     let source = r#"
         state "game.exe" {}

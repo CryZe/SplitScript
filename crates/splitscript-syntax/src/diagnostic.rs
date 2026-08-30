@@ -20,10 +20,11 @@ pub enum DiagnosticCode {
     SuspiciousInterpolation,
     DebugOnlyUse,
     RecordFieldShorthand,
+    EmptyFutureRace,
 }
 
 impl DiagnosticCode {
-    pub const WARNINGS: [Self; 10] = [
+    pub const WARNINGS: [Self; 11] = [
         Self::MustUse,
         Self::UnusedBinding,
         Self::UnusedDeclaration,
@@ -34,6 +35,7 @@ impl DiagnosticCode {
         Self::SuspiciousInterpolation,
         Self::DebugOnlyUse,
         Self::RecordFieldShorthand,
+        Self::EmptyFutureRace,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -52,6 +54,7 @@ impl DiagnosticCode {
             Self::SuspiciousInterpolation => "SS1008",
             Self::DebugOnlyUse => "SS1009",
             Self::RecordFieldShorthand => "SS1010",
+            Self::EmptyFutureRace => "SS1011",
         }
     }
 
@@ -68,6 +71,7 @@ impl DiagnosticCode {
                 | Self::SuspiciousInterpolation
                 | Self::DebugOnlyUse
                 | Self::RecordFieldShorthand
+                | Self::EmptyFutureRace
         )
     }
 }
@@ -91,6 +95,7 @@ impl FromStr for DiagnosticCode {
             "SS1008" => Ok(Self::SuspiciousInterpolation),
             "SS1009" => Ok(Self::DebugOnlyUse),
             "SS1010" => Ok(Self::RecordFieldShorthand),
+            "SS1011" => Ok(Self::EmptyFutureRace),
             _ => Err(()),
         }
     }

@@ -180,6 +180,7 @@ pub struct TypeParameter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Name(String),
+    Async(Box<Type>),
     Application {
         constructor: String,
         arguments: Vec<Type>,
@@ -203,6 +204,7 @@ impl fmt::Display for Type {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Name(name) => formatter.write_str(name),
+            Self::Async(value) => write!(formatter, "async {value}"),
             Self::Application {
                 constructor,
                 arguments,

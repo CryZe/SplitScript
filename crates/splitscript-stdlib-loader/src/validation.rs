@@ -270,7 +270,8 @@ impl<'a> Validator<'a> {
                     ));
                 }
             }
-            Type::Array(value)
+            Type::Async(value)
+            | Type::Array(value)
             | Type::Option(value)
             | Type::Result(value)
             | Type::ExclusiveRange(value)
@@ -1135,6 +1136,7 @@ impl<'a> Validator<'a> {
 
     fn validate_type(&mut self, owner: &str, ty: &Type, parameters: &[TypeParameter]) {
         match ty {
+            Type::Async(value) => self.validate_type(owner, value, parameters),
             Type::Name(name)
                 if PrimitiveType::parse(name).is_some()
                     || self.types.contains(name.as_str())

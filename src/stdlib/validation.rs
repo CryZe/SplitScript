@@ -421,6 +421,16 @@ fn validate_field_type(
                 );
             }
         }
+        TypeRef::Async(value) => {
+            validate_field_type(
+                *value,
+                field,
+                parameters,
+                core_types,
+                standard_types,
+                errors,
+            );
+        }
         TypeRef::FixedArray { element, .. } => {
             validate_field_type(
                 *element,
@@ -501,6 +511,7 @@ fn validate_memory_type(
         TypeRef::Associated(_) => {
             Err("associated fields have no fixed process-memory layout".to_owned())
         }
+        TypeRef::Async(_) => Err("async fields have no fixed process-memory layout".to_owned()),
         TypeRef::Callable { .. } => {
             Err("callable fields have no fixed process-memory layout".to_owned())
         }
@@ -538,6 +549,7 @@ fn validate_equality_type(
         TypeRef::FixedArray { .. } => Err("its fixed array type is not Equatable".to_owned()),
         TypeRef::Parameter(_) => Err("its generic type is not Equatable".to_owned()),
         TypeRef::Associated(_) => Err("its associated type is not Equatable".to_owned()),
+        TypeRef::Async(_) => Err("its async type is not Equatable".to_owned()),
         TypeRef::Callable { .. } => Err("its callable type is not Equatable".to_owned()),
     }
 }

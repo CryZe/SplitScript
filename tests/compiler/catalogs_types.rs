@@ -1910,6 +1910,10 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         "setTickRate<T>(hz: T) -> None where T: Numeric"
     );
     assert_eq!(
+        library.render_signature(StdlibItemId::FutureRace),
+        "future.race<T>(operations: [async T]) -> async T"
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::DurationFromSeconds),
         "Duration.fromSeconds<T>(seconds: T) -> Duration where T: Numeric"
     );

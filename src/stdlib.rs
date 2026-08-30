@@ -65,6 +65,9 @@ impl TypeRef {
                 .find_map(|(parameter, ty)| (*parameter == name).then(|| ty.clone()))
                 .unwrap_or_else(|| name.to_owned()),
             Self::Associated(name) => name.to_owned(),
+            Self::Async(value) => {
+                format!("async {}", value.render_with(library, substitutions))
+            }
             Self::Application {
                 constructor,
                 arguments,
@@ -1725,6 +1728,9 @@ fn validate_catalog_type_ref(
             }
         }
         TypeRef::Associated(_) => {}
+        TypeRef::Async(value) => {
+            validate_catalog_type_ref(*value, parameters, item, errors);
+        }
         TypeRef::Application {
             constructor,
             arguments,

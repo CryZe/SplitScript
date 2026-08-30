@@ -18,14 +18,15 @@ use crate::{
 };
 
 use super::{
-    LocalPlanOptions, MemoryByteOrder, Type,
+    LocalPlanOptions, MemoryByteOrder, Type, array_element_type,
     async_frame::{
-        AsyncFrameLayout, AsyncFrameRef, AsyncFrameSource, LeafFutureInstance, LeafFutureLayout,
+        AsyncFrameLayout, AsyncFrameRef, AsyncFrameSource, FUTURE_POLL_EPOCH_FIELD,
+        FUTURE_STATE_FIELD, FUTURE_TAG_FIELD, LeafFutureInstance, LeafFutureLayout,
     },
     call_target,
     context::AttachContext,
     data_plan::StringPool,
-    emit_default, emit_memory_value, emit_string_literal, emit_typed_struct_get,
+    emit_array_get, emit_default, emit_memory_value, emit_string_literal, emit_typed_struct_get,
     expression::{
         BareReturn, ExprContext, IntrinsicCapture, LocalStorage, LoopControl, MatchLayout,
         compile_assignment, compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
@@ -1832,6 +1833,9 @@ fn compile_suspension_poll(
     }
     match resolved_intrinsic(target) {
         Some(IntrinsicId::NextTick) => {}
+        Some(IntrinsicId::FutureRace) => {
+            emit_future_race_poll(function, args[0], destination, layout, scratch, context);
+        }
         Some(IntrinsicId::ProcessClosed) => {
             compile_receiver(function, target, context);
             function
@@ -2426,6 +2430,91 @@ fn compile_suspension_poll(
     }
 }
 
+fn emit_future_race_poll(
+    function: &mut Function,
+    operations: ExprId,
+    destination: wasm_ir::SuspensionDestination,
+    layout: &AsyncFrameLayout,
+    scratch: &[u32],
+    context: &ExprContext<'_>,
+) {
+    let Type::Array(array) = context.expression_type(operations) else {
+        unreachable!("future.race accepts an array of futures")
+    };
+    let future_type = array_element_type(array, context.semantics);
+    let Type::Async(_) = future_type else {
+        unreachable!("future.race accepts async array elements")
+    };
+    let [index, length, version, ..] = scratch else {
+        unreachable!("future.race reserves index, length, and version scratch locals")
+    };
+
+    compile_expr(function, operations, context);
+    super::array_value::emit_length(function, context.gc, array);
+    function.instruction(&Instruction::LocalSet(*length));
+    compile_expr(function, operations, context);
+    super::array_value::emit_version(function, context.gc, array);
+    function
+        .instruction(&Instruction::LocalSet(*version))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalSet(*index))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(*index))
+        .instruction(&Instruction::LocalGet(*length))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        // An empty array and an all-pending array have the same result: this
+        // race remains pending until a later host update.
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+
+    // A child is allowed to share the operations array through its captures.
+    // If it structurally mutates the array while being polled, stop this pass
+    // before indexing stale backing storage and observe the new shape next
+    // update.
+    compile_expr(function, operations, context);
+    super::array_value::emit_version(function, context.gc, array);
+    function
+        .instruction(&Instruction::LocalGet(*version))
+        .instruction(&Instruction::I32Ne)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+
+    let storage = Type::ArrayStorage(super::array_value::storage_id(
+        array,
+        context.arrays,
+        context.semantics,
+    ));
+    emit_future_poll_status(
+        function,
+        future_type,
+        destination,
+        layout,
+        context,
+        |function| {
+            compile_expr(function, operations, context);
+            super::array_value::emit_backing(function, context.gc, array);
+            function.instruction(&Instruction::LocalGet(*index));
+            emit_array_get(function, context.gc.index(storage), future_type, context.gc);
+        },
+    );
+    function
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::Br(2))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(*index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(*index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+}
+
 fn compile_source_future_poll(
     function: &mut Function,
     destination: wasm_ir::SuspensionDestination,
@@ -2456,6 +2545,49 @@ fn compile_source_future_poll(
         })
         .instruction(&Instruction::End);
 
+    emit_future_poll_status(
+        function,
+        child_type,
+        destination,
+        parent_layout,
+        context,
+        |function| {
+            parent.emit(function);
+            function.instruction(&Instruction::StructGet {
+                struct_type_index: parent.struct_type,
+                field_index: child_field,
+            });
+        },
+    );
+    function
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+
+    clear_child_future(function, parent, child_field, child_future, context);
+}
+
+/// Polls one erased first-class future and leaves `0` for pending or `1` for
+/// ready on the stack. All producer families share this dispatch path, so
+/// combinators cannot accidentally support only source, closure, or intrinsic
+/// futures. A pending handle already polled during this host update is not
+/// advanced again through another alias.
+fn emit_future_poll_status(
+    function: &mut Function,
+    future_type: Type,
+    destination: wasm_ir::SuspensionDestination,
+    destination_layout: &AsyncFrameLayout,
+    context: &ExprContext<'_>,
+    mut emit_future: impl FnMut(&mut Function),
+) {
+    let Type::Async(_) = future_type else {
+        unreachable!("future dispatch requires an async value")
+    };
+    let erased_frame = context.gc.index(future_type);
+    let parent = context.locals.frame();
+
     let source_candidates = context
         .async_frames
         .functions()
@@ -2467,9 +2599,18 @@ fn compile_source_future_poll(
                     .function_result(candidate.function)
                     .expect("checked functions have result types"),
             );
-            semantic_type(result, context.semantics) == child_type
+            semantic_type(result, context.semantics) == future_type
         })
-        .collect::<Vec<_>>();
+        .map(|(candidate, layout)| {
+            (
+                context.gc.function_frame_index(candidate),
+                context.gc.function_frame_tag(candidate),
+                context.functions[candidate]
+                    .poll
+                    .expect("async source functions have poll entries"),
+                layout.completion,
+            )
+        });
     let closure_candidates = context
         .async_frames
         .closures()
@@ -2486,106 +2627,113 @@ fn compile_source_future_poll(
             let TypeKind::Callable { result, .. } = context.semantics.types().kind(ty) else {
                 unreachable!("checked closure expressions have callable types")
             };
-            semantic_type(*result, context.semantics) == child_type
+            semantic_type(*result, context.semantics) == future_type
         })
-        .collect::<Vec<_>>();
+        .map(|(instance, layout)| {
+            (
+                context.gc.closure_frame_index(instance),
+                context.gc.closure_frame_tag(instance),
+                context.closure_polls[instance],
+                layout.completion,
+            )
+        });
     let leaf_candidates = context
         .async_frames
         .leaves()
-        .filter(|(_, layout)| layout.future == child_type)
+        .filter(|(_, layout)| layout.future == future_type)
+        .map(|(instance, layout)| {
+            (
+                context.gc.leaf_frame_index(instance),
+                context.gc.leaf_frame_tag(instance),
+                context.leaf_futures[instance],
+                layout.completion,
+            )
+        });
+    let candidates = source_candidates
+        .chain(closure_candidates)
+        .chain(leaf_candidates)
         .collect::<Vec<_>>();
-    assert!(
-        !source_candidates.is_empty()
-            || !closure_candidates.is_empty()
-            || !leaf_candidates.is_empty(),
-        "reachable future values have at least one concrete producer"
-    );
-    function.instruction(&Instruction::Block(BlockType::Empty));
-    for (child, child_layout) in source_candidates {
-        let child_frame = context.gc.function_frame_index(child);
-        parent.emit(function);
-        function
-            .instruction(&Instruction::StructGet {
-                struct_type_index: parent.struct_type,
-                field_index: child_field,
-            })
-            .instruction(&Instruction::RefAsNonNull)
-            .instruction(&Instruction::StructGet {
-                struct_type_index: context.gc.index(Type::Async(child_future)),
-                field_index: 1,
-            })
-            .instruction(&Instruction::I32Const(
-                context.gc.function_frame_tag(child) as i32
-            ))
-            .instruction(&Instruction::I32Eq)
-            .instruction(&Instruction::If(BlockType::Empty));
-        emit_child_frame(function, parent, child_field, child_frame);
-        function
-            .instruction(&Instruction::Call(
-                context.functions[child]
-                    .poll
-                    .expect("async source functions have poll entries"),
-            ))
-            .instruction(&Instruction::I32Eqz)
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::I32Const(0))
-            .instruction(&Instruction::Return)
-            .instruction(&Instruction::End);
-
-        if let Some((destination_field, destination_type)) = parent_layout.field(destination) {
-            parent.emit(function);
-            if let Some((completion_field, completion_type)) = child_layout.completion {
-                debug_assert_eq!(destination_type, completion_type);
-                emit_child_frame(function, parent, child_field, child_frame);
-                emit_typed_struct_get(function, child_frame, completion_field, completion_type);
-            } else {
-                debug_assert_eq!(destination_type, Type::None);
-                emit_default(function, Type::None, context.gc);
-            }
-            function.instruction(&Instruction::StructSet {
-                struct_type_index: parent.struct_type,
-                field_index: destination_field,
-            });
-        }
-
-        clear_child_future(function, parent, child_field, child_future, context);
-        function
-            .instruction(&Instruction::Br(1))
-            .instruction(&Instruction::End);
+    if candidates.is_empty() {
+        // This is reachable for a statically empty `future.race([])`: there is
+        // no concrete frame to dispatch because the program never constructs
+        // an operation of the inferred future type. The caller's length check
+        // keeps this path pending at runtime.
+        function.instruction(&Instruction::I32Const(0));
+        return;
     }
-    for (child, child_layout) in closure_candidates {
-        let child_frame = context.gc.closure_frame_index(child);
-        parent.emit(function);
+
+    function.instruction(&Instruction::Block(BlockType::Result(ValType::I32)));
+
+    // A future that is still pending after another alias polled it during this
+    // update reports pending without running its state machine twice. Completed
+    // futures still flow through producer dispatch so their typed result can be
+    // copied into the caller's destination.
+    emit_future(function);
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: erased_frame,
+            field_index: FUTURE_POLL_EPOCH_FIELD,
+        })
+        .instruction(&Instruction::GlobalGet(
+            context.runtime_globals.future_poll_epoch,
+        ))
+        .instruction(&Instruction::I64Eq)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_future(function);
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: erased_frame,
+            field_index: FUTURE_STATE_FIELD,
+        })
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::I32Ne)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Br(2))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::Else);
+    emit_future(function);
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::GlobalGet(
+            context.runtime_globals.future_poll_epoch,
+        ))
+        .instruction(&Instruction::StructSet {
+            struct_type_index: erased_frame,
+            field_index: FUTURE_POLL_EPOCH_FIELD,
+        })
+        .instruction(&Instruction::End);
+
+    for (frame_type, tag, poll, completion) in candidates {
+        emit_future(function);
         function
-            .instruction(&Instruction::StructGet {
-                struct_type_index: parent.struct_type,
-                field_index: child_field,
-            })
             .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
-                struct_type_index: context.gc.index(Type::Async(child_future)),
-                field_index: 1,
+                struct_type_index: erased_frame,
+                field_index: FUTURE_TAG_FIELD,
             })
-            .instruction(&Instruction::I32Const(
-                context.gc.closure_frame_tag(child) as i32
-            ))
+            .instruction(&Instruction::I32Const(tag as i32))
             .instruction(&Instruction::I32Eq)
             .instruction(&Instruction::If(BlockType::Empty));
-        emit_child_frame(function, parent, child_field, child_frame);
+        emit_future(function);
         function
-            .instruction(&Instruction::Call(context.closure_polls[child]))
+            .instruction(&Instruction::RefCastNonNull(HeapType::Concrete(frame_type)))
+            .instruction(&Instruction::Call(poll))
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::I32Const(0))
-            .instruction(&Instruction::Return)
+            .instruction(&Instruction::Br(2))
             .instruction(&Instruction::End);
 
-        if let Some((destination_field, destination_type)) = parent_layout.field(destination) {
+        if let Some((destination_field, destination_type)) = destination_layout.field(destination) {
             parent.emit(function);
-            if let Some((completion_field, completion_type)) = child_layout.completion {
+            if let Some((completion_field, completion_type)) = completion {
                 debug_assert_eq!(destination_type, completion_type);
-                emit_child_frame(function, parent, child_field, child_frame);
-                emit_typed_struct_get(function, child_frame, completion_field, completion_type);
+                emit_future(function);
+                function.instruction(&Instruction::RefCastNonNull(HeapType::Concrete(frame_type)));
+                emit_typed_struct_get(function, frame_type, completion_field, completion_type);
             } else {
                 debug_assert_eq!(destination_type, Type::None);
                 emit_default(function, Type::None, context.gc);
@@ -2596,56 +2744,8 @@ fn compile_source_future_poll(
             });
         }
 
-        clear_child_future(function, parent, child_field, child_future, context);
         function
-            .instruction(&Instruction::Br(1))
-            .instruction(&Instruction::End);
-    }
-    for (child, child_layout) in leaf_candidates {
-        let child_frame = context.gc.leaf_frame_index(child);
-        parent.emit(function);
-        function
-            .instruction(&Instruction::StructGet {
-                struct_type_index: parent.struct_type,
-                field_index: child_field,
-            })
-            .instruction(&Instruction::RefAsNonNull)
-            .instruction(&Instruction::StructGet {
-                struct_type_index: context.gc.index(Type::Async(child_future)),
-                field_index: 1,
-            })
-            .instruction(&Instruction::I32Const(
-                context.gc.leaf_frame_tag(child) as i32
-            ))
-            .instruction(&Instruction::I32Eq)
-            .instruction(&Instruction::If(BlockType::Empty));
-        emit_child_frame(function, parent, child_field, child_frame);
-        function
-            .instruction(&Instruction::Call(context.leaf_futures[child]))
-            .instruction(&Instruction::I32Eqz)
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::I32Const(0))
-            .instruction(&Instruction::Return)
-            .instruction(&Instruction::End);
-
-        if let Some((destination_field, destination_type)) = parent_layout.field(destination) {
-            parent.emit(function);
-            if let Some((completion_field, completion_type)) = child_layout.completion {
-                debug_assert_eq!(destination_type, completion_type);
-                emit_child_frame(function, parent, child_field, child_frame);
-                emit_typed_struct_get(function, child_frame, completion_field, completion_type);
-            } else {
-                debug_assert_eq!(destination_type, Type::None);
-                emit_default(function, Type::None, context.gc);
-            }
-            function.instruction(&Instruction::StructSet {
-                struct_type_index: parent.struct_type,
-                field_index: destination_field,
-            });
-        }
-
-        clear_child_future(function, parent, child_field, child_future, context);
-        function
+            .instruction(&Instruction::I32Const(1))
             .instruction(&Instruction::Br(1))
             .instruction(&Instruction::End);
     }
@@ -2670,18 +2770,6 @@ fn clear_child_future(
             struct_type_index: parent.struct_type,
             field_index: field,
         });
-}
-
-fn emit_child_frame(function: &mut Function, parent: AsyncFrameRef, field: u32, child_frame: u32) {
-    parent.emit(function);
-    function
-        .instruction(&Instruction::StructGet {
-            struct_type_index: parent.struct_type,
-            field_index: field,
-        })
-        .instruction(&Instruction::RefCastNonNull(HeapType::Concrete(
-            child_frame,
-        )));
 }
 
 fn emit_module_name_value(

@@ -559,7 +559,11 @@ concepts rather than maintaining a parallel inventory.
   fallback signatures, range/page selection, capture transforms, relative
   address decoding, and concise pointer-follow composition. Existing `sig`,
   scan, follow, and `readRelative32` APIs should be documented before new APIs
-  are introduced.
+  are introduced. Defer finite `scanOnce`-style variants: do not multiply
+  one-shot forms across waiting discovery APIs while general future
+  composition is unsettled. Reconsider operation-level exhaustion only when
+  further porting evidence shows that timeout, race/select, and cancellation
+  cannot express the required behavior cleanly.
 - [ ] Design typed byte-order reads for every [`MemoryReadable`] value once a
   representative port needs more than scalar conversion. The design must
   recursively decode records and fixed arrays, compose with ordinary reads and
@@ -916,13 +920,16 @@ remaining work is product hardening and distribution.
   `timer.CurrentSplit.Name`, `timer.Run.Offset`, category, and timing-method
   ports as the evidence ledger; coordinate the host side through R5 in
   [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
-- [ ] Add structured async discovery combinators only as ports require them:
-  timeout, race/select, bounded concurrent scans, and cancellation scopes.
-  Hades provides an immediate small case: wait for the first of several known
-  module names without an infinite hand-written polling loop. Decide whether a
-  source-defined `process.moduleAny(names)` is sufficient before introducing
-  general future selection. Do not expose threads or unconstrained background
-  tasks.
+- [ ] Add structured future combinators as the shared alternative to
+  operation-specific `Once` and `Any` families: race/select, timeout, and
+  explicit cancellation semantics. Hades provides an immediate small case:
+  wait for the first of several known module names without an infinite
+  hand-written polling loop. Start from ordinary `async T` values, preserve
+  lazy construction, bound the work performed by one poll, and reuse one
+  producer-agnostic polling path for source functions, closures, and intrinsic
+  futures. Do not expose threads or unconstrained background tasks. Keep
+  bounded concurrent scanning as a separate scheduling decision rather than
+  silently making an unbounded race array consume arbitrary work per update.
 - [ ] Broaden suspending control flow incrementally from real ports and add a
   host-executed conformance fixture for each new shape.
 - [ ] Finish first-class function values and lexical closures for iterator

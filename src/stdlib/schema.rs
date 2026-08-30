@@ -154,6 +154,7 @@ pub enum TypeRef {
     Standard(StdlibTypeId),
     Parameter(&'static str),
     Associated(&'static str),
+    Async(&'static TypeRef),
     Application {
         constructor: super::ids::StdlibTypeConstructorId,
         arguments: &'static [TypeRef],

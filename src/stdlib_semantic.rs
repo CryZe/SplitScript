@@ -162,6 +162,7 @@ fn catalog_method_accepts(
                 })
             }),
         TypeRef::Associated(_) => false,
+        TypeRef::Async(_) => matches!(receiver, TypeKind::Async { .. }),
         TypeRef::Callable { .. } => matches!(receiver, TypeKind::Callable { .. }),
     }
 }

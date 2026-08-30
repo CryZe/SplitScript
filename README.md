@@ -40,10 +40,12 @@ documentation catalog, formatter, diagnostics, and language service.
 
 ### Visual Studio Code authors
 
-Install a supplied `splitscript-*.vsix`, open a saved `.split` file, and run
-**SplitScript: Open Documentation**. The bundled **Getting started** guide is a
-self-contained, compiler-checked path through attachment, settings, state
-snapshots, builds, diagnostics, and host loading.
+Install the [latest SplitScript VSIX][latest-vsix], open a saved `.split` file,
+and run **SplitScript: Open Documentation**. The bundled **Getting started**
+guide is a self-contained, compiler-checked path through attachment, settings,
+state snapshots, builds, diagnostics, and host loading. The package is rebuilt
+from every verified push to `master`, so it is an early moving build rather than
+a stable release.
 
 Use **SplitScript: Start Debug Watch** while editing and **SplitScript: Build
 Release** for the final module. Both write a neighboring `.wasm` file. The
@@ -131,3 +133,5 @@ instantiate it.
 The repository also contains ports and deterministic runtime fixtures used as
 implementation evidence. They are not the user guide, are not compatibility
 promises, and should not be treated as templates for new scripts.
+
+[latest-vsix]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-latest.vsix

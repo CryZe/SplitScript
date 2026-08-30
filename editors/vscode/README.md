@@ -7,8 +7,9 @@ separate native executable.
 
 ## Start a script
 
-1. Install the supplied `splitscript-*.vsix` with **Extensions: Install from
-   VSIX**.
+1. Download the [latest SplitScript VSIX][latest-vsix] and install it with
+   **Extensions: Install from VSIX**. This early package follows every verified
+   push to `master` and may contain breaking language changes.
 2. Open a folder and create a saved file ending in `.split`.
 3. Run **SplitScript: Open Documentation** and open **Getting started**. That
    compiler-checked guide introduces process attachment, a typed setting, one
@@ -83,3 +84,5 @@ reported without losing the failing state.
 If a build targets the wrong file, make sure the intended `.split` editor is
 active when starting the command. Untitled files prompt for a save location;
 the resulting saved document is the one compiled.
+
+[latest-vsix]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-latest.vsix

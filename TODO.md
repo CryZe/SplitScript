@@ -837,6 +837,10 @@ debug watch without external executables. Native `splitc` and `splitls` remain
 separate first-class products. The architecture experiment is complete; the
 remaining work is product hardening and distribution.
 
+- [x] Publish a platform-neutral VSIX from every verified `master` push. CI
+  moves the stable `latest` tag and replaces `splitscript-latest.vsix` on one
+  durable GitHub release; pull requests and other branches remain read-only.
+
 - [x] Add cooperative cancellation points to expensive compiler stages so a
   superseded editor build can stop work rather than merely have its completed
   response discarded. The shared compiler and service distinguish typed

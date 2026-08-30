@@ -34,6 +34,12 @@ npm run package:vsix
 The production build runs automatically and writes
 `splitscript-<version>.vsix` in this directory.
 
+After the complete verification job succeeds for a push to `master`, CI runs
+the same production packaging path with the stable asset name
+`splitscript-latest.vsix`. It moves the `latest` tag to that verified commit and
+replaces the asset on the existing **Latest SplitScript VS Code Extension**
+release. Pull requests and pushes to other branches never publish a package.
+
 ## Worker architecture
 
 The language client gives the language server its own worker and Wasm instance.

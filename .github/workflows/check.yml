@@ -72,3 +72,54 @@ jobs:
 
       - name: Run the repository verification matrix
         run: cargo xtask check
+
+  vscode-release:
+    name: Publish latest VS Code extension
+    needs: repository
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install extension dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      - name: Package the extension
+        working-directory: editors/vscode
+        run: npm run package:vsix -- --out splitscript-latest.vsix
+
+      - name: Publish the latest release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset="editors/vscode/splitscript-latest.vsix"
+          title="Latest SplitScript VS Code Extension"
+          notes="Continuously updated from the latest verified commit on master. This early build may introduce breaking language changes."
+
+          git tag --force latest "$GITHUB_SHA"
+          git push --force origin refs/tags/latest
+
+          if gh release view latest >/dev/null 2>&1; then
+            gh release edit latest --title "$title" --notes "$notes" --latest
+            gh release upload latest "$asset" --clobber
+          else
+            gh release create latest "$asset" --verify-tag --title "$title" --notes "$notes" --latest
+          fi

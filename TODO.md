@@ -277,11 +277,18 @@ to inference or code generation.
   than truncate, UTF-16 replacement decoding is consistent, the raw
   `Process.readManagedString` surface is gone, and diagnostics, completion,
   hover, highlighting, docs, and Lunistice use the schema form.
-- [ ] Design managed arrays and managed lists after the string storage model.
-  Both
-  materialize as `[T]`; do not reintroduce a public `List<T>` value type.
-  Dictionaries and dynamic typed values need a separately approved language
-  design based on representative ports.
+- [ ] After ASR has a tested managed-array and managed-list representation,
+  align the schema syntax and runtime model with it rather than independently
+  fixing target layouts in SplitScript. Both should materialize as `[T]`; do
+  not reintroduce a public `List<T>` value type. Use Alba and A Short Hike as
+  acceptance ports once that dependency is ready. Separate stable
+  singleton/field chains handled by declarations from collection enumeration
+  that genuinely needs new support. Alba can retain discovered task addresses,
+  names, required values, and previous readings in ordinary growable arrays;
+  it does not need runtime-created state fields. Keep ASR's target families
+  explicit rather than guessing offsets. Dictionaries and A Short Hike's
+  dynamic typed tag values need a separately approved language design based on
+  representative ports.
 ## P0 — make docs-first ASL porting semantically reliable
 
 The latest clean-folder exercise had only the current compiler and legacy ASL
@@ -687,16 +694,6 @@ concepts rather than maintaining a parallel inventory.
   object-header arithmetic, and backend-specific target-family traversal
   private implementation tools. Bring any schema shape that still cannot
   represent a real port back as a design question before adding public syntax.
-- [ ] Extend Unity managed collections after the schema value/snapshot design,
-  using the corpus-proven residual needs: managed list/dictionary traversal for
-  Alba and A Short Hike, plus A Short Hike's dynamic typed tag values. Separate
-  stable singleton/field chains handled by declarations from collection
-  enumeration that genuinely needs new library/runtime support. Alba does not
-  require runtime-created state fields: growable arrays can retain discovered
-  task addresses, names, required values, and previous readings once typed
-  managed-list traversal exists. Keep target families explicit (V1, PE32, ELF,
-  Mach-O) and source-defined; do not add reflection-shaped compiler exceptions
-  or silently guess offsets.
 - [ ] Assess an Unreal provider only after representative `GWorld`, object, and
   name traversal ports establish the required surface.
 ## P1 — expand migration guidance and automated fixes

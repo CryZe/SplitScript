@@ -457,7 +457,7 @@ concepts rather than maintaining a parallel inventory.
   in metadata/URLs rather than reader-facing labels. Keep the C#, JavaScript,
   and Rust guides compact, add a clear next step, and use a few explicit
   source-spelling to SplitScript-spelling pairs rather than another large table.
-- [ ] Add compact decision guides for lifecycle availability, choosing a state
+- [x] Add compact decision guides for lifecycle availability, choosing a state
   field form, failure/async syntax, and string units. The lifecycle matrix must
   state timing, available roots/globals, suspension policy, return type, and
   fallthrough for every action. The other guides should lead from a task to

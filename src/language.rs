@@ -33,6 +33,15 @@ pub struct LanguageItem {
     pub documentation: Documentation<LanguageItemId>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActionReferenceFacts {
+    pub timing: &'static str,
+    pub available_context: &'static str,
+    pub suspension: &'static str,
+    pub result: &'static str,
+    pub fallthrough: &'static str,
+}
+
 const DECLARATIONS_SOURCE: &str = r#"state "game.exe" {}
 
 record Position {
@@ -2035,6 +2044,95 @@ impl LanguageCatalog {
             .iter()
             .find(|item| item.kind == LanguageItemKind::Action(action))
             .expect("every action kind must have a language catalog entry")
+    }
+
+    pub const fn action_reference_facts(self, action: ActionKind) -> ActionReferenceFacts {
+        match action {
+            ActionKind::Setup => ActionReferenceFacts {
+                timing: "Once, when the loaded module first updates",
+                available_context: "settings and initialized module globals",
+                suspension: "not allowed",
+                result: "None",
+                fallthrough: "complete setup",
+            },
+            ActionKind::OnStart => ActionReferenceFacts {
+                timing: "After an observed timer transition out of NotRunning",
+                available_context: "settings, module globals, and globals initialized here",
+                suspension: "not allowed",
+                result: "None",
+                fallthrough: "complete the event",
+            },
+            ActionKind::OnReset => ActionReferenceFacts {
+                timing: "After an observed timer transition into NotRunning",
+                available_context: "settings, module globals, and attempt globals",
+                suspension: "not allowed",
+                result: "None",
+                fallthrough: "complete, then clear attempt globals",
+            },
+            ActionKind::OnAttach => ActionReferenceFacts {
+                timing: "Once after acquiring and preparing a process",
+                available_context: "process, prepared provider roots, settings, and globals; layout when already selected",
+                suspension: "await and retry allowed; cancelled on detach",
+                result: "None, Layout, or StateLayout as required by state",
+                fallthrough: "finish attachment when no layout result is required",
+            },
+            ActionKind::OnStateReady => ActionReferenceFacts {
+                timing: "Once after the first complete state snapshot",
+                available_context: "process, provider roots, layout, globals, old, and current",
+                suspension: "not allowed",
+                result: "None",
+                fallthrough: "complete initialization",
+            },
+            ActionKind::WhileAttached => ActionReferenceFacts {
+                timing: "Every initialized attached update after state refresh",
+                available_context: "process, provider roots, layout, globals, old, and current",
+                suspension: "not allowed",
+                result: "bool",
+                fallthrough: "true; continue to timer decisions",
+            },
+            ActionKind::Start => ActionReferenceFacts {
+                timing: "After whileAttached when the sampled timer is NotRunning",
+                available_context: "process, provider roots, layout, globals, old, and current",
+                suspension: "not allowed",
+                result: "bool",
+                fallthrough: "false; do not start",
+            },
+            ActionKind::IsLoading => ActionReferenceFacts {
+                timing: "After start handling when the sampled timer is Running or Paused",
+                available_context: "process, provider roots, layout, globals, old, and current",
+                suspension: "not allowed",
+                result: "bool?",
+                fallthrough: "None; retain the current loading state",
+            },
+            ActionKind::GameTime => ActionReferenceFacts {
+                timing: "After isLoading when the sampled timer is Running or Paused",
+                available_context: "process, provider roots, layout, globals, old, and current",
+                suspension: "not allowed",
+                result: "Duration?",
+                fallthrough: "None; retain the current game time",
+            },
+            ActionKind::Reset => ActionReferenceFacts {
+                timing: "After loading and game-time updates when the sampled timer is Running or Paused",
+                available_context: "process, provider roots, layout, globals, old, and current",
+                suspension: "not allowed",
+                result: "bool",
+                fallthrough: "false; continue to split",
+            },
+            ActionKind::Split => ActionReferenceFacts {
+                timing: "After reset declines when the sampled timer is Running or Paused",
+                available_context: "process, provider roots, layout, globals, old, and current",
+                suspension: "not allowed",
+                result: "bool",
+                fallthrough: "false; do not split",
+            },
+            ActionKind::OnDetach => ActionReferenceFacts {
+                timing: "Once after an attached process closes and its context is cleared",
+                available_context: "settings, module globals, and live attempt globals",
+                suspension: "not allowed",
+                result: "None",
+                fallthrough: "complete cleanup",
+            },
+        }
     }
 
     pub fn validate(self) -> Vec<String> {

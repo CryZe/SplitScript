@@ -24,6 +24,7 @@ struct BundledGuide {
     summary: &'static str,
     source: &'static str,
     migration_overview: bool,
+    lifecycle_matrix: bool,
 }
 
 const GUIDES: &[BundledGuide] = &[
@@ -33,6 +34,7 @@ const GUIDES: &[BundledGuide] = &[
         summary: "Build a first SplitScript autosplitter with the VS Code extension or native CLI.",
         source: include_str!("../../docs/GETTING_STARTED.md"),
         migration_overview: false,
+        lifecycle_matrix: false,
     },
     BundledGuide {
         uri: "/guides/asl-porting.md",
@@ -40,6 +42,7 @@ const GUIDES: &[BundledGuide] = &[
         summary: "Canonical compiler-checked recipes for migrating legacy ASL autosplitters.",
         source: include_str!("../../docs/ASL_PORTING.md"),
         migration_overview: true,
+        lifecycle_matrix: false,
     },
     BundledGuide {
         uri: "/guides/from-csharp.md",
@@ -47,6 +50,7 @@ const GUIDES: &[BundledGuide] = &[
         summary: "A concise guide to SplitScript's types, control flow, errors, and autosplitter lifecycle for C# authors.",
         source: include_str!("../../docs/FROM_CSHARP.md"),
         migration_overview: false,
+        lifecycle_matrix: false,
     },
     BundledGuide {
         uri: "/guides/from-javascript.md",
@@ -54,6 +58,7 @@ const GUIDES: &[BundledGuide] = &[
         summary: "A concise guide to SplitScript's static types, fixed-width numbers, errors, and autosplitter lifecycle for JavaScript authors.",
         source: include_str!("../../docs/FROM_JAVASCRIPT.md"),
         migration_overview: false,
+        lifecycle_matrix: false,
     },
     BundledGuide {
         uri: "/guides/from-rust.md",
@@ -61,6 +66,15 @@ const GUIDES: &[BundledGuide] = &[
         summary: "A concise guide to SplitScript's inference, capabilities, error values, async behavior, and autosplitter lifecycle for Rust authors.",
         source: include_str!("../../docs/FROM_RUST.md"),
         migration_overview: false,
+        lifecycle_matrix: false,
+    },
+    BundledGuide {
+        uri: "/guides/decision-guides.md",
+        title: "Decision guides",
+        summary: "Choose a lifecycle block, state-field form, failure boundary, or string unit.",
+        source: include_str!("../../docs/DECISION_GUIDES.md"),
+        migration_overview: false,
+        lifecycle_matrix: true,
     },
 ];
 
@@ -101,6 +115,11 @@ pub(super) fn page(uri: &str) -> Option<DocumentationPage> {
     } else {
         source
     };
+    let source = if guide.lifecycle_matrix {
+        insert_lifecycle_matrix(guide.uri, &source)
+    } else {
+        source
+    };
     Some(DocumentationPage {
         uri: guide.uri.to_owned(),
         title: guide.title.to_owned(),
@@ -111,6 +130,51 @@ pub(super) fn page(uri: &str) -> Option<DocumentationPage> {
             source,
         ),
     })
+}
+
+fn insert_lifecycle_matrix(uri: &str, source: &str) -> String {
+    let language = crate::language::LanguageCatalog::new();
+    let mut matrix = String::new();
+    append_reference_table_header(
+        &mut matrix,
+        &[
+            "Action",
+            "Timing",
+            "Available context",
+            "Suspension",
+            "Result",
+            "Fallthrough",
+        ],
+    );
+    for action in [
+        crate::ast::ActionKind::Setup,
+        crate::ast::ActionKind::OnStart,
+        crate::ast::ActionKind::OnReset,
+        crate::ast::ActionKind::OnAttach,
+        crate::ast::ActionKind::OnStateReady,
+        crate::ast::ActionKind::WhileAttached,
+        crate::ast::ActionKind::Start,
+        crate::ast::ActionKind::IsLoading,
+        crate::ast::ActionKind::GameTime,
+        crate::ast::ActionKind::Reset,
+        crate::ast::ActionKind::Split,
+        crate::ast::ActionKind::OnDetach,
+    ] {
+        let item = language.action(action);
+        let facts = language.action_reference_facts(action);
+        let target = super::reference::language_item_uri(item.id);
+        matrix.push_str(&format!(
+            "\n| [{}]({}) | {} | {} | {} | `{}` | {} |",
+            item.name,
+            relative_document_link(uri, &target),
+            facts.timing,
+            facts.available_context,
+            facts.suspension,
+            format!("<code>{}</code>", facts.result),
+            facts.fallthrough,
+        ));
+    }
+    source.replace("<!-- lifecycle-matrix -->", &matrix)
 }
 
 /// Adds a compact catalog-owned map ahead of the detailed recipes. Grouping by
@@ -398,6 +462,44 @@ mod tests {
             assert!(page.markdown.starts_with("[SplitScript reference]"));
             assert!(!page.markdown.contains("## Quick migration map"));
         }
+    }
+
+    #[test]
+    fn decision_guide_uses_the_catalog_owned_lifecycle_matrix() {
+        let page = page("/guides/decision-guides.md").expect("decision guide is bundled");
+        assert!(!page.markdown.contains("<!-- lifecycle-matrix -->"));
+        for heading in [
+            "## Choose a lifecycle block",
+            "## Choose a state field form",
+            "## Choose absence, failure, retrying, or waiting",
+            "## Choose the correct string unit",
+        ] {
+            assert!(page.markdown.contains(heading));
+        }
+        for action in [
+            "setup",
+            "onStart",
+            "onReset",
+            "onAttach",
+            "onStateReady",
+            "whileAttached",
+            "start",
+            "isLoading",
+            "gameTime",
+            "reset",
+            "split",
+            "onDetach",
+        ] {
+            assert!(
+                page.markdown.contains(&format!("[{action}](")),
+                "missing lifecycle row for `{action}`"
+            );
+        }
+        let is_loading = page.markdown.find("[isLoading](").unwrap();
+        let game_time = page.markdown.find("[gameTime](").unwrap();
+        let reset = page.markdown.find("[reset](").unwrap();
+        let split = page.markdown.find("[split](").unwrap();
+        assert!(is_loading < game_time && game_time < reset && reset < split);
     }
 
     fn markdown_link_targets(markdown: &str) -> impl Iterator<Item = &str> {

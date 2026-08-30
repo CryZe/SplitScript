@@ -15,9 +15,11 @@ pub fn parse_signature(signature: &str) -> Result<(Vec<u8>, Vec<u8>), String> {
     }
     let mut needle = Vec::with_capacity(nibbles.len() / 2);
     let mut mask = Vec::with_capacity(nibbles.len() / 2);
-    for pair in nibbles.chunks_exact(2) {
-        let (high, high_mask) = signature_nibble(pair[0])?;
-        let (low, low_mask) = signature_nibble(pair[1])?;
+    let (pairs, remainder) = nibbles.as_chunks::<2>();
+    debug_assert!(remainder.is_empty());
+    for &[high_nibble, low_nibble] in pairs {
+        let (high, high_mask) = signature_nibble(high_nibble)?;
+        let (low, low_mask) = signature_nibble(low_nibble)?;
         needle.push((high << 4) | low);
         mask.push((high_mask << 4) | low_mask);
     }

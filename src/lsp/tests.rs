@@ -876,9 +876,10 @@ fn semantic_tokens_cover_language_domains_and_use_utf16_deltas() {
     let data = response[0]["result"]["data"]
         .as_array()
         .expect("semantic token data");
-    assert_eq!(data.len() % 5, 0);
-    let kinds = data
-        .chunks_exact(5)
+    let (tokens, remainder) = data.as_chunks::<5>();
+    assert!(remainder.is_empty());
+    let kinds = tokens
+        .iter()
         .map(|token| token[3].as_u64().unwrap() as u32)
         .collect::<Vec<_>>();
     for expected in [
@@ -896,7 +897,7 @@ fn semantic_tokens_cover_language_domains_and_use_utf16_deltas() {
             "missing {expected:?} semantic token"
         );
     }
-    assert!(data.chunks_exact(5).any(|token| {
+    assert!(tokens.iter().any(|token| {
         token[4].as_u64().unwrap() as u32 & crate::highlight::MODIFIER_DEBUG != 0
     }));
 

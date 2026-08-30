@@ -1,7 +1,7 @@
-use std::io;
+use std::io::{self, IsTerminal};
 
 use codespan_reporting::term::termcolor::{
-    Ansi, Color, ColorChoice, ColorSpec, StandardStream, WriteColor,
+    Ansi, Color, ColorChoice, ColorSpec, NoColor, StandardStream, WriteColor,
 };
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use splitscript::tooling::{database::CompilerDatabase, highlight::SemanticTokenKind};
@@ -534,13 +534,22 @@ pub(crate) fn emit(writer: &mut dyn WriteColor, markdown: &str, width: usize) ->
 }
 
 pub(crate) fn emit_stdout(markdown: &str, width: usize) -> io::Result<()> {
+    let stdout = io::stdout();
+    if !stdout.is_terminal() {
+        // Environment variables may force `supports-color` to report a rich
+        // palette even when stdout is redirected. Redirected documentation is
+        // a machine-readable plain-text boundary, so the terminal capability
+        // check takes precedence over those hints.
+        let mut writer = NoColor::new(stdout.lock());
+        return emit_with_color_depth(&mut writer, markdown, width, ColorDepth::Ansi16);
+    }
+
     let color_depth = ColorDepth::stdout();
     if color_depth == ColorDepth::Ansi256 {
         // `termcolor`'s legacy Windows-console backend only supports 16 colors.
         // A terminal that advertises 256 colors understands ANSI escapes, so
         // use its ANSI writer directly instead of silently dropping the richer
         // colors on Windows Terminal and VS Code's integrated terminal.
-        let stdout = io::stdout();
         let mut writer = Ansi::new(stdout.lock());
         emit_with_color_depth(&mut writer, markdown, width, color_depth)
     } else {

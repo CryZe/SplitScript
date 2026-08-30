@@ -51,6 +51,21 @@ fn documentation_topics_render_without_a_source_checkout() {
     let stdout = String::from_utf8(search.stdout).unwrap();
     assert!(stdout.contains("Documentation results for Process.r"));
     assert!(stdout.contains("Process.read"));
+
+    let forced_color = Command::new(env!("CARGO_BIN_EXE_splitc"))
+        .args(["docs", "Process.r"])
+        .env("FORCE_COLOR", "2")
+        .output()
+        .expect("splitc should start with forced color");
+    assert!(forced_color.status.success());
+    assert!(forced_color.stderr.is_empty());
+    let stdout = String::from_utf8(forced_color.stdout).unwrap();
+    assert!(
+        !stdout.contains('\u{1b}'),
+        "redirected output must be plain text"
+    );
+    assert!(stdout.contains("Documentation results for Process.r"));
+    assert!(stdout.contains("Process.read"));
 }
 
 #[test]

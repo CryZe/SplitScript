@@ -695,6 +695,25 @@ fn append_attachment_layouts(
     }
 }
 
+fn record_field_memory_layout(
+    record: &crate::ast::RecordDecl,
+    field: crate::ast::RecordFieldId,
+    context: &SemanticContext,
+) -> Option<(u32, u32)> {
+    let checked = context.snapshot.checked()?;
+    let record_layout = checked.memory_layouts().record(record.id).ok()?;
+    let field_layout = record_layout
+        .fields
+        .iter()
+        .find(|layout| layout.field == crate::memory::MemoryFieldId::Source(field))?;
+    let size = checked
+        .memory_layouts()
+        .layout(field_layout.ty, checked.semantics())
+        .ok()?
+        .size();
+    Some((field_layout.offset, size))
+}
+
 fn append_source_capabilities(description: &mut String, ty: TypeId, context: &SemanticContext) {
     let Some(checked) = context.snapshot.checked() else {
         return;
@@ -879,9 +898,18 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 .fields
                 .iter()
                 .find(|candidate| candidate.id == field)?;
+            let mut description =
+                documented_description("Record field", field.documentation.as_deref());
+            if let Some((offset, size)) = record_field_memory_layout(record, field.id, context) {
+                let unit = if size == 1 { "byte" } else { "bytes" };
+                description.push_str(&format!(
+                    "\n\n**Process-memory layout:** byte offset `0x{offset:x}` from the start of `{}`; size `{size}` {unit}.",
+                    record.name
+                ));
+            }
             Some(source_markdown(
                 &format!("{}.{}: {ty}", record.name, definition.name),
-                &documented_description("Record field", field.documentation.as_deref()),
+                &description,
             ))
         }
         SourceDefinitionId::Function(function) => {
@@ -2439,6 +2467,50 @@ whileAttached {
                 hover.markdown
             );
         }
+    }
+
+    #[test]
+    fn memory_readable_record_field_hover_shows_canonical_offset_and_size() {
+        let source = r#"
+record Header {
+    tag: u8,
+    count: u32,
+    flags: u16,
+}
+record Packet {
+    header: Header,
+    samples: [u16; 3],
+}
+record Metadata {
+    label: String,
+}
+state "game.exe" {}
+"#;
+        let mut database = CompilerDatabase::new(source);
+
+        for (field, record, offset, size, unit) in [
+            ("tag", "Header", 0, 1, "byte"),
+            ("count", "Header", 4, 4, "bytes"),
+            ("flags", "Header", 8, 2, "bytes"),
+            ("header", "Packet", 0, 12, "bytes"),
+            ("samples", "Packet", 12, 6, "bytes"),
+        ] {
+            let hover = database
+                .hover(source.find(&format!("{field}:")).unwrap() + 1)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{record}.{field} hover"));
+            let expected = format!(
+                "**Process-memory layout:** byte offset `0x{offset:x}` from the start of `{record}`; size `{size}` {unit}."
+            );
+            assert!(hover.markdown.contains(&expected), "{}", hover.markdown);
+        }
+
+        let label = database
+            .hover(source.find("label:").unwrap() + 1)
+            .unwrap()
+            .expect("Metadata.label hover");
+        assert!(label.markdown.contains("Metadata.label: String"));
+        assert!(!label.markdown.contains("Process-memory layout"));
     }
 
     #[test]

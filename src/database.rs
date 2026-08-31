@@ -267,9 +267,21 @@ impl DefinitionIndex {
     }
 
     pub fn reference_at(&self, offset: usize) -> Option<&SyntaxReference> {
+        self.references_at_offset(offset)
+            .min_by_key(|reference| navigation_reference_priority(reference.target))
+    }
+
+    /// Returns every source identity represented by the token at `offset`.
+    ///
+    /// Most source tokens have exactly one identity. A shorthand record field
+    /// such as `Point { x }` intentionally has two: the destination field and
+    /// the value supplied by the local binding. Tooling features can therefore
+    /// choose an operation-specific interpretation without depending on
+    /// collector insertion order.
+    pub fn references_at_offset(&self, offset: usize) -> impl Iterator<Item = &SyntaxReference> {
         self.syntax_references
             .iter()
-            .find(|reference| reference.span.start <= offset && offset < reference.span.end)
+            .filter(move |reference| reference.span.start <= offset && offset < reference.span.end)
     }
 
     pub fn references_to(
@@ -279,6 +291,17 @@ impl DefinitionIndex {
         self.syntax_references
             .iter()
             .filter(move |reference| reference.target == target)
+    }
+}
+
+fn navigation_reference_priority(target: SourceDefinitionId) -> u8 {
+    // A shorthand record field navigates to the field declaration: that is the
+    // structural contract represented by the literal and is normally farther
+    // away than the supplying local. Rename has its own policy and selects the
+    // local value when invoked directly on the shorthand token.
+    match target {
+        SourceDefinitionId::RecordField(_) => 0,
+        _ => 1,
     }
 }
 

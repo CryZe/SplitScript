@@ -186,6 +186,31 @@ pub(crate) fn hover(
     let Some(target) = target else {
         return expression_type_hover(database, offset);
     };
+    let shorthand_value = if matches!(
+        &target,
+        DefinitionTarget::Source(SourceDefinition {
+            id: SourceDefinitionId::RecordField(_),
+            ..
+        })
+    ) {
+        let definitions = database.definition_index()?;
+        let references = definitions.references_at_offset(offset).collect::<Vec<_>>();
+        let field_span = references.iter().find_map(|reference| {
+            matches!(reference.target, SourceDefinitionId::RecordField(_)).then_some(reference.span)
+        });
+        field_span.and_then(|field_span| {
+            references
+                .iter()
+                .find(|reference| {
+                    reference.span == field_span
+                        && matches!(reference.target, SourceDefinitionId::Value(_))
+                })
+                .and_then(|reference| definitions.get(reference.target))
+                .cloned()
+        })
+    } else {
+        None
+    };
     let (markdown, documentation_uri) = match target {
         DefinitionTarget::StandardLibrary(item) => {
             let type_arguments = database
@@ -327,9 +352,15 @@ pub(crate) fn hover(
             let Some(context) = semantic_context(database) else {
                 return Ok(None);
             };
-            let Some(markdown) = render_source_hover(&definition, &context) else {
+            let Some(mut markdown) = render_source_hover(&definition, &context) else {
                 return Ok(None);
             };
+            if let Some(value) = shorthand_value.as_ref()
+                && let Some(value_markdown) = render_source_hover(value, &context)
+            {
+                markdown.push_str("\n\n**Supplied by the shorthand value**\n\n");
+                markdown.push_str(&value_markdown);
+            }
             (markdown, None)
         }
     };

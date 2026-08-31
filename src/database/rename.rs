@@ -69,7 +69,20 @@ impl CompilerDatabase {
     pub fn rename_target_at(&mut self, offset: usize) -> SemanticQueryResult<Option<RenameTarget>> {
         let offset = self.caret_query_offset(offset)?;
         let definitions = self.definition_index()?;
-        if let Some(reference) = definitions.reference_at(offset) {
+        let references = definitions.references_at_offset(offset).collect::<Vec<_>>();
+        let is_record_shorthand = references
+            .iter()
+            .any(|reference| matches!(reference.target, SourceDefinitionId::RecordField(_)));
+        let reference = is_record_shorthand
+            .then(|| {
+                references
+                    .iter()
+                    .copied()
+                    .find(|reference| matches!(reference.target, SourceDefinitionId::Value(_)))
+            })
+            .flatten()
+            .or_else(|| definitions.reference_at(offset));
+        if let Some(reference) = reference {
             let target = definitions.get(reference.target).and_then(|definition| {
                 (!matches!(
                     definition.id,

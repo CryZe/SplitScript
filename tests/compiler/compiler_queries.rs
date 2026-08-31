@@ -1355,6 +1355,68 @@ fn record_shorthand_renames_expand_to_preserve_field_and_value_identity() {
 }
 
 #[test]
+fn record_shorthand_tooling_uses_operation_specific_identity() {
+    use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
+
+    let source = r#"
+        record Point { x: u32 }
+        state "game.exe" {}
+        fn point(value: u32) -> Point {
+            let x = value
+            return Point { x }
+        }
+    "#;
+    let shorthand = source.rfind("{ x }").unwrap() + 2;
+
+    let mut database = CompilerDatabase::new(source);
+    assert!(matches!(
+        database.definition_at(shorthand).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if matches!(definition.id, SourceDefinitionId::RecordField(_))
+    ));
+
+    let hover = database
+        .hover(shorthand)
+        .unwrap()
+        .expect("a shorthand field should have hover information");
+    assert!(
+        hover.markdown.contains("Point.x: u32"),
+        "{}",
+        hover.markdown
+    );
+    assert!(
+        hover
+            .markdown
+            .contains("**Supplied by the shorthand value**"),
+        "{}",
+        hover.markdown
+    );
+    assert!(hover.markdown.contains("let x: u32"), "{}", hover.markdown);
+    assert!(
+        hover.markdown.contains("Local variable"),
+        "{}",
+        hover.markdown
+    );
+
+    let rename = database
+        .rename_at(shorthand, "coordinate")
+        .expect("rename on a shorthand token should select its local value");
+    assert!(
+        rename
+            .edits
+            .iter()
+            .any(|edit| { edit.span.start == shorthand && edit.replacement == "x: coordinate" }),
+        "{rename:#?}"
+    );
+    assert!(
+        !rename
+            .edits
+            .iter()
+            .any(|edit| { edit.span.start == shorthand && edit.replacement == "coordinate: x" })
+    );
+}
+
+#[test]
 fn unrelated_renames_preserve_both_identities_of_unchanged_record_shorthand() {
     use splitscript::tooling::database::CompilerDatabase;
 

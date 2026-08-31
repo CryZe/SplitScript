@@ -1290,6 +1290,13 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 name_span,
                 fields,
             } => {
+                // Visit values first. A shorthand field's synthesized value
+                // expression has the same span as its field name, so the
+                // structural field role must deliberately win semantic-token
+                // precedence over the supplying local variable.
+                for field in fields {
+                    self.visit_expr(&field.value);
+                }
                 self.insert(*name_span, SemanticTokenKind::Struct, 0);
                 for field in fields {
                     self.insert(
@@ -1298,6 +1305,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                         MODIFIER_READONLY,
                     );
                 }
+                return;
             }
             ExprKind::Closure {
                 return_annotation: Some(result),
@@ -2224,6 +2232,26 @@ state "game.exe" {
                 .expect("the expression-receiver method should have a semantic token");
             assert_eq!(method_highlight.kind, SemanticTokenKind::Method);
         }
+    }
+
+    #[test]
+    fn record_shorthand_is_highlighted_as_the_destination_field() {
+        let source = r#"record Point { x: u32 }
+state "game.exe" {}
+fn point(value: u32) -> Point {
+    let x = value
+    return Point { x }
+}"#;
+        let shorthand = source.rfind("{ x }").unwrap() + 2;
+        let mut database = CompilerDatabase::new(source);
+        let highlights = database.semantic_highlights().unwrap();
+        let highlight = highlights
+            .highlights()
+            .iter()
+            .find(|highlight| highlight.span.start == shorthand)
+            .expect("the shorthand field should have a semantic token");
+        assert_eq!(highlight.kind, SemanticTokenKind::Property);
+        assert_eq!(highlight.modifiers, MODIFIER_READONLY);
     }
 
     #[test]

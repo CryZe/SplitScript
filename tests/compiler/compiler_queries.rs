@@ -1355,6 +1355,35 @@ fn record_shorthand_renames_expand_to_preserve_field_and_value_identity() {
 }
 
 #[test]
+fn unrelated_renames_preserve_both_identities_of_unchanged_record_shorthand() {
+    use splitscript::tooling::database::CompilerDatabase;
+
+    let source = r#"
+        record Point { x: u32, y: u32 }
+        state "game.exe" {}
+        fn point(x: u32) -> Point { return Point { x, y: 0 } }
+        fn inspect(point: Point) { print(point.x) }
+        whileAttached { inspect(point(1)) }
+    "#;
+    let y_declaration = source.find("y: u32").unwrap();
+
+    let mut rename_database = CompilerDatabase::new(source);
+    let rename = rename_database
+        .rename_at(y_declaration, "vertical")
+        .expect("an unrelated shorthand must retain both of its identities");
+    assert_eq!(rename.new_name, "vertical");
+    assert_eq!(rename.edits.len(), 2);
+
+    let mut suppression_database = CompilerDatabase::new(source);
+    let suppression = suppression_database
+        .underscore_suppression_at(y_declaration)
+        .unwrap()
+        .expect("unused-field suppression must terminate with a validated rename");
+    assert_eq!(suppression.new_name, "_y");
+    assert_eq!(suppression.edits.len(), 2);
+}
+
+#[test]
 fn semantic_queries_use_exact_tokens_before_end_of_word_fallbacks() {
     use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget};
 

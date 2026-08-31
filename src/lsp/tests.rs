@@ -2285,6 +2285,159 @@ fn unused_member_code_actions_apply_validated_multi_edit_suppressions() {
 }
 
 #[test]
+fn unused_record_field_fix_survives_save_undo_and_save() {
+    let unformatted = concat!(
+        "state \"explorer.exe\" {}\n",
+        "record Pos {\n",
+        "    x: u16,\n",
+        "    y: u16,\n",
+        "}\n",
+        "fn Pos.toString() { return `({self.x}, {self.y})` }\n",
+        "setup {\n",
+        "    let x = 5\n",
+        "    inspect([Pos { x, y: 2 }, Pos { x: 3, y: 4 }])\n",
+        "}\n",
+        "fn inspect(values) { print(values) }\n",
+    );
+    let source = crate::database::CompilerDatabase::new(unformatted)
+        .format()
+        .expect("fixture formatting")
+        .to_string();
+    let source = source.as_str();
+    let uri = "file:///unused-record-field-undo.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    let diagnostics = server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+    let published = diagnostics[0]["params"]["diagnostics"].as_array().unwrap();
+    let x_offset = source.find("x: u16").unwrap();
+    let (x_line, x_character) = position_parts(source, x_offset);
+    let actions = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 25,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": x_line, "character": x_character },
+                "end": { "line": x_line, "character": x_character + 1 }
+            },
+            "context": {
+                "diagnostics": published,
+                "only": ["quickfix"]
+            }
+        }
+    }));
+    let action = &actions[0]["result"][0];
+    assert_eq!(action["title"], "rename `x` to `_x`");
+
+    let mut fixed = source.to_owned();
+    let mut edits = action["edit"]["changes"][uri]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|edit| {
+            let start = &edit["range"]["start"];
+            let end = &edit["range"]["end"];
+            let start = offset_at_position(
+                source,
+                start["line"].as_u64().unwrap() as u32,
+                start["character"].as_u64().unwrap() as u32,
+            )
+            .unwrap();
+            let end = offset_at_position(
+                source,
+                end["line"].as_u64().unwrap() as u32,
+                end["character"].as_u64().unwrap() as u32,
+            )
+            .unwrap();
+            (start, end, edit["newText"].as_str().unwrap().to_owned())
+        })
+        .collect::<Vec<_>>();
+    edits.sort_by_key(|(start, end, _)| (*start, *end));
+    for (start, end, replacement) in edits.into_iter().rev() {
+        fixed.replace_range(start..end, &replacement);
+    }
+    assert!(fixed.contains("_x: u16"));
+
+    server.handle(notification(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri, "version": 2 },
+            "contentChanges": [{ "text": fixed }]
+        }),
+    ));
+    let first_save = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 26,
+        "method": "textDocument/formatting",
+        "params": {
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": 4, "insertSpaces": true }
+        }
+    }));
+    assert_eq!(first_save[0]["result"], json!([]));
+
+    // Undo restores the exact earlier source but with a monotonically newer
+    // LSP document version. A second save must not strand any compiler query.
+    let undo_diagnostics = server.handle(notification(
+        "textDocument/didChange",
+        json!({
+            "textDocument": { "uri": uri, "version": 3 },
+            "contentChanges": [{ "text": source }]
+        }),
+    ));
+    let republished = undo_diagnostics[0]["params"]["diagnostics"]
+        .as_array()
+        .unwrap();
+    let second_save = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 27,
+        "method": "textDocument/formatting",
+        "params": {
+            "textDocument": { "uri": uri },
+            "options": { "tabSize": 4, "insertSpaces": true }
+        }
+    }));
+    assert_eq!(second_save[0]["result"], json!([]));
+
+    let y_offset = source.find("y: u16").unwrap();
+    let (y_line, y_character) = position_parts(source, y_offset);
+    let actions = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 28,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": y_line, "character": y_character },
+                "end": { "line": y_line, "character": y_character + 1 }
+            },
+            "context": { "diagnostics": republished, "only": ["quickfix"] }
+        }
+    }));
+    assert_eq!(actions[0]["result"][0]["title"], "rename `y` to `_y`");
+    let hover = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 29,
+        "method": "textDocument/hover",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": y_line, "character": y_character }
+        }
+    }));
+    assert!(!hover[0]["result"].is_null());
+}
+
+#[test]
 fn unused_shared_state_field_has_one_validated_multi_layout_suppression() {
     let source = concat!(
         "state \"game.exe\" {\n",

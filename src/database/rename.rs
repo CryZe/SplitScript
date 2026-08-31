@@ -1,12 +1,13 @@
 //! Identity-preserving source rename validation.
 
-use std::{fmt, sync::Arc};
+use std::{collections::HashSet, fmt, sync::Arc};
 
 use crate::{
     Diagnostic,
     ast::{Expr, ExprKind, Span},
     diagnostic::TextEdit,
     language::LanguageCatalog,
+    lexer::TokenKind,
     semantic::{ResolvedRecordFieldId, SemanticModel},
     stdlib::{StandardLibrary, StdlibOwner},
     visit::{self, Visitor},
@@ -196,8 +197,9 @@ impl CompilerDatabase {
             }
             let mapped = remap_span(reference.span, &edits);
             if !candidate_definitions
-                .reference_at(mapped.start)
-                .is_some_and(|candidate_reference| {
+                .syntax_references()
+                .iter()
+                .any(|candidate_reference| {
                     candidate_reference.span == mapped
                         && candidate_reference.target == reference.target
                 })
@@ -361,11 +363,29 @@ impl CompilerDatabase {
             return Ok(None);
         }
 
+        let occupied = self
+            .recovering_parse()
+            .map_err(RenameError::Diagnostics)?
+            .source_document()
+            .tokens()
+            .filter_map(|token| match &token.kind {
+                TokenKind::Ident(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        let standard_library = self.context.standard_library();
         let mut replacement = format!("_{}", target.name);
         loop {
+            while is_reserved_source_identifier(standard_library.clone(), &replacement) {
+                replacement.insert(0, '_');
+            }
             match self.rename_at(offset, &replacement) {
                 Ok(plan) => return Ok(Some(plan)),
-                Err(RenameError::ConflictingBinding | RenameError::ReservedIdentifier) => {
+                // A spelling that occurs in the finite source token set may
+                // genuinely capture another binding. Once the spelling is
+                // fresh, another underscore cannot repair a structural rename
+                // validation failure, so propagate it instead of looping.
+                Err(RenameError::ConflictingBinding) if occupied.contains(&replacement) => {
                     replacement.insert(0, '_');
                 }
                 Err(error) => return Err(error),

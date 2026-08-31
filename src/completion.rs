@@ -22,7 +22,9 @@ use crate::{
     documentation::{StandardLibraryDocumentation, language_item_uri, symbol_uri},
     effects::{OperationAnalysis, action_has_attached_process, action_has_state_snapshots},
     hir::ExpressionResolution,
-    language::{LanguageCatalog, LanguageItem, LanguageItemId, LanguageItemKind},
+    language::{
+        LanguageCatalog, LanguageCompletionSite, LanguageItem, LanguageItemId, LanguageItemKind,
+    },
     lexer::TokenKind,
     semantic::ResolvedCall,
     stdlib::{
@@ -76,6 +78,10 @@ struct ContextAvailability {
     attached_process: bool,
     state_snapshots: bool,
     process_selection: bool,
+    statement_position: bool,
+    loop_control: bool,
+    return_control: bool,
+    method_receiver: bool,
 }
 
 /// Immutable lexical and syntactic facts shared by every completion strategy
@@ -156,10 +162,11 @@ pub(crate) fn complete(
             .iter()
             .find(|action| contains_offset(action.body.span, offset))
             .map(|action| action.kind);
-        let inside_function = syntax
+        let containing_function = syntax
             .functions
             .iter()
-            .any(|function| contains_offset(function.body.span, offset));
+            .find(|function| contains_offset(function.body.span, offset));
+        let inside_function = containing_function.is_some();
         let top_level = action.is_none() && is_top_level_offset(syntax, offset);
         let has_attached_process = action.is_none_or(action_has_attached_process);
         let has_state_snapshots = action
@@ -184,6 +191,15 @@ pub(crate) fn complete(
                 attached_process: has_attached_process,
                 state_snapshots: has_state_snapshots,
                 process_selection: action == Some(crate::ast::ActionKind::SelectProcess),
+                statement_position: is_statement_position(
+                    source,
+                    &request.tokens,
+                    request.replacement.start,
+                ),
+                loop_control: cursor_inside_loop(syntax, offset),
+                return_control: action.is_some() || inside_function,
+                method_receiver: containing_function
+                    .is_some_and(|function| function.method_of.is_some()),
             },
             effects.as_ref(),
             top_level,
@@ -577,7 +593,7 @@ fn complete_root(
         {
             continue;
         }
-        if let Some(completion) = language_completion(item) {
+        if let Some(completion) = language_completion(item, availability) {
             builder.add(completion);
         }
     }
@@ -1000,7 +1016,123 @@ fn selected_provider_at(
     }
 }
 
-fn language_completion(item: &LanguageItem) -> Option<CompletionItem> {
+fn is_statement_position(
+    source: &str,
+    tokens: &[&crate::lexer::Token],
+    cursor_start: usize,
+) -> bool {
+    let before = tokens.partition_point(|token| token.span.end <= cursor_start);
+    let Some(previous) = before.checked_sub(1).map(|index| tokens[index]) else {
+        return true;
+    };
+    if matches!(previous.kind, TokenKind::LBrace | TokenKind::Semicolon) {
+        return true;
+    }
+    if !source[previous.span.end..cursor_start].contains(['\n', '\r']) {
+        return false;
+    }
+    !matches!(
+        previous.kind,
+        TokenKind::Assign
+            | TokenKind::PlusAssign
+            | TokenKind::MinusAssign
+            | TokenKind::StarAssign
+            | TokenKind::SlashAssign
+            | TokenKind::PercentAssign
+            | TokenKind::OrAssign
+            | TokenKind::AndAssign
+            | TokenKind::CaretAssign
+            | TokenKind::ShlAssign
+            | TokenKind::ShrAssign
+            | TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::Star
+            | TokenKind::Slash
+            | TokenKind::Percent
+            | TokenKind::Or
+            | TokenKind::And
+            | TokenKind::Caret
+            | TokenKind::OrOr
+            | TokenKind::AndAnd
+            | TokenKind::EqEq
+            | TokenKind::BangEq
+            | TokenKind::Lt
+            | TokenKind::Le
+            | TokenKind::Gt
+            | TokenKind::Ge
+            | TokenKind::Shl
+            | TokenKind::Shr
+            | TokenKind::Dot
+            | TokenKind::Comma
+            | TokenKind::Colon
+            | TokenKind::LParen
+            | TokenKind::LBracket
+            | TokenKind::FatArrow
+    )
+}
+
+fn cursor_inside_loop(syntax: &Program, offset: usize) -> bool {
+    struct Finder {
+        offset: usize,
+        loop_start: Option<usize>,
+        closure_start: Option<usize>,
+    }
+
+    impl<'ast> Visitor<'ast> for Finder {
+        fn visit_stmt(&mut self, statement: &'ast Stmt) {
+            let body = match statement {
+                Stmt::While { body, .. } | Stmt::For { body, .. } => Some(body),
+                _ => None,
+            };
+            if let Some(body) = body
+                && contains_offset(body.span, self.offset)
+            {
+                self.loop_start = Some(
+                    self.loop_start
+                        .map_or(body.span.start, |start| start.max(body.span.start)),
+                );
+            }
+            visit::walk_stmt(self, statement);
+        }
+
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            match &expression.kind {
+                ExprKind::Loop(body) if contains_offset(body.span, self.offset) => {
+                    self.loop_start = Some(
+                        self.loop_start
+                            .map_or(body.span.start, |start| start.max(body.span.start)),
+                    );
+                }
+                ExprKind::Closure { body, .. }
+                    if contains_offset(expression.span, self.offset)
+                        || contains_offset(body.span, self.offset) =>
+                {
+                    self.closure_start =
+                        Some(self.closure_start.map_or(expression.span.start, |start| {
+                            start.max(expression.span.start)
+                        }));
+                }
+                _ => {}
+            }
+            visit::walk_expr(self, expression);
+        }
+    }
+
+    let mut finder = Finder {
+        offset,
+        loop_start: None,
+        closure_start: None,
+    };
+    finder.visit_program(syntax);
+    finder
+        .loop_start
+        .is_some_and(|start| finder.closure_start.is_none_or(|closure| closure < start))
+}
+
+fn language_completion(
+    item: &LanguageItem,
+    availability: ContextAvailability,
+) -> Option<CompletionItem> {
     if matches!(
         item.id,
         LanguageItemId::NativeStringDecoder | LanguageItemId::NativeUtf16LeDecoder
@@ -1008,35 +1140,31 @@ fn language_completion(item: &LanguageItem) -> Option<CompletionItem> {
         return None;
     }
     let (kind, insert_text, is_snippet) = match item.kind {
-        LanguageItemKind::Action(_) => (
-            CompletionKind::Snippet,
-            format!("{} {{\n    $0\n}}", item.name),
-            true,
-        ),
+        LanguageItemKind::Action(_) | LanguageItemKind::Declaration => return None,
         LanguageItemKind::BuiltinType(_) => (CompletionKind::Type, item.name.to_owned(), false),
         LanguageItemKind::SnapshotRoot => (CompletionKind::Variable, item.name.to_owned(), false),
-        LanguageItemKind::Keyword | LanguageItemKind::Declaration => match item.name {
-            "for" => (
-                CompletionKind::Snippet,
-                "for ${1:value} in ${2:values} {\n    $0\n}".to_owned(),
-                true,
-            ),
-            "loop" => (
-                CompletionKind::Snippet,
-                "loop {\n    $0\n}".to_owned(),
-                true,
-            ),
-            _ => (CompletionKind::Keyword, item.name.to_owned(), false),
-        },
-        LanguageItemKind::Syntax if is_identifier(item.name) => {
-            let (insert, snippet) = match item.name {
-                "Some" | "Ok" | "Err" => (format!("{}(${{1:value}})", item.name), true),
-                "sig" => ("sig\"${1:pattern}\"".to_owned(), true),
-                _ => (item.name.to_owned(), false),
+        LanguageItemKind::Keyword | LanguageItemKind::Syntax => {
+            let completion = LanguageCatalog::new().completion(item.id)?;
+            let available = match completion.site {
+                LanguageCompletionSite::Expression => true,
+                LanguageCompletionSite::Statement => availability.statement_position,
+                LanguageCompletionSite::Loop => availability.loop_control,
+                LanguageCompletionSite::Return => availability.return_control,
+                LanguageCompletionSite::Method => availability.method_receiver,
             };
-            (CompletionKind::Keyword, insert, snippet)
+            if !available {
+                return None;
+            }
+            (
+                if completion.is_snippet {
+                    CompletionKind::Snippet
+                } else {
+                    CompletionKind::Keyword
+                },
+                completion.insert_text.to_owned(),
+                completion.is_snippet,
+            )
         }
-        LanguageItemKind::Syntax => return None,
     };
     Some(catalog_language_completion(
         item.name,
@@ -2489,10 +2617,6 @@ fn identifier_span(source: &str, offset: usize) -> Span {
     Span { start, end }
 }
 
-fn is_identifier(name: &str) -> bool {
-    splitscript_syntax::is_identifier(name)
-}
-
 fn is_identifier_byte(byte: u8) -> bool {
     splitscript_syntax::is_identifier_continue_byte(byte)
 }
@@ -3613,8 +3737,8 @@ fn relay() {
     fn root_completion_comes_from_language_standard_library_and_source() {
         let source = "state \"game.exe\" {}\nlet customValue = 0\nwhileAttached { pri }";
         let mut database = CompilerDatabase::new(source);
-        let labels = labels(&mut database, "pri");
-        assert!(labels.contains(&"print".to_owned()));
+        let print_labels = labels(&mut database, "pri");
+        assert!(print_labels.contains(&"print".to_owned()));
 
         let offset = source.find("customValue").unwrap() + 2;
         let all = database.completions(offset).unwrap();
@@ -3622,8 +3746,41 @@ fn relay() {
 
         let empty_prefix = source.find(" pri").unwrap() + 1;
         let all = database.completions(empty_prefix).unwrap();
-        assert!(all.items.iter().any(|item| item.label == "whileAttached"));
+        for absent in [
+            "whileAttached",
+            "class",
+            "closure",
+            "enum",
+            "range",
+            "else",
+            "as",
+            "async",
+            "break",
+            "continue",
+            "self",
+        ] {
+            assert!(
+                all.items.iter().all(|item| item.label != absent),
+                "`{absent}` is not valid as an unqualified completion here: {all:#?}"
+            );
+        }
+        for present in ["let", "if", "while", "loop", "for", "match", "return"] {
+            assert!(
+                all.items.iter().any(|item| item.label == present),
+                "missing `{present}`: {all:#?}"
+            );
+        }
         assert!(all.items.iter().all(|item| item.label != "utf8"));
+
+        let loop_source = "state \"game.exe\" {}\nsplit { while true { con } }";
+        let mut loop_database = CompilerDatabase::new(loop_source);
+        let loop_items = labels(&mut loop_database, "con");
+        assert!(loop_items.contains(&"continue".to_owned()));
+
+        let method_source =
+            "state \"game.exe\" {}\nstruct Point { x: i32 }\nfn Point.value() { sel }";
+        let mut method_database = CompilerDatabase::new(method_source);
+        assert!(labels(&mut method_database, "sel").contains(&"self".to_owned()));
     }
 
     #[test]

@@ -23,6 +23,26 @@ pub enum LanguageItemKind {
     Action(ActionKind),
 }
 
+/// Where a catalog item is meaningful as an unqualified source completion.
+/// Documentation entries are intentionally broader than insertable syntax;
+/// concepts such as "closure" and "range" have pages but no token with that
+/// spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LanguageCompletionSite {
+    Expression,
+    Statement,
+    Loop,
+    Return,
+    Method,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LanguageCompletion {
+    pub site: LanguageCompletionSite,
+    pub insert_text: &'static str,
+    pub is_snippet: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LanguageItem {
     pub id: LanguageItemId,
@@ -2039,6 +2059,93 @@ impl LanguageCatalog {
 
     pub fn item_by_name(self, name: &str) -> Option<&'static LanguageItem> {
         ITEMS.iter().find(|item| item.name == name)
+    }
+
+    /// Returns source insertion metadata only for items that have a meaningful
+    /// unqualified spelling. Context-independent documentation concepts and
+    /// infix/postfix syntax deliberately return `None`.
+    pub const fn completion(self, id: LanguageItemId) -> Option<LanguageCompletion> {
+        let (site, insert_text, is_snippet) = match id {
+            LanguageItemId::Let => (
+                LanguageCompletionSite::Statement,
+                "let ${1:name} = ${2:value}",
+                true,
+            ),
+            LanguageItemId::If => (
+                LanguageCompletionSite::Expression,
+                "if ${1:condition} {\n    $0\n}",
+                true,
+            ),
+            LanguageItemId::While => (
+                LanguageCompletionSite::Statement,
+                "while ${1:condition} {\n    $0\n}",
+                true,
+            ),
+            LanguageItemId::Loop => (
+                LanguageCompletionSite::Expression,
+                "loop {\n    $0\n}",
+                true,
+            ),
+            LanguageItemId::For => (
+                LanguageCompletionSite::Statement,
+                "for ${1:value} in ${2:values} {\n    $0\n}",
+                true,
+            ),
+            LanguageItemId::Break => (LanguageCompletionSite::Loop, "break${1: value}", true),
+            LanguageItemId::Continue => (LanguageCompletionSite::Loop, "continue", false),
+            LanguageItemId::Debug => (
+                LanguageCompletionSite::Statement,
+                "debug ${1:statement}",
+                true,
+            ),
+            LanguageItemId::Match => (
+                LanguageCompletionSite::Expression,
+                "match ${1:value} {\n    ${2:pattern} => $0\n}",
+                true,
+            ),
+            LanguageItemId::Return => (LanguageCompletionSite::Return, "return${1: value}", true),
+            LanguageItemId::Throw => (LanguageCompletionSite::Expression, "throw ${1:error}", true),
+            LanguageItemId::Await => (
+                LanguageCompletionSite::Expression,
+                "await ${1:future}",
+                true,
+            ),
+            LanguageItemId::Retry => (
+                LanguageCompletionSite::Expression,
+                "retry ${1:fallibleExpression}",
+                true,
+            ),
+            LanguageItemId::SelfValue => (LanguageCompletionSite::Method, "self", false),
+            LanguageItemId::SomeConstructor => {
+                (LanguageCompletionSite::Expression, "Some(${1:value})", true)
+            }
+            LanguageItemId::IteratorItem => {
+                (LanguageCompletionSite::Expression, "Item(${1:value})", true)
+            }
+            LanguageItemId::IteratorEnd => (LanguageCompletionSite::Expression, "End", false),
+            LanguageItemId::SuccessConstructor => {
+                (LanguageCompletionSite::Expression, "Ok(${1:value})", true)
+            }
+            LanguageItemId::ErrorConstructor => {
+                (LanguageCompletionSite::Expression, "Err(${1:error})", true)
+            }
+            LanguageItemId::SignatureLiteral => (
+                LanguageCompletionSite::Expression,
+                "sig\"${1:pattern}\"",
+                true,
+            ),
+            LanguageItemId::VersionLiteral => (
+                LanguageCompletionSite::Expression,
+                "v\"${1:major.minor.build.private}\"",
+                true,
+            ),
+            _ => return None,
+        };
+        Some(LanguageCompletion {
+            site,
+            insert_text,
+            is_snippet,
+        })
     }
 
     /// Resolves an exact source token or a short syntax spelling to its

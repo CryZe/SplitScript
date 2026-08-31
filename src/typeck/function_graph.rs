@@ -236,7 +236,7 @@ mod tests {
         let names = component_names(
             r#"
                 state "game.exe" {}
-                record Box { value: i32 }
+                struct Box { value: i32 }
 
                 fn use(box: Box) -> i32 { return box.unwrap() }
                 fn Box.unwrap() -> i32 { return self.value }

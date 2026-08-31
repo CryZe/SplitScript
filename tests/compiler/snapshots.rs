@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn resolved_and_typed_hir_snapshot() {
     let source = r#"
-        record Point {
+        struct Point {
             x: i32,
             y: i32,
         }
@@ -125,7 +125,7 @@ fn diagnostics_expose_stable_stage_codes_and_severity() {
     assert_eq!(DiagnosticCode::StaticSettingLookup.as_str(), "SS1007");
     assert_eq!(DiagnosticCode::SuspiciousInterpolation.as_str(), "SS1008");
     assert_eq!(DiagnosticCode::DebugOnlyUse.as_str(), "SS1009");
-    assert_eq!(DiagnosticCode::RecordFieldShorthand.as_str(), "SS1010");
+    assert_eq!(DiagnosticCode::StructFieldShorthand.as_str(), "SS1010");
 }
 
 #[test]
@@ -442,8 +442,8 @@ fn snapshot_expression_kind(
         TypedExpressionKind::Loop { body } => {
             format!("loop statements={}", body.statements.len())
         }
-        TypedExpressionKind::Record { record, fields } => {
-            format!("record {record} fields={fields:?}")
+        TypedExpressionKind::Struct { structure, fields } => {
+            format!("struct {structure} fields={fields:?}")
         }
         TypedExpressionKind::Enum {
             enumeration,
@@ -546,13 +546,13 @@ fn snapshot_type_name(
         TypeKind::Standard(standard) => StandardLibrary::new().type_decl(*standard).name.to_owned(),
         TypeKind::StateSnapshot => "StateSnapshot".to_owned(),
         TypeKind::SettingsView => "SettingsView".to_owned(),
-        TypeKind::Record(id) => checked
+        TypeKind::Struct(id) => checked
             .syntax()
-            .records
+            .structs
             .iter()
-            .find(|record| record.id == *id)
-            .map(|record| record.name.clone())
-            .unwrap_or_else(|| format!("record#{id}")),
+            .find(|structure| structure.id == *id)
+            .map(|structure| structure.name.clone())
+            .unwrap_or_else(|| format!("struct#{id}")),
         TypeKind::Enum(id) => checked
             .enum_types()
             .iter()

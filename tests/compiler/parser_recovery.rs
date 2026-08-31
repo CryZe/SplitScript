@@ -31,7 +31,7 @@ fn recovering_parse_reports_multiple_errors_and_keeps_later_declarations() {
 
     let source = r#"
         state "game.exe" {}
-        record Broken { value }
+        struct Broken { value }
         fn retained() {
             let missingAssignment
             return 1
@@ -264,12 +264,12 @@ fn standalone_value_blocks_parse_without_recovery() {
 }
 
 #[test]
-fn recovering_parse_keeps_later_record_fields_and_enum_variants() {
+fn recovering_parse_keeps_later_struct_fields_and_enum_variants() {
     use splitscript::compiler::syntax::RecoveryNodeKind;
 
     let source = r#"
         state "game.exe" {}
-        record RecoveredRecord {
+        struct RecoveredStruct {
             first: i32,
             missingColon i64,
             after: u32,
@@ -297,7 +297,7 @@ fn recovering_parse_keeps_later_record_fields_and_enum_variants() {
             .any(|diagnostic| { diagnostic.message == "expected `)` after the payload type" })
     );
     assert_eq!(
-        recovered.syntax().records[0]
+        recovered.syntax().structs[0]
             .fields
             .iter()
             .map(|field| field.name.as_str())
@@ -801,14 +801,14 @@ fn recovering_parse_keeps_valid_array_elements_and_call_arguments() {
 }
 
 #[test]
-fn recovering_parse_keeps_valid_record_fields_and_template_interpolations() {
+fn recovering_parse_keeps_valid_struct_fields_and_template_interpolations() {
     use splitscript::{
         compiler::ast::{ExprKind, InterpolatedPart, Stmt},
         compiler::syntax::RecoveryNodeKind,
     };
 
     let source = r#"
-        record Point {
+        struct Point {
             x: i32,
             y: i32,
         }
@@ -832,10 +832,10 @@ fn recovering_parse_keeps_valid_record_fields_and_template_interpolations() {
     assert_eq!(statements.len(), 3);
 
     let Stmt::Variable(point) = &statements[0] else {
-        panic!("the recovered record literal should remain a variable initializer");
+        panic!("the recovered struct literal should remain a variable initializer");
     };
-    let ExprKind::Record { fields, .. } = &point.value.as_ref().unwrap().kind else {
-        panic!("the recovered initializer should remain a record literal");
+    let ExprKind::Struct { fields, .. } = &point.value.as_ref().unwrap().kind else {
+        panic!("the recovered initializer should remain a struct literal");
     };
     assert_eq!(
         fields

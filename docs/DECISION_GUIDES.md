@@ -24,7 +24,7 @@ while detached, so they cannot use process or snapshot context.
 - Keep the field as `T` when a failed read should retain its last accepted
   value. Use [`T?`] only when absence itself should enter [`current`] and
   [`old`].
-- Put values in one record or fixed array when they must succeed and advance as
+- Put values in one struct or fixed array when they must succeed and advance as
   one transaction.
 - Use independent [`layout`] dimensions for independent build facts. Use named
   layouts when each build selects one complete alternative memory shape.

@@ -20,7 +20,7 @@ reported as capability bounds such as [`Numeric`], [`Display`], or
 [`MemoryReadable`], which play a trait-like role but are currently declared by
 the standard library rather than user programs.
 
-User code does not need an `impl Display for Type` block. Records and enums
+User code does not need an `impl Display for Type` block. Structs and enums
 derive a multiline [`Display`] representation automatically. Define
 `fn Type.toString() -> String` only to override it; the result type may be
 inferred. The derived or custom implementation powers interpolation, [`as`]
@@ -28,7 +28,7 @@ inferred. The derived or custom implementation powers interpolation, [`as`]
 
 ```splitscript
 # state "game.exe" {}
-record Position {
+struct Position {
     x: i32,
     y: i32,
 }
@@ -49,7 +49,7 @@ print(greater(7u32, 3u32))
 # }
 ```
 
-Arrays use [`[T]`] and [`[T; N]`], records are GC product types, and enums support
+Arrays use [`[T]`] and [`[T; N]`], structs are GC product types, and enums support
 payload variants. There are no lifetimes, moves, borrows, or explicit memory
 management in source.
 

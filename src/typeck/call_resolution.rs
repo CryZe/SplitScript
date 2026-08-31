@@ -2509,8 +2509,8 @@ impl Checker {
             {
                 self.unknown_state_field(field, span)
             }
-            Type::Known(_) if self.source_record_id(ty).is_some() => {
-                self.error(format!("unknown record field `{field}`"), span)
+            Type::Known(_) if self.source_struct_id(ty).is_some() => {
+                self.error(format!("unknown struct field `{field}`"), span)
             }
             Type::Known(id)
                 if let TypeKind::ManagedClass(class) | TypeKind::ManagedReference(class) =
@@ -2661,17 +2661,17 @@ impl Checker {
                 ResolvedMember::ManagedField(field.id),
             ));
         }
-        match self.source_record_id(ty) {
-            Some(record_id) => self
+        match self.source_struct_id(ty) {
+            Some(struct_id) => self
                 .declarations
-                .records
+                .structs
                 .iter()
-                .find(|record| record.id == record_id)
-                .and_then(|record| record.fields.iter().find(|item| item.name == field))
+                .find(|structure| structure.id == struct_id)
+                .and_then(|structure| structure.fields.iter().find(|item| item.name == field))
                 .map(|field| {
                     (
                         self.syntax_type(field.ty),
-                        ResolvedMember::RecordField(field.id),
+                        ResolvedMember::StructField(field.id),
                     )
                 }),
             None => None,
@@ -3050,9 +3050,9 @@ impl Checker {
             )])
             .chain(
                 self.declarations
-                    .records
+                    .structs
                     .iter()
-                    .map(|record| self.record_type(record.id)),
+                    .map(|structure| self.struct_type(structure.id)),
             )
             .collect::<Vec<_>>();
 
@@ -3157,12 +3157,12 @@ impl Checker {
             }
             Type::Variable(_) => "an inferred type".to_owned(),
             Type::Known(id) => match self.inference.type_store().kind(id) {
-                TypeKind::Record(record) => self
+                TypeKind::Struct(structure) => self
                     .declarations
-                    .records
+                    .structs
                     .iter()
-                    .find(|candidate| candidate.id == *record)
-                    .map_or_else(|| ty.to_string(), |record| record.name.clone()),
+                    .find(|candidate| candidate.id == *structure)
+                    .map_or_else(|| ty.to_string(), |structure| structure.name.clone()),
                 TypeKind::Enum(enumeration) => self
                     .declarations
                     .enums

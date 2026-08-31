@@ -138,7 +138,7 @@ fn unity_review_fixture_uses_the_schema_provider_and_rejects_manual_traversal() 
 #[test]
 fn emulator_review_fixture_keeps_guest_addresses_and_provider_owned_byte_order() {
     let source = r#"
-        record Snapshot {
+        struct Snapshot {
             checkpoint: u16,
             flags: u32,
         }

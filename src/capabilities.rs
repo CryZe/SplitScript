@@ -3,12 +3,12 @@
 //! Inference uses lightweight capability constraints while types are still
 //! unknown. Once a program has semantic [`TypeId`] values, this module is the
 //! authoritative query boundary for declared core/standard capabilities and
-//! capabilities derived from source records, enums, and wrappers.
+//! capabilities derived from source structs, enums, and wrappers.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{EnumDecl, FunctionDecl, FunctionId, RecordDecl},
+    ast::{EnumDecl, FunctionDecl, FunctionId, StructDecl},
     equality::EqualityCapabilities,
     memory::MemoryLayouts,
     semantic::SemanticModel,
@@ -58,7 +58,7 @@ pub(crate) struct CapabilityDependencies {
 
 impl CapabilityAnalysis {
     pub fn build(
-        records: &[RecordDecl],
+        structs: &[StructDecl],
         enums: &[EnumDecl],
         functions: &[FunctionDecl],
         semantics: &SemanticModel,
@@ -78,7 +78,7 @@ impl CapabilityAnalysis {
             };
             if matches!(
                 semantics.types().kind(receiver),
-                TypeKind::Record(_) | TypeKind::Enum(_)
+                TypeKind::Struct(_) | TypeKind::Enum(_)
             ) {
                 source_methods
                     .entry(receiver)
@@ -86,7 +86,7 @@ impl CapabilityAnalysis {
                     .insert(function.name.clone(), function.id);
             }
         }
-        let structural = StructuralTypes::build(records, enums, semantics);
+        let structural = StructuralTypes::build(structs, enums, semantics);
         let structural_requirements = standard_library
             .capabilities()
             .iter()
@@ -114,7 +114,7 @@ impl CapabilityAnalysis {
                 semantics,
                 standard_library.clone(),
             ),
-            memory: MemoryLayouts::build_with_library(records, semantics, standard_library),
+            memory: MemoryLayouts::build_with_library(structs, semantics, standard_library),
             source_methods,
             structural,
             structural_requirements,
@@ -219,7 +219,7 @@ impl CapabilityAnalysis {
                 } else if !declared || has_candidate {
                     if !matches!(
                         semantics.types().kind(ty),
-                        TypeKind::Record(_) | TypeKind::Enum(_)
+                        TypeKind::Struct(_) | TypeKind::Enum(_)
                     ) {
                         return Err(format!(
                             "type `{}` cannot structurally implement capability `{}`",
@@ -407,7 +407,7 @@ impl CapabilityAnalysis {
             TypeKind::Application { constructor, .. } => StdlibOwner::TypeConstructor(*constructor),
             TypeKind::Error
             | TypeKind::StateSnapshot
-            | TypeKind::Record(_)
+            | TypeKind::Struct(_)
             | TypeKind::Enum(_)
             | TypeKind::ManagedClass(_)
             | TypeKind::ManagedReference(_)

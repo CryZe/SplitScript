@@ -16,7 +16,7 @@ use crate::{
         TypedStatement, TypedStatementKind,
     },
     semantic::{
-        DynamicCallCallee, ResolvedCall, ResolvedMember, ResolvedRecordFieldId, ResolvedValue,
+        DynamicCallCallee, ResolvedCall, ResolvedMember, ResolvedStructFieldId, ResolvedValue,
         SemanticModel,
     },
     stdlib::{Availability, Effect, StdlibFieldId, StdlibItemId, StdlibTypeConstructorId},
@@ -40,9 +40,9 @@ enum SymbolicValue {
         captures: Vec<(ValueId, SymbolicValue)>,
     },
     NamedFunction(FunctionId),
-    Record {
+    Struct {
         constructor: Option<StdlibTypeConstructorId>,
-        fields: Vec<(ResolvedRecordFieldId, SymbolicValue)>,
+        fields: Vec<(ResolvedStructFieldId, SymbolicValue)>,
     },
     Union(Vec<SymbolicValue>),
 }
@@ -88,7 +88,7 @@ impl SymbolicValue {
                         fields: existing,
                     }
                 }
-                Self::Record { fields, .. } => fields
+                Self::Struct { fields, .. } => fields
                     .into_iter()
                     .find_map(|(candidate, value)| {
                         member_matches_field(*field, candidate).then_some(value)
@@ -125,10 +125,10 @@ impl SymbolicValue {
                     .collect(),
             },
             Self::NamedFunction(function) => Self::NamedFunction(*function),
-            Self::Record {
+            Self::Struct {
                 constructor,
                 fields,
-            } => Self::Record {
+            } => Self::Struct {
                 constructor: *constructor,
                 fields: fields
                     .iter()
@@ -144,13 +144,13 @@ impl SymbolicValue {
     }
 }
 
-fn member_matches_field(member: ResolvedMember, field: ResolvedRecordFieldId) -> bool {
+fn member_matches_field(member: ResolvedMember, field: ResolvedStructFieldId) -> bool {
     matches!(
         (member, field),
-        (ResolvedMember::RecordField(left), ResolvedRecordFieldId::Source(right)) if left == right
+        (ResolvedMember::StructField(left), ResolvedStructFieldId::Source(right)) if left == right
     ) || matches!(
         (member, field),
-        (ResolvedMember::StandardField(left), ResolvedRecordFieldId::Standard(right)) if left == right
+        (ResolvedMember::StandardField(left), ResolvedStructFieldId::Standard(right)) if left == right
     )
 }
 
@@ -418,15 +418,15 @@ impl<'a> Evaluator<'a> {
                 self.block(body);
                 SymbolicValue::Unknown
             }
-            TypedExpressionKind::Record { record, fields } => {
-                let resolved = self.program.record_literal_fields(id).unwrap_or_default();
+            TypedExpressionKind::Struct { structure, fields } => {
+                let resolved = self.program.struct_literal_fields(id).unwrap_or_default();
                 let fields = fields
                     .iter()
                     .zip(resolved)
                     .map(|((_, expression), field)| (*field, self.expression(*expression)))
                     .collect();
-                let constructor = match record {
-                    crate::semantic::ResolvedRecordId::StandardConstructor(_) => {
+                let constructor = match structure {
+                    crate::semantic::ResolvedStructId::StandardConstructor(_) => {
                         match self.semantics.types().kind(expression.ty) {
                             TypeKind::Application { constructor, .. } => Some(*constructor),
                             _ => None,
@@ -434,7 +434,7 @@ impl<'a> Evaluator<'a> {
                     }
                     _ => None,
                 };
-                SymbolicValue::Record {
+                SymbolicValue::Struct {
                     constructor,
                     fields,
                 }
@@ -806,7 +806,7 @@ impl<'a> Evaluator<'a> {
                 }
                 (accumulator.finish(), SymbolicValue::union(returned))
             }
-            SymbolicValue::Record { .. } | SymbolicValue::Unknown => (
+            SymbolicValue::Struct { .. } | SymbolicValue::Unknown => (
                 FunctionOperationSemantics::default(),
                 SymbolicValue::Unknown,
             ),
@@ -823,23 +823,23 @@ impl<'a> Evaluator<'a> {
                 }],
                 ..FunctionOperationSemantics::default()
             },
-            SymbolicValue::Record {
+            SymbolicValue::Struct {
                 constructor: Some(StdlibTypeConstructorId::MapIterator),
                 fields,
             } => {
-                let source = record_field(fields, StdlibFieldId::MapIteratorSource);
-                let transform = record_field(fields, StdlibFieldId::MapIteratorTransform);
+                let source = struct_field(fields, StdlibFieldId::MapIteratorSource);
+                let transform = struct_field(fields, StdlibFieldId::MapIteratorTransform);
                 let mut accumulator = Accumulator::default();
                 accumulator.operation(&self.operation_for_iteration(&source));
                 accumulator.operation(&self.operation_for_invoke(&transform, &[]).0);
                 accumulator.finish()
             }
-            SymbolicValue::Record {
+            SymbolicValue::Struct {
                 constructor: Some(StdlibTypeConstructorId::FilterIterator),
                 fields,
             } => {
-                let source = record_field(fields, StdlibFieldId::FilterIteratorSource);
-                let predicate = record_field(fields, StdlibFieldId::FilterIteratorPredicate);
+                let source = struct_field(fields, StdlibFieldId::FilterIteratorSource);
+                let predicate = struct_field(fields, StdlibFieldId::FilterIteratorPredicate);
                 let mut accumulator = Accumulator::default();
                 accumulator.operation(&self.operation_for_iteration(&source));
                 accumulator.operation(&self.operation_for_invoke(&predicate, &[]).0);
@@ -854,7 +854,7 @@ impl<'a> Evaluator<'a> {
             }
             SymbolicValue::Closure { .. }
             | SymbolicValue::NamedFunction(_)
-            | SymbolicValue::Record { .. }
+            | SymbolicValue::Struct { .. }
             | SymbolicValue::Unknown => FunctionOperationSemantics::default(),
         }
     }
@@ -866,14 +866,14 @@ impl<'a> Evaluator<'a> {
     }
 }
 
-fn record_field(
-    fields: &[(ResolvedRecordFieldId, SymbolicValue)],
+fn struct_field(
+    fields: &[(ResolvedStructFieldId, SymbolicValue)],
     expected: StdlibFieldId,
 ) -> SymbolicValue {
     fields
         .iter()
         .find_map(|(field, value)| {
-            (*field == ResolvedRecordFieldId::Standard(expected)).then(|| value.clone())
+            (*field == ResolvedStructFieldId::Standard(expected)).then(|| value.clone())
         })
         .unwrap_or(SymbolicValue::Unknown)
 }

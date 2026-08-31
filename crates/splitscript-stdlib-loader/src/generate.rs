@@ -959,8 +959,8 @@ impl<'a> CatalogGenerator<'a> {
         let values = attribute_names(attributes, "valueUsage");
         let has = |name: &str| values.iter().any(|value| value == name);
         format!(
-            "ValueUsage {{ record_field: {}, enum_payload: {}, state_field: {}, local_variable: {}, global_variable: {} }}",
-            has("recordField"),
+            "ValueUsage {{ struct_field: {}, enum_payload: {}, state_field: {}, local_variable: {}, global_variable: {} }}",
+            has("structField"),
             has("enumPayload"),
             has("stateField"),
             has("localVariable"),
@@ -1015,7 +1015,7 @@ fn is_complete_program_example(source: &str) -> bool {
         "isLoading",
         "gameTime",
         "fn",
-        "record",
+        "struct",
         "enum",
         "image",
     ]
@@ -1320,11 +1320,11 @@ stateProvider GBA as gba { "mGBA" }
     #[test]
     fn summary_only_documentation_is_not_copied_into_details() {
         let source = r#"
-/// A documented record.
+/// A documented structure.
 ///
 /// # Example
 ///
-/// Construct the record
+/// Construct the struct
 ///
 /// ```splitscript
 /// let value = Example { field: 1 }

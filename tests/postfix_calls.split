@@ -1,6 +1,6 @@
 state "game.exe" {}
 
-record Counter {
+struct Counter {
     value: u32,
 }
 

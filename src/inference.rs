@@ -40,7 +40,7 @@ impl Type {
                 TypeKind::Standard(standard) => ResolvedTypeRef::Standard(*standard),
                 TypeKind::StateSnapshot => ResolvedTypeRef::StateSnapshot,
                 TypeKind::SettingsView => ResolvedTypeRef::SettingsView,
-                TypeKind::Record(record) => ResolvedTypeRef::Record(*record),
+                TypeKind::Struct(structure) => ResolvedTypeRef::Struct(*structure),
                 TypeKind::Enum(enumeration) => ResolvedTypeRef::Enum(*enumeration),
                 TypeKind::ManagedClass(class) => ResolvedTypeRef::ManagedClass(*class),
                 TypeKind::ManagedReference(class) => ResolvedTypeRef::ManagedReference(*class),
@@ -443,7 +443,7 @@ impl InferenceContext {
             TypeKind::Standard(standard) => self.standard_library.type_decl(*standard).name.into(),
             TypeKind::StateSnapshot => "StateSnapshot".into(),
             TypeKind::SettingsView => "SettingsView".into(),
-            TypeKind::Record(record) => format!("record#{record}"),
+            TypeKind::Struct(structure) => format!("struct#{structure}"),
             TypeKind::Enum(enumeration) => format!("enum#{enumeration}"),
             TypeKind::ManagedClass(class) => format!("class#{class}"),
             TypeKind::ManagedReference(class) => format!("class#{class}.Ref"),
@@ -2234,7 +2234,7 @@ pub(crate) fn type_may_have_capability(
             TypeKind::Builtin(builtin) => library.core_type_has_capability(*builtin, capability),
             TypeKind::Standard(standard) => library.type_has_capability(*standard, capability),
             TypeKind::StateSnapshot | TypeKind::SettingsView => false,
-            TypeKind::Record(_) => matches!(
+            TypeKind::Struct(_) => matches!(
                 behavior,
                 CapabilityBehavior::StructuralEquality
                     | CapabilityBehavior::StructuralMemoryLayout

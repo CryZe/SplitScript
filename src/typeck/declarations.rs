@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     ast::{
-        EnumDecl, EnumVariantId, FunctionId, ManagedFieldId, RecordDecl, RecordFieldId, Span,
+        EnumDecl, EnumVariantId, FunctionId, ManagedFieldId, Span, StructDecl, StructFieldId,
         ValueId,
     },
     inference::Type,
@@ -17,7 +17,7 @@ use crate::{
 /// One fact established about the attachment-wide `layout` value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct LayoutConstraint {
-    pub(super) dimension: RecordFieldId,
+    pub(super) dimension: StructFieldId,
     pub(super) variant: EnumVariantId,
 }
 
@@ -206,14 +206,14 @@ pub(super) struct DeclarationEnvironment {
     pub(super) methods: HashMap<(Type, String), FunctionSignature>,
     pub(super) function_signatures: HashMap<FunctionId, FunctionSignature>,
     pub(super) debug_functions: HashSet<FunctionId>,
-    pub(super) records: Vec<RecordDecl>,
+    pub(super) structs: Vec<StructDecl>,
     pub(super) enums: Vec<EnumDecl>,
     pub(super) managed_classes: Vec<crate::ast::ManagedClassDecl>,
 }
 
 impl DeclarationEnvironment {
     pub(super) fn new(
-        records: Vec<RecordDecl>,
+        structs: Vec<StructDecl>,
         enums: Vec<EnumDecl>,
         managed_classes: Vec<crate::ast::ManagedClassDecl>,
         debug_functions: HashSet<FunctionId>,
@@ -235,7 +235,7 @@ impl DeclarationEnvironment {
             methods: HashMap::new(),
             function_signatures: HashMap::new(),
             debug_functions,
-            records,
+            structs,
             enums,
             managed_classes,
         }

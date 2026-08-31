@@ -318,15 +318,15 @@ The maintained Arietta of Spirits port uses independent `utf8(128)` and
 also proves the persistent-watcher rule: a failed stage-string read retains
 that field while a successful pause flag from the same poll still advances.
 
-## Contiguous records and fixed arrays
+## Contiguous structs and fixed arrays
 
 Several separate ASL watchers may describe one physically contiguous native
-value. When the target layout is known, a SplitScript record reads the complete
+value. When the target layout is known, a SplitScript struct reads the complete
 value once and gives each component a name. Fields use declaration order with
 natural alignment:
 
 ```splitscript
-record LevelTimeParts {
+struct LevelTimeParts {
     minutes: f32,
     seconds: f32,
     hundredths: f32,
@@ -337,10 +337,10 @@ state "game.exe" {
 }
 ```
 
-This record is 12 bytes because all three fields have four-byte size and
-alignment. In a mixed record, each field starts at the next multiple of its
+This struct is 12 bytes because all three fields have four-byte size and
+alignment. In a mixed struct, each field starts at the next multiple of its
 own alignment and the final size is rounded to the largest field alignment.
-SplitScript currently reads these values as little-endian. Do not use a record
+SplitScript currently reads these values as little-endian. Do not use a struct
 for a packed, explicitly padded, or differently endian target layout; exact
 layout controls remain intentionally deferred until maintained-port evidence
 requires them.
@@ -360,7 +360,7 @@ split {
 
 Use [`[T; N]`], not growable [`[T]`], for process-memory layout. The fixed array
 still supports indexing and iteration, while its exact length prevents a port
-from silently reading a different number of bytes. A record or fixed array is
+from silently reading a different number of bytes. A struct or fixed array is
 [`MemoryReadable`] only when every contained field or element has a fixed
 readable layout.
 
@@ -706,7 +706,7 @@ setVariable("Value", value)
 Interpolation, [`print`], and [`setVariable`] already accept [`Display`] values, so
 they do not need an intermediate string cast.
 
-A port-defined record or enum is a [`Display`] value automatically and receives
+A port-defined struct or enum is a [`Display`] value automatically and receives
 a stable multiline structural representation. Define
 `fn Type.toString() -> String` only when the timer-facing text should use a
 custom format; the result may be inferred. No `impl` block or annotation is
@@ -714,7 +714,7 @@ necessary.
 
 ```splitscript
 # state "game.exe" {}
-record Position {
+struct Position {
     x: i32,
     y: i32,
 }
@@ -797,7 +797,7 @@ reason.
 When the original script has several independent build facts, avoid turning
 their cartesian product into many version-labelled states. Declare enum-valued
 dimensions in one unnamed state [`layout`] block and return the generated
-`Layout` record from [`onAttach`]. The selected [`layout`] value can guard native
+`Layout` struct from [`onAttach`]. The selected [`layout`] value can guard native
 state fields and managed class fields with the same predicate:
 
 ```splitscript
@@ -1170,7 +1170,7 @@ every successful layout path remain available everywhere while attached.
 Expression-backed fields are persistent watcher values. The initial snapshot
 waits for every required field to succeed together. Afterwards, a failed [`T!`]
 retains that field's last accepted value while successful siblings advance. If
-several values must advance atomically, read them as one record- or array-valued
+several values must advance atomically, read them as one struct- or array-valued
 state field. For a field that is semantically absent on some ticks, declare
 [`T?`] and convert just that read:
 

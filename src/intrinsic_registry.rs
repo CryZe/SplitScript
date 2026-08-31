@@ -130,7 +130,7 @@ pub(crate) struct ProviderReadContract {
 /// the latter describes a value's fixed shape, while the provider describes
 /// how bytes from the emulated machine are encoded. A future provider whose
 /// byte order varies by backend can extend this with provider-owned runtime
-/// state without duplicating record or array layouts.
+/// state without duplicating struct or array layouts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProviderByteOrder {
     Little,

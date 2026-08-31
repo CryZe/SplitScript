@@ -13,7 +13,7 @@ poll and yield before either continuing or delivering their result. State
 polling starts only after the timer, save-data, actor, and coordinate roots are
 ready.
 
-The port keeps patch-dependent save-data layouts explicit. Records and static
+The port keeps patch-dependent save-data layouts explicit. Structs and static
 arrays replace the original dynamic dictionaries for position triggers, pause
 triggers, rift identification, and hub-return detection. Its settings tree
 registers the same 214 runtime keys as the original script, and helper

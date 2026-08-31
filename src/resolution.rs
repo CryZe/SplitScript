@@ -102,9 +102,9 @@ pub(crate) fn validate_declarations(
     }
 
     for (kind, name, span) in program
-        .records
+        .structs
         .iter()
-        .map(|decl| ("record", decl.name.as_str(), decl.name_span))
+        .map(|decl| ("struct", decl.name.as_str(), decl.name_span))
         .chain(
             program
                 .enums
@@ -162,7 +162,10 @@ pub(crate) fn validate_declarations(
                 .is_none()
             && !(matches!(name.as_str(), "Array" | "Option" | "Result")
                 && applied_constructor_occurrences.contains(span))
-            && !program.records.iter().any(|record| record.name == *name)
+            && !program
+                .structs
+                .iter()
+                .any(|structure| structure.name == *name)
             && !program
                 .enum_declarations()
                 .any(|enumeration| enumeration.name == *name)
@@ -299,10 +302,10 @@ pub(crate) fn resolve_program(
     let type_names = program
         .type_names()
         .filter_map(|(id, name, _)| {
-            let resolved = if let Some(record) =
-                program.records.iter().find(|item| item.name == *name)
+            let resolved = if let Some(structure) =
+                program.structs.iter().find(|item| item.name == *name)
             {
-                ResolvedTypeRef::Record(record.id)
+                ResolvedTypeRef::Struct(structure.id)
             } else if let Some(enumeration) =
                 program.enum_declarations().find(|item| item.name == *name)
             {
@@ -384,7 +387,10 @@ pub(crate) fn resolve_program(
                 continue;
             }
             let is_undeclared_legacy_type = legacy_type_diagnostic(name).is_some()
-                && !program.records.iter().any(|record| record.name == name)
+                && !program
+                    .structs
+                    .iter()
+                    .any(|structure| structure.name == name)
                 && !program
                     .enums
                     .iter()

@@ -6,7 +6,7 @@ use splitscript::{
         abi::{AbiCatalog, AbiEffect, AbiImportId, AbiOwnership},
         semantic::{
             ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedReceiver,
-            ResolvedRecordFieldId, ResolvedValue,
+            ResolvedStructFieldId, ResolvedValue,
         },
         stdlib::{
             Availability, CancellationKind, CoreTypeId, Effect, FieldVisibility, Implementation,

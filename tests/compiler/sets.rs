@@ -132,7 +132,7 @@ fn named_spellings_of_structural_type_forms_are_rejected() {
         ("Option<i32>", "T?"),
         ("Result<i32>", "T!"),
     ] {
-        let source = format!("state \"game.exe\" {{}} record Legacy {{ values: {legacy} }}");
+        let source = format!("state \"game.exe\" {{}} struct Legacy {{ values: {legacy} }}");
         let diagnostics =
             splitscript::compile(&source).expect_err("structural types use punctuation syntax");
         assert!(
@@ -174,7 +174,7 @@ fn named_spellings_of_structural_type_forms_are_rejected() {
 fn structural_type_rewrites_preserve_nested_arguments_and_fix_every_occurrence() {
     let source = r#"
         state "game.exe" {}
-        record Legacy {
+        struct Legacy {
             first: Option<Array<u16> >,
             second: Option<Array<u16> >,
         }

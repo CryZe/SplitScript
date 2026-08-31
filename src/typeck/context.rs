@@ -208,7 +208,7 @@ impl FailureContext {
         )
     }
 
-    /// Records that the retry operand's value-producing path supplied a
+    /// Structs that the retry operand's value-producing path supplied a
     /// result directly instead of being implicitly lifted into the boundary.
     pub(super) fn observe_result(&mut self, expected: Type, actual: Type) {
         if let Self::Boundary {

@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{RecordDecl, RecordFieldId, RecordId},
+    ast::{StructDecl, StructFieldId, StructId},
     semantic::SemanticModel,
     stdlib::{RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibFieldId},
     types::{BuiltinType, TypeId, TypeKind},
@@ -20,7 +20,7 @@ pub const MAX_FIXED_ARRAY_BYTES: u32 = 65_536;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryFieldId {
-    Source(RecordFieldId),
+    Source(StructFieldId),
     Standard(StdlibFieldId),
 }
 
@@ -32,7 +32,7 @@ pub struct MemoryFieldLayout {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecordMemoryLayout {
+pub struct StructMemoryLayout {
     pub ty: TypeId,
     pub size: u32,
     pub alignment: u32,
@@ -52,7 +52,7 @@ pub struct FixedArrayMemoryLayout {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryTypeLayout<'a> {
     Scalar { size: u32, alignment: u32 },
-    Record(&'a RecordMemoryLayout),
+    Struct(&'a StructMemoryLayout),
     FixedArray(&'a FixedArrayMemoryLayout),
 }
 
@@ -60,7 +60,7 @@ impl MemoryTypeLayout<'_> {
     pub fn size(self) -> u32 {
         match self {
             Self::Scalar { size, .. } => size,
-            Self::Record(layout) => layout.size,
+            Self::Struct(layout) => layout.size,
             Self::FixedArray(layout) => layout.size,
         }
     }
@@ -68,7 +68,7 @@ impl MemoryTypeLayout<'_> {
     pub fn alignment(self) -> u32 {
         match self {
             Self::Scalar { alignment, .. } => alignment,
-            Self::Record(layout) => layout.alignment,
+            Self::Struct(layout) => layout.alignment,
             Self::FixedArray(layout) => layout.alignment,
         }
     }
@@ -77,32 +77,32 @@ impl MemoryTypeLayout<'_> {
 #[derive(Debug, Clone, Default)]
 pub struct MemoryLayouts {
     standard_library: StandardLibrary,
-    records: HashMap<TypeId, Result<RecordMemoryLayout, String>>,
+    structs: HashMap<TypeId, Result<StructMemoryLayout, String>>,
     arrays: HashMap<TypeId, Result<FixedArrayMemoryLayout, String>>,
-    source_records: HashMap<RecordId, TypeId>,
+    source_structs: HashMap<StructId, TypeId>,
 }
 
 impl MemoryLayouts {
-    pub fn build(records: &[RecordDecl], semantics: &SemanticModel) -> Self {
-        Self::build_with_library(records, semantics, StandardLibrary::new())
+    pub fn build(structs: &[StructDecl], semantics: &SemanticModel) -> Self {
+        Self::build_with_library(structs, semantics, StandardLibrary::new())
     }
 
     pub fn build_with_library(
-        records: &[RecordDecl],
+        structs: &[StructDecl],
         semantics: &SemanticModel,
         standard_library: StandardLibrary,
     ) -> Self {
         let mut layouts = Self {
             standard_library,
-            records: HashMap::new(),
+            structs: HashMap::new(),
             arrays: HashMap::new(),
-            source_records: HashMap::new(),
+            source_structs: HashMap::new(),
         };
-        for record in records {
-            let ty = semantics.types().id_for_record(record.id);
-            layouts.source_records.insert(record.id, ty);
+        for structure in structs {
+            let ty = semantics.types().id_for_struct(structure.id);
+            layouts.source_structs.insert(structure.id, ty);
             let mut visiting = HashSet::new();
-            let _ = layouts.build_record(ty, records, semantics, &mut visiting);
+            let _ = layouts.build_struct(ty, structs, semantics, &mut visiting);
         }
         let library = layouts.standard_library.clone();
         for standard in library.all_types().iter().filter(|standard| {
@@ -113,9 +113,9 @@ impl MemoryLayouts {
                 )
         }) {
             let mut visiting = HashSet::new();
-            let _ = layouts.build_record(
+            let _ = layouts.build_struct(
                 semantics.types().id_for_standard(standard.id),
-                records,
+                structs,
                 semantics,
                 &mut visiting,
             );
@@ -136,7 +136,7 @@ impl MemoryLayouts {
             .collect::<Vec<_>>();
         for ty in fixed_arrays {
             let mut visiting = HashSet::new();
-            let _ = layouts.build_array(ty, records, semantics, &mut visiting);
+            let _ = layouts.build_array(ty, structs, semantics, &mut visiting);
         }
         layouts
     }
@@ -150,12 +150,12 @@ impl MemoryLayouts {
             TypeKind::Builtin(builtin) => scalar_layout(&self.standard_library, *builtin)
                 .map(|(size, alignment)| MemoryTypeLayout::Scalar { size, alignment })
                 .ok_or_else(|| format!("type `{builtin}` is not MemoryReadable")),
-            TypeKind::Record(record) => self
-                .records
-                .get(&semantics.types().id_for_record(*record))
-                .expect("every declared record has a memory-layout result")
+            TypeKind::Struct(structure) => self
+                .structs
+                .get(&semantics.types().id_for_struct(*structure))
+                .expect("every declared struct has a memory-layout result")
                 .as_ref()
-                .map(MemoryTypeLayout::Record)
+                .map(MemoryTypeLayout::Struct)
                 .map_err(Clone::clone),
             TypeKind::Standard(standard) => {
                 let library = &self.standard_library;
@@ -175,11 +175,11 @@ impl MemoryLayouts {
                             format!("type `{}` is not MemoryReadable", declaration.name)
                         }),
                     RuntimeRepresentation::GcStruct { .. } => self
-                        .records
+                        .structs
                         .get(&ty)
-                        .expect("every readable standard record has a memory-layout result")
+                        .expect("every readable standard struct has a memory-layout result")
                         .as_ref()
-                        .map(MemoryTypeLayout::Record)
+                        .map(MemoryTypeLayout::Struct)
                         .map_err(Clone::clone),
                     RuntimeRepresentation::GcArray { .. } | RuntimeRepresentation::Enum { .. } => {
                         Err(format!("type `{}` is not MemoryReadable", declaration.name))
@@ -203,14 +203,14 @@ impl MemoryLayouts {
         }
     }
 
-    pub fn record(&self, record: RecordId) -> Result<&RecordMemoryLayout, &str> {
+    pub fn structure(&self, structure: StructId) -> Result<&StructMemoryLayout, &str> {
         let ty = self
-            .source_records
-            .get(&record)
-            .expect("every declared record has a semantic type");
-        self.records
+            .source_structs
+            .get(&structure)
+            .expect("every declared struct has a semantic type");
+        self.structs
             .get(ty)
-            .expect("every declared record has a memory-layout result")
+            .expect("every declared struct has a memory-layout result")
             .as_ref()
             .map_err(String::as_str)
     }
@@ -219,7 +219,7 @@ impl MemoryLayouts {
     /// scratch planning uses this conservative bound so every generated
     /// `process.read<T>` destination is sized before body emission.
     pub fn maximum_size(&self) -> u32 {
-        self.records
+        self.structs
             .values()
             .filter_map(|layout| layout.as_ref().ok())
             .map(|layout| layout.size)
@@ -237,7 +237,7 @@ impl MemoryLayouts {
     fn build_array(
         &mut self,
         ty: TypeId,
-        records: &[RecordDecl],
+        structs: &[StructDecl],
         semantics: &SemanticModel,
         visiting: &mut HashSet<TypeId>,
     ) -> Result<FixedArrayMemoryLayout, String> {
@@ -267,7 +267,7 @@ impl MemoryLayouts {
                 ));
             }
             let (element_size, alignment) =
-                self.fixed_layout(*element, records, semantics, visiting)?;
+                self.fixed_layout(*element, structs, semantics, visiting)?;
             let stride = align_up(element_size, alignment);
             let size = stride
                 .checked_mul(*length)
@@ -291,27 +291,27 @@ impl MemoryLayouts {
         result
     }
 
-    fn build_record(
+    fn build_struct(
         &mut self,
         ty: TypeId,
-        records: &[RecordDecl],
+        structs: &[StructDecl],
         semantics: &SemanticModel,
         visiting: &mut HashSet<TypeId>,
-    ) -> Result<RecordMemoryLayout, String> {
-        if let Some(layout) = self.records.get(&ty) {
+    ) -> Result<StructMemoryLayout, String> {
+        if let Some(layout) = self.structs.get(&ty) {
             return layout.clone();
         }
         if !visiting.insert(ty) {
-            return Err("recursive records do not have a finite process-memory layout".to_owned());
+            return Err("recursive structs do not have a finite process-memory layout".to_owned());
         }
 
         let result = (|| {
             let (name, declared_fields) = match semantics.types().kind(ty) {
-                TypeKind::Record(record) => {
-                    let declaration = records
+                TypeKind::Struct(structure) => {
+                    let declaration = structs
                         .iter()
-                        .find(|declaration| declaration.id == *record)
-                        .expect("record IDs refer to declarations");
+                        .find(|declaration| declaration.id == *structure)
+                        .expect("struct IDs refer to declarations");
                     (
                         declaration.name.clone(),
                         declaration
@@ -322,8 +322,8 @@ impl MemoryLayouts {
                                     MemoryFieldId::Source(field.id),
                                     field.name.clone(),
                                     semantics
-                                        .record_field_type(field.id)
-                                        .expect("checked record fields have semantic types"),
+                                        .struct_field_type(field.id)
+                                        .expect("checked struct fields have semantic types"),
                                 )
                             })
                             .collect::<Vec<_>>(),
@@ -356,10 +356,10 @@ impl MemoryLayouts {
                             .collect::<Vec<_>>(),
                     )
                 }
-                kind => return Err(format!("type `{kind:?}` is not a record")),
+                kind => return Err(format!("type `{kind:?}` is not a struct")),
             };
             if declared_fields.is_empty() {
-                return Err(format!("record `{name}` has no readable fields"));
+                return Err(format!("struct `{name}` has no readable fields"));
             }
 
             let mut offset = 0;
@@ -367,9 +367,9 @@ impl MemoryLayouts {
             let mut fields = Vec::with_capacity(declared_fields.len());
             for (field, field_name, field_ty) in declared_fields {
                 let (field_size, field_alignment) = self
-                    .fixed_layout(field_ty, records, semantics, visiting)
+                    .fixed_layout(field_ty, structs, semantics, visiting)
                     .map_err(|error| {
-                        format!("record `{name}.{field_name}` is not MemoryReadable: {error}")
+                        format!("struct `{name}.{field_name}` is not MemoryReadable: {error}")
                     })?;
                 offset = align_up(offset, field_alignment);
                 fields.push(MemoryFieldLayout {
@@ -379,10 +379,10 @@ impl MemoryLayouts {
                 });
                 offset = offset
                     .checked_add(field_size)
-                    .ok_or_else(|| format!("record `{name}` is too large"))?;
+                    .ok_or_else(|| format!("struct `{name}` is too large"))?;
                 alignment = alignment.max(field_alignment);
             }
-            Ok(RecordMemoryLayout {
+            Ok(StructMemoryLayout {
                 ty,
                 size: align_up(offset, alignment),
                 alignment,
@@ -390,22 +390,22 @@ impl MemoryLayouts {
             })
         })();
         visiting.remove(&ty);
-        self.records.insert(ty, result.clone());
+        self.structs.insert(ty, result.clone());
         result
     }
 
     fn fixed_layout(
         &mut self,
         ty: TypeId,
-        records: &[RecordDecl],
+        structs: &[StructDecl],
         semantics: &SemanticModel,
         visiting: &mut HashSet<TypeId>,
     ) -> Result<(u32, u32), String> {
         match semantics.types().kind(ty) {
             TypeKind::Builtin(builtin) => scalar_layout(&self.standard_library, *builtin)
                 .ok_or_else(|| format!("`{builtin}` has no fixed process-memory layout")),
-            TypeKind::Record(_) => self
-                .build_record(ty, records, semantics, visiting)
+            TypeKind::Struct(_) => self
+                .build_struct(ty, structs, semantics, visiting)
                 .map(|layout| (layout.size, layout.alignment)),
             TypeKind::Standard(standard) => {
                 let library = &self.standard_library;
@@ -425,7 +425,7 @@ impl MemoryLayouts {
                             format!("`{}` has no fixed process-memory layout", declaration.name)
                         }),
                     RuntimeRepresentation::GcStruct { .. } => self
-                        .build_record(ty, records, semantics, visiting)
+                        .build_struct(ty, structs, semantics, visiting)
                         .map(|layout| (layout.size, layout.alignment)),
                     RuntimeRepresentation::GcArray { .. } | RuntimeRepresentation::Enum { .. } => {
                         Err(format!(
@@ -438,7 +438,7 @@ impl MemoryLayouts {
             TypeKind::Array {
                 length: Some(_), ..
             } => self
-                .build_array(ty, records, semantics, visiting)
+                .build_array(ty, structs, semantics, visiting)
                 .map(|layout| (layout.size, layout.alignment)),
             TypeKind::Array { length: None, .. } => Err(
                 "an unsized `[T]` array has no fixed process-memory layout; use `[T; N]`"

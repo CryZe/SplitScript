@@ -301,8 +301,8 @@ R1 records a host-GC direction for settings values whose cleanup need not be
 prompt. A complementary solution may be needed for files, manually attached
 processes, or other resources whose release is observable and must be
 deterministic. Core Wasm GC objects have no user-defined finalizer, so merely
-placing an owned host handle inside a GC record cannot arrange a reliable close
-when that record becomes unreachable.
+placing an owned host handle inside a GC struct cannot arrange a reliable close
+when that struct becomes unreachable.
 
 SplitScript could instead add an affine `resource` category. A resource leaf
 would be an opaque host handle with trusted destruction behavior. Any type that
@@ -313,7 +313,7 @@ field:
 ```splitscript
 resource File
 
-record Request {
+struct Request {
     file: File,
     path: String,
 }
@@ -323,7 +323,7 @@ record Request {
 deterministic drop. Assignment would move ownership rather than create an
 untracked GC alias, while ordinary method calls and non-consuming parameters
 could borrow implicitly. The compiler would generate structural drop glue for
-records, active enum variants, options, results, and initialized collection
+structs, active enum variants, options, results, and initialized collection
 elements. It would invoke that glue on normal scope exit, overwrite, `return`,
 `throw`, `break`, `continue`, and async completion or cancellation. Returning
 or otherwise transferring a value would suppress the source owner's drop.
@@ -355,8 +355,8 @@ Before implementing this direction, settle:
 - how moves and implicit borrows appear in diagnostics, function signatures,
   returns, globals, and editor type information;
 - whether `T?`/`T!` receive specialized resource drop glue before user
-  records and variable-length collections;
-- how current aliasable arrays, sets, records, and closures are
+  structs and variable-length collections;
+- how current aliasable arrays, sets, structs, and closures are
   restricted when they transitively contain a resource;
 - the exact non-suspending, non-failing destructor ABI and its behavior during
   traps, hot reload, and store destruction;

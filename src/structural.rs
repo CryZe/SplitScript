@@ -2,19 +2,19 @@
 //!
 //! Capability analysis and lazy backend derivations consume this one graph so
 //! equality, display, and future structural capabilities cannot disagree about
-//! which record fields or enum payloads belong to a type.
+//! which struct fields or enum payloads belong to a type.
 
 use std::collections::HashMap;
 
 use crate::{
-    ast::{EnumDecl, EnumId, EnumVariantId, RecordDecl, RecordFieldId, RecordId},
+    ast::{EnumDecl, EnumId, EnumVariantId, StructDecl, StructFieldId, StructId},
     semantic::SemanticModel,
     types::{TypeId, TypeKind},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum StructuralTypeId {
-    Record(RecordId),
+    Struct(StructId),
     Enum(EnumId),
 }
 
@@ -22,13 +22,13 @@ pub(crate) enum StructuralTypeId {
 pub(crate) struct StructuralMember {
     pub name: String,
     pub source: StructuralMemberId,
-    /// Records always have a member type. Payload-less enum variants do not.
+    /// Structs always have a member type. Payload-less enum variants do not.
     pub ty: Option<TypeId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum StructuralMemberId {
-    RecordField(RecordFieldId),
+    StructField(StructFieldId),
     EnumVariant(EnumVariantId),
 }
 
@@ -43,47 +43,47 @@ pub(crate) struct StructuralType {
 pub(crate) struct StructuralTypes {
     by_type: HashMap<TypeId, StructuralType>,
     semantic_types: HashMap<StructuralTypeId, TypeId>,
-    records: Vec<TypeId>,
+    structs: Vec<TypeId>,
     enums: Vec<TypeId>,
 }
 
 impl StructuralTypes {
-    pub fn build(records: &[RecordDecl], enums: &[EnumDecl], semantics: &SemanticModel) -> Self {
+    pub fn build(structs: &[StructDecl], enums: &[EnumDecl], semantics: &SemanticModel) -> Self {
         let semantic_types = semantics
             .types()
             .iter()
             .filter_map(|(ty, kind)| match kind {
-                TypeKind::Record(record) => Some((StructuralTypeId::Record(*record), ty)),
+                TypeKind::Struct(structure) => Some((StructuralTypeId::Struct(*structure), ty)),
                 TypeKind::Enum(enumeration) => Some((StructuralTypeId::Enum(*enumeration), ty)),
                 _ => None,
             })
             .collect::<HashMap<_, _>>();
         let mut by_type = HashMap::new();
-        let mut record_types = Vec::with_capacity(records.len());
-        for record in records {
-            let id = StructuralTypeId::Record(record.id);
+        let mut struct_types = Vec::with_capacity(structs.len());
+        for structure in structs {
+            let id = StructuralTypeId::Struct(structure.id);
             let ty = semantic_types[&id];
             by_type.insert(
                 ty,
                 StructuralType {
                     id,
-                    name: record.name.clone(),
-                    members: record
+                    name: structure.name.clone(),
+                    members: structure
                         .fields
                         .iter()
                         .map(|field| StructuralMember {
                             name: field.name.clone(),
-                            source: StructuralMemberId::RecordField(field.id),
+                            source: StructuralMemberId::StructField(field.id),
                             ty: Some(
                                 semantics
-                                    .record_field_type(field.id)
-                                    .expect("checked record fields have semantic types"),
+                                    .struct_field_type(field.id)
+                                    .expect("checked struct fields have semantic types"),
                             ),
                         })
                         .collect(),
                 },
             );
-            record_types.push(ty);
+            struct_types.push(ty);
         }
         let mut enum_types = Vec::with_capacity(enums.len());
         for enumeration in enums {
@@ -110,7 +110,7 @@ impl StructuralTypes {
         Self {
             by_type,
             semantic_types,
-            records: record_types,
+            structs: struct_types,
             enums: enum_types,
         }
     }
@@ -124,14 +124,14 @@ impl StructuralTypes {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (StructuralTypeId, TypeId)> + '_ {
-        self.records
+        self.structs
             .iter()
             .chain(&self.enums)
             .map(|ty| (self.by_type[ty].id, *ty))
     }
 
-    pub fn records(&self) -> impl Iterator<Item = (TypeId, &StructuralType)> {
-        self.records.iter().map(|ty| (*ty, &self.by_type[ty]))
+    pub fn structs(&self) -> impl Iterator<Item = (TypeId, &StructuralType)> {
+        self.structs.iter().map(|ty| (*ty, &self.by_type[ty]))
     }
 
     pub fn enums(&self) -> impl Iterator<Item = (TypeId, &StructuralType)> {

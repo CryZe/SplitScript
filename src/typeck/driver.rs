@@ -38,7 +38,7 @@ fn initialize_checker(
     resolutions: &ProgramResolutions,
     standard_library: StandardLibrary,
 ) -> Checker {
-    let records = program.records.clone();
+    let structs = program.structs.clone();
     let enums = program.enum_declarations().cloned().collect::<Vec<_>>();
     let managed_classes = program
         .managed_class_declarations()
@@ -46,7 +46,7 @@ fn initialize_checker(
         .cloned()
         .collect::<Vec<_>>();
     let semantic_types =
-        TypeStore::with_source_types(&standard_library, &records, &enums, &managed_classes);
+        TypeStore::with_source_types(&standard_library, &structs, &enums, &managed_classes);
     let array_types = program
         .array_types
         .iter()
@@ -144,7 +144,7 @@ fn initialize_checker(
     let inference = InferenceContext::new(
         standard_library.clone(),
         semantic_types,
-        records.len() as u32 + enums.len() as u32,
+        structs.len() as u32 + enums.len() as u32,
         ConstructedLayouts {
             arrays: array_types,
             options: option_types,
@@ -173,7 +173,7 @@ fn initialize_checker(
         resolutions: resolutions.clone(),
         errors: Vec::new(),
         declarations: DeclarationEnvironment::new(
-            records,
+            structs,
             enums,
             managed_classes,
             program

@@ -161,12 +161,12 @@ fn user_function_types_are_inferred_across_bodies_and_call_sites() {
     let source = r#"
         state "game.exe" {}
 
-        record Clock {
+        struct Clock {
             minutes: f32,
             seconds: f32
         }
 
-        record Snapshot {
+        struct Snapshot {
             clock: Clock
         }
 
@@ -193,8 +193,8 @@ fn user_function_types_are_inferred_across_bodies_and_call_sites() {
         }
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap())
-        .expect("function and record receiver types should be inferred");
-    let snapshot = checked.syntax().records[1].id;
+        .expect("function and struct receiver types should be inferred");
+    let snapshot = checked.syntax().structs[1].id;
     let format_clock = &checked.syntax().functions[2];
     assert_eq!(
         checked.semantics().types().kind(
@@ -203,7 +203,7 @@ fn user_function_types_are_inferred_across_bodies_and_call_sites() {
                 .value_type(format_clock.params[0].id)
                 .unwrap()
         ),
-        &TypeKind::Record(snapshot)
+        &TypeKind::Struct(snapshot)
     );
     let splitscript::compiler::ast::Stmt::Expression(splitscript::compiler::ast::Expr {
         kind: splitscript::compiler::ast::ExprKind::Return(Some(returned)),
@@ -217,8 +217,8 @@ fn user_function_types_are_inferred_across_bodies_and_call_sites() {
         checked.semantics().path_members(path.id),
         Some(
             [
-                ResolvedMember::RecordField(checked.syntax().records[1].fields[0].id),
-                ResolvedMember::RecordField(checked.syntax().records[0].fields[1].id),
+                ResolvedMember::StructField(checked.syntax().structs[1].fields[0].id),
+                ResolvedMember::StructField(checked.syntax().structs[0].fields[1].id),
             ]
             .as_slice()
         )
@@ -229,8 +229,8 @@ fn user_function_types_are_inferred_across_bodies_and_call_sites() {
         .expect("inferred function signatures should produce valid Wasm");
 
     let ambiguous = r#"
-        record First { value: i32 }
-        record Second { value: i32 }
+        struct First { value: i32 }
+        struct Second { value: i32 }
         state "game.exe" {}
         fn inspect(item) { return item.value }
     "#;
@@ -542,7 +542,7 @@ fn recursive_generic_components_reuse_the_callers_concrete_instance() {
 #[test]
 fn inferred_method_parameters_are_instantiated_independently() {
     let source = r#"
-        record Selector { marker: i32 }
+        struct Selector { marker: i32 }
         state "game.exe" {}
 
         fn Selector.choose(value, fallback) {
@@ -619,7 +619,7 @@ fn generic_instance_expansion_has_a_deterministic_total_limit() {
         "state \"game.exe\" {}\nfn identity(value) { return value }\nwhileAttached {\n",
     );
     let declarations = (0..257)
-        .map(|index| format!("record Item{index} {{ value: i32 }}\n"))
+        .map(|index| format!("struct Item{index} {{ value: i32 }}\n"))
         .collect::<String>();
     source.insert_str(0, &declarations);
     for index in 0..257 {
@@ -1038,7 +1038,7 @@ fn as_casts_lower_all_numeric_representations_and_integer_strings() {
 }
 
 #[test]
-fn gc_records_support_nesting_functions_and_async_frames() {
+fn gc_structs_support_nesting_functions_and_async_frames() {
     let source = r#"
         state "game.exe" {}
 
@@ -1046,13 +1046,13 @@ fn gc_records_support_nesting_functions_and_async_frames() {
             return timer.digits.minutes == 0.0 && timer.character == "Hana"
         }
 
-        record Digits {
+        struct Digits {
             minutes: f32,
             seconds: f32,
             hundredths: f32
         }
 
-        record TimerInfo {
+        struct TimerInfo {
             digits: Digits,
             character: String
         }
@@ -1072,10 +1072,10 @@ fn gc_records_support_nesting_functions_and_async_frames() {
             }
         }
     "#;
-    let wasm = splitscript::compile(source).expect("nested records should compile");
+    let wasm = splitscript::compile(source).expect("nested structs should compile");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
-        .expect("record GC structs should produce valid Wasm");
+        .expect("source structs should produce valid Wasm GC structs");
 }
 
 #[test]
@@ -1225,7 +1225,7 @@ fn timer_state_is_a_compiler_provided_exhaustive_enum() {
 #[test]
 fn aggregate_global_constants_are_materialized_once_at_module_start() {
     let source = r#"
-        record Point {
+        struct Point {
             x: f32,
             y: f32
         }
@@ -1254,7 +1254,7 @@ fn aggregate_global_constants_are_materialized_once_at_module_start() {
     let mut imported_functions = 0_u32;
     let mut start_function = None;
     let mut defined_function = 0_u32;
-    let mut start_record_count = 0_u32;
+    let mut start_struct_count = 0_u32;
     let mut start_array_count = 0_u32;
     let mut stores_constructed_array = false;
     for payload in Parser::new(0).parse_all(&wasm) {
@@ -1276,7 +1276,7 @@ fn aggregate_global_constants_are_materialized_once_at_module_start() {
                 let mut constructed_array = false;
                 for operator in body.get_operators_reader().unwrap() {
                     match operator.unwrap() {
-                        wasmparser::Operator::StructNew { .. } => start_record_count += 1,
+                        wasmparser::Operator::StructNew { .. } => start_struct_count += 1,
                         wasmparser::Operator::ArrayNewFixed { .. } => {
                             start_array_count += 1;
                             constructed_array = true;
@@ -1295,8 +1295,8 @@ fn aggregate_global_constants_are_materialized_once_at_module_start() {
     }
 
     assert!(
-        start_record_count >= 2,
-        "start should construct both records"
+        start_struct_count >= 2,
+        "start should construct both structs"
     );
     assert_eq!(
         start_array_count, 2,
@@ -1311,7 +1311,7 @@ fn aggregate_global_constants_are_materialized_once_at_module_start() {
 #[test]
 fn enums_and_their_payloads_use_structural_equality() {
     let source = r#"
-        record Position {
+        struct Position {
             x: i32,
             y: i32
         }
@@ -1330,8 +1330,8 @@ fn enums_and_their_payloads_use_structural_equality() {
             let same = left == right
             let different = Value.Label("four") != Value.Label("five")
             let empty = Value.Empty == Value.Empty
-            let recordsEqual = Position { x: 1, y: 2 } == Position { x: 1, y: 2 }
-            if same && different && empty && recordsEqual {
+            let structsEqual = Position { x: 1, y: 2 } == Position { x: 1, y: 2 }
+            if same && different && empty && structsEqual {
                 setVariable("Equality", "works")
             }
         }
@@ -1575,12 +1575,12 @@ fn methods_have_implicit_self_and_support_nested_receivers() {
     let source = r#"
         state "game.exe" {}
 
-        record Digits {
+        struct Digits {
             minutes: f32,
             seconds: f32
         }
 
-        record TimerInfo {
+        struct TimerInfo {
             digits: Digits,
             stopped: bool
         }
@@ -1614,7 +1614,7 @@ fn generic_gc_arrays_infer_elements_and_support_core_methods() {
     let source = r#"
         state "game.exe" {}
 
-        record ScanBuffer {
+        struct ScanBuffer {
             bytes: [u8]
         }
 
@@ -1703,7 +1703,7 @@ fn array_indexing_is_first_class_bidirectional_and_array_only() {
     let source = r#"
         state "game.exe" {}
 
-        record Point {
+        struct Point {
             x: i32,
         }
 
@@ -1761,7 +1761,7 @@ fn indexed_assignment_updates_arrays_through_stable_aliases() {
     let source = r#"
         state "game.exe" {}
 
-        record Holder {
+        struct Holder {
             bar: [u8],
             matrix: [[u8]],
         }

@@ -1,5 +1,5 @@
 /// Describes the memory paths discovered for the active executable build.
-record AxiomVergeLayout {
+struct AxiomVergeLayout {
     /// The player's maximum-health value.
     maxHealth: MemoryPath,
     /// The game's sixty-hertz elapsed tick counter.

@@ -238,7 +238,7 @@ impl Parser<'_> {
                             start.join(member_span),
                         )
                         .with_primary_label(
-                            "declare attachment-wide dimensions in the state `layout { ... }` block and use the generated `Layout` record",
+                            "declare attachment-wide dimensions in the state `layout { ... }` block and use the generated `Layout` struct",
                         ));
                     }
                     return Err(Diagnostic::new(

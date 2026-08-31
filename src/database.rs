@@ -24,7 +24,7 @@ use crate::{
     CheckedProgram, Diagnostic, RecoveredCheck,
     ast::{
         EnumId, EnumVariantId, ExprKind, FunctionId, ManagedClassId, ManagedFieldId,
-        ManagedImageId, ManagedNamespaceId, MatchPattern, RecordFieldId, RecordId, Span, Stmt,
+        ManagedImageId, ManagedNamespaceId, MatchPattern, Span, Stmt, StructFieldId, StructId,
         TypeRef as SyntaxTypeRef, ValueId,
     },
     hir::ExpressionResolution,
@@ -51,8 +51,8 @@ pub enum SourceDefinitionId {
     Settings,
     Value(ValueId),
     Function(FunctionId),
-    Record(RecordId),
-    RecordField(RecordFieldId),
+    Struct(StructId),
+    StructField(StructFieldId),
     Enum(EnumId),
     EnumVariant(EnumVariantId),
     ManagedImage(ManagedImageId),
@@ -83,8 +83,8 @@ pub struct DefinitionIndex {
     settings: Option<SourceDefinition>,
     values: HashMap<ValueId, SourceDefinition>,
     functions: HashMap<FunctionId, SourceDefinition>,
-    records: HashMap<RecordId, SourceDefinition>,
-    record_fields: HashMap<RecordFieldId, SourceDefinition>,
+    structs: HashMap<StructId, SourceDefinition>,
+    struct_fields: HashMap<StructFieldId, SourceDefinition>,
     enums: HashMap<EnumId, SourceDefinition>,
     enum_variants: HashMap<EnumVariantId, SourceDefinition>,
     managed_images: HashMap<ManagedImageId, SourceDefinition>,
@@ -172,18 +172,18 @@ impl DefinitionIndex {
         defined.extend(
             collector
                 .index
-                .records
+                .structs
                 .keys()
                 .copied()
-                .map(SourceDefinitionId::Record),
+                .map(SourceDefinitionId::Struct),
         );
         defined.extend(
             collector
                 .index
-                .record_fields
+                .struct_fields
                 .keys()
                 .copied()
-                .map(SourceDefinitionId::RecordField),
+                .map(SourceDefinitionId::StructField),
         );
         defined.extend(
             collector
@@ -251,8 +251,8 @@ impl DefinitionIndex {
             SourceDefinitionId::Settings => self.settings.as_ref(),
             SourceDefinitionId::Value(id) => self.values.get(&id),
             SourceDefinitionId::Function(id) => self.functions.get(&id),
-            SourceDefinitionId::Record(id) => self.records.get(&id),
-            SourceDefinitionId::RecordField(id) => self.record_fields.get(&id),
+            SourceDefinitionId::Struct(id) => self.structs.get(&id),
+            SourceDefinitionId::StructField(id) => self.struct_fields.get(&id),
             SourceDefinitionId::Enum(id) => self.enums.get(&id),
             SourceDefinitionId::EnumVariant(id) => self.enum_variants.get(&id),
             SourceDefinitionId::ManagedImage(id) => self.managed_images.get(&id),
@@ -273,7 +273,7 @@ impl DefinitionIndex {
 
     /// Returns every source identity represented by the token at `offset`.
     ///
-    /// Most source tokens have exactly one identity. A shorthand record field
+    /// Most source tokens have exactly one identity. A shorthand struct field
     /// such as `Point { x }` intentionally has two: the destination field and
     /// the value supplied by the local binding. Tooling features can therefore
     /// choose an operation-specific interpretation without depending on
@@ -295,12 +295,12 @@ impl DefinitionIndex {
 }
 
 fn navigation_reference_priority(target: SourceDefinitionId) -> u8 {
-    // A shorthand record field navigates to the field declaration: that is the
+    // A shorthand struct field navigates to the field declaration: that is the
     // structural contract represented by the literal and is normally farther
     // away than the supplying local. Rename has its own policy and selects the
     // local value when invoked directly on the shorthand token.
     match target {
-        SourceDefinitionId::RecordField(_) => 0,
+        SourceDefinitionId::StructField(_) => 0,
         _ => 1,
     }
 }
@@ -443,7 +443,7 @@ fn definition_for_resolution(
                     })
             }
         }
-        ExpressionResolution::RecordLiteral { .. } => None,
+        ExpressionResolution::StructLiteral { .. } => None,
     }
 }
 
@@ -523,7 +523,7 @@ fn source_definition_for_resolution(
                 }
                 ResolvedEnumVariantId::Standard(_) => None,
             })?,
-        ExpressionResolution::RecordLiteral { .. } => None,
+        ExpressionResolution::StructLiteral { .. } => None,
     }
 }
 
@@ -532,7 +532,7 @@ fn source_definition_for_member(member: &ResolvedMember) -> Option<SourceDefinit
         ResolvedMember::StateField(field) | ResolvedMember::SettingField(field) => {
             Some(SourceDefinitionId::Value(*field))
         }
-        ResolvedMember::RecordField(field) => Some(SourceDefinitionId::RecordField(*field)),
+        ResolvedMember::StructField(field) => Some(SourceDefinitionId::StructField(*field)),
         ResolvedMember::ManagedField(field) => Some(SourceDefinitionId::ManagedField(*field)),
         ResolvedMember::StandardField(_) => None,
     }
@@ -547,8 +547,8 @@ fn definition_for_member(
             .get(SourceDefinitionId::Value(*field))
             .cloned()
             .map(DefinitionTarget::Source),
-        ResolvedMember::RecordField(field) => definitions
-            .get(SourceDefinitionId::RecordField(*field))
+        ResolvedMember::StructField(field) => definitions
+            .get(SourceDefinitionId::StructField(*field))
             .cloned()
             .map(DefinitionTarget::Source),
         ResolvedMember::ManagedField(field) => definitions
@@ -643,7 +643,7 @@ fn source_definition_for_value_path(
         ResolvedMember::StateField(field) | ResolvedMember::SettingField(field) => {
             Some(SourceDefinitionId::Value(*field))
         }
-        ResolvedMember::RecordField(field) => Some(SourceDefinitionId::RecordField(*field)),
+        ResolvedMember::StructField(field) => Some(SourceDefinitionId::StructField(*field)),
         ResolvedMember::ManagedField(field) => Some(SourceDefinitionId::ManagedField(*field)),
         ResolvedMember::StandardField(_) => None,
     }
@@ -769,8 +769,8 @@ fn definition_for_value_path(
             .get(SourceDefinitionId::Value(*field))
             .cloned()
             .map(DefinitionTarget::Source),
-        ResolvedMember::RecordField(field) => definitions
-            .get(SourceDefinitionId::RecordField(*field))
+        ResolvedMember::StructField(field) => definitions
+            .get(SourceDefinitionId::StructField(*field))
             .cloned()
             .map(DefinitionTarget::Source),
         ResolvedMember::ManagedField(field) => definitions
@@ -833,11 +833,11 @@ impl DefinitionCollector<'_> {
             SourceDefinitionId::Function(id) => {
                 self.index.functions.insert(id, definition);
             }
-            SourceDefinitionId::Record(id) => {
-                self.index.records.insert(id, definition);
+            SourceDefinitionId::Struct(id) => {
+                self.index.structs.insert(id, definition);
             }
-            SourceDefinitionId::RecordField(id) => {
-                self.index.record_fields.insert(id, definition);
+            SourceDefinitionId::StructField(id) => {
+                self.index.struct_fields.insert(id, definition);
             }
             SourceDefinitionId::Enum(id) => {
                 self.index.enums.insert(id, definition);
@@ -974,7 +974,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             }
             if let Some(layout) = &state.layout {
                 self.insert_definition(SourceDefinition {
-                    id: SourceDefinitionId::Record(layout.record),
+                    id: SourceDefinitionId::Struct(layout.structure),
                     name: "Layout".to_owned(),
                     span: layout.keyword_span,
                 });
@@ -1064,25 +1064,25 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
         }
     }
 
-    fn visit_record(&mut self, record: &'ast crate::ast::RecordDecl) {
+    fn visit_struct(&mut self, structure: &'ast crate::ast::StructDecl) {
         let is_attachment_layout = self
             .syntax
             .state
             .as_ref()
             .and_then(|state| state.layout.as_ref())
-            .is_some_and(|layout| layout.record == record.id);
+            .is_some_and(|layout| layout.structure == structure.id);
         if !is_attachment_layout
             && let Some(definition) = self.definition(
-                SourceDefinitionId::Record(record.id),
-                &record.name,
-                record.span,
+                SourceDefinitionId::Struct(structure.id),
+                &structure.name,
+                structure.span,
             )
         {
             self.insert_definition(definition);
         }
-        for field in &record.fields {
+        for field in &structure.fields {
             if let Some(definition) = self.definition(
-                SourceDefinitionId::RecordField(field.id),
+                SourceDefinitionId::StructField(field.id),
                 &field.name,
                 field.span,
             ) {
@@ -1090,7 +1090,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             }
             self.add_type_after_colon(field.ty, field.span);
         }
-        visit::walk_record(self, record);
+        visit::walk_struct(self, structure);
     }
 
     fn visit_enum(&mut self, enumeration: &'ast crate::ast::EnumDecl) {
@@ -1341,22 +1341,22 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
 
     fn visit_expr(&mut self, expression: &'ast crate::ast::Expr) {
         match &expression.kind {
-            ExprKind::Record {
+            ExprKind::Struct {
                 name_span, fields, ..
             } => {
-                if let Some(crate::semantic::ResolvedRecordId::Source(record)) =
-                    self.semantics.record_literal(expression.id)
+                if let Some(crate::semantic::ResolvedStructId::Source(structure)) =
+                    self.semantics.struct_literal(expression.id)
                 {
-                    self.add_reference(SourceDefinitionId::Record(record), *name_span);
+                    self.add_reference(SourceDefinitionId::Struct(structure), *name_span);
                 }
                 let resolved = self
                     .semantics
-                    .record_literal_fields(expression.id)
+                    .struct_literal_fields(expression.id)
                     .unwrap_or_default();
                 for (literal_field, field) in fields.iter().zip(resolved) {
-                    if let crate::semantic::ResolvedRecordFieldId::Source(field) = field {
+                    if let crate::semantic::ResolvedStructFieldId::Source(field) = field {
                         self.add_reference(
-                            SourceDefinitionId::RecordField(*field),
+                            SourceDefinitionId::StructField(*field),
                             literal_field.name_span,
                         );
                     }
@@ -1516,10 +1516,15 @@ fn named_type(
         SyntaxTypeRef::Named(id) => {
             let name = syntax.type_name(id);
             syntax
-                .records
+                .structs
                 .iter()
-                .find(|record| record.name == name)
-                .map(|record| (SourceDefinitionId::Record(record.id), record.name.as_str()))
+                .find(|structure| structure.name == name)
+                .map(|structure| {
+                    (
+                        SourceDefinitionId::Struct(structure.id),
+                        structure.name.as_str(),
+                    )
+                })
                 .or_else(|| {
                     syntax
                         .enums

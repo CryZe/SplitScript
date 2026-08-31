@@ -11,12 +11,12 @@ use crate::{
         ActionKind, AssignmentId, BinaryOp, Block, EnumId, EnumVariantId, Expr, ExprId, ExprKind,
         FunctionId, InterpolatedPart, ManagedClassId, ManagedFieldId, ManagedImageId,
         ManagedItemDecl, ManagedNamespaceId, MatchArm, MatchPattern, PatternBinding, PatternId,
-        Program as SyntaxProgram, RecordId, SettingChoiceOptionId, SettingKind, Span, Stmt,
+        Program as SyntaxProgram, SettingChoiceOptionId, SettingKind, Span, Stmt, StructId,
         SuspensionMode, TypeRef, UnaryOp, ValueId,
     },
     semantic::{
         DynamicCallCallee, FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember,
-        ResolvedRecordFieldId, ResolvedRecordId, ResolvedValue, ResolvedWrapperPattern,
+        ResolvedStructFieldId, ResolvedStructId, ResolvedValue, ResolvedWrapperPattern,
         SemanticModel, ValueConversion,
     },
     stdlib::{Implementation, StandardLibrary, StdlibItemId, StdlibTypeId},
@@ -29,7 +29,7 @@ pub enum DeclarationId {
     StateField(ValueId),
     Setting(ValueId),
     Global(ValueId),
-    Record(RecordId),
+    Struct(StructId),
     Enum(EnumId),
     ManagedImage(ManagedImageId),
     ManagedNamespace(ManagedNamespaceId),
@@ -93,12 +93,12 @@ impl DeclarationIndex {
                 global.span,
             );
         }
-        for record in &syntax.records {
+        for structure in &syntax.structs {
             program.push(
-                DeclarationId::Record(record.id),
+                DeclarationId::Struct(structure.id),
                 None,
-                &record.name,
-                record.span,
+                &structure.name,
+                structure.span,
             );
         }
         for enumeration in &syntax.enums {
@@ -228,9 +228,9 @@ pub enum ExpressionResolution {
     Call(ResolvedCall),
     DynamicCall(DynamicCallCallee),
     FunctionValue(FunctionInstance),
-    RecordLiteral {
-        record: ResolvedRecordId,
-        fields: Vec<ResolvedRecordFieldId>,
+    StructLiteral {
+        structure: ResolvedStructId,
+        fields: Vec<ResolvedStructFieldId>,
     },
     EnumConstructor {
         variant: ResolvedEnumVariantId,
@@ -316,8 +316,8 @@ pub enum TypedExpressionKind {
     Loop {
         body: TypedBlock,
     },
-    Record {
-        record: ResolvedRecordId,
+    Struct {
+        structure: ResolvedStructId,
         fields: Vec<(String, ExprId)>,
     },
     Enum {
@@ -804,9 +804,9 @@ impl TypedProgram {
         }
     }
 
-    pub fn record_literal_fields(&self, id: ExprId) -> Option<&[ResolvedRecordFieldId]> {
+    pub fn struct_literal_fields(&self, id: ExprId) -> Option<&[ResolvedStructFieldId]> {
         match &self.expression(id)?.resolution {
-            Some(ExpressionResolution::RecordLiteral { fields, .. }) => Some(fields),
+            Some(ExpressionResolution::StructLiteral { fields, .. }) => Some(fields),
             _ => None,
         }
     }
@@ -959,15 +959,15 @@ impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
                         .to_vec(),
                 }),
                 ExprKind::Call { .. } => None,
-                ExprKind::Record { .. } => Some(ExpressionResolution::RecordLiteral {
-                    record: self
+                ExprKind::Struct { .. } => Some(ExpressionResolution::StructLiteral {
+                    structure: self
                         .semantics
-                        .record_literal(expression.id)
-                        .expect("checked record literals have resolved nominal identities"),
+                        .struct_literal(expression.id)
+                        .expect("checked struct literals have resolved nominal identities"),
                     fields: self
                         .semantics
-                        .record_literal_fields(expression.id)
-                        .expect("checked record literals have resolved fields")
+                        .struct_literal_fields(expression.id)
+                        .expect("checked struct literals have resolved fields")
                         .to_vec(),
                 }),
                 _ => None,
@@ -1165,7 +1165,7 @@ pub fn walk_typed_expression<V: TypedVisitor>(
             }
         }
         TypedExpressionKind::Loop { body } => visitor.visit_block(body, program),
-        TypedExpressionKind::Record { fields, .. } => {
+        TypedExpressionKind::Struct { fields, .. } => {
             for (_, value) in fields {
                 visit_expression(*value);
             }
@@ -1433,10 +1433,10 @@ fn lower_expression_kind(
         ExprKind::Loop(block) => TypedExpressionKind::Loop {
             body: lower_block(block, semantics),
         },
-        ExprKind::Record { fields, .. } => TypedExpressionKind::Record {
-            record: semantics
-                .record_literal(expression.id)
-                .expect("checked record literals resolve their nominal declaration"),
+        ExprKind::Struct { fields, .. } => TypedExpressionKind::Struct {
+            structure: semantics
+                .struct_literal(expression.id)
+                .expect("checked struct literals resolve their nominal declaration"),
             fields: fields
                 .iter()
                 .map(|field| (field.name.clone(), field.value.id))

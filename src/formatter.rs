@@ -7,8 +7,8 @@ use crate::{
     Diagnostic,
     ast::{
         Action, EnumDecl, Expr, ExprKind, FunctionDecl, ManagedClassDecl, ManagedImageDecl,
-        ManagedNamespaceDecl, MatchArm, Program, RecordDecl, SettingDecl, SettingFamilyDecl,
-        SettingKind, StateDecl, StateField, Stmt, TypeApplicationDecl, VariableDecl,
+        ManagedNamespaceDecl, MatchArm, Program, SettingDecl, SettingFamilyDecl, SettingKind,
+        StateDecl, StateField, Stmt, StructDecl, TypeApplicationDecl, VariableDecl,
     },
     lexer::{Lexeme, Token, TokenKind, TriviaKind},
     syntax::SourceDocument,
@@ -276,12 +276,12 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
         }
     }
 
-    fn visit_record(&mut self, record: &'ast RecordDecl) {
+    fn visit_struct(&mut self, structure: &'ast StructDecl) {
         self.mark_declaration_items_vertical(
-            record.span,
-            record.fields.iter().map(|field| field.span.end),
+            structure.span,
+            structure.fields.iter().map(|field| field.span.end),
         );
-        visit::walk_record(self, record);
+        visit::walk_struct(self, structure);
     }
 
     fn visit_enum(&mut self, enumeration: &'ast EnumDecl) {
@@ -1356,11 +1356,11 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
         }
     }
 
-    fn visit_record(&mut self, record: &'ast RecordDecl) {
-        if !record.fields.is_empty() {
-            self.mark_comma(record.span);
+    fn visit_struct(&mut self, structure: &'ast StructDecl) {
+        if !structure.fields.is_empty() {
+            self.mark_comma(structure.span);
         }
-        visit::walk_record(self, record);
+        visit::walk_struct(self, structure);
     }
 
     fn visit_enum(&mut self, enumeration: &'ast EnumDecl) {
@@ -1393,7 +1393,7 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
 
     fn visit_expr(&mut self, expression: &'ast Expr) {
         match &expression.kind {
-            ExprKind::Record { fields, .. } if !fields.is_empty() => {
+            ExprKind::Struct { fields, .. } if !fields.is_empty() => {
                 self.mark_comma_for_items(
                     expression.span,
                     fields.iter().map(|field| field.value.span),
@@ -1869,7 +1869,7 @@ fn choose(flag: bool) -> i32 {
 
     #[test]
     fn uses_trailing_commas_only_for_multiline_lists() {
-        let source = r#"record Point { x: i32, y: i32, }
+        let source = r#"struct Point { x: i32, y: i32, }
 enum Mode { First, Second, }
 state "game.exe" { value = 1 }
 fn compact() { print(1, 2,) }
@@ -1886,7 +1886,7 @@ fn multiline() {
 
         let formatted = format_source(source).unwrap();
         assert!(
-            formatted.contains("record Point {\n    x: i32,\n    y: i32,\n}"),
+            formatted.contains("struct Point {\n    x: i32,\n    y: i32,\n}"),
             "{formatted}"
         );
         assert!(
@@ -2092,7 +2092,7 @@ stage:i32 at 0x100
 /// Shared counter.
 let count=0
 /// Coordinate pair.
-record Point{
+struct Point{
 /// Horizontal coordinate.
 x:i32
 }
@@ -2106,7 +2106,7 @@ fn describe(point:Point){return point.x as String}
 /// Shared counter.
 let count = 0
 /// Coordinate pair.
-record Point {
+struct Point {
     /// Horizontal coordinate.
     x: i32,
 }
@@ -2599,7 +2599,7 @@ onAttach {
     }
 
     #[test]
-    fn formats_attachment_layout_dimensions_as_a_nested_record_shape() {
+    fn formats_attachment_layout_dimensions_as_a_nested_struct_shape() {
         let source = r#"enum Edition{Base,Demo}
 enum Storefront{Steam,GOG}
 state "game.exe"{layout{edition:Edition,storefront:Storefront}level:u32 at 0x100}

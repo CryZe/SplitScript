@@ -18,13 +18,13 @@ pub(crate) fn display_type(ty: TypeId, snapshot: &SemanticSnapshot) -> String {
             .to_owned(),
         TypeKind::StateSnapshot => "StateSnapshot".to_owned(),
         TypeKind::SettingsView => "SettingsView".to_owned(),
-        TypeKind::Record(id) => snapshot
+        TypeKind::Struct(id) => snapshot
             .syntax()
-            .records
+            .structs
             .iter()
-            .find(|record| record.id == *id)
-            .map(|record| record.name.clone())
-            .unwrap_or_else(|| format!("record#{}", id.index())),
+            .find(|structure| structure.id == *id)
+            .map(|structure| structure.name.clone())
+            .unwrap_or_else(|| format!("struct#{}", id.index())),
         TypeKind::Enum(id) => snapshot
             .enum_types()
             .iter()

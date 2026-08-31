@@ -36,7 +36,7 @@ fn serves_compiler_owned_documentation_index_and_markdown_pages() {
     assert!(entries.iter().any(|entry| {
         entry["title"] == "Duration"
             && entry["uri"] == "/stdlib/types/Duration/index.md"
-            && entry["kind"] == "record"
+            && entry["kind"] == "struct"
     }));
     assert!(entries.iter().any(|entry| {
         entry["signature"] == "asl.lifecycle.update"
@@ -505,7 +505,7 @@ fn showcase_declaration_recovery_does_not_panic_the_language_server() {
     pos: Pos at 0x100;
 }
 
-record Pos {
+struct Pos {
     x: f32,
 }
 
@@ -1642,7 +1642,7 @@ fn document_highlights_classify_reads_and_writes() {
 #[test]
 fn type_definition_navigates_inferred_source_and_catalog_types() {
     let source = concat!(
-        "record Point { x: i32, }\n",
+        "struct Point { x: i32, }\n",
         "state \"game.exe\" {}\n",
         "whileAttached {\n",
         "    let point = Point { x: 1 }\n",
@@ -1667,7 +1667,7 @@ fn type_definition_navigates_inferred_source_and_catalog_types() {
 
     let point_use = source.rfind("= point").unwrap() + 2;
     let (line, character) = position_parts(source, point_use);
-    let record = server.handle(json!({
+    let structure = server.handle(json!({
         "jsonrpc": "2.0",
         "id": 19,
         "method": "textDocument/typeDefinition",
@@ -1677,9 +1677,9 @@ fn type_definition_navigates_inferred_source_and_catalog_types() {
         }
     }));
     let declaration = source.find("Point").unwrap();
-    assert_eq!(record[0]["result"]["uri"], uri);
+    assert_eq!(structure[0]["result"]["uri"], uri);
     assert_eq!(
-        record[0]["result"]["range"]["start"],
+        structure[0]["result"]["range"]["start"],
         position(source, declaration)
     );
 
@@ -1998,7 +1998,7 @@ whileAttached {
 #[test]
 fn document_symbols_and_code_actions_preserve_compiler_structure() {
     let symbols_source = concat!(
-        "record Point { x: i32 }\n",
+        "struct Point { x: i32 }\n",
         "state \"game.exe\" { level = process.read<i32>(0) }\n",
         "settings { \"General\" { \"Enabled\" => enabled: true } }\n",
         "whileAttached {}\n"
@@ -2234,7 +2234,7 @@ fn code_actions_extract_selected_expressions() {
 #[test]
 fn unused_member_code_actions_apply_validated_multi_edit_suppressions() {
     let source = concat!(
-        "record Pair {\n",
+        "struct Pair {\n",
         "    used: i32,\n",
         "    unused: i32,\n",
         "}\n",
@@ -2285,10 +2285,10 @@ fn unused_member_code_actions_apply_validated_multi_edit_suppressions() {
 }
 
 #[test]
-fn unused_record_field_fix_survives_save_undo_and_save() {
+fn unused_struct_field_fix_survives_save_undo_and_save() {
     let unformatted = concat!(
         "state \"explorer.exe\" {}\n",
-        "record Pos {\n",
+        "struct Pos {\n",
         "    x: u16,\n",
         "    y: u16,\n",
         "}\n",
@@ -2304,7 +2304,7 @@ fn unused_record_field_fix_survives_save_undo_and_save() {
         .expect("fixture formatting")
         .to_string();
     let source = source.as_str();
-    let uri = "file:///unused-record-field-undo.split";
+    let uri = "file:///unused-struct-field-undo.split";
     let mut server = LanguageServer::default();
     initialize(&mut server);
     let diagnostics = server.handle(notification(
@@ -2502,14 +2502,14 @@ fn unused_shared_state_field_has_one_validated_multi_layout_suppression() {
 }
 
 #[test]
-fn record_field_shorthand_fixes_and_renames_preserve_both_identities() {
+fn struct_field_shorthand_fixes_and_renames_preserve_both_identities() {
     let source = concat!(
-        "record Point { x: u32 }\n",
+        "struct Point { x: u32 }\n",
         "state \"game.exe\" {}\n",
         "fn point(x: u32) -> Point { return Point { x: x } }\n",
         "setup { print(point(1).x) }\n"
     );
-    let uri = "file:///record-shorthand.split";
+    let uri = "file:///struct-shorthand.split";
     let mut server = LanguageServer::default();
     initialize(&mut server);
     let diagnostics = server.handle(notification(
@@ -2547,7 +2547,7 @@ fn record_field_shorthand_fixes_and_renames_preserve_both_identities() {
     assert_eq!(quick_fixes[0]["edit"]["changes"][uri][0]["newText"], "");
 
     let shorthand_source = source.replacen("x: x", "x", 1);
-    let shorthand_uri = "file:///record-shorthand-rename.split";
+    let shorthand_uri = "file:///struct-shorthand-rename.split";
     server.handle(notification(
         "textDocument/didOpen",
         json!({

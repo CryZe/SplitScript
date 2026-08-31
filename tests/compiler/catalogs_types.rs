@@ -913,7 +913,7 @@ fn array_search_methods_are_source_defined_and_preserve_element_constraints() {
 
     let errors = splitscript::compile(
         r#"
-            record Marker { values: [i32] }
+            struct Marker { values: [i32] }
             state "game.exe" {}
             whileAttached {
                 let markers: [Marker; 1] = [Marker { values: [1] }]
@@ -986,7 +986,7 @@ fn source_defined_library_bodies_publish_compiler_derived_operation_metadata() {
 }
 
 #[test]
-fn user_code_cannot_construct_runtime_private_standard_library_records() {
+fn user_code_cannot_construct_runtime_private_standard_library_structs() {
     let parsed = splitscript::parse(
         r#"
         state "game.exe" {}
@@ -1448,7 +1448,7 @@ fn genesis_provider_normalizes_word_swapped_unaligned_reads_and_guest_pointer_pa
     ));
 
     let source = r#"
-        record Snapshot {
+        struct Snapshot {
             score: u32,
             velocity: i16,
             samples: [u16; 2],
@@ -1501,7 +1501,7 @@ fn genesis_provider_normalizes_word_swapped_unaligned_reads_and_guest_pointer_pa
 }
 
 #[test]
-fn gcn_provider_decodes_big_endian_records_arrays_and_guest_pointer_paths() {
+fn gcn_provider_decodes_big_endian_structs_arrays_and_guest_pointer_paths() {
     let library = StandardLibrary::new();
     let gcn = library
         .state_provider_by_name("GCN")
@@ -1529,7 +1529,7 @@ fn gcn_provider_decodes_big_endian_records_arrays_and_guest_pointer_paths() {
     ));
 
     let source = r#"
-        record Snapshot {
+        struct Snapshot {
             health: u16,
             velocity: i32,
             samples: [u16; 2],
@@ -1612,7 +1612,7 @@ fn wii_provider_covers_mem1_mem2_and_big_endian_guest_pointer_paths() {
     ));
 
     let source = r#"
-        record Player {
+        struct Player {
             health: u16,
             position: [f32; 3],
         }
@@ -2782,7 +2782,7 @@ fn parsed_type_references_are_inference_free_syntax() {
             level: u16 at "game.exe", 0x10
         }
 
-        record Buffer {
+        struct Buffer {
             values: [u32]
         }
 
@@ -2804,9 +2804,9 @@ fn parsed_type_references_are_inference_free_syntax() {
             Some(TypeRef::core(CoreTypeId::U16))
         );
 
-        let values = &syntax.records[0].fields[0];
+        let values = &syntax.structs[0].fields[0];
         let TypeRef::Array(array) = values.ty else {
-            panic!("the record field should retain its parsed array reference");
+            panic!("the struct field should retain its parsed array reference");
         };
         assert_eq!(
             syntax
@@ -2896,13 +2896,13 @@ fn source_standard_type_names_resolve_after_parsing() {
 }
 
 #[test]
-fn source_record_and_enum_annotations_resolve_after_parsing() {
+fn source_struct_and_enum_annotations_resolve_after_parsing() {
     use splitscript::compiler::ast::TypeRef;
 
     let parsed = splitscript::parse(
         r#"
             state "game.exe" {}
-            record Point {
+            struct Point {
                 x: i32
             }
             enum Location {
@@ -2933,7 +2933,7 @@ fn source_record_and_enum_annotations_resolve_after_parsing() {
         checked
             .semantics()
             .types()
-            .id_for_record(checked.syntax().records[0].id),
+            .id_for_struct(checked.syntax().structs[0].id),
     );
     assert_eq!(
         checked.semantics().value_type(location_parameter).unwrap(),
@@ -2947,7 +2947,7 @@ fn source_record_and_enum_annotations_resolve_after_parsing() {
             .semantics()
             .types()
             .kind(checked.semantics().value_type(point_parameter).unwrap()),
-        &TypeKind::Record(checked.syntax().records[0].id)
+        &TypeKind::Struct(checked.syntax().structs[0].id)
     );
     assert_eq!(
         checked
@@ -2964,7 +2964,7 @@ fn semantic_capabilities_query_declared_and_derived_types_by_type_id() {
         splitscript::parse(
             r#"
             state "game.exe" {}
-            record Pair {
+            struct Pair {
                 left: i32,
                 right: i32
             }
@@ -2982,10 +2982,10 @@ fn semantic_capabilities_query_declared_and_derived_types_by_type_id() {
     let pair = types
         .iter()
         .find_map(|(id, kind)| {
-            matches!(kind, TypeKind::Record(record) if *record == checked.syntax().records[0].id)
+            matches!(kind, TypeKind::Struct(structure) if *structure == checked.syntax().structs[0].id)
                 .then_some(id)
         })
-        .expect("the source record should have a semantic type");
+        .expect("the source struct should have a semantic type");
     let maybe_pair = types
         .iter()
         .find_map(|(id, kind)| {
@@ -3028,7 +3028,7 @@ fn source_methods_structurally_satisfy_display() {
     let source = r#"
         state "game.exe" {}
 
-        record Position {
+        struct Position {
             x: i32,
             y: i32,
         }
@@ -3064,7 +3064,7 @@ fn source_methods_structurally_satisfy_display() {
     let position = checked
         .semantics()
         .types()
-        .id_for_record(checked.syntax().records[0].id);
+        .id_for_struct(checked.syntax().structs[0].id);
     let mode = checked
         .semantics()
         .types()
@@ -3086,7 +3086,7 @@ fn source_methods_structurally_satisfy_display() {
 fn structural_display_derives_by_default_and_reports_mismatched_overrides() {
     let derived = r#"
         state "game.exe" {}
-        record Position { x: i32, }
+        struct Position { x: i32, }
         enum Location { Unknown, Known(Position), }
         whileAttached {
             let position = Position { x: 3 }
@@ -3102,7 +3102,7 @@ fn structural_display_derives_by_default_and_reports_mismatched_overrides() {
         checked
             .semantics()
             .types()
-            .id_for_record(checked.syntax().records[0].id),
+            .id_for_struct(checked.syntax().structs[0].id),
         checked
             .semantics()
             .types()
@@ -3127,7 +3127,7 @@ fn structural_display_derives_by_default_and_reports_mismatched_overrides() {
             let source = format!(
                 r#"
                     state "game.exe" {{}}
-                    record Position {{ x: i32, }}
+                    struct Position {{ x: i32, }}
                     {method}
                     whileAttached {{ {consumer} }}
                 "#
@@ -3160,7 +3160,7 @@ fn structural_display_derives_by_default_and_reports_mismatched_overrides() {
 fn structural_debug_can_be_overridden_and_rejects_mismatched_methods() {
     let source = r#"
         state "game.exe" {}
-        record Position { x: i32, }
+        struct Position { x: i32, }
         fn Position.debugString() -> String { return `point:{self.x}` }
         whileAttached {
             print(Position { x: 3 })
@@ -3172,7 +3172,7 @@ fn structural_debug_can_be_overridden_and_rejects_mismatched_methods() {
     let position = checked
         .semantics()
         .types()
-        .id_for_record(checked.syntax().records[0].id);
+        .id_for_struct(checked.syntax().structs[0].id);
     assert!(checked.capabilities().has(
         position,
         splitscript::compiler::stdlib::StdlibCapabilityId::Debug,
@@ -3186,7 +3186,7 @@ fn structural_debug_can_be_overridden_and_rejects_mismatched_methods() {
         splitscript::parse(
             r#"
                 state "game.exe" {}
-                record Position { x: i32, }
+                struct Position { x: i32, }
                 fn Position.debugString() -> i32 { return self.x }
                 whileAttached { print(Position { x: 3 }) }
             "#,
@@ -3208,8 +3208,8 @@ fn structural_debug_can_be_overridden_and_rejects_mismatched_methods() {
 fn implicit_display_calls_propagate_source_method_effects() {
     let source = r#"
         state "game.exe" {}
-        record ProcessLabel { prefix: String, }
-        record WrappedLabel { label: ProcessLabel, }
+        struct ProcessLabel { prefix: String, }
+        struct WrappedLabel { label: ProcessLabel, }
 
         fn ProcessLabel.toString() -> String {
             return `{self.prefix}: {process.name()}`
@@ -3239,7 +3239,7 @@ fn implicit_display_calls_propagate_source_method_effects() {
 fn implicit_debug_calls_propagate_source_method_effects() {
     let source = r#"
         state "game.exe" {}
-        record ProcessLabel { prefix: String, }
+        struct ProcessLabel { prefix: String, }
 
         fn ProcessLabel.debugString() -> String {
             return `{self.prefix}: {process.name()}`
@@ -3266,7 +3266,7 @@ fn implicit_debug_calls_propagate_state_snapshot_effects() {
         state "game.exe" {
             health: u32 at 0x100;
         }
-        record SnapshotLabel { prefix: String, }
+        struct SnapshotLabel { prefix: String, }
 
         fn SnapshotLabel.debugString() -> String {
             return `{self.prefix}: {current.health}`
@@ -3328,7 +3328,7 @@ fn option_and_result_annotations_are_distinct_interned_semantic_types() {
     let source = r#"
         state "game.exe" {}
 
-        record Wrappers {
+        struct Wrappers {
             maybe: i32?,
             attempt: String!
         }

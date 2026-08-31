@@ -465,7 +465,7 @@ fn wasm_ir_owns_gc_constructors_interpolation_and_signatures() {
     let source = r#"
         state "game.exe" {}
 
-        record Pair {
+        struct Pair {
             left: i32,
             right: i32
         }
@@ -512,7 +512,7 @@ fn wasm_ir_owns_gc_constructors_interpolation_and_signatures() {
                 assert_eq!(elements.len(), 3);
                 saw[3] = true;
             }
-            ExpressionKind::Record { fields, .. } => {
+            ExpressionKind::Struct { fields, .. } => {
                 assert_eq!(fields.len(), 2);
                 assert_ne!(fields[0].0, fields[1].0);
                 saw[4] = true;
@@ -539,7 +539,7 @@ fn wasm_ir_owns_backend_call_targets_intrinsics_and_arguments() {
     let source = r#"
         state "game.exe" {}
 
-        record Counter { value: i32 }
+        struct Counter { value: i32 }
 
         fn answer() -> i32 {
             return 42
@@ -668,7 +668,7 @@ fn none_is_a_first_class_unit_across_wrappers_storage_and_async_code() {
 
         let globalUnit = None
 
-        record UnitBox {
+        struct UnitBox {
             value: None
         }
 
@@ -1102,11 +1102,11 @@ fn retry_next_to_fallback_requires_explicit_grouping() {
 }
 
 #[test]
-fn declared_record_enum_and_array_layouts_are_semantic_facts() {
+fn declared_struct_enum_and_array_layouts_are_semantic_facts() {
     let source = r#"
         state "game.exe" {}
 
-        record Inventory {
+        struct Inventory {
             names: [String],
             code: u16
         }
@@ -1126,11 +1126,11 @@ fn declared_record_enum_and_array_layouts_are_semantic_facts() {
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
     let syntax = checked.syntax();
     let semantics = checked.semantics();
-    let inventory = &syntax.records[0];
+    let inventory = &syntax.structs[0];
 
     let names_type = semantics
-        .record_field_type(inventory.fields[0].id)
-        .expect("record field layouts should expose semantic types");
+        .struct_field_type(inventory.fields[0].id)
+        .expect("struct field layouts should expose semantic types");
     let TypeKind::Array {
         layout,
         element: names_element,
@@ -1153,7 +1153,7 @@ fn declared_record_enum_and_array_layouts_are_semantic_facts() {
         Some(*names_element)
     );
 
-    let code_type = semantics.record_field_type(inventory.fields[1].id).unwrap();
+    let code_type = semantics.struct_field_type(inventory.fields[1].id).unwrap();
     assert_eq!(
         semantics.types().kind(code_type),
         &TypeKind::Builtin(BuiltinType::U16)
@@ -1170,7 +1170,7 @@ fn declared_record_enum_and_array_layouts_are_semantic_facts() {
         .expect("payload variants should expose their semantic payload type");
     assert_eq!(
         semantics.types().kind(found_payload),
-        &TypeKind::Record(inventory.id)
+        &TypeKind::Struct(inventory.id)
     );
 
     Validator::new_with_features(WasmFeatures::all())
@@ -1631,7 +1631,7 @@ fn call_result_fields_parse_before_detached_effects_are_checked() {
     let source = r#"
         state "game.exe" {}
 
-        record LevelTimeParts {
+        struct LevelTimeParts {
             minutes: f32,
             seconds: f32,
             hundredths: f32
@@ -1702,7 +1702,7 @@ fn attached_process_requirements_propagate_through_function_call_graphs() {
     let safe_source = r#"
         state "game.exe" {}
 
-        record Reader {
+        struct Reader {
             address: address
         }
 
@@ -2020,7 +2020,7 @@ fn explicit_generic_calls_accept_named_and_constructed_types() {
     let source = r#"
         state "game.exe" {}
 
-        record Header {
+        struct Header {
             marker: u32
         }
 

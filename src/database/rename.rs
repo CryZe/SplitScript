@@ -8,7 +8,7 @@ use crate::{
     diagnostic::TextEdit,
     language::LanguageCatalog,
     lexer::TokenKind,
-    semantic::{ResolvedRecordFieldId, SemanticModel},
+    semantic::{ResolvedStructFieldId, SemanticModel},
     stdlib::{StandardLibrary, StdlibOwner},
     visit::{self, Visitor},
 };
@@ -38,7 +38,7 @@ pub enum RenameError {
 }
 
 #[derive(Debug, Clone)]
-struct RecordShorthandReference {
+struct StructShorthandReference {
     span: Span,
     name: String,
     field: SourceDefinitionId,
@@ -70,10 +70,10 @@ impl CompilerDatabase {
         let offset = self.caret_query_offset(offset)?;
         let definitions = self.definition_index()?;
         let references = definitions.references_at_offset(offset).collect::<Vec<_>>();
-        let is_record_shorthand = references
+        let is_struct_shorthand = references
             .iter()
-            .any(|reference| matches!(reference.target, SourceDefinitionId::RecordField(_)));
-        let reference = is_record_shorthand
+            .any(|reference| matches!(reference.target, SourceDefinitionId::StructField(_)));
+        let reference = is_struct_shorthand
             .then(|| {
                 references
                     .iter()
@@ -148,7 +148,7 @@ impl CompilerDatabase {
         }
 
         let definitions = self.definition_index().map_err(RenameError::Diagnostics)?;
-        let shorthand_references = self.record_shorthand_references()?;
+        let shorthand_references = self.struct_shorthand_references()?;
         let target_ids = self.logical_rename_ids(target.id)?;
         let mut spans = target_ids
             .iter()
@@ -256,11 +256,11 @@ impl CompilerDatabase {
         })
     }
 
-    fn record_shorthand_references(
+    fn struct_shorthand_references(
         &mut self,
-    ) -> Result<Vec<RecordShorthandReference>, RenameError> {
+    ) -> Result<Vec<StructShorthandReference>, RenameError> {
         let checked = self.check().map_err(RenameError::Diagnostics)?;
-        let mut collector = RecordShorthandCollector {
+        let mut collector = StructShorthandCollector {
             semantics: checked.semantics(),
             references: Vec::new(),
         };
@@ -419,23 +419,23 @@ impl CompilerDatabase {
     }
 }
 
-struct RecordShorthandCollector<'a> {
+struct StructShorthandCollector<'a> {
     semantics: &'a SemanticModel,
-    references: Vec<RecordShorthandReference>,
+    references: Vec<StructShorthandReference>,
 }
 
-impl<'ast> Visitor<'ast> for RecordShorthandCollector<'_> {
+impl<'ast> Visitor<'ast> for StructShorthandCollector<'_> {
     fn visit_expr(&mut self, expression: &'ast Expr) {
-        if let ExprKind::Record { fields, .. } = &expression.kind {
+        if let ExprKind::Struct { fields, .. } = &expression.kind {
             let resolved = self
                 .semantics
-                .record_literal_fields(expression.id)
+                .struct_literal_fields(expression.id)
                 .unwrap_or_default();
             for (field, resolved_field) in fields.iter().zip(resolved) {
                 if !field.shorthand {
                     continue;
                 }
-                let ResolvedRecordFieldId::Source(record_field) = resolved_field else {
+                let ResolvedStructFieldId::Source(struct_field) = resolved_field else {
                     continue;
                 };
                 let Some(value) = self
@@ -445,10 +445,10 @@ impl<'ast> Visitor<'ast> for RecordShorthandCollector<'_> {
                 else {
                     continue;
                 };
-                self.references.push(RecordShorthandReference {
+                self.references.push(StructShorthandReference {
                     span: field.name_span,
                     name: field.name.clone(),
-                    field: SourceDefinitionId::RecordField(*record_field),
+                    field: SourceDefinitionId::StructField(*struct_field),
                     value: SourceDefinitionId::Value(value),
                 });
             }

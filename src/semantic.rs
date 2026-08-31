@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use crate::{
     ast::{
         ActionKind, ArrayTypeId, AssignmentId, EnumVariantId, ExprId, FunctionId, ManagedClassId,
-        ManagedFieldId, OptionTypeId, PatternId, RecordFieldId, RecordId, ResultTypeId,
-        SettingChoiceOptionId, TypeApplicationId, ValueId,
+        ManagedFieldId, OptionTypeId, PatternId, ResultTypeId, SettingChoiceOptionId,
+        StructFieldId, StructId, TypeApplicationId, ValueId,
     },
     inference::Type,
     stdlib::{StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibTypeId, StdlibVariantId},
@@ -310,7 +310,7 @@ impl ResolvedReceiver {
 pub enum ResolvedMember {
     StateField(ValueId),
     SettingField(ValueId),
-    RecordField(RecordFieldId),
+    StructField(StructFieldId),
     ManagedField(ManagedFieldId),
     StandardField(StdlibFieldId),
 }
@@ -322,28 +322,28 @@ pub enum ResolvedEnumVariantId {
     Standard(StdlibVariantId),
 }
 
-/// Nominal record selected by a checked record literal.
+/// Nominal struct selected by a checked struct literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ResolvedRecordId {
-    Source(RecordId),
+pub enum ResolvedStructId {
+    Source(StructId),
     Standard(StdlibTypeId),
     StandardConstructor(TypeApplicationId),
 }
 
-impl std::fmt::Display for ResolvedRecordId {
+impl std::fmt::Display for ResolvedStructId {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Source(record) => record.fmt(formatter),
-            Self::Standard(record) => write!(formatter, "{record:?}"),
-            Self::StandardConstructor(record) => write!(formatter, "{record:?}"),
+            Self::Source(structure) => structure.fmt(formatter),
+            Self::Standard(structure) => write!(formatter, "{structure:?}"),
+            Self::StandardConstructor(structure) => write!(formatter, "{structure:?}"),
         }
     }
 }
 
-/// Field selected by a checked record literal.
+/// Field selected by a checked struct literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ResolvedRecordFieldId {
-    Source(RecordFieldId),
+pub enum ResolvedStructFieldId {
+    Source(StructFieldId),
     Standard(StdlibFieldId),
 }
 
@@ -366,7 +366,7 @@ pub enum DynamicCallCallee {
 /// One statically proven fact about the attachment-wide `layout` value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ResolvedLayoutConstraint {
-    pub dimension: RecordFieldId,
+    pub dimension: StructFieldId,
     pub variant: EnumVariantId,
 }
 
@@ -396,7 +396,7 @@ pub struct SemanticModel {
     function_associated_projections: HashMap<FunctionId, Vec<FunctionAssociatedProjection>>,
     generic_parameter_constraints: HashMap<TypeId, Vec<crate::stdlib::StdlibCapabilityId>>,
     specialized_types: HashMap<(FunctionInstance, TypeId), TypeId>,
-    record_field_types: HashMap<RecordFieldId, TypeId>,
+    struct_field_types: HashMap<StructFieldId, TypeId>,
     managed_field_types: HashMap<ManagedFieldId, TypeId>,
     standard_field_types: HashMap<StdlibFieldId, TypeId>,
     enum_variant_payloads: HashMap<EnumVariantId, Option<TypeId>>,
@@ -411,8 +411,8 @@ pub struct SemanticModel {
     propagation_targets: HashMap<ExprId, TypeId>,
     propagation_retry_boundaries: HashMap<ExprId, ExprId>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
-    record_literals: HashMap<ExprId, ResolvedRecordId>,
-    record_literal_fields: HashMap<ExprId, Vec<ResolvedRecordFieldId>>,
+    struct_literals: HashMap<ExprId, ResolvedStructId>,
+    struct_literal_fields: HashMap<ExprId, Vec<ResolvedStructFieldId>>,
     enum_variants: HashMap<ExprId, ResolvedEnumVariantId>,
     pattern_variants: HashMap<PatternId, ResolvedEnumVariantId>,
     wrapper_patterns: HashMap<PatternId, ResolvedWrapperPattern>,
@@ -491,7 +491,7 @@ impl SemanticModel {
         self.action_results.get(&action).copied()
     }
 
-    /// Physical fields in the generated StateSnapshot GC struct.
+    /// Physical fields in the generated StateSnapshot GC structure.
     pub fn state_storage_fields(&self) -> &[ValueId] {
         &self.state_storage_fields
     }
@@ -642,7 +642,7 @@ impl SemanticModel {
             | TypeKind::Standard(_)
             | TypeKind::StateSnapshot
             | TypeKind::SettingsView
-            | TypeKind::Record(_)
+            | TypeKind::Struct(_)
             | TypeKind::ManagedClass(_)
             | TypeKind::ManagedReference(_)
             | TypeKind::Enum(_)
@@ -960,7 +960,7 @@ impl SemanticModel {
             | TypeKind::Standard(_)
             | TypeKind::StateSnapshot
             | TypeKind::SettingsView
-            | TypeKind::Record(_)
+            | TypeKind::Struct(_)
             | TypeKind::ManagedClass(_)
             | TypeKind::ManagedReference(_)
             | TypeKind::Enum(_)
@@ -978,7 +978,7 @@ impl SemanticModel {
             TypeKind::Standard(standard) => crate::types::ResolvedTypeRef::Standard(*standard),
             TypeKind::StateSnapshot => crate::types::ResolvedTypeRef::StateSnapshot,
             TypeKind::SettingsView => crate::types::ResolvedTypeRef::SettingsView,
-            TypeKind::Record(record) => crate::types::ResolvedTypeRef::Record(*record),
+            TypeKind::Struct(structure) => crate::types::ResolvedTypeRef::Struct(*structure),
             TypeKind::Enum(enumeration) => crate::types::ResolvedTypeRef::Enum(*enumeration),
             TypeKind::ManagedClass(class) => crate::types::ResolvedTypeRef::ManagedClass(*class),
             TypeKind::ManagedReference(class) => {
@@ -1120,12 +1120,12 @@ impl SemanticModel {
         self.function_parameter_types = parameters;
     }
 
-    pub fn record_field_type(&self, field: RecordFieldId) -> Option<TypeId> {
-        self.record_field_types.get(&field).copied()
+    pub fn struct_field_type(&self, field: StructFieldId) -> Option<TypeId> {
+        self.struct_field_types.get(&field).copied()
     }
 
-    pub fn record_field_types(&self) -> impl Iterator<Item = (RecordFieldId, TypeId)> + '_ {
-        self.record_field_types
+    pub fn struct_field_types(&self) -> impl Iterator<Item = (StructFieldId, TypeId)> + '_ {
+        self.struct_field_types
             .iter()
             .map(|(field, ty)| (*field, *ty))
     }
@@ -1207,14 +1207,14 @@ impl SemanticModel {
         self.path_members.get(&expression).map(Vec::as_slice)
     }
 
-    pub fn record_literal_fields(&self, expression: ExprId) -> Option<&[ResolvedRecordFieldId]> {
-        self.record_literal_fields
+    pub fn struct_literal_fields(&self, expression: ExprId) -> Option<&[ResolvedStructFieldId]> {
+        self.struct_literal_fields
             .get(&expression)
             .map(Vec::as_slice)
     }
 
-    pub fn record_literal(&self, expression: ExprId) -> Option<ResolvedRecordId> {
-        self.record_literals.get(&expression).copied()
+    pub fn struct_literal(&self, expression: ExprId) -> Option<ResolvedStructId> {
+        self.struct_literals.get(&expression).copied()
     }
 
     pub fn enum_variant(&self, expression: ExprId) -> Option<ResolvedEnumVariantId> {
@@ -1347,7 +1347,7 @@ pub(crate) struct SemanticBuilder {
     action_results: HashMap<ActionKind, Type>,
     function_results: HashMap<FunctionId, Type>,
     function_completions: HashMap<FunctionId, Type>,
-    record_field_types: HashMap<RecordFieldId, Type>,
+    struct_field_types: HashMap<StructFieldId, Type>,
     managed_field_types: HashMap<ManagedFieldId, Type>,
     standard_field_types: HashMap<StdlibFieldId, Type>,
     enum_variant_payloads: HashMap<EnumVariantId, Option<Type>>,
@@ -1362,8 +1362,8 @@ pub(crate) struct SemanticBuilder {
     propagation_targets: HashMap<ExprId, Type>,
     propagation_retry_boundaries: HashMap<ExprId, ExprId>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
-    record_literals: HashMap<ExprId, ResolvedRecordId>,
-    record_literal_fields: HashMap<ExprId, Vec<ResolvedRecordFieldId>>,
+    struct_literals: HashMap<ExprId, ResolvedStructId>,
+    struct_literal_fields: HashMap<ExprId, Vec<ResolvedStructFieldId>>,
     enum_variants: HashMap<ExprId, ResolvedEnumVariantId>,
     pattern_variants: HashMap<PatternId, ResolvedEnumVariantId>,
     wrapper_patterns: HashMap<PatternId, ResolvedWrapperPattern>,
@@ -1554,9 +1554,9 @@ impl SemanticBuilder {
         debug_assert!(previous.is_none(), "function IDs must be unique");
     }
 
-    pub(crate) fn resolve_record_field_type(&mut self, field: RecordFieldId, ty: Type) {
-        let previous = self.record_field_types.insert(field, ty);
-        debug_assert!(previous.is_none(), "record field IDs must be unique");
+    pub(crate) fn resolve_struct_field_type(&mut self, field: StructFieldId, ty: Type) {
+        let previous = self.struct_field_types.insert(field, ty);
+        debug_assert!(previous.is_none(), "struct field IDs must be unique");
     }
 
     pub(crate) fn resolve_managed_field_type(&mut self, field: ManagedFieldId, ty: Type) {
@@ -1631,18 +1631,22 @@ impl SemanticBuilder {
         debug_assert!(previous.is_none(), "path expression IDs must be unique");
     }
 
-    pub(crate) fn resolve_record_literal_fields(
+    pub(crate) fn resolve_struct_literal_fields(
         &mut self,
         expression: ExprId,
-        fields: Vec<ResolvedRecordFieldId>,
+        fields: Vec<ResolvedStructFieldId>,
     ) {
-        let previous = self.record_literal_fields.insert(expression, fields);
-        debug_assert!(previous.is_none(), "record expression IDs must be unique");
+        let previous = self.struct_literal_fields.insert(expression, fields);
+        debug_assert!(previous.is_none(), "struct expression IDs must be unique");
     }
 
-    pub(crate) fn resolve_record_literal(&mut self, expression: ExprId, record: ResolvedRecordId) {
-        let previous = self.record_literals.insert(expression, record);
-        debug_assert!(previous.is_none(), "record expression IDs must be unique");
+    pub(crate) fn resolve_struct_literal(
+        &mut self,
+        expression: ExprId,
+        structure: ResolvedStructId,
+    ) {
+        let previous = self.struct_literals.insert(expression, structure);
+        debug_assert!(previous.is_none(), "struct expression IDs must be unique");
     }
 
     pub(crate) fn resolve_enum_variant(
@@ -1749,7 +1753,7 @@ impl SemanticBuilder {
             action_results,
             function_results,
             function_completions,
-            record_field_types,
+            struct_field_types,
             managed_field_types,
             standard_field_types,
             enum_variant_payloads,
@@ -1764,8 +1768,8 @@ impl SemanticBuilder {
             propagation_targets,
             propagation_retry_boundaries,
             path_members,
-            record_literals,
-            record_literal_fields,
+            struct_literals,
+            struct_literal_fields,
             enum_variants,
             pattern_variants,
             wrapper_patterns,
@@ -1951,7 +1955,7 @@ impl SemanticBuilder {
             .into_iter()
             .map(|(function, ty)| (function, types.intern_inferred(resolve(ty), constructed)))
             .collect();
-        let record_field_types = record_field_types
+        let struct_field_types = struct_field_types
             .into_iter()
             .map(|(field, ty)| (field, types.intern_inferred(resolve(ty), constructed)))
             .collect();
@@ -2054,7 +2058,7 @@ impl SemanticBuilder {
             function_associated_projections: HashMap::new(),
             generic_parameter_constraints: HashMap::new(),
             specialized_types: HashMap::new(),
-            record_field_types,
+            struct_field_types,
             managed_field_types,
             standard_field_types,
             enum_variant_payloads,
@@ -2069,8 +2073,8 @@ impl SemanticBuilder {
             propagation_targets,
             propagation_retry_boundaries,
             path_members,
-            record_literals,
-            record_literal_fields,
+            struct_literals,
+            struct_literal_fields,
             enum_variants,
             pattern_variants,
             wrapper_patterns,

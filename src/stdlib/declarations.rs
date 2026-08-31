@@ -192,7 +192,7 @@ pub enum FieldVisibility {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ValueUsage {
-    pub record_field: bool,
+    pub struct_field: bool,
     pub enum_payload: bool,
     pub state_field: bool,
     pub local_variable: bool,
@@ -365,26 +365,26 @@ mod tests {
     use super::{StdlibFieldId, StdlibTypeId};
 
     #[test]
-    fn ordinary_catalog_record_flows_through_compiler_and_tooling_generically() {
+    fn ordinary_catalog_struct_flows_through_compiler_and_tooling_generically() {
         let source = r#"
             state "probe.exe" {}
 
             whileAttached {
-                let probe: CatalogRecordProbe = process.read(0x100) else return
+                let probe: CatalogStructProbe = process.read(0x100) else return
                 if probe == probe {
                     print(probe.value as String)
                 }
             }
         "#;
         let library = StandardLibrary::new();
-        let record = library
-            .type_by_name("CatalogRecordProbe")
-            .expect("the test record should resolve by its sole catalog name");
-        assert_eq!(record.id, StdlibTypeId::CatalogRecordProbe);
+        let structure = library
+            .type_by_name("CatalogStructProbe")
+            .expect("the test struct should resolve by its sole catalog name");
+        assert_eq!(structure.id, StdlibTypeId::CatalogStructProbe);
         let field = library
-            .public_field(record.id, "value")
-            .expect("the test record's declared field should be discoverable");
-        assert_eq!(field.id, StdlibFieldId::CatalogRecordProbeValue);
+            .public_field(structure.id, "value")
+            .expect("the test struct's declared field should be discoverable");
+        assert_eq!(field.id, StdlibFieldId::CatalogStructProbeValue);
         assert_eq!(library.validate(), Vec::<String>::new());
 
         let mut database = CompilerDatabase::new(source);
@@ -394,25 +394,25 @@ mod tests {
         let ty = checked
             .semantics()
             .types()
-            .id_for_standard(StdlibTypeId::CatalogRecordProbe);
-        let MemoryTypeLayout::Record(memory) = checked
+            .id_for_standard(StdlibTypeId::CatalogStructProbe);
+        let MemoryTypeLayout::Struct(memory) = checked
             .memory_layouts()
             .layout(ty, checked.semantics())
             .expect("the declared capability should produce a generic memory layout")
         else {
-            panic!("the catalog fixture should have a record memory layout")
+            panic!("the catalog fixture should have a struct memory layout")
         };
         assert_eq!((memory.size, memory.alignment), (4, 4));
         assert_eq!(
             memory.fields[0].field,
-            MemoryFieldId::Standard(StdlibFieldId::CatalogRecordProbeValue)
+            MemoryFieldId::Standard(StdlibFieldId::CatalogStructProbeValue)
         );
 
-        let type_offset = source.find("CatalogRecordProbe").unwrap();
+        let type_offset = source.find("CatalogStructProbe").unwrap();
         assert_eq!(
             database.definition_at(type_offset).unwrap(),
             Some(DefinitionTarget::StandardLibrarySymbol(
-                StdlibSymbolId::Type(StdlibTypeId::CatalogRecordProbe)
+                StdlibSymbolId::Type(StdlibTypeId::CatalogStructProbe)
             ))
         );
         let type_hover = database
@@ -422,16 +422,16 @@ mod tests {
         assert!(
             type_hover
                 .markdown
-                .contains("Exercises the generic standard-library record pipeline")
+                .contains("Exercises the generic standard-library struct pipeline")
         );
         let type_completion = database
-            .completions(type_offset + "CatalogRecord".len())
+            .completions(type_offset + "CatalogStruct".len())
             .unwrap();
         assert!(type_completion.items.iter().any(|item| {
-            item.label == "CatalogRecordProbe"
+            item.label == "CatalogStructProbe"
                 && item.kind == CompletionKind::Struct
                 && item.documentation.as_deref().is_some_and(|documentation| {
-                    documentation.contains("generic standard-library record pipeline")
+                    documentation.contains("generic standard-library struct pipeline")
                 })
         }));
 
@@ -439,14 +439,14 @@ mod tests {
         assert_eq!(
             database.definition_at(field_offset).unwrap(),
             Some(DefinitionTarget::StandardLibrarySymbol(
-                StdlibSymbolId::Field(StdlibFieldId::CatalogRecordProbeValue)
+                StdlibSymbolId::Field(StdlibFieldId::CatalogStructProbeValue)
             ))
         );
         let hover = database
             .hover(field_offset)
             .unwrap()
             .expect("catalog field documentation should power hover");
-        assert!(hover.markdown.contains("CatalogRecordProbe.value: u32"));
+        assert!(hover.markdown.contains("CatalogStructProbe.value: u32"));
         assert!(hover.markdown.contains("Returns the probe value"));
 
         let completion_offset = field_offset + "va".len();
@@ -465,10 +465,10 @@ mod tests {
         );
 
         let wasm = crate::compile(source)
-            .expect("generic process-memory and field lowering should compile the catalog record");
+            .expect("generic process-memory and field lowering should compile the catalog struct");
         Validator::new_with_features(WasmFeatures::all())
             .validate_all(&wasm)
-            .expect("the catalog representation should produce a valid Wasm GC record");
+            .expect("the catalog representation should produce a valid Wasm GC struct");
     }
 
     #[test]
@@ -477,7 +477,7 @@ mod tests {
             state "probe.exe" {}
 
             whileAttached {
-                let seed: CatalogRecordProbe = process.read(0x100) else return
+                let seed: CatalogStructProbe = process.read(0x100) else return
                 let constructed = seed.constructed([3, 5], Some(8))
                 let pair = seed.fixedPair([13, 21])
                 let memory: CatalogFixedMemoryProbe = process.read(0x200) else return
@@ -486,11 +486,11 @@ mod tests {
             }
         "#;
         let library = StandardLibrary::new();
-        let record = library
+        let structure = library
             .type_by_name("CatalogConstructedFieldProbe")
             .expect("the constructed-field fixture should be generated");
         let values = library
-            .public_field(record.id, "values")
+            .public_field(structure.id, "values")
             .expect("the array field should be discoverable");
         assert_eq!(library.render_type(values.ty), "[u64; 2]");
 

@@ -34,7 +34,7 @@ Interpolation is `{expression}`, not `${expression}`. The compiler warns on
 text really needs a dollar sign before the formatted score, escape that intent
 as `\${score}`.
 
-Records and enums have no mutable prototype chain. They receive a readable
+Structs and enums have no mutable prototype chain. They receive a readable
 multiline display representation automatically. Define
 `fn Type.toString() -> String` only to override it; the result may be inferred
 and no separate implementation declaration is needed. The derived or custom
@@ -43,7 +43,7 @@ representation is used by interpolation, [`as`] [`String`], [`print`], and
 
 ```splitscript
 # state "game.exe" {}
-record Position {
+struct Position {
     x: i32,
     y: i32,
 }
@@ -150,9 +150,9 @@ synchronous and bounded: evaluating [`await`] or another [`retry`] inside it is
 an error, although merely calling an async function to construct a future is
 still synchronous.
 
-## Arrays, records, and control flow
+## Arrays, structs, and control flow
 
-[`[T]`] is a growable array and [`[T; N]`] is an exact fixed-length array. Records
+[`[T]`] is a growable array and [`[T; N]`] is an exact fixed-length array. Structs
 replace object literals when a stable named shape matters. [`if`] and [`match`]
 are expressions, and `for value in values` plus `while condition` provide
 loops without callback allocation.

@@ -858,7 +858,7 @@ fn contains_generic_parameter(ty: TypeId, snapshot: &SemanticSnapshot) -> bool {
         | TypeKind::Standard(_)
         | TypeKind::StateSnapshot
         | TypeKind::SettingsView
-        | TypeKind::Record(_)
+        | TypeKind::Struct(_)
         | TypeKind::ManagedClass(_)
         | TypeKind::ManagedReference(_)
         | TypeKind::Enum(_) => false,

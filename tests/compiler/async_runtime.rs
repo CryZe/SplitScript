@@ -1602,7 +1602,7 @@ fn retry_restarts_the_complete_operand_once_per_attached_update() {
 #[test]
 fn structural_debug_formats_nested_containers_and_text_unambiguously() {
     let source = r#"
-        record Checkpoint {
+        struct Checkpoint {
             name: String,
             values: [u32],
         }
@@ -1612,7 +1612,7 @@ fn structural_debug_formats_nested_containers_and_text_unambiguously() {
             Idle,
         }
 
-        record Label {
+        struct Label {
             name: String,
         }
 
@@ -1620,11 +1620,11 @@ fn structural_debug_formats_nested_containers_and_text_unambiguously() {
             return `debug:{self.name}`
         }
 
-        record Custom {
+        struct Custom {
             name: String,
         }
 
-        record Measurement {
+        struct Measurement {
             value: f32,
         }
 
@@ -1705,7 +1705,7 @@ fn structural_debug_formats_nested_containers_and_text_unambiguously() {
 #[test]
 fn structural_debug_bounds_recursive_container_graphs() {
     let source = r#"
-        record Node {
+        struct Node {
             children: [Node],
         }
 
@@ -2136,7 +2136,7 @@ fn intrinsic_future_values_can_be_stored_and_awaited_later() {
     let source = r#"
         state "game.exe" {}
 
-        record PendingModule {
+        struct PendingModule {
             operation: async Module
         }
 
@@ -2998,11 +2998,11 @@ fn inferred_none_arguments_are_abi_erased_but_still_evaluated() {
 }
 
 #[test]
-fn source_futures_flow_through_parameters_and_records() {
+fn source_futures_flow_through_parameters_and_structs() {
     let source = r#"
         state "game.exe" {}
 
-        record PendingValue {
+        struct PendingValue {
             operation: async u32
         }
 
@@ -3023,7 +3023,7 @@ fn source_futures_flow_through_parameters_and_records() {
     "#;
 
     let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
-        .expect("async values should use ordinary parameter and record storage");
+        .expect("async values should use ordinary parameter and struct storage");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
         .expect("future values passed through aggregate storage should validate");
@@ -3059,7 +3059,7 @@ fn async_methods_capture_their_receiver_once() {
     let source = r#"
         state "game.exe" {}
 
-        record Counter {
+        struct Counter {
             value: u32
         }
 
@@ -3086,7 +3086,7 @@ fn async_methods_capture_their_receiver_once() {
 fn process_lifetime_futures_cannot_escape_into_globals() {
     let source = r#"
         state "game.exe" {}
-        record Holder { operation: async u32 }
+        struct Holder { operation: async u32 }
         let pending: Holder? = None
     "#;
 
@@ -3550,17 +3550,17 @@ fn inferred_generic_process_helpers_preserve_constraints_and_effects() {
 }
 
 #[test]
-fn memory_readable_records_have_shared_layouts_and_single_read_lowering() {
+fn memory_readable_structs_have_shared_layouts_and_single_read_lowering() {
     use splitscript::compiler::memory::MemoryTypeLayout;
 
     let source = r#"
-        record Header {
+        struct Header {
             tag: u8,
             count: u32,
             flags: u16
         }
 
-        record Packet {
+        struct Packet {
             version: u16,
             header: Header
         }
@@ -3581,9 +3581,9 @@ fn memory_readable_records_have_shared_layouts_and_single_read_lowering() {
         }
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
-    let header = checked.syntax().records[0].id;
-    let packet = checked.syntax().records[1].id;
-    let header_layout = checked.memory_layouts().record(header).unwrap();
+    let header = checked.syntax().structs[0].id;
+    let packet = checked.syntax().structs[1].id;
+    let header_layout = checked.memory_layouts().structure(header).unwrap();
     assert_eq!(header_layout.size, 12);
     assert_eq!(header_layout.alignment, 4);
     assert_eq!(
@@ -3594,7 +3594,7 @@ fn memory_readable_records_have_shared_layouts_and_single_read_lowering() {
             .collect::<Vec<_>>(),
         [0, 4, 8]
     );
-    let packet_layout = checked.memory_layouts().record(packet).unwrap();
+    let packet_layout = checked.memory_layouts().structure(packet).unwrap();
     assert_eq!(packet_layout.size, 16);
     assert_eq!(packet_layout.alignment, 4);
     assert_eq!(
@@ -3613,15 +3613,15 @@ fn memory_readable_records_have_shared_layouts_and_single_read_lowering() {
                 .unwrap(),
             checked.semantics()
         ),
-        Ok(MemoryTypeLayout::Record(_))
+        Ok(MemoryTypeLayout::Struct(_))
     ));
 
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
-        .expect("record reads should deserialize into valid WebAssembly GC records");
+        .expect("struct reads should deserialize into valid WebAssembly GC structs");
 
     let invalid = r#"
-        record BadMemory {
+        struct BadMemory {
             label: String
         }
         state "game.exe" {
@@ -3629,7 +3629,7 @@ fn memory_readable_records_have_shared_layouts_and_single_read_lowering() {
         }
     "#;
     let errors = splitscript::check(splitscript::parse(invalid).unwrap())
-        .expect_err("records containing managed references are not MemoryReadable");
+        .expect_err("structs containing managed references are not MemoryReadable");
     assert!(errors.iter().any(|error| {
         error.message.contains("BadMemory.label")
             && error.message.contains("no fixed process-memory layout")
@@ -3641,7 +3641,7 @@ fn fixed_arrays_have_exact_memory_layouts_and_use_ordinary_array_methods() {
     use splitscript::compiler::{memory::MemoryTypeLayout, types::TypeKind};
 
     let source = r#"
-        record Entry {
+        struct Entry {
             id: u16,
             flags: u8
         }
@@ -4141,7 +4141,7 @@ fn unreachable_gc_layouts_are_pruned_and_live_layouts_are_remapped() {
 
     let live_only = splitscript::compile(
         r#"
-            record Live { value: i32 }
+            struct Live { value: i32 }
             state "game.exe" {
                 current = Live { value: 1 }
             }
@@ -4154,18 +4154,18 @@ fn unreachable_gc_layouts_are_pruned_and_live_layouts_are_remapped() {
                 Empty,
                 Value(i32)
             }
-            record DeadRecord { value: DeadEnum? }
-            record Live { value: i32 }
+            struct DeadStruct { value: DeadEnum? }
+            struct Live { value: i32 }
 
             state "game.exe" {
                 current = Live { value: 1 }
             }
 
             fn dead(
-                record: DeadRecord,
-                records: [DeadRecord],
+                structure: DeadStruct,
+                structs: [DeadStruct],
                 optional: DeadEnum?,
-                result: DeadRecord!
+                result: DeadStruct!
             ) {}
         "#,
     )
@@ -4177,7 +4177,7 @@ fn unreachable_gc_layouts_are_pruned_and_live_layouts_are_remapped() {
     assert_eq!(
         indexed_type_count(&with_dead_layouts),
         indexed_type_count(&live_only),
-        "unreachable records, enums, arrays, Options, and Results should emit no indexed types"
+        "unreachable structs, enums, arrays, Options, and Results should emit no indexed types"
     );
 }
 #[test]

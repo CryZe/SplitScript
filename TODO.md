@@ -104,7 +104,7 @@ to inference or code generation.
     the attachment inert until the process closes instead of rescanning
     metadata forever.
 - [x] Replace independent state and managed-class layouts with one
-  attachment-wide `layout: Layout` record composed from explicitly declared,
+  attachment-wide `layout: Layout` struct composed from explicitly declared,
   enum-valued dimensions such as edition, storefront, renderer, or build.
   Matching one dimension refines every state field, managed field, snapshot,
   and attachment-scoped global conditioned on that value without requiring a
@@ -113,7 +113,7 @@ to inference or code generation.
   a second public `.layout` selector merely because the same logical schema has
   multiple metadata spellings.
   - [x] Add dimension declarations to the state DSL and represent the generated
-    `Layout` record and read-only `layout` value through ordinary record/value
+    `Layout` struct and read-only `layout` value through ordinary struct/value
     identities. Require finite enum-valued dimensions initially, preserve their
     documentation, and integrate formatting, recovery, navigation, completion,
     hover, semantic highlighting, reference docs, and unused analysis.
@@ -167,7 +167,7 @@ to inference or code generation.
     backend selectors specialized for now so release reachability can still
     prune the unused traversal implementation.
   - [x] Make manual runtime/image/class/offset traversal and all of its backend
-    record types private to the trusted standard library. Remove them from
+    struct types private to the trusted standard library. Remove them from
     public lookup, completion, hover, navigation, and generated documentation;
     retain only the pieces reached by provider preparation and schema binding.
     Do not preserve a public dynamic escape hatch by default: introduce one
@@ -335,7 +335,7 @@ or assumptions tied to one generated corpus.
   byte-order, and legacy-`DeepPointer` vocabulary; the ASL/Rust migration index
   covers every provider; and reference-search tests require `Dolphin`, `Fusion`,
   `RetroArch`, `PCSX2`, `DuckStation`, `mGBA`, and `DeepPointer` to surface the
-  corresponding provider declarations rather than only backing record types.
+  corresponding provider declarations rather than only backing struct types.
 - [x] Make `setTickRate` document the complete polling policy in its own page:
   the default 120 Hz attached and 1 Hz detached rates, when those lifecycle
   values are applied, how a top-level `tickRate` declaration overrides either
@@ -356,7 +356,7 @@ or assumptions tied to one generated corpus.
   is consumed in place, diagnosed at its declaration, and gets a
   machine-applicable trailing-underscore rename instead of producing a later
   missing-brace cascade. The path covers globals, locals, loop/closure/pattern
-  bindings, functions and parameters, records, enums, managed declarations,
+  bindings, functions and parameters, structs, enums, managed declarations,
   layouts, state fields, and settings. The reserved set is intentionally
   limited to words that take over expression or statement grammar; contextual
   DSL words such as `at`, `from`, `key`, and `static` remain legal ordinary
@@ -430,7 +430,7 @@ concepts rather than maintaining a parallel inventory.
 ### Make every documentation surface agree
 
 - [x] Correct current contradictions before expanding prose: generic user
-  functions and source async helpers are implemented; strings, records,
+  functions and source async helpers are implemented; strings, structs,
   arrays, closures, iterators, UTF-16 decoding, numeric formatting, string
   construction, browsable docs, and generated reference pages must not still
   be described as future work.
@@ -566,19 +566,19 @@ concepts rather than maintaining a parallel inventory.
   cannot express the required behavior cleanly.
 - [ ] Design typed byte-order reads for every [`MemoryReadable`] value once a
   representative port needs more than scalar conversion. The design must
-  recursively decode records and fixed arrays, compose with ordinary reads and
+  recursively decode structs and fixed arrays, compose with ordinary reads and
   state-field `at` declarations, and make mixed-endian fields auditable without
   per-tick temporary allocations. `Numeric.swapBytes()` now covers the Sonic 3
   A.I.R. scalar case; do not choose the aggregate API before a concrete target
   establishes its shape.
-- [ ] Add exact record layout controls only when a target requires them:
+- [ ] Add exact struct layout controls only when a target requires them:
   offsets, padding/alignment, packing, and per-field byte order. Keep
   field-order native-endian layout as the default and diagnose overlaps and
   unsupported combinations.
 - [ ] Evaluate adjacent state reads after the existing exact pointer-prefix
   sharing pass. When several fields resolve the same base and cover neighboring
   bytes, compare two user-facing outcomes before choosing one: a contextual
-  suggestion to model the memory shape as one [`MemoryReadable`] record, or a
+  suggestion to model the memory shape as one [`MemoryReadable`] struct, or a
   lowering pass that safely coalesces the reads without changing per-field
   failure retention. Any automatic form must prove compatible layout guards,
   byte order, alignment, optional fields, overlapping ranges, process-memory
@@ -625,7 +625,7 @@ concepts rather than maintaining a parallel inventory.
 
 - [x] Separate user-facing `Display` from structural `Debug` while retaining a
   boilerplate-free default. An exact `fn Type.toString() -> String` controls
-  direct display; otherwise `Display` falls back to `Debug`. Records, enums,
+  direct display; otherwise `Display` falls back to `Debug`. Structs, enums,
   arrays, fixed arrays, sets, options, results, ranges, and iterator steps
   derive a stable multiline `Debug` representation conditionally on their
   contained values. Nested strings and characters are quoted and escaped, and
@@ -673,7 +673,7 @@ concepts rather than maintaining a parallel inventory.
   identity operation that preserves the current cursor position. Generic
   `T: Iterable` loops lower through `T.iterator()` and `Iterator.next`, while
   monomorphic collection and range loops retain their direct fast paths.
-  Constructed callable layouts, generic standard-library record fields,
+  Constructed callable layouts, generic standard-library struct fields,
   reachability, scratch planning, and intrinsic dependencies all use the same
   demand-driven specialization path rather than adapter-specific intrinsics.
 - [ ] Design user-defined mutable iterator state once user-authored associated
@@ -890,7 +890,7 @@ remaining work is product hardening and distribution.
 
 ## P1 — remaining language and runtime breadth
 
-- [x] Add shorthand record field initializers: `Point { x }` means
+- [x] Add shorthand struct field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename
   must preserve meaning in both directions: renaming either the field or the
@@ -974,7 +974,7 @@ remaining work is product hardening and distribution.
   numeric operations, and typed time operations proven useful by maintained
   ports.
 - [ ] Add an associative map only after a maintained port demonstrates a
-  runtime key-to-value lookup that cannot be folded into `settings`, a record,
+  runtime key-to-value lookup that cannot be folded into `settings`, a struct,
   a finite `match`, or parallel typed arrays. If that evidence arrives, design
   one typed `Map<K, V>` around the source-defined equality/hash capability
   hierarchy, stable GC identity, mutation-during-iteration rules, indexing
@@ -991,8 +991,8 @@ remaining work is product hardening and distribution.
   using the capability graph's associated-type projection machinery, then make
   its declarations, documentation, completion, and lowering catalog driven
   rather than disguising the operation as a callable method.
-- [ ] Add structural anonymous records only after named records prove materially
-  noisy. Decide explicitly whether anonymous records are memory-readable.
+- [ ] Add structural anonymous structs only after named structs prove materially
+  noisy. Decide explicitly whether anonymous structs are memory-readable.
 
 ## P2 — documentation and editor evolution
 
@@ -1012,7 +1012,7 @@ remaining work is product hardening and distribution.
   debugger inline values together with the eventual debugging strategy. Do
   not prioritize implementation hierarchy, linked editing, document colors,
   or inline completion without a concrete SplitScript use case.
-- [ ] Add completion snippets for lifecycle blocks, match, records, and common
+- [ ] Add completion snippets for lifecycle blocks, match, structs, and common
   standard-library patterns. Module scope plus state, settings, and tick-rate
   declarations are grammar-aware already. Keep candidates compiler-owned and
   the VS Code client thin.
@@ -1080,7 +1080,7 @@ remaining work is product hardening and distribution.
   `Default` capability. Like `None`, it may be assigned directly where the
   expected type or later constraints determine a unique target, but it must not
   silently become the fallback for failed inference. Define capability
-  membership for primitives and standard-library types; make records defaultable
+  membership for primitives and standard-library types; make structs defaultable
   only when every field is defaultable; and require an explicit decision for
   enums and collections rather than assuming a first variant or allocating
   implicitly. Keep `default` distinct from `None`: `None` is the unit value and
@@ -1097,7 +1097,7 @@ remaining work is product hardening and distribution.
   or declarations should provide target-specific candidates. Only then add a
   warning or migration rewrite, with attachment fixtures on all three hosts.
 - [ ] Specialize physical aggregate layouts around zero-sized `None` only when
-  measured size or allocation pressure justifies it. Records may omit unit
+  measured size or allocation pressure justifies it. Structs may omit unit
   fields; `None?` still needs distinct empty/present states; `None!` retains
   tag/error; `[None]` retains its logical length. Keep
   all specialization behind one physical-layout abstraction so construction,

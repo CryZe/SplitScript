@@ -94,6 +94,7 @@ pub enum ForeignSpellingContext {
     VariableModifier,
     OptionalValue,
     FunctionDeclaration,
+    StructDeclaration,
     Type,
     StaticTypeReceiver,
     Method,
@@ -1162,6 +1163,16 @@ const FN_SPELLINGS: &[ForeignSpelling] = &[
     },
 ];
 
+const STRUCT_DECLARATION_SPELLINGS: &[ForeignSpelling] = &[ForeignSpelling {
+    source: SourceLanguage::CSharp,
+    context: ForeignSpellingContext::StructDeclaration,
+    spelling: "record",
+    replacement: ForeignSpellingReplacement::Text("struct"),
+    message: "SplitScript uses `struct` instead of C#'s `record` declaration keyword",
+    primary_label: "replace this C# declaration keyword",
+    fix_title: "replace `record` with `struct`",
+}];
+
 macro_rules! type_spelling {
     ($source:expr, $context:expr, $foreign:literal, $canonical:literal, $message:literal, $label:literal) => {
         ForeignSpelling {
@@ -1914,17 +1925,17 @@ pub const CONCEPTS: &[MigrationConcept] = &[
     MigrationConcept {
         id: MigrationConceptId::new("asl.state.contiguous-aggregate"),
         name: "Contiguous memory aggregates",
-        sources: ASL,
+        sources: ASL_CSHARP,
         support: MigrationSupport::TypedPattern,
-        summary: "Read physically contiguous values as one naturally aligned record or fixed-length [`[T; N]`] array when that type exactly matches the target-memory layout.",
+        summary: "Read physically contiguous values as one naturally aligned struct or fixed-length [`[T; N]`] array when that type exactly matches the target-memory layout.",
         targets: &[
-            MigrationTarget::Language("record"),
+            MigrationTarget::Language("struct"),
             MigrationTarget::Language("[T; N]"),
             MigrationTarget::Language("state"),
             MigrationTarget::StandardLibraryItem("Process.read"),
         ],
-        cookbook_anchor: Some("contiguous-records-and-fixed-arrays"),
-        spellings: &[],
+        cookbook_anchor: Some("contiguous-structs-and-fixed-arrays"),
+        spellings: STRUCT_DECLARATION_SPELLINGS,
     },
     MigrationConcept {
         id: MigrationConceptId::new("asl.state.helper-snapshots"),

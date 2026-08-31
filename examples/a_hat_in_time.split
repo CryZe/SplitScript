@@ -29,7 +29,7 @@ enum Rift {
 }
 
 /// Patch-dependent offsets below the discovered save-data pointer.
-record SaveDataOffsets {
+struct SaveDataOffsets {
     root: i64,
     yarn: i64,
     chapter: i64,
@@ -38,7 +38,7 @@ record SaveDataOffsets {
 }
 
 /// Axis-aligned world-space trigger volume.
-record Bounds {
+struct Bounds {
     minX: f32,
     maxX: f32,
     minY: f32,
@@ -48,20 +48,20 @@ record Bounds {
 }
 
 /// Volume that arms a later position split.
-record PositionKeyLocation {
+struct PositionKeyLocation {
     chapter: i32,
     key: i32,
     bounds: Bounds,
 }
 
 /// Destination volume associated with an armed position split.
-record PositionTarget {
+struct PositionTarget {
     key: i32,
     bounds: Bounds,
 }
 
 /// Rift identity and one of the world-space volumes that identifies it.
-record RiftLocation {
+struct RiftLocation {
     /// Zero means the location is valid in every chapter.
     chapter: i32,
     rift: Rift,
@@ -69,7 +69,7 @@ record RiftLocation {
 }
 
 /// Chapter-qualified world-space location, with zero meaning every chapter.
-record ChapterLocation {
+struct ChapterLocation {
     chapter: i32,
     bounds: Bounds,
 }
@@ -84,7 +84,7 @@ enum PausePosition {
 }
 
 /// Chapter-specific pause transition volume.
-record PauseLocation {
+struct PauseLocation {
     chapter: i32,
     kind: PausePosition,
     bounds: Bounds,

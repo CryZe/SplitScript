@@ -24,7 +24,7 @@ use super::{
     pointer_prefixes::{
         PointerPrefixPlan, PrefixEmissionContext, PrefixEmissionState, PrefixLocals,
     },
-    record_field_type, semantic_type, state_storage_index, value_type,
+    semantic_type, state_storage_index, struct_field_type, value_type,
 };
 
 /// Per-tick runtime view of the completed backend plans.
@@ -1032,9 +1032,9 @@ fn emit_automatic_layout_failure_report(
         return;
     };
     let bindings = program
-        .records
+        .structs
         .iter()
-        .find(|record| record.name == crate::stdlib::PROVIDER_BINDINGS_TYPE)
+        .find(|structure| structure.name == crate::stdlib::PROVIDER_BINDINGS_TYPE)
         .expect("managed layout evidence has generated bindings");
     emit_runtime_message(function, strings, &report.observed_present, lowering.abi);
     for evidence in &report.evidence {
@@ -1084,7 +1084,7 @@ fn emit_automatic_layout_failure_report(
 fn emit_layout_evidence_condition(
     function: &mut Function,
     bindings_global: u32,
-    bindings: &crate::ast::RecordDecl,
+    bindings: &crate::ast::StructDecl,
     field: crate::ast::ManagedFieldId,
     expected_present: bool,
     lowering: &UpdateContext<'_>,
@@ -1096,13 +1096,13 @@ fn emit_layout_evidence_condition(
         .enumerate()
         .find(|(_, candidate)| candidate.name == name)
         .expect("layout evidence has generated presence storage");
-    let field_type = record_field_type(declaration.id, lowering.semantics);
+    let field_type = struct_field_type(declaration.id, lowering.semantics);
     function
         .instruction(&Instruction::GlobalGet(bindings_global))
         .instruction(&Instruction::RefAsNonNull);
     emit_typed_struct_get(
         function,
-        lowering.gc.index(Type::Record(bindings.id)),
+        lowering.gc.index(Type::Struct(bindings.id)),
         field_index as u32,
         field_type,
     );
@@ -1247,20 +1247,20 @@ fn emit_layout_constraints(
         .layout
         .as_ref()
         .expect("conditional fields require attachment layout dimensions");
-    let record = program
-        .records
-        .get(layout.record.index())
-        .expect("attachment Layout is an ordinary record");
+    let structure = program
+        .structs
+        .get(layout.structure.index())
+        .expect("attachment Layout is an ordinary struct");
     let selected = selected_layout.expect("conditional fields have selected-layout storage");
     for (index, constraint) in constraints.iter().enumerate() {
-        let field_index = record
+        let field_index = structure
             .fields
             .iter()
             .position(|field| field.id == constraint.dimension)
             .expect("layout constraints refer to Layout fields") as u32;
         let field_type = semantic_type(
             semantics
-                .record_field_type(constraint.dimension)
+                .struct_field_type(constraint.dimension)
                 .expect("layout dimensions have checked enum types"),
             semantics,
         );
@@ -1283,7 +1283,7 @@ fn emit_layout_constraints(
             .instruction(&Instruction::RefAsNonNull);
         emit_typed_struct_get(
             function,
-            gc.index(Type::Record(layout.record)),
+            gc.index(Type::Struct(layout.structure)),
             field_index,
             field_type,
         );
@@ -1312,9 +1312,9 @@ fn emit_managed_field_presence_validation(
         return;
     };
     let Some(bindings) = program
-        .records
+        .structs
         .iter()
-        .find(|record| record.name == PROVIDER_BINDINGS_TYPE)
+        .find(|structure| structure.name == PROVIDER_BINDINGS_TYPE)
     else {
         return;
     };
@@ -1338,13 +1338,13 @@ fn emit_managed_field_presence_validation(
                     .enumerate()
                     .find(|(_, candidate)| candidate.name == name)
                     .expect("conditional managed fields have generated presence storage");
-                let presence_type = record_field_type(presence.id, lowering.semantics);
+                let presence_type = struct_field_type(presence.id, lowering.semantics);
                 function
                     .instruction(&Instruction::GlobalGet(bindings_global))
                     .instruction(&Instruction::RefAsNonNull);
                 emit_typed_struct_get(
                     function,
-                    lowering.gc.index(Type::Record(bindings.id)),
+                    lowering.gc.index(Type::Struct(bindings.id)),
                     field_index as u32,
                     presence_type,
                 );
@@ -1376,12 +1376,12 @@ fn emit_automatic_layout_selection(
             .runtime_globals
             .provider_preparation_value
             .expect("managed layout evidence has provider preparation storage");
-        let record = program
-            .records
+        let structure = program
+            .structs
             .iter()
-            .find(|record| record.name == PROVIDER_BINDINGS_TYPE)
+            .find(|structure| structure.name == PROVIDER_BINDINGS_TYPE)
             .expect("managed layout evidence has generated bindings");
-        (global, record)
+        (global, structure)
     });
     let layout = program
         .state
@@ -1394,22 +1394,22 @@ fn emit_automatic_layout_selection(
         .expect("automatic selection has layout storage");
 
     for candidate in &plan.candidates {
-        if let Some((bindings_global, bindings_record)) = bindings {
+        if let Some((bindings_global, bindings_struct)) = bindings {
             for (index, field) in plan.evidence_fields.iter().enumerate() {
                 let name = managed_field_presence_name(field.index());
-                let (field_index, declaration) = bindings_record
+                let (field_index, declaration) = bindings_struct
                     .fields
                     .iter()
                     .enumerate()
                     .find(|(_, candidate)| candidate.name == name)
                     .expect("layout evidence has generated presence storage");
-                let field_type = record_field_type(declaration.id, lowering.semantics);
+                let field_type = struct_field_type(declaration.id, lowering.semantics);
                 function
                     .instruction(&Instruction::GlobalGet(bindings_global))
                     .instruction(&Instruction::RefAsNonNull);
                 emit_typed_struct_get(
                     function,
-                    lowering.gc.index(Type::Record(bindings_record.id)),
+                    lowering.gc.index(Type::Struct(bindings_struct.id)),
                     field_index as u32,
                     field_type,
                 );
@@ -1443,7 +1443,7 @@ fn emit_automatic_layout_selection(
         }
         function
             .instruction(&Instruction::StructNew(
-                lowering.gc.index(Type::Record(layout.record)),
+                lowering.gc.index(Type::Struct(layout.structure)),
             ))
             .instruction(&Instruction::GlobalSet(selected))
             .instruction(&Instruction::End);

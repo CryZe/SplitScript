@@ -624,14 +624,14 @@ fn csharp_collection_count_rewrites_only_resolved_arrays_and_sets() {
 
     splitscript::compile(
         r#"
-            record Counter {
+            struct Counter {
                 Count: u32,
             }
             state "game.exe" {}
             fn count(value: Counter) -> u32 { return value.Count }
         "#,
     )
-    .expect("a user record field named Count must keep its ordinary meaning");
+    .expect("a user struct field named Count must keep its ordinary meaning");
 }
 
 #[test]
@@ -1225,7 +1225,7 @@ fn csharp_power_guides_squares_and_typed_masks_without_claiming_general_pow() {
 #[test]
 fn a_user_binding_named_int32_keeps_its_parse_method() {
     let source = r#"
-        record Parser {}
+        struct Parser {}
         state "game.exe" {}
 
         fn Parser.Parse(text: String) -> i32 {
@@ -1317,14 +1317,14 @@ fn legacy_list_types_point_to_variable_length_arrays() {
 #[test]
 fn a_source_type_named_list_is_not_mistaken_for_the_legacy_collection() {
     let source = r#"
-        record List {
+        struct List {
             value: i32,
         }
         state "game.exe" {}
         fn invalid(value: List<i32>) {}
     "#;
     let diagnostics = splitscript::compile(source)
-        .expect_err("ordinary source records are not generic constructors");
+        .expect_err("ordinary source structs are not generic constructors");
 
     assert!(
         diagnostics
@@ -1791,6 +1791,52 @@ fn familiar_declaration_keywords_recover_as_let_with_machine_applicable_fixes() 
 }
 
 #[test]
+fn csharp_record_declaration_recovers_as_struct_with_a_machine_applicable_fix() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        record Position {
+            x: i32,
+            y: i32,
+        }
+
+        state "game.exe" {}
+
+        whileAttached {
+            let point = Position { x: 1, y: 2 }
+            print(point)
+        }
+    "#;
+
+    splitscript::compile(source).expect_err("`record` must not remain an accepted alias");
+
+    let recovered = splitscript::parse_recovering(source).unwrap();
+    assert_eq!(recovered.syntax().structs.len(), 1);
+    assert_eq!(recovered.diagnostics().len(), 1);
+
+    let diagnostic = &recovered.diagnostics()[0];
+    assert_eq!(
+        diagnostic.message,
+        "SplitScript uses `struct` instead of C#'s `record` declaration keyword"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "record"
+    );
+    assert_eq!(diagnostic.fixes.len(), 1);
+
+    let fix = &diagnostic.fixes[0];
+    assert_eq!(fix.title, "replace `record` with `struct`");
+    assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+    assert_eq!(fix.edits.len(), 1);
+    assert_eq!(fix.edits[0].span, diagnostic.span);
+    assert_eq!(fix.edits[0].replacement, "struct");
+
+    splitscript::compile(&source.replacen("record", "struct", 1))
+        .expect("applying the suggested replacement should produce valid source");
+}
+
+#[test]
 fn null_recovers_as_none_with_machine_applicable_fixes() {
     use splitscript::FixApplicability;
 
@@ -1916,7 +1962,7 @@ fn csharp_numeric_type_names_have_machine_applicable_fixes() {
     let source = r#"
         state "game.exe" {}
 
-        record CSharpNumbers {
+        struct CSharpNumbers {
             signed8: sbyte,
             unsigned8: byte,
             signed16: short,
@@ -2402,7 +2448,7 @@ fn legacy_process_identity_is_not_rewritten_outside_attachment_context() {
     let user_defined = r#"
         state "game.exe" {}
 
-        record Game {
+        struct Game {
             ProcessName: String,
         }
 
@@ -2514,7 +2560,7 @@ fn legacy_named_module_queries_distinguish_optional_required_and_enumerated_modu
     let user_defined = r#"
         state "game.exe" {}
 
-        record ModuleBag {}
+        struct ModuleBag {}
 
         fn ModuleBag.First() -> u32 {
             return 1
@@ -2584,7 +2630,7 @@ fn user_defined_timer_split_index_member_keeps_its_meaning() {
     let source = r#"
         state "game.exe" {}
 
-        record LegacyTimer {
+        struct LegacyTimer {
             CurrentSplitIndex: u64,
         }
 
@@ -2897,11 +2943,11 @@ fn user_defined_timer_members_keep_their_meaning() {
     let source = r#"
         state "game.exe" {}
 
-        record RunInfo {
+        struct RunInfo {
             CategoryName: String,
         }
 
-        record TimerInfo {
+        struct TimerInfo {
             Run: RunInfo,
         }
 
@@ -2917,7 +2963,7 @@ fn user_defined_datetime_member_keeps_its_meaning() {
     let source = r#"
         state "game.exe" {}
 
-        record Clock {
+        struct Clock {
             Now: u64,
         }
 

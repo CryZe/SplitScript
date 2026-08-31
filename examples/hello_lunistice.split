@@ -11,7 +11,7 @@ enum LevelOrScene {
     Scene(String),
 }
 
-record Greeting {
+struct Greeting {
     version: u32,
     message: String,
     location: LevelOrScene,

@@ -109,7 +109,7 @@ pub struct WarningPolicy {
     static_setting_lookup: WarningLevel,
     suspicious_interpolation: WarningLevel,
     debug_only_use: WarningLevel,
-    record_field_shorthand: WarningLevel,
+    struct_field_shorthand: WarningLevel,
     empty_future_race: WarningLevel,
 }
 
@@ -125,7 +125,7 @@ impl WarningPolicy {
             DiagnosticCode::StaticSettingLookup => Some(self.static_setting_lookup),
             DiagnosticCode::SuspiciousInterpolation => Some(self.suspicious_interpolation),
             DiagnosticCode::DebugOnlyUse => Some(self.debug_only_use),
-            DiagnosticCode::RecordFieldShorthand => Some(self.record_field_shorthand),
+            DiagnosticCode::StructFieldShorthand => Some(self.struct_field_shorthand),
             DiagnosticCode::EmptyFutureRace => Some(self.empty_future_race),
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
@@ -146,7 +146,7 @@ impl WarningPolicy {
             DiagnosticCode::StaticSettingLookup => &mut self.static_setting_lookup,
             DiagnosticCode::SuspiciousInterpolation => &mut self.suspicious_interpolation,
             DiagnosticCode::DebugOnlyUse => &mut self.debug_only_use,
-            DiagnosticCode::RecordFieldShorthand => &mut self.record_field_shorthand,
+            DiagnosticCode::StructFieldShorthand => &mut self.struct_field_shorthand,
             DiagnosticCode::EmptyFutureRace => &mut self.empty_future_race,
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax

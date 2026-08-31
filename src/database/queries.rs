@@ -712,9 +712,9 @@ impl CompilerDatabase {
                 .get(super::SourceDefinitionId::Settings)
                 .cloned()
                 .map(DefinitionTarget::Source),
-            TypeKind::Record(record) => self
+            TypeKind::Struct(structure) => self
                 .definition_index()?
-                .get(super::SourceDefinitionId::Record(record))
+                .get(super::SourceDefinitionId::Struct(structure))
                 .cloned()
                 .map(DefinitionTarget::Source),
             TypeKind::Enum(enumeration) => self
@@ -1006,7 +1006,7 @@ fn diagnostic_recovery_region(program: &crate::ast::Program, target: Span) -> Op
         .map(|function| function.span)
         .chain(program.actions.iter().map(|action| action.span))
         .chain(program.globals.iter().map(|global| global.span))
-        .chain(program.records.iter().map(|record| record.span))
+        .chain(program.structs.iter().map(|structure| structure.span))
         .chain(program.enums.iter().map(|enumeration| enumeration.span))
         .chain(program.settings.iter().map(|setting| setting.span))
         .chain(program.tick_rate.iter().map(|tick_rate| tick_rate.span))

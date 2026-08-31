@@ -7,7 +7,7 @@ enum AlanWakeBuild {
     Epic,
 }
 
-record AlanWakeLayout {
+struct AlanWakeLayout {
     isLoading: MemoryPath,
     level: MemoryPath,
     video: MemoryPath,

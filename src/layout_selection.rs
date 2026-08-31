@@ -1,6 +1,6 @@
 //! Attachment-wide layout selection derived from runtime schema evidence.
 //!
-//! The public model is always the source-defined `Layout` record. Managed
+//! The public model is always the source-defined `Layout` structure. Managed
 //! metadata contributes only presence observations for conditional fields;
 //! this module turns those observations into a bounded, backend-independent
 //! decision plan shared by semantic validation and Wasm emission.
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{
-        ActionKind, EnumId, EnumVariantId, Expr, ExprKind, ManagedFieldId, Program, RecordFieldId,
+        ActionKind, EnumId, EnumVariantId, Expr, ExprKind, ManagedFieldId, Program, StructFieldId,
     },
     semantic::SemanticModel,
     types::TypeKind,
@@ -61,7 +61,7 @@ pub(crate) struct LayoutSelectionPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LayoutSelectionDimension {
-    pub field: RecordFieldId,
+    pub field: StructFieldId,
     pub enumeration: EnumId,
     pub variants: Vec<EnumVariantId>,
 }
@@ -142,17 +142,17 @@ impl LayoutSelectionPlan {
                     .iter()
                     .zip(&candidate.variants)
                     .map(|(dimension, variant)| {
-                        let field = program.records[program
+                        let field = program.structs[program
                             .state
                             .as_ref()
                             .and_then(|state| state.layout.as_ref())
-                            .expect("layout selection plans have a layout record")
-                            .record
+                            .expect("layout selection plans have a layout struct")
+                            .structure
                             .index()]
                         .fields
                         .iter()
                         .find(|field| field.id == dimension.field)
-                        .expect("layout dimensions use fields from the layout record");
+                        .expect("layout dimensions use fields from the layout struct");
                         let enumeration = program
                             .enum_declaration(dimension.enumeration)
                             .expect("layout dimensions use source enums");
@@ -223,7 +223,7 @@ fn managed_field_label(program: &Program, target: ManagedFieldId) -> String {
 }
 
 struct ManagedEvidenceGroup {
-    alternatives: Vec<Vec<(RecordFieldId, EnumVariantId)>>,
+    alternatives: Vec<Vec<(StructFieldId, EnumVariantId)>>,
     fields: Vec<ManagedFieldId>,
 }
 
@@ -234,7 +234,7 @@ pub(crate) fn automatic_layout_selection(
     automatic_layout_selection_with(
         program,
         |field| {
-            let ty = semantics.record_field_type(field)?;
+            let ty = semantics.struct_field_type(field)?;
             let TypeKind::Enum(enumeration) = semantics.types().kind(ty) else {
                 return None;
             };
@@ -262,8 +262,8 @@ pub(crate) fn automatic_layout_selection(
 
 pub(crate) fn automatic_layout_selection_with(
     program: &Program,
-    enum_for_dimension: impl Fn(RecordFieldId) -> Option<EnumId>,
-    predicates_for_field: impl Fn(ManagedFieldId) -> Vec<Vec<(RecordFieldId, EnumVariantId)>>,
+    enum_for_dimension: impl Fn(StructFieldId) -> Option<EnumId>,
+    predicates_for_field: impl Fn(ManagedFieldId) -> Vec<Vec<(StructFieldId, EnumVariantId)>>,
 ) -> AutomaticLayoutSelection {
     let Some(layout) = program
         .state
@@ -272,10 +272,10 @@ pub(crate) fn automatic_layout_selection_with(
     else {
         return AutomaticLayoutSelection::NotDeclared;
     };
-    let record = &program.records[layout.record.index()];
-    let mut dimensions = Vec::with_capacity(record.fields.len());
+    let structure = &program.structs[layout.structure.index()];
+    let mut dimensions = Vec::with_capacity(structure.fields.len());
     let mut combination_count = 1usize;
-    for field in &record.fields {
+    for field in &structure.fields {
         let Some(enumeration) = enum_for_dimension(field.id) else {
             return AutomaticLayoutSelection::RequiresExplicit(
                 ExplicitSelectionReason::IndistinguishableEvidence,

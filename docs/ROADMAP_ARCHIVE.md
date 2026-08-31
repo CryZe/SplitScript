@@ -12,9 +12,9 @@
 - Moved the proposed SNES provider to the ASR-dependent deferred roadmap after
   confirming the current ASR tree has no SNES implementation to align with.
 
-## 2026-08-30: record literals gain identity-safe field shorthand
+## 2026-08-30: struct literals gain identity-safe field shorthand
 
-- Added record field initializer shorthand: `Point { x }` lowers through the
+- Added struct field initializer shorthand: `Point { x }` lowers through the
   same value-path semantics as `Point { x: x }`. Repeated explicit
   initializers produce configurable warning `SS1010` with a machine-applicable
   fix.
@@ -91,7 +91,7 @@
 - Corrected hand-written language and architecture prose that still described
   generalized user functions, value-producing block branches, LSP formatting,
   browsable and terminal documentation, wrapper editor types, closures,
-  iterators, arrays, strings, records, and other GC values as future work.
+  iterators, arrays, strings, structs, and other GC values as future work.
 - Kept genuinely pending host events, machine-readable/static exporters, race
   combinators, resource ownership, and unsupported-build behavior explicitly
   pending rather than flattening all forward-looking prose indiscriminately.
@@ -147,7 +147,7 @@
   DLC scene into its `GameManager` snapshot, and updated completion, hover,
   semantic highlighting, formatting, diagnostics, migration guidance, and the
   reference journey around the schema-first spelling.
-- Recorded record-initializer shorthand and adjacent shared-prefix state reads
+- Recorded struct-initializer shorthand and adjacent shared-prefix state reads
   as separate follow-up work so neither is smuggled into this storage-policy
   milestone without its own rename and memory-semantics design.
 
@@ -235,7 +235,7 @@
 
 - Added catalog-authored structural method requirements and used them for
   `Display.toString`.
-- User records and enums now satisfy `Display` by defining the exact ordinary
+- User structs and enums now satisfy `Display` by defining the exact ordinary
   source method, without an `impl` block or annotation.
 - Routed casts, interpolation, `print`, and custom-variable values through the
   same source method in validation, reachability, effect analysis, and Wasm
@@ -316,21 +316,21 @@
   libretro cores supported by ASR.
 - Normalized word-swapped emulator storage, including unaligned reads crossing
   16-bit boundaries, before recursively decoding big-endian primitives,
-  records, fixed arrays, floating-point values, and guest pointer paths.
+  structs, fixed arrays, floating-point values, and guest pointer paths.
 
 ## 2026-08-22: source-defined Wii emulator provider
 
 - Added `state Wii` and `wii: WiiEmulator` with source-defined Dolphin and
   `dolphin_libretro.dll` discovery.
 - Added exact MEM1 and MEM2 guest bounds and native mapping translation.
-- Reused provider-selected big-endian decoding for explicit reads, records,
+- Reused provider-selected big-endian decoding for explicit reads, structs,
   fixed arrays, and guest pointer paths.
 
 ## 2026-08-22: provider-owned byte order and GameCube support
 
 - Separated fixed `MemoryReadable` shape from the byte order supplied by an
   emulator provider.
-- Added recursive big-endian decoding for primitives, records, fixed arrays,
+- Added recursive big-endian decoding for primitives, structs, fixed arrays,
   floating-point values, signed integers, and provider pointer paths.
 - Added `state GCN` and `gcn: GCNEmulator` with source-defined Dolphin and
   `dolphin_libretro.dll` discovery and MEM1 address translation.
@@ -521,13 +521,13 @@
 ## 2026-08-17: contiguous memory aggregate migration
 
 - Added a compiler-checked porting recipe for replacing physically contiguous
-  ASL watchers with one naturally aligned `MemoryReadable` record or exact
-  `[T; N]` state field, based on maintained record and byte-array ports.
+  ASL watchers with one naturally aligned `MemoryReadable` struct or exact
+  `[T; N]` state field, based on maintained struct and byte-array ports.
 - Documented the one-read behavior, little-endian and natural-alignment rules,
   growable-versus-fixed array distinction, and the cases that must wait for
   explicit packing, offsets, or endianness controls.
 - Added the pattern to the compiler-owned migration catalog, generated index,
-  and navigable quick map with direct links to `record`, `[T; N]`, `state`, and
+  and navigable quick map with direct links to `struct`, `[T; N]`, `state`, and
   `Process.read`.
 
 ## 2026-08-17: race-free standard-library initialization
@@ -690,12 +690,12 @@
 
 - Replaced separate generic-call and shallow state-field completion paths with
   one lexical recognizer for function parameters and results, global and local
-  annotations, casts, state and layout fields, record fields, enum payloads,
+  annotations, casts, state and layout fields, struct fields, enum payloads,
   nested arrays, generic constructors, and explicit generic call arguments.
 - Restricted those positions to type candidates and structural type snippets,
   eliminating unrelated functions, values, namespaces, and control-flow
   keywords while retaining completion during syntax recovery.
-- Centralized primitive, standard-library, named-constructor, source record,
+- Centralized primitive, standard-library, named-constructor, source struct,
   source enum, array, option, result, and async candidates with catalog-backed
   documentation and snippets.
 
@@ -703,7 +703,7 @@
 
 - Carried the source of an expected type through parameters, explicit return
   types, globals, locals, later assignments, state fields and their filters,
-  record fields, enum payloads, and nested option/result/collection checking.
+  struct fields, enum payloads, and nested option/result/collection checking.
 - Reworded concrete mismatches around the supplied value, including
   unsuffixed integer and floating-point literals, while preserving focused
   capability, integer-range, optional-value, and fallible-value diagnostics.
@@ -744,7 +744,7 @@
 - Preserved capability requirements through failed inference so diagnostics
   name the exact missing capability. Declared-only capability sets also list
   every accepted concrete type, while structural capabilities avoid claiming
-  that records or fixed arrays form a closed set.
+  that structs or fixed arrays form a closed set.
 
 ## 2026-08-15: explicit string-concatenation guidance
 
@@ -1125,7 +1125,7 @@
 - Added `equals` and `notEquals` to the source-defined `Equatable` capability
   and bound `==` and `!=` to those declarations, completing catalog ownership
   for non-logical binary operators.
-- Preserved specialized semantics for strings, standard enums, records, payload
+- Preserved specialized semantics for strings, standard enums, structs, payload
   enums, options, results, scalar values, IEEE 754 floats, and zero-sized
   `None`, including demand-driven structural equality functions.
 - Taught reachability and code generation to plan equality from intrinsic call
@@ -1696,7 +1696,7 @@
   deterministic bounded windows and yield between windows so one update cannot
   monopolize the autosplitting thread.
 - Represented discovered timer, save-data, actor, and coordinate roots through
-  ordinary source globals, records, arrays, functions, and declarative state
+  ordinary source globals, structs, arrays, functions, and declarative state
   expressions rather than game-specific compiler paths.
 - Used the official current-split-index observation for the polling-based
   debounce lock and documented its skip/undo limitation instead of inventing a
@@ -1845,7 +1845,7 @@
   values.
 - Made the state-field assignment the persistent watcher boundary. Later
   successes advance independently and errors retain that field's accepted
-  value, while `toOption()` deliberately accepts `None`. Record- and
+  value, while `toOption()` deliberately accepts `None`. Struct- and
   array-valued fields remain the explicit unit for values that must advance
   atomically.
 - Removed the fabricated field-local `old` binding. Pointer filters receive
@@ -1903,7 +1903,7 @@
   snapshot, returns false for unknown or heterogeneous keys, performs no host
   query, and allocates no polling-time strings.
 - Replaced Akiba's Trip's temporary 50-way settings match with string keys in
-  its immutable mission records and `settings.enabled(point.settingKey)`.
+  its immutable mission structs and `settings.enabled(point.settingKey)`.
   Added release-Wasm runtime coverage for module-relative reads, exact host-key
   registration, live enable/disable changes, chapter gating, coordinate
   matching, and the prologue transition.
@@ -1917,7 +1917,7 @@
 - Re-audited the manual ASL porting notes against the compiler-owned migration
   capability index instead of treating every old deferral as a missing feature.
 - Selected Akiba's Trip: Undead & Undressed as the next maintained port:
-  records, fixed arrays, `for`, decimal rounding, and nested settings already
+  structs, fixed arrays, `for`, decimal rounding, and nested settings already
   cover its data model, while typed data-driven settings lookup remains a
   genuine, high-frequency corpus gap.
 - Kept growable collections out of the initial goal because this splitter's
@@ -1926,14 +1926,14 @@
 
 ## 2026-08-03: one-time aggregate globals
 
-- Added global record, fixed-array, variable-array, and string constants whose
+- Added global struct, fixed-array, variable-array, and string constants whose
   GC values are materialized exactly once in the WebAssembly module start
   function instead of being reconstructed on every polling tick.
 - Split module-start emission out of settings code so enum globals, aggregate
   globals, initial snapshots, async storage, and setting registration have one
   explicit initialization boundary.
 - Added a backend regression that validates the generated Wasm GC and proves
-  the record, array, and string constructors run in `_start` before the globals
+  the struct, array, and string constructors run in `_start` before the globals
   are observed.
 - Added the maintained Akiba's Trip: Undead & Undressed port with seven typed
   mission-coordinate tables, source-faithful f32-to-f64 rounding, nested route
@@ -2289,7 +2289,7 @@ without changing their consumers.
   pages plus growable host-string staging from the complete layout. String and
   signature pools store relative offsets until this plan relocates them, so
   scratch growth cannot invalidate embedded pointers. Stress tests cover
-  multi-page static strings, scratch growth from a readable record larger than
+  multi-page static strings, scratch growth from a readable struct larger than
   one page, long planner-level signatures, bounds, and alias placement.
 - [x] Complete the collision-safety slice of that plan: reserve the first Wasm
   page for centralized runtime scratch regions, place immutable data after it,
@@ -2379,7 +2379,7 @@ without changing their consumers.
 
 - [x] Make parsing purely syntactic. `parser.rs` currently pre-scans top-level
   declarations, allocates semantic declaration/layout IDs, knows the standard
-  library, resolves record/enum constructors, and emits some redeclaration
+  library, resolves struct/enum constructors, and emits some redeclaration
   diagnostics (sometimes with a default span). Move declaration collection,
   nominal lookup, reserved-name checks, and constructor resolution into a real
   resolution/lowering stage; syntax type paths should retain source names.
@@ -2389,13 +2389,13 @@ without changing their consumers.
     spans, and secondary labels. Parsed, lowered, recovered, and database
     products retain those resolution diagnostics independently; formatting
     remains available for syntactically valid but semantically conflicting
-    source, and strict checking reports the conflict. Record/enum declaration
+    source, and strict checking reports the conflict. Struct/enum declaration
     identities are assigned while parsing rather than borrowed from the token
     pre-scan. Source type annotations now retain arbitrary nominal names and
     their source spans; unknown-name diagnostics belong to resolution, and
     recovering checking uses a total error placeholder instead of relying on a
-    parser-enforced `unreachable!`. Record literals now retain their nominal
-    spelling/span in syntax and publish the resolved `RecordId` through the
+    parser-enforced `unreachable!`. Struct literals now retain their nominal
+    spelling/span in syntax and publish the resolved `StructId` through the
     semantic model; parsing recognizes their `field:` grammar shape without a
     declaration lookup.
   - [x] Remove the parser's declaration/catalog pre-scan and enum
@@ -2406,7 +2406,7 @@ without changing their consumers.
     choice-setting restrictions/constructor arity, and publishes resolved
     references. Typed HIR owns a separate `TypedPattern` with concrete
     `EnumTypeId`s, so unresolved syntax cannot leak into Wasm lowering. Source
-    record, enum, and constructed-layout IDs now start in their own typed
+    struct, enum, and constructed-layout IDs now start in their own typed
     identity spaces without a token-count offset scan. The final substep below
     records why parser-owned constructed IDs remain syntax rather than layout.
   - [x] Classify parser-assigned declaration, expression, binding, and
@@ -2423,7 +2423,7 @@ without changing their consumers.
   resolution, making the advertised `syntax -> resolved HIR -> typed HIR`
   pipeline misleading.
   `LoweredProgram` is now the explicit resolution product: it owns syntax with
-  nominal type names, enum constructors/patterns/settings, and record literal
+  nominal type names, enum constructors/patterns/settings, and struct literal
   identities resolved to stable source/catalog IDs, plus resolution
   diagnostics. The former ambiguously named `hir::Program` is now the
   deliberately narrow `hir::DeclarationIndex`; it supports pre-check tooling
@@ -2697,7 +2697,7 @@ model mirrors the API hierarchy as cleanly as the consumer model does.
   Validation must prove that every declared intrinsic has exactly one backend
   implementation and that no implementation is orphaned.
 - [x] Migrate every existing declaration, including the test-only ordinary
-  catalog record, then delete the retired macros, duplicated owner/name data,
+  catalog struct, then delete the retired macros, duplicated owner/name data,
   and manual intrinsic-ID list.
 - [x] Add architecture tests showing that representative types with fields,
   variants, associated functions, and methods are declared in owner blocks yet
@@ -2744,7 +2744,7 @@ model mirrors the API hierarchy as cleanly as the consumer model does.
   identities. Names are lookup/display data, never semantic identity.
 - [x] Describe public fields and runtime-private storage in the owning type
   declaration. Runtime metadata must be backend-neutral: scalar, GC struct,
-  GC array, enum, compile-time-only, and derived record representations rather
+  GC array, enum, compile-time-only, and derived struct representations rather
   than `wasm_encoder` types or numeric heap/field indices.
 - [x] Generate namespace, standard type, field, variant, and callable IDs
   together with their declaration rows, so adding an ordinary symbol cannot
@@ -2766,7 +2766,7 @@ model mirrors the API hierarchy as cleanly as the consumer model does.
   The parser must not enumerate future standard-library type names.
   - [x] Keep source-written standard-library type names nominal in syntax and
     resolve them to catalog identities when entering inference/semantics.
-  - [x] Apply the same name-resolution boundary to source record/enum names:
+  - [x] Apply the same name-resolution boundary to source struct/enum names:
     source annotations now carry an interned nominal-name identity and resolve
     alongside catalog names only when entering semantics.
   - [x] Consolidate constructor, enum-pattern, choice-setting, and nominal-type
@@ -2781,7 +2781,7 @@ model mirrors the API hierarchy as cleanly as the consumer model does.
     Checked publication preserves that identity directly; no library type has
     a dedicated inference or semantic variant or a post-inference conversion
     table.
-  - [x] Represent source record and enum inference types with the same known
+  - [x] Represent source struct and enum inference types with the same known
     semantic `TypeId` values used by checked programs; nominal inference no
     longer has separate standard/source variants.
   - [x] Represent core primitives with their canonical semantic `TypeId` as
@@ -2796,13 +2796,13 @@ model mirrors the API hierarchy as cleanly as the consumer model does.
   capabilities, nullability, or representation.
 - [x] Generalize equality, process-memory layout, interpolation/string
   conversion, and future traits into capability queries over semantic
-  `TypeId`. Derive record/enum capabilities from their members where
+  `TypeId`. Derive struct/enum capabilities from their members where
   appropriate rather than matching concrete library types.
   - [x] Declare core and standard-type capabilities once in the catalog and
     make inference constraints, callable applicability, casts,
     interpolation, memory-read eligibility, and equality query them instead
     of maintaining concrete-type lists.
-  - [x] Treat inference checks for source records, enums, and wrappers as
+  - [x] Treat inference checks for source structs, enums, and wrappers as
     conservative admissibility only, then prove them through one recursive
     semantic-`TypeId` capability query. Preserve precise equality failures and
     process-memory layouts as capability evidence for diagnostics and backend
@@ -2840,7 +2840,7 @@ model mirrors the API hierarchy as cleanly as the consumer model does.
 - [x] Migrate `TimerState` first as the enum/variant proving case. Remove its
   synthetic AST enum, checker injection, name-based backend lookup, and
   duplicate `LanguageCatalog` entries.
-- [x] Migrate `Module` as the field and nominal-GC-record proving case. Its
+- [x] Migrate `Module` as the field and nominal-GC-struct proving case. Its
   `address` and `size` members and physical slots must come from one
   declaration.
 - [x] Migrate `UnityModule`, `UnityImage`, `UnityClass`, and `UnityField`
@@ -2856,10 +2856,10 @@ model mirrors the API hierarchy as cleanly as the consumer model does.
   compatibility aliases; the language is not yet in production.
 - [x] Finish with full compiler, formatter, generated-documentation, LSP,
   extension, example-autosplitter, Wasm validation, and runtime regression
-  coverage. Add a test proving that a new ordinary catalog record with fields
+  coverage. Add a test proving that a new ordinary catalog struct with fields
   becomes resolvable, documentable, completable, and code-generatable without
   adding a concrete-type match elsewhere.
-  - [x] A test-only `CatalogRecordProbe` declaration exercises nominal
+  - [x] A test-only `CatalogStructProbe` declaration exercises nominal
     resolution, semantic `TypeId` identity, public fields, go-to-definition,
     hover documentation, completion, derived process-memory layout,
     structural equality helpers, and valid Wasm GC generation. Its ID is not
@@ -2967,9 +2967,9 @@ introducing the following boundaries.
   - [x] Assign `ValueId` values to match payload bindings, include the resolved
     receiver root and semantic receiver type in method-call facts, and lower
     receivers directly through ID-keyed storage without backend name maps.
-  - [x] Assign typed IDs to records, enums, record fields, enum variants, and
+  - [x] Assign typed IDs to structs, enums, struct fields, enum variants, and
     built-in fields. Publish semantic member chains for paths and method
-    receivers, and make record literals and enum constructors expose their
+    receivers, and make struct literals and enum constructors expose their
     resolved field/variant IDs to the backend.
   - [x] Assign `PatternId` and `SettingChoiceOptionId` values, publish resolved
     enum variants for match arms and choice defaults/options, and remove their
@@ -2988,7 +2988,7 @@ introducing the following boundaries.
     annotations absent in checked syntax. Publish every inferred declaration
     type by `ValueId` (and each function result by `FunctionId`) in the semantic
     model, and make the Wasm backend consume those facts.
-  - [x] Publish record-field, enum-payload, and array-element layouts as
+  - [x] Publish struct-field, enum-payload, and array-element layouts as
     ID-keyed semantic `TypeId` facts, give arrays a dedicated `ArrayTypeId`, and
     make the Wasm backend consume those facts instead of AST layout types.
   - [x] Introduce inference-free `ast::TypeRef` values for every source
@@ -3014,7 +3014,7 @@ introducing the following boundaries.
     declarations, and standard-library generic constraints share it.
   - [x] Replace the remaining procedural overload/method selection branches
     with declarative candidates that submit constraints to the same context.
-  - [x] Defer record-member resolution when a receiver is still an inference
+  - [x] Defer struct-member resolution when a receiver is still an inference
     variable, then solve it from later call sites or a unique combination of
     accessed fields. `fn levelTimeText(parts) { parts.minutes }` now infers
     `LevelTimeParts` from `levelTimeText(current.levelTimeParts)` without an
@@ -3033,7 +3033,7 @@ introducing the following boundaries.
 
 - [x] Replace name-based `Builtin::resolve` and method-name special cases with
   a declarative, backend-independent `StandardLibrary` catalog. Each item needs
-  one canonical record containing:
+  one canonical struct containing:
 
   - a stable symbol ID and qualified name;
   - item kind, receiver (for methods), parameters, return type scheme, generic
@@ -3110,7 +3110,7 @@ introducing the following boundaries.
       re-querying their typed-HIR operation or path resolution.
     - [x] Migrate String literals/interpolation with explicit String-conversion
       edges, signature literals and their data collection, arrays, resolved
-      record-field constructors, and resolved enum-variant constructors.
+      struct-field constructors, and resolved enum-variant constructors.
     - [x] Migrate call arguments and resolved call targets, including user
       function IDs, method receivers/member chains, standard-library item IDs,
       and inferred generic type arguments. Ordinary and suspending call
@@ -3136,7 +3136,7 @@ introducing the following boundaries.
   - [x] Extract deterministic GC type/layout construction into
     `codegen/gc_types.rs`. Return the completed recursive type section and next
     free type index as an explicit backend plan covering state, built-ins,
-    async frames, records, enums, arrays, Options, and Results.
+    async frames, structs, enums, arrays, Options, and Results.
   - [x] Extract final section assembly after generated functions, globals,
     exports, and data dependencies are represented as explicit backend plans.
   - [x] Extract ordinary block/assignment/expression emission and
@@ -3186,7 +3186,7 @@ introducing the following boundaries.
     user-method calls transitively. Filter user function signatures/bodies,
     source strings/signature literals, helpers, and host imports by that set.
   - [x] Filter generated structural-equality signatures/bodies from reachable
-    `==` / `!=` operand types, recursively retaining nested record/enum and
+    `==` / `!=` operand types, recursively retaining nested struct/enum and
     String equality dependencies. A minimal script now emits no equality body.
   - [x] Introduce an explicit `GcLayout` plan returned by GC type construction;
     use it for recursive field storage, globals, generated function signatures,
@@ -3196,7 +3196,7 @@ introducing the following boundaries.
     generated helpers, and failure propagation. Dynamic GC types now fail fast
     if they reach the fixed built-in type conversion path.
   - [x] Filter inferred GC layouts by reachable storage, signatures, and
-    expressions, with transitive closure through record fields, enum payloads,
+    expressions, with transitive closure through struct fields, enum payloads,
     arrays, Options, and Results. Compiler-generated helper layouts are
     explicit roots, and `GcLayout` owns both compact ordering and encoding.
 
@@ -3313,7 +3313,7 @@ lowering IR from the architecture checkpoint are prerequisites for this work.
 ## P0 — Typed process deserialization
 
 Start this only after standard-library calls resolve through the catalog and
-typed HIR. Record layout/deserialization should be a reusable semantic service,
+typed HIR. Struct layout/deserialization should be a reusable semantic service,
 not another collection of `process.read` branches inside code generation.
 
 ### One generic `process.read`
@@ -3327,24 +3327,24 @@ not another collection of `process.read` branches inside code generation.
 - [x] When inference is ambiguous, explain which annotation would resolve it
   and show an example in the diagnostic.
 
-### Records as readable memory layouts
+### Structs as readable memory layouts
 
 - [x] Introduce a compiler-known `MemoryReadable` / `Deserializable` capability.
   Every primitive memory type implements it.
-- [x] Automatically make a record readable when all its fields are readable.
+- [x] Automatically make a struct readable when all its fields are readable.
   The initial layout is field order with explicit, documented size and padding
   rules.
-- [x] Read a record with one host `process_read` call, then deserialize its
+- [x] Read a struct with one host `process_read` call, then deserialize its
   fields locally. Besides being faster, this gives a coherent snapshot.
 - [ ] Once real target layouts require it, add declarative layout controls for
-  exact field offsets, explicit padding/packing, per-record or per-field
+  exact field offsets, explicit padding/packing, per-struct or per-field
   little-/big-endian decoding, and eventually custom decoding, without changing
   `process.read` call sites. Keep natural layout as the zero-annotation default.
-- [x] Add a record for Lunistice's adjacent clock fields and replace three
+- [x] Add a struct for Lunistice's adjacent clock fields and replace three
   reads with one:
 
   ```text
-  record LevelTimeParts {
+  struct LevelTimeParts {
       minutes: f32,
       seconds: f32,
       hundredths: f32,
@@ -3369,7 +3369,7 @@ not another collection of `process.read` branches inside code generation.
 ### Traits / interfaces
 
 - [x] Establish one compiler-known structural equality capability shared by
-  semantic diagnostics and Wasm helper generation. Records and enums derive it
+  semantic diagnostics and Wasm helper generation. Structs and enums derive it
   recursively from their fields and payloads; this service can later feed LSP
   availability and hover information without reconstructing backend rules.
 - [ ] Design a trait or type-class system compatible with bidirectional
@@ -3385,14 +3385,14 @@ not another collection of `process.read` branches inside code generation.
   need to explain why a method is available for an inferred type, including
   which bound supplied it.
 
-### Anonymous records
+### Anonymous structs
 
-- [ ] Add structural anonymous record values and types after named-record
+- [ ] Add structural anonymous struct values and types after named-struct
   deserialization is stable.
 - [ ] Infer their field types bidirectionally and allow ordinary field access,
   nesting, matching, and GC storage.
-- [ ] Decide whether anonymous records can implement `Deserializable` from a
-  type annotation or remain value-level conveniences only. Named records should
+- [ ] Decide whether anonymous structs can implement `Deserializable` from a
+  type annotation or remain value-level conveniences only. Named structs should
   remain the recommended form for documented target-process layouts.
 
 ## P1 — Core language and lifecycle polish
@@ -3579,7 +3579,7 @@ and standard-library work.
 - [x] Recover independently inside function, action, and nested statement
   blocks. Synchronize at semicolons, closing braces, and plausible statements
   on later lines without consuming a valid boundary token.
-- [x] Recover invalid record fields and enum variants independently while
+- [x] Recover invalid struct fields and enum variants independently while
   retaining later valid members and their stable IDs.
 - [x] Recover invalid state fields independently in both supported state
   syntaxes, retaining other pointer paths and state expressions.
@@ -3593,7 +3593,7 @@ and standard-library work.
   bodies when the parameter list is missing its closing parenthesis.
 - [x] Recover malformed array elements and function-call arguments
   independently, retaining later expressions and their enclosing statement.
-- [x] Recover malformed record-literal fields and template interpolations
+- [x] Recover malformed struct-literal fields and template interpolations
   independently, retaining neighboring fields, later interpolations, and the
   enclosing expression.
 - [x] Add a syntax-only error expression and use it for missing unary/binary
@@ -3648,11 +3648,11 @@ and standard-library work.
     identifier components of typed paths and call targets with their precise
     source spans, excluding arguments and nested child expressions.
   - [x] Resolve identifier segments in checked expressions to exact
-    source-definition spans for values, functions, record fields, enums, and
+    source-definition spans for values, functions, struct fields, enums, and
     enum variants. Represent standard-library calls and compiler-provided
     fields as catalog targets rather than inventing source spans.
   - [x] Add a syntax-reference index for source-defined types in annotations,
-    method receivers, return types, enum payloads, and casts, plus record
+    method receivers, return types, enum payloads, and casts, plus struct
     literal type/field labels and enum-pattern type/variant labels. Declaration
     and pattern-binding identifiers navigate to themselves.
   - [x] Navigate source-spellable built-in types, array/option/result syntax,
@@ -3693,10 +3693,10 @@ and standard-library work.
   tokens, syntax declarations, and recovered semantic resolutions; the LSP
   only converts its byte spans into delta-encoded UTF-16 semantic tokens.
 - [x] Add completion for keywords, action blocks, standard-library symbols,
-  settings, state snapshots, record fields, enum variants, and inferred methods.
+  settings, state snapshots, struct fields, enum variants, and inferred methods.
   The compiler owns candidate kinds, snippets, documentation, and replacement
   spans. An incomplete `receiver.` is probed without its unfinished suffix so
-  receiver types and record/user/standard-library members stay inferable. Root
+  receiver types and struct/user/standard-library members stay inferable. Root
   completion follows lexical scope and includes parameters, preceding ordinary
   and suspension bindings, nested-block locals, and match bindings while
   excluding declarations after the cursor.
@@ -3708,7 +3708,7 @@ and standard-library work.
   Signature help counts nested delimiters correctly and probes the inferred
   receiver when a method call is still syntactically incomplete. Source hover
   renders inferred types for globals, locals, parameters, state and setting
-  fields, record fields, functions and methods, records, enums, and variants.
+  fields, struct fields, functions and methods, structs, enums, and variants.
   Function and method hover also renders transitive operational effects,
   attachment constraints, synchronous behavior, and debug-only availability.
 - [x] Drive keyword, settings DSL, and lifecycle hover documentation from the
@@ -3721,7 +3721,7 @@ and standard-library work.
   completion, hover, and signature help; the test compares their JSON-RPC
   responses against both its generic and inferred `T = i32` forms.
 - [x] Add go-to-definition and find-references for functions, types, globals,
-  state fields, settings, record fields, and enum variants. Both features use
+  state fields, settings, struct fields, and enum variants. Both features use
   stable source declaration IDs and exact identifier-token references from the
   compiler database; the LSP only maps those spans into locations for the
   current single-file URI. References distinguish same-spelling declarations
@@ -3735,7 +3735,7 @@ and standard-library work.
   document so newly introduced conflicts can be distinguished reliably.
 - [x] Add document symbols and code actions. A cached, editor-neutral compiler
   query restores source order and models state/settings as domain containers,
-  nested setting titles as outline groups, record/enum children, methods, and
+  nested setting titles as outline groups, struct/enum children, methods, and
   lifecycle events. LSP quick fixes are derived from the compiler's structured
   diagnostic fixes, honor requested ranges and `context.only`, and preserve
   applicability metadata rather than duplicating repair logic in the server.
@@ -3760,7 +3760,7 @@ and standard-library work.
   domain token type and modifier with standard supertypes/theme scopes, and has
   a Rust integration test that prevents its manifest from drifting from the
   server legend.
-- [ ] Add snippets for state, settings, lifecycle blocks, match, records, and
+- [ ] Add snippets for state, settings, lifecycle blocks, match, structs, and
   common process/Unity attachment patterns.
 
 ## P2 — Documentation and migration
@@ -3907,7 +3907,7 @@ and standard-library work.
 5. Specify and implement `T?`, `T!`, and `else` fallback/control flow on those
    foundations, including their typed-HIR and Wasm GC representations.
 6. Lower process-read failures through ordinary `T!` values and result-aware
-   control flow, then implement generic typed reads, named-record
+   control flow, then implement generic typed reads, named-struct
    deserialization, the minimal
    capability/trait machinery, and Lunistice's single `LevelTimeParts` read.
 7. Land compound assignment, `TimerState`, global convenience functions, and
@@ -4180,7 +4180,7 @@ language catalog document the refinement rule.
 - Added compiler-owned document highlights for source declarations and every
   resolved occurrence, preserving read and write classification from the
   existing value-reference analysis.
-- Added inferred type-definition navigation to source records, enums, state and
+- Added inferred type-definition navigation to source structs, enums, state and
   settings declarations, and canonical documentation pages for built-in and
   standard-library types.
 - Kept the LSP as a conversion layer over the shared database products and
@@ -4200,7 +4200,7 @@ language catalog document the refinement rule.
 # 2026-08-24: shortest floating-point Display and Debug
 
 - Made `f32` and `f64` implement `Debug` and therefore `Display`, including
-  recursive formatting inside records, arrays, options, results, and the other
+  recursive formatting inside structs, arrays, options, results, and the other
   conditionally debug-printable containers.
 - Adapted zmij's correctness-first Schubfach conversion to lazily emitted
   Wasm-GC runtime helpers. The power-of-ten data and width-specific formatter

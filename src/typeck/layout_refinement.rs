@@ -54,9 +54,9 @@ impl Checker {
         };
         let layout = self
             .declarations
-            .records
+            .structs
             .iter()
-            .find(|record| record.name == "Layout")?;
+            .find(|structure| structure.name == "Layout")?;
         let field = layout
             .fields
             .iter()
@@ -297,9 +297,9 @@ impl Checker {
 
         let layout = self
             .declarations
-            .records
+            .structs
             .iter()
-            .find(|record| record.name == "Layout")?;
+            .find(|structure| structure.name == "Layout")?;
         let field = layout
             .fields
             .iter()
@@ -325,9 +325,9 @@ impl Checker {
     fn layout_assignments(&self) -> Vec<Vec<LayoutConstraint>> {
         let Some(layout) = self
             .declarations
-            .records
+            .structs
             .iter()
-            .find(|record| record.name == "Layout")
+            .find(|structure| structure.name == "Layout")
         else {
             return vec![Vec::new()];
         };

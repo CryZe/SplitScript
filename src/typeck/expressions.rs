@@ -11,7 +11,7 @@ use crate::{
     inference::{Requirements, Type},
     migration::{ASL_SETTINGS_LOOKUP_DIAGNOSTIC, migration_diagnostic},
     semantic::{
-        PendingFunctionValue, ResolvedEnumVariantId, ResolvedRecordFieldId, ResolvedRecordId,
+        PendingFunctionValue, ResolvedEnumVariantId, ResolvedStructFieldId, ResolvedStructId,
         ResolvedWrapperPattern,
     },
     signature::parse_signature,
@@ -291,23 +291,23 @@ impl Checker {
                     self.expect_expression(expr.id, never, expected, expr.span)?
                 }
             }
-            ExprKind::Record { name, fields, .. } => {
+            ExprKind::Struct { name, fields, .. } => {
                 let declaration = self
                     .declarations
-                    .records
+                    .structs
                     .iter()
                     .find(|declaration| declaration.name == *name)
                     .cloned();
                 if let Some(declaration) = declaration {
                     self.semantics
-                        .resolve_record_literal(expr.id, ResolvedRecordId::Source(declaration.id));
+                        .resolve_struct_literal(expr.id, ResolvedStructId::Source(declaration.id));
                     let mut seen = HashSet::new();
                     let mut resolved_fields = Vec::with_capacity(fields.len());
                     for literal_field in fields {
                         let name = &literal_field.name;
                         let value = &literal_field.value;
                         if !seen.insert(name.clone()) {
-                            self.error(format!("duplicate record field `{name}`"), value.span);
+                            self.error(format!("duplicate struct field `{name}`"), value.span);
                             continue;
                         }
                         if let Some(field) =
@@ -319,28 +319,28 @@ impl Checker {
                                 super::ExpectedTypeSource {
                                     span: field.span,
                                     label: format!(
-                                        "record field `{}.{}` is declared as `{field_type_name}`",
+                                        "struct field `{}.{}` is declared as `{field_type_name}`",
                                         declaration.name, field.name,
                                     ),
                                 },
                                 |checker| checker.expr(value, Some(field_type)),
                             );
-                            resolved_fields.push(ResolvedRecordFieldId::Source(field.id));
+                            resolved_fields.push(ResolvedStructFieldId::Source(field.id));
                         } else {
                             self.expr(value, None);
                             self.error(
-                                format!("record `{}` has no field `{name}`", declaration.name),
+                                format!("struct `{}` has no field `{name}`", declaration.name),
                                 value.span,
                             );
                         }
                     }
                     self.semantics
-                        .resolve_record_literal_fields(expr.id, resolved_fields);
+                        .resolve_struct_literal_fields(expr.id, resolved_fields);
                     for field in &declaration.fields {
                         if !seen.contains(&field.name) {
                             self.error(
                                 format!(
-                                    "record `{}` initializer is missing field `{}`",
+                                    "struct `{}` initializer is missing field `{}`",
                                     declaration.name, field.name
                                 ),
                                 expr.span,
@@ -349,7 +349,7 @@ impl Checker {
                     }
                     self.expect_expression(
                         expr.id,
-                        self.record_type(declaration.id),
+                        self.struct_type(declaration.id),
                         expected,
                         expr.span,
                     )?
@@ -375,9 +375,9 @@ impl Checker {
                         );
                         return None;
                     }
-                    self.semantics.resolve_record_literal(
+                    self.semantics.resolve_struct_literal(
                         expr.id,
-                        ResolvedRecordId::Standard(declaration.id),
+                        ResolvedStructId::Standard(declaration.id),
                     );
                     let declared_fields = self
                         .standard_library
@@ -390,29 +390,29 @@ impl Checker {
                         let name = &literal_field.name;
                         let value = &literal_field.value;
                         if !seen.insert(name.clone()) {
-                            self.error(format!("duplicate record field `{name}`"), value.span);
+                            self.error(format!("duplicate struct field `{name}`"), value.span);
                             continue;
                         }
                         if let Some(field) =
                             declared_fields.iter().find(|field| field.name == *name)
                         {
                             self.expr(value, Some(self.standard_field_type(field.id)));
-                            resolved_fields.push(ResolvedRecordFieldId::Standard(field.id));
+                            resolved_fields.push(ResolvedStructFieldId::Standard(field.id));
                         } else {
                             self.expr(value, None);
                             self.error(
-                                format!("record `{}` has no field `{name}`", declaration.name),
+                                format!("struct `{}` has no field `{name}`", declaration.name),
                                 value.span,
                             );
                         }
                     }
                     self.semantics
-                        .resolve_record_literal_fields(expr.id, resolved_fields);
+                        .resolve_struct_literal_fields(expr.id, resolved_fields);
                     for field in &declared_fields {
                         if !seen.contains(field.name) {
                             self.error(
                                 format!(
-                                    "record `{}` initializer is missing field `{}`",
+                                    "struct `{}` initializer is missing field `{}`",
                                     declaration.name, field.name
                                 ),
                                 expr.span,
@@ -449,13 +449,13 @@ impl Checker {
                         .iter()
                         .map(|parameter| variables[parameter.name])
                         .collect::<Vec<_>>();
-                    let record_type = self.catalog_application_type(declaration.id, arguments);
-                    let Type::Application(application) = record_type else {
-                        unreachable!("named runtime record constructors use application layouts")
+                    let struct_type = self.catalog_application_type(declaration.id, arguments);
+                    let Type::Application(application) = struct_type else {
+                        unreachable!("named runtime struct constructors use application layouts")
                     };
-                    self.semantics.resolve_record_literal(
+                    self.semantics.resolve_struct_literal(
                         expr.id,
-                        ResolvedRecordId::StandardConstructor(application),
+                        ResolvedStructId::StandardConstructor(application),
                     );
                     let declared_fields = self
                         .standard_library
@@ -468,7 +468,7 @@ impl Checker {
                         let name = &literal_field.name;
                         let value = &literal_field.value;
                         if !seen.insert(name.clone()) {
-                            self.error(format!("duplicate record field `{name}`"), value.span);
+                            self.error(format!("duplicate struct field `{name}`"), value.span);
                             continue;
                         }
                         if let Some(field) =
@@ -476,31 +476,31 @@ impl Checker {
                         {
                             let field_type = self.catalog_type(field.ty, &variables);
                             self.expr(value, Some(field_type));
-                            resolved_fields.push(ResolvedRecordFieldId::Standard(field.id));
+                            resolved_fields.push(ResolvedStructFieldId::Standard(field.id));
                         } else {
                             self.expr(value, None);
                             self.error(
-                                format!("record `{}` has no field `{name}`", declaration.name),
+                                format!("struct `{}` has no field `{name}`", declaration.name),
                                 value.span,
                             );
                         }
                     }
                     self.semantics
-                        .resolve_record_literal_fields(expr.id, resolved_fields);
+                        .resolve_struct_literal_fields(expr.id, resolved_fields);
                     for field in &declared_fields {
                         if !seen.contains(field.name) {
                             self.error(
                                 format!(
-                                    "record `{}` initializer is missing field `{}`",
+                                    "struct `{}` initializer is missing field `{}`",
                                     declaration.name, field.name
                                 ),
                                 expr.span,
                             );
                         }
                     }
-                    self.expect_expression(expr.id, record_type, expected, expr.span)?
+                    self.expect_expression(expr.id, struct_type, expected, expr.span)?
                 } else {
-                    self.error(format!("unknown record type `{name}`"), expr.span);
+                    self.error(format!("unknown struct type `{name}`"), expr.span);
                     return None;
                 }
             }

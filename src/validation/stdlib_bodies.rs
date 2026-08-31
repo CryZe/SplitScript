@@ -416,7 +416,7 @@ fn render_actual_type(
         TypeKind::Standard(standard) => library.type_decl(*standard).name.to_owned(),
         TypeKind::StateSnapshot => "StateSnapshot".to_owned(),
         TypeKind::SettingsView => "SettingsView".to_owned(),
-        TypeKind::Record(record) => format!("record#{record}"),
+        TypeKind::Struct(structure) => format!("struct#{structure}"),
         TypeKind::Enum(enumeration) => format!("enum#{enumeration}"),
         TypeKind::ManagedClass(class) => format!("class#{class}"),
         TypeKind::ManagedReference(class) => format!("class#{class}.Ref"),

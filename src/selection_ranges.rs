@@ -6,8 +6,8 @@
 
 use crate::{
     ast::{
-        Action, Block, EnumDecl, Expr, ExprKind, FunctionDecl, MatchArm, Program, RecordDecl,
-        SettingDecl, SettingFamilyDecl, SettingKind, Span, StateDecl, StateField, Stmt,
+        Action, Block, EnumDecl, Expr, ExprKind, FunctionDecl, MatchArm, Program, SettingDecl,
+        SettingFamilyDecl, SettingKind, Span, StateDecl, StateField, Stmt, StructDecl,
         VariableDecl,
     },
     lexer::{Lexeme, TokenKind, TriviaKind},
@@ -167,12 +167,12 @@ impl<'ast> Visitor<'ast> for SpanCollector {
         }
     }
 
-    fn visit_record(&mut self, record: &'ast RecordDecl) {
-        self.push(record.span);
-        for field in &record.fields {
+    fn visit_struct(&mut self, structure: &'ast StructDecl) {
+        self.push(structure.span);
+        for field in &structure.fields {
             self.push(field.span);
         }
-        visit::walk_record(self, record);
+        visit::walk_struct(self, structure);
     }
 
     fn visit_enum(&mut self, enumeration: &'ast EnumDecl) {

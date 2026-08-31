@@ -275,7 +275,7 @@ fn lexical_kind(
         TokenKind::Ident(_) if matches!(previous, Some(TokenKind::Ident(name)) if name == "namespace") => {
             Some(SemanticTokenKind::Namespace)
         }
-        TokenKind::Ident(_) if matches!(previous, Some(TokenKind::Ident(name)) if name == "record") => {
+        TokenKind::Ident(_) if matches!(previous, Some(TokenKind::Ident(name)) if name == "struct") => {
             Some(SemanticTokenKind::Struct)
         }
         TokenKind::Ident(_) if matches!(previous, Some(TokenKind::Ident(name)) if name == "enum") => {

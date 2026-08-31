@@ -235,12 +235,12 @@ fn type_name(
         TypeKind::Standard(standard) => standard_library.type_decl(*standard).name.to_owned(),
         TypeKind::StateSnapshot => "StateSnapshot".to_owned(),
         TypeKind::SettingsView => "SettingsView".to_owned(),
-        TypeKind::Record(id) => program
-            .records
+        TypeKind::Struct(id) => program
+            .structs
             .iter()
-            .find(|record| record.id == *id)
-            .map(|record| record.name.clone())
-            .unwrap_or_else(|| format!("record#{}", id.index())),
+            .find(|structure| structure.id == *id)
+            .map(|structure| structure.name.clone())
+            .unwrap_or_else(|| format!("struct#{}", id.index())),
         TypeKind::Enum(id) => enums
             .iter()
             .find(|enumeration| enumeration.id == *id)
@@ -860,7 +860,7 @@ fn scalar_type_entry(
         | Type::Standard(_)
         | Type::StateSnapshot
         | Type::SettingsView
-        | Type::Record(_)
+        | Type::Struct(_)
         | Type::ManagedClass(_)
         | Type::Enum(_)
         | Type::ArrayStorage(_)

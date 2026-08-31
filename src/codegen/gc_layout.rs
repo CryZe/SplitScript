@@ -117,13 +117,13 @@ impl GcLayout {
         let mut callable_functions = HashMap::new();
         let mut ordered = Vec::new();
 
-        for record in program
-            .records
+        for structure in program
+            .structs
             .iter()
-            .filter(|record| reachability.contains_record_type(record.id))
+            .filter(|structure| reachability.contains_struct_type(structure.id))
         {
-            dynamic.insert(Type::Record(record.id), next);
-            ordered.push(Type::Record(record.id));
+            dynamic.insert(Type::Struct(structure.id), next);
+            ordered.push(Type::Struct(structure.id));
             next += 1;
         }
         for class in program
@@ -529,7 +529,7 @@ impl GcLayout {
                 .get(&future)
                 .expect("reachable async values have erased GC headers"),
             Type::Standard(standard) => self.standard_index(standard),
-            Type::Record(_)
+            Type::Struct(_)
             | Type::ManagedClass(_)
             | Type::Enum(_)
             | Type::ArrayStorage(_)
@@ -586,7 +586,7 @@ impl GcLayout {
                     }),
                 }
             }
-            Type::Record(_)
+            Type::Struct(_)
             | Type::ManagedClass(_)
             | Type::Enum(_)
             | Type::ArrayStorage(_)

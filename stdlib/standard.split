@@ -856,7 +856,7 @@ intrinsic type Process {
     /// Reads a fixed-layout value from process memory.
     ///
     /// The expected [`MemoryReadable`] type selects a fixed-size primitive or
-    /// record layout. A synchronous read returns [`T!`]; [`retry`] polls until a
+    /// struct layout. A synchronous read returns [`T!`]; [`retry`] polls until a
     /// value is available and yields `T`. Use an explicit type argument such as
     /// `process.read<i32>` when context cannot determine the type.
     ///
@@ -1473,7 +1473,7 @@ namespace Unity {
 /// state Unity.il2cpp(2020) ["game.exe"] {}
 /// ```
 @representation(enum, nullable)
-@valueUsage(recordField, localVariable)
+@valueUsage(structField, localVariable)
 private enum UnityRuntimeBackend {
     /// Selects the IL2CPP metadata adapter.
     ///
@@ -1505,7 +1505,7 @@ private enum UnityRuntimeBackend {
 /// Internal backend-independent context consumed by generated schema binders.
 ///
 /// Exactly one backend payload is present. Keeping both representations behind
-/// one private record lets schema lowering share one attachment lifecycle.
+/// one private struct lets schema lowering share one attachment lifecycle.
 ///
 /// # Example
 ///
@@ -2489,7 +2489,7 @@ capability Equatable<T> {
     /// Reports whether this value and another value are equal.
     ///
     /// This method is also the implementation of the
-    /// [`==`](operator@Equatable.equals) operator. Records,
+    /// [`==`](operator@Equatable.equals) operator. Structs,
     /// enums, options, and results compare their complete structure; strings
     /// compare UTF-8 contents. Floating-point equality follows IEEE 754, so
     /// NaN is not equal to itself.
@@ -2531,7 +2531,7 @@ capability Equatable<T> {
 
 /// Produces an unambiguous structural representation of a value.
 ///
-/// [`String`] and [`char`] values are quoted and escaped. Source records and
+/// [`String`] and [`char`] values are quoted and escaped. Source structs and
 /// enums derive a multiline representation recursively when every contained
 /// value implements [`Debug`]. Standard-library containers opt into the same
 /// conditional derivation for their element or payload types.
@@ -2553,7 +2553,7 @@ capability Equatable<T> {
 capability Debug<T: Display> {
     /// Converts the receiver to its unambiguous structural representation.
     ///
-    /// User records and enums receive a recursive derived implementation when
+    /// User structs and enums receive a recursive derived implementation when
     /// this method is absent. Defining an exact method with this signature
     /// overrides that representation without changing the user-facing
     /// [`Display.toString`] method.
@@ -2565,7 +2565,7 @@ capability Debug<T: Display> {
     /// ```splitscript
     /// state "example.exe" {}
     ///
-    /// record Checkpoint {
+    /// struct Checkpoint {
     ///     name: String,
     /// }
     ///
@@ -2580,7 +2580,7 @@ capability Debug<T: Display> {
 ///
 /// An [`as`] [`String`] cast, string interpolation, [`print`], and
 /// [`setVariable`] all display values through this single capability.
-/// Source records, enums, and opted-in standard-library containers fall back
+/// Source structs, enums, and opted-in standard-library containers fall back
 /// to their derived [`Debug`] representation when no exact
 /// [`Display.toString`] implementation exists.
 ///
@@ -2595,7 +2595,7 @@ capability Debug<T: Display> {
 capability Display<T> {
     /// Converts the receiver to its user-facing string representation.
     ///
-    /// A user record or enum falls back to its derived [`Debug`] representation
+    /// A user struct or enum falls back to its derived [`Debug`] representation
     /// when this method is absent. Defining a method with this signature
     /// overrides that fallback. The [`String`] result may be inferred from the
     /// body, and no separate implementation declaration or annotation is needed.
@@ -2607,7 +2607,7 @@ capability Display<T> {
     /// Display a user-defined position
     ///
     /// ```splitscript
-    /// record Position {
+    /// struct Position {
     ///     x: i32,
     ///     y: i32,
     /// }
@@ -3160,7 +3160,7 @@ typeConstructor InclusiveRangeIterator<T: Integer> {
 
 /// Supports deserialization from process memory.
 ///
-/// Primitive and record layouts with this capability can be selected by
+/// Primitive and struct layouts with this capability can be selected by
 /// [`Process.read`].
 ///
 /// # Example
@@ -3958,7 +3958,7 @@ extend address {
 /// let character: String = "Toree"
 /// ```
 @representation(gcArray, u8, mutable, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 @capabilities(Debug, Equatable, Display)
 intrinsic type String {
     /// Returns a string's UTF-8 byte length.
@@ -4412,7 +4412,7 @@ intrinsic type String {
 /// let markerAddress = await executable.scan(sig"48 8B ?? 89")
 /// ```
 @representation(scalar, i64)
-@valueUsage(recordField, enumPayload, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, localVariable, globalVariable)
 intrinsic type Signature {}
 
 /// Identifies a signature selected by a multi-pattern memory scan.
@@ -4429,7 +4429,7 @@ intrinsic type Signature {}
 /// print(found.index)
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, localVariable, globalVariable)
 struct SignatureMatch {
     /// Address where the signature matched.
     ///
@@ -4476,7 +4476,7 @@ struct SignatureMatch {
 /// let delay = Duration.fromSeconds(2)
 /// ```
 @representation(gcStruct)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 @capabilities(Equatable)
 struct Duration {
     /// Stores the whole-second component.
@@ -5025,7 +5025,7 @@ struct Duration {
 /// let detectedAt: Instant = Instant.now()
 /// ```
 @representation(gcStruct)
-@valueUsage(recordField, enumPayload, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, localVariable, globalVariable)
 @capabilities(Equatable)
 struct Instant {
     /// Stores the opaque monotonic timestamp in nanoseconds.
@@ -5173,7 +5173,7 @@ struct Instant {
 /// let pointerWidth = PointerSize.Bit64
 /// ```
 @representation(enum, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 @capabilities(Equatable)
 enum PointerSize {
     /// Intermediate pointers contain 32-bit addresses.
@@ -5211,7 +5211,7 @@ enum PointerSize {
 /// let requiredAccess = MemoryRangeAccess.ReadWrite
 /// ```
 @representation(enum, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 @capabilities(Equatable)
 enum MemoryRangeAccess {
     /// Requires readable memory.
@@ -5260,7 +5260,7 @@ enum MemoryRangeAccess {
 /// let emulatorRange = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite)
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 struct MemoryRange {
     /// Returns the first mapped address.
     ///
@@ -5336,7 +5336,7 @@ struct MemoryRange {
 /// let healthPath = 0x1000.memoryPath([0x20, 0x18], 0x8, PointerSize.Bit64)
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 struct MemoryPath {
     /// Returns the address at which traversal starts.
     ///
@@ -5464,7 +5464,7 @@ struct MemoryPath {
 /// }
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 @capabilities(Debug, Equatable, Display)
 struct FileVersion {
     /// Major version component.
@@ -5575,7 +5575,7 @@ struct FileVersion {
 /// let sameRelease = versions.file == versions.product
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, localVariable)
+@valueUsage(structField, enumPayload, localVariable)
 struct ModuleVersionInfo {
     /// The version of this particular executable or library file.
     ///
@@ -5616,7 +5616,7 @@ struct ModuleVersionInfo {
 /// let executable: Module = await process.mainModule()
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 struct Module {
     /// Returns the module base address.
     ///
@@ -6072,7 +6072,7 @@ struct Module {
 /// }
 /// ```
 @representation(enum, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 @capabilities(Equatable)
 enum TimerState {
     /// The timer has not started.
@@ -6149,7 +6149,7 @@ enum TimerState {
 /// }
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 struct UnityContext {
     /// Accesses native Unity scene snapshots and hierarchy roots.
     ///
@@ -6186,7 +6186,7 @@ struct UnityContext {
 /// }
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 struct UnityScenes {
     /// Address of Unity's native scene-manager state.
     private address: address,
@@ -6408,7 +6408,7 @@ struct UnityScenes {
 /// }
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 struct UnityScene {
     /// Scene-manager context retained for live hierarchy lookups.
     private scenes: UnityScenes,
@@ -6549,7 +6549,7 @@ struct UnityScene {
 /// }
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 struct UnityGameObject {
     /// Scene-manager context used for native hierarchy traversal.
     private scenes: UnityScenes,
@@ -6741,7 +6741,7 @@ struct UnityGameObject {
 /// let unityRuntime = await Unity.il2cpp(2020)
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 private struct UnityModule {
     /// Returns the IL2CPP assemblies metadata address.
     ///
@@ -6826,7 +6826,7 @@ private struct UnityModule {
 /// let assemblyImage = await runtime.image("Assembly-CSharp")
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 private struct UnityImage {
     /// Returns the Unity image address.
     ///
@@ -6903,7 +6903,7 @@ private struct UnityImage {
 /// let playerClass = await image.class("Player")
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 private struct UnityClass {
     /// Returns the Unity class address.
     ///
@@ -7054,7 +7054,7 @@ private struct UnityClass {
 /// let healthField = await player.fieldAny(["health", "_health"])
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 private struct UnityField {
     /// Returns the instance-field byte offset.
     ///
@@ -7100,7 +7100,7 @@ private struct UnityField {
 /// let monoVersion = MonoVersion.V2
 /// ```
 @representation(enum, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 @capabilities(Equatable)
 enum MonoVersion {
     /// Layout used by Unity releases before the V3 metadata change.
@@ -7139,7 +7139,7 @@ enum MonoVersion {
 /// let layoutBackedRuntime: MonoModule = await Unity.mono(MonoVersion.V2)
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, localVariable)
+@valueUsage(structField, localVariable)
 private struct MonoLayout {
     /// Offset of the assembly-name pointer.
     private assemblyName: u64,
@@ -7219,7 +7219,7 @@ private struct MonoLayout {
 /// let discoveredMonoModule = await Unity.mono(MonoVersion.V2)
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 private struct MonoModule {
     /// Address of Mono's global assembly-list pointer.
     ///
@@ -7617,7 +7617,7 @@ private struct MonoModule {
 /// let mainManagedImage: MonoImage = await monoForImage.image("Assembly-CSharp")
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 private struct MonoImage {
     /// Address of the target Mono image metadata.
     ///
@@ -7689,7 +7689,7 @@ private struct MonoImage {
 /// let managedGameClass = await imageForClass.class("GameManager")
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
 private struct MonoClass {
     /// Address of the target Mono class metadata.
     ///
@@ -7843,7 +7843,7 @@ private struct MonoClass {
 /// let emulator: GBAEmulator = gba
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 struct GBAEmulator {
     /// Identifies the emulator-specific memory layout.
     private backend: u32,
@@ -8126,7 +8126,7 @@ struct GBAEmulator {
 /// let emulator: PS2Emulator = ps2
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 struct PS2Emulator {
     /// Identifies how the current emulator exposes its RAM base.
     private backend: u32,
@@ -8223,7 +8223,7 @@ struct PS2Emulator {
 /// let emulator: PS1Emulator = ps1
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 struct PS1Emulator {
     /// Identifies how the selected emulator exposes its RAM base.
     private backend: u32,
@@ -8453,7 +8453,7 @@ struct PS1Emulator {
 /// let emulator: SMSEmulator = sms
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 struct SMSEmulator {
     /// Identifies how the selected emulator exposes work RAM.
     private backend: u32,
@@ -8614,7 +8614,7 @@ struct SMSEmulator {
 /// let emulator: GenesisEmulator = genesis
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 struct GenesisEmulator {
     /// Identifies a stable, moving-pointer, or libretro mapping.
     private backend: u32,
@@ -8742,7 +8742,7 @@ struct GenesisEmulator {
     /// Reads a typed value from emulated Genesis work RAM.
     ///
     /// Valid reads lie entirely within `0x0000..=0xffff`. Unaligned reads work
-    /// across 16-bit word boundaries, and primitive values, record fields, and
+    /// across 16-bit word boundaries, and primitive values, struct fields, and
     /// fixed-array elements use the Genesis's big-endian byte order.
     ///
     /// # Example
@@ -8765,7 +8765,7 @@ struct GenesisEmulator {
 /// Dolphin exposes MEM1 as a stable 24 MiB native mapping. RetroArch uses the
 /// same mapping while `dolphin_libretro.dll` remains loaded. Reads accept the
 /// original console addresses and decode every [`MemoryReadable`] scalar,
-/// record field, and fixed-array element as big endian.
+/// struct field, and fixed-array element as big endian.
 ///
 /// # Example
 ///
@@ -8775,7 +8775,7 @@ struct GenesisEmulator {
 /// let emulator: GCNEmulator = gcn
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 struct GCNEmulator {
     /// Identifies whether the mapping belongs to a standalone or libretro host.
     private backend: u32,
@@ -8810,7 +8810,7 @@ struct GCNEmulator {
     /// Reads a typed value from emulated GameCube MEM1.
     ///
     /// Valid reads lie entirely within `0x80000000..=0x817fffff`. Primitive
-    /// values, record fields, and fixed-array elements are decoded using the
+    /// values, struct fields, and fixed-array elements are decoded using the
     /// GameCube's big-endian byte order.
     ///
     /// # Example
@@ -8831,7 +8831,7 @@ struct GCNEmulator {
 /// Retains discovered Nintendo Wii MEM1 and MEM2 mappings.
 ///
 /// Reads accept the original console addresses and decode every
-/// [`MemoryReadable`] scalar, record field, and fixed-array element as big
+/// [`MemoryReadable`] scalar, struct field, and fixed-array element as big
 /// endian. Dolphin and 64-bit RetroArch with `dolphin_libretro.dll` are
 /// supported.
 ///
@@ -8843,7 +8843,7 @@ struct GCNEmulator {
 /// let emulator: WiiEmulator = wii
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 struct WiiEmulator {
     /// Identifies whether the mapping belongs to a standalone or libretro host.
     private backend: u32,
@@ -8911,22 +8911,22 @@ struct WiiEmulator {
     ) -> T!;
 }
 
-/// Exercises the generic standard-library record pipeline.
+/// Exercises the generic standard-library struct pipeline.
 ///
 /// This declaration exists only in tests and deliberately has no intrinsic implementation.
 ///
 /// # Example
 ///
-/// Read a probe record
+/// Read a probe struct
 ///
 /// ```splitscript
-/// let probe: CatalogRecordProbe = process.read(0x100) else return
+/// let probe: CatalogStructProbe = process.read(0x100) else return
 /// ```
 @testOnly
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 @capabilities(Equatable, MemoryReadable)
-struct CatalogRecordProbe {
+struct CatalogStructProbe {
     /// Returns the probe value.
     ///
     /// # Example
@@ -8981,10 +8981,10 @@ struct CatalogRecordProbe {
     }
 }
 
-/// Exercises constructed field types in standard-library records.
+/// Exercises constructed field types in standard-library structs.
 ///
-/// This declaration exists only in tests and verifies that catalog records use
-/// the same array and wrapper type machinery as ordinary source records.
+/// This declaration exists only in tests and verifies that catalog structs use
+/// the same array and wrapper type machinery as ordinary source structs.
 ///
 /// # Example
 ///
@@ -8995,7 +8995,7 @@ struct CatalogRecordProbe {
 /// ```
 @testOnly
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(structField, enumPayload, stateField, localVariable)
 struct CatalogConstructedFieldProbe {
     /// Returns the stored values.
     ///
@@ -9022,7 +9022,7 @@ struct CatalogConstructedFieldProbe {
 
 /// Exercises fixed-array fields in structural process-memory layouts.
 ///
-/// This declaration exists only in tests and verifies that catalog records
+/// This declaration exists only in tests and verifies that catalog structs
 /// preserve an exact array length while deriving [`MemoryReadable`].
 ///
 /// # Example

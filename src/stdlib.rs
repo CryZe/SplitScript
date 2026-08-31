@@ -878,7 +878,7 @@ impl StandardLibrary {
         let mut call_shapes = HashSet::new();
         let mut example_sources = HashSet::new();
         for namespace in NAMESPACES {
-            record_example_sources(
+            struct_example_sources(
                 "namespace",
                 namespace.name,
                 namespace.documentation,
@@ -887,7 +887,7 @@ impl StandardLibrary {
             );
         }
         for capability in CAPABILITIES {
-            record_example_sources(
+            struct_example_sources(
                 "capability",
                 capability.name,
                 capability.documentation,
@@ -896,7 +896,7 @@ impl StandardLibrary {
             );
         }
         for constructor in TYPE_CONSTRUCTORS {
-            record_example_sources(
+            struct_example_sources(
                 "type constructor",
                 constructor.name,
                 constructor.documentation,
@@ -908,7 +908,7 @@ impl StandardLibrary {
             .iter()
             .filter(|ty| ty.visibility == TypeVisibility::Public)
         {
-            record_example_sources(
+            struct_example_sources(
                 "type",
                 ty.name,
                 ty.documentation,
@@ -926,7 +926,7 @@ impl StandardLibrary {
                     _ => false,
                 }
         }) {
-            record_example_sources(
+            struct_example_sources(
                 "field",
                 field.name,
                 field.documentation,
@@ -935,7 +935,7 @@ impl StandardLibrary {
             );
         }
         for variant in self.public_variants() {
-            record_example_sources(
+            struct_example_sources(
                 "variant",
                 variant.name,
                 variant.documentation,
@@ -1008,7 +1008,7 @@ impl StandardLibrary {
                         "state-provider context `{qualified}` has incomplete documentation"
                     ));
                 }
-                record_example_sources(
+                struct_example_sources(
                     "state-provider context",
                     &qualified,
                     context.documentation,
@@ -1906,7 +1906,7 @@ fn validate_named_declarations<T, I>(
     }
 }
 
-fn record_example_sources(
+fn struct_example_sources(
     kind: &str,
     name: &str,
     documentation: Documentation<StdlibSymbolId>,

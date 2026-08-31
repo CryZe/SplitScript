@@ -28,8 +28,8 @@ pub trait Visitor<'ast>: Sized {
         walk_setting_family(self, family);
     }
 
-    fn visit_record(&mut self, record: &'ast RecordDecl) {
-        walk_record(self, record);
+    fn visit_struct(&mut self, structure: &'ast StructDecl) {
+        walk_struct(self, structure);
     }
 
     fn visit_enum(&mut self, enumeration: &'ast EnumDecl) {
@@ -143,8 +143,8 @@ pub fn walk_program<'ast, V: Visitor<'ast>>(visitor: &mut V, program: &'ast Prog
     for global in &program.globals {
         visitor.visit_variable(global);
     }
-    for record in &program.records {
-        visitor.visit_record(record);
+    for structure in &program.structs {
+        visitor.visit_struct(structure);
     }
     for enumeration in &program.enums {
         visitor.visit_enum(enumeration);
@@ -231,8 +231,8 @@ pub fn walk_setting_family<'ast, V: Visitor<'ast>>(
 ) {
 }
 
-pub fn walk_record<'ast, V: Visitor<'ast>>(visitor: &mut V, record: &'ast RecordDecl) {
-    for field in &record.fields {
+pub fn walk_struct<'ast, V: Visitor<'ast>>(visitor: &mut V, structure: &'ast StructDecl) {
+    for field in &structure.fields {
         visitor.visit_type_ref(&field.ty);
     }
 }
@@ -378,7 +378,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
             visitor.visit_expr(end);
         }
         ExprKind::Block(block) | ExprKind::Loop(block) => visitor.visit_block(block),
-        ExprKind::Record { fields, .. } => {
+        ExprKind::Struct { fields, .. } => {
             for field in fields {
                 visitor.visit_expr(&field.value);
             }
@@ -510,8 +510,8 @@ pub trait Folder: Sized {
         walk_setting_family_mut(self, family);
     }
 
-    fn fold_record(&mut self, record: &mut RecordDecl) {
-        walk_record_mut(self, record);
+    fn fold_struct(&mut self, structure: &mut StructDecl) {
+        walk_struct_mut(self, structure);
     }
 
     fn fold_enum(&mut self, enumeration: &mut EnumDecl) {
@@ -612,8 +612,8 @@ pub fn walk_program_mut<F: Folder>(folder: &mut F, program: &mut Program) {
     for global in &mut program.globals {
         folder.fold_variable(global);
     }
-    for record in &mut program.records {
-        folder.fold_record(record);
+    for structure in &mut program.structs {
+        folder.fold_struct(structure);
     }
     for enumeration in &mut program.enums {
         folder.fold_enum(enumeration);
@@ -681,8 +681,8 @@ pub fn walk_setting_mut<F: Folder>(_folder: &mut F, _setting: &mut SettingDecl) 
 
 pub fn walk_setting_family_mut<F: Folder>(_folder: &mut F, _family: &mut SettingFamilyDecl) {}
 
-pub fn walk_record_mut<F: Folder>(folder: &mut F, record: &mut RecordDecl) {
-    for field in &mut record.fields {
+pub fn walk_struct_mut<F: Folder>(folder: &mut F, structure: &mut StructDecl) {
+    for field in &mut structure.fields {
         folder.fold_type_ref(&mut field.ty);
     }
 }
@@ -825,7 +825,7 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
             folder.fold_expr(end);
         }
         ExprKind::Block(block) | ExprKind::Loop(block) => folder.fold_block(block),
-        ExprKind::Record { fields, .. } => {
+        ExprKind::Struct { fields, .. } => {
             for field in fields {
                 folder.fold_expr(&mut field.value);
             }

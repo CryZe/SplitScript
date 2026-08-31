@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{
     ast::{
         ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, ExprId, ManagedClassId, OptionTypeId,
-        Program, RecordId, ResultTypeId, TypeApplicationId,
+        Program, ResultTypeId, StructId, TypeApplicationId,
     },
     semantic::{ClosureInstance, FunctionInstance, FunctionValueInstance, SemanticModel},
     stdlib::{
@@ -20,13 +20,13 @@ pub(super) struct Reachability {
     closures: BTreeSet<ClosureInstance>,
     function_values: BTreeSet<FunctionValueInstance>,
     expression_instances: BTreeSet<(Option<FunctionInstance>, ExprId)>,
-    equality_records: BTreeSet<RecordId>,
-    equality_standard_records: BTreeSet<StdlibTypeId>,
+    equality_structs: BTreeSet<StructId>,
+    equality_standard_structs: BTreeSet<StdlibTypeId>,
     equality_enums: BTreeSet<EnumId>,
     equality_options: BTreeSet<OptionTypeId>,
     equality_results: BTreeSet<ResultTypeId>,
     string_equality: bool,
-    gc_records: BTreeSet<RecordId>,
+    gc_structs: BTreeSet<StructId>,
     gc_managed_classes: BTreeSet<ManagedClassId>,
     managed_snapshots: BTreeSet<ManagedClassId>,
     managed_instances: BTreeSet<ManagedClassId>,
@@ -696,12 +696,12 @@ impl Reachability {
         self.function_values.iter()
     }
 
-    pub fn requires_record_equality(&self, record: RecordId) -> bool {
-        self.equality_records.contains(&record)
+    pub fn requires_struct_equality(&self, structure: StructId) -> bool {
+        self.equality_structs.contains(&structure)
     }
 
-    pub fn requires_standard_record_equality(&self, record: StdlibTypeId) -> bool {
-        self.equality_standard_records.contains(&record)
+    pub fn requires_standard_struct_equality(&self, structure: StdlibTypeId) -> bool {
+        self.equality_standard_structs.contains(&structure)
     }
 
     pub fn requires_enum_equality(&self, enumeration: EnumId) -> bool {
@@ -720,8 +720,8 @@ impl Reachability {
         self.string_equality
     }
 
-    pub fn contains_record_type(&self, record: RecordId) -> bool {
-        self.gc_records.contains(&record)
+    pub fn contains_struct_type(&self, structure: StructId) -> bool {
+        self.gc_structs.contains(&structure)
     }
 
     pub fn contains_managed_class_type(&self, class: ManagedClassId) -> bool {
@@ -860,8 +860,8 @@ impl Reachability {
                         }));
                     }
                 }
-                TypeKind::Record(record) => {
-                    self.gc_records.insert(*record);
+                TypeKind::Struct(structure) => {
+                    self.gc_structs.insert(*structure);
                     pending.extend(capabilities.structural_dependency_types(ty));
                 }
                 TypeKind::Enum(enumeration) => {
@@ -958,7 +958,7 @@ impl Reachability {
                             declaration.representation,
                             RuntimeRepresentation::GcStruct { .. }
                         )
-                        && self.equality_standard_records.insert(*standard)
+                        && self.equality_standard_structs.insert(*standard)
                     {
                         pending.extend(library.fields_of(*standard).map(|field| {
                             semantics
@@ -973,7 +973,7 @@ impl Reachability {
                 | TypeKind::ManagedClass(_)
                 | TypeKind::ManagedReference(_)
                 | TypeKind::GenericParameter { .. } => {}
-                TypeKind::Record(record) if self.equality_records.insert(*record) => {
+                TypeKind::Struct(structure) if self.equality_structs.insert(*structure) => {
                     pending.extend(capabilities.structural_dependency_types(ty));
                 }
                 TypeKind::Enum(enumeration) if self.equality_enums.insert(*enumeration) => {
@@ -986,7 +986,7 @@ impl Reachability {
                     self.string_equality = true;
                     pending.push(*value);
                 }
-                TypeKind::Record(_)
+                TypeKind::Struct(_)
                 | TypeKind::Enum(_)
                 | TypeKind::Array { .. }
                 | TypeKind::Option { .. }

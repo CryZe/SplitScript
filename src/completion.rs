@@ -688,9 +688,9 @@ fn is_top_level_offset(syntax: &Program, offset: usize) -> bool {
             .iter()
             .all(|setting| !contains_offset(setting.span, offset))
         && syntax
-            .records
+            .structs
             .iter()
-            .all(|record| !contains_offset(record.span, offset))
+            .all(|structure| !contains_offset(structure.span, offset))
         && syntax
             .enums
             .iter()
@@ -1228,11 +1228,11 @@ fn add_source_declarations(
             is_snippet: true,
         });
     }
-    for record in &syntax.records {
+    for structure in &syntax.structs {
         builder.add(simple_completion(
-            &record.name,
+            &structure.name,
             CompletionKind::Struct,
-            "record type",
+            "struct type",
         ));
     }
     for enumeration in syntax.enum_declarations() {
@@ -1417,7 +1417,7 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
         ExprKind::Block(block) | ExprKind::Loop(block) => {
             add_block_bindings(builder, block, offset)
         }
-        ExprKind::Record { fields, .. } => {
+        ExprKind::Struct { fields, .. } => {
             for field in fields {
                 add_expression_bindings(builder, &field.value, offset);
             }
@@ -1543,7 +1543,7 @@ fn add_inferred_fields(
     syntax: &Program,
     receiver: &TypeKind,
     standard_library: &StandardLibrary,
-    active_layout_facts: &[(crate::ast::RecordFieldId, crate::ast::EnumVariantId)],
+    active_layout_facts: &[(crate::ast::StructFieldId, crate::ast::EnumVariantId)],
 ) {
     match receiver {
         TypeKind::Error => {}
@@ -1587,13 +1587,13 @@ fn add_inferred_fields(
                 }
             }
         }
-        TypeKind::Record(id) => {
-            if let Some(record) = syntax.records.iter().find(|record| record.id == *id) {
-                for field in &record.fields {
+        TypeKind::Struct(id) => {
+            if let Some(structure) = syntax.structs.iter().find(|structure| structure.id == *id) {
+                for field in &structure.fields {
                     builder.add(simple_completion(
                         &field.name,
                         CompletionKind::Property,
-                        "record field",
+                        "struct field",
                     ));
                 }
             }
@@ -1825,11 +1825,11 @@ fn active_state_layout<'a>(
 fn active_attachment_layout_facts(
     syntax: &Program,
     offset: usize,
-) -> Vec<(crate::ast::RecordFieldId, crate::ast::EnumVariantId)> {
+) -> Vec<(crate::ast::StructFieldId, crate::ast::EnumVariantId)> {
     struct Finder<'a> {
         syntax: &'a Program,
         offset: usize,
-        facts: Vec<(crate::ast::RecordFieldId, crate::ast::EnumVariantId)>,
+        facts: Vec<(crate::ast::StructFieldId, crate::ast::EnumVariantId)>,
     }
 
     impl<'ast> Visitor<'ast> for Finder<'ast> {
@@ -1886,7 +1886,7 @@ fn layout_group_is_active<Field>(
     syntax: &Program,
     groups: &[crate::ast::ConditionalFieldsDecl<Field>],
     target: usize,
-    active: &[(crate::ast::RecordFieldId, crate::ast::EnumVariantId)],
+    active: &[(crate::ast::StructFieldId, crate::ast::EnumVariantId)],
 ) -> bool {
     let mut chain_start = target;
     while chain_start > 0 && groups[chain_start].else_span.is_some() {
@@ -1908,7 +1908,7 @@ fn layout_group_is_active<Field>(
 
 fn layout_condition_value(
     syntax: &Program,
-    active: &[(crate::ast::RecordFieldId, crate::ast::EnumVariantId)],
+    active: &[(crate::ast::StructFieldId, crate::ast::EnumVariantId)],
     condition: &Expr,
 ) -> Option<bool> {
     match &condition.kind {
@@ -1973,7 +1973,7 @@ fn layout_condition_value(
 fn collect_attachment_layout_facts(
     syntax: &Program,
     expression: &Expr,
-    output: &mut Vec<(crate::ast::RecordFieldId, crate::ast::EnumVariantId)>,
+    output: &mut Vec<(crate::ast::StructFieldId, crate::ast::EnumVariantId)>,
 ) {
     match &expression.kind {
         ExprKind::Binary {
@@ -2002,7 +2002,7 @@ fn collect_attachment_layout_facts(
 fn collect_attachment_layout_falsy_facts(
     syntax: &Program,
     expression: &Expr,
-    output: &mut Vec<(crate::ast::RecordFieldId, crate::ast::EnumVariantId)>,
+    output: &mut Vec<(crate::ast::StructFieldId, crate::ast::EnumVariantId)>,
 ) {
     if let ExprKind::Binary {
         op: crate::ast::BinaryOp::Or,
@@ -2020,7 +2020,7 @@ fn collect_attachment_layout_falsy_facts(
 fn inverse_attachment_layout_fact(
     syntax: &Program,
     expression: &Expr,
-) -> Option<(crate::ast::RecordFieldId, crate::ast::EnumVariantId)> {
+) -> Option<(crate::ast::StructFieldId, crate::ast::EnumVariantId)> {
     let ExprKind::Binary {
         op: crate::ast::BinaryOp::Eq | crate::ast::BinaryOp::Ne,
         left,
@@ -2060,7 +2060,7 @@ fn attachment_layout_fact(
     syntax: &Program,
     dimension: &Expr,
     variant: &Expr,
-) -> Option<(crate::ast::RecordFieldId, crate::ast::EnumVariantId)> {
+) -> Option<(crate::ast::StructFieldId, crate::ast::EnumVariantId)> {
     let dimension = completion_expression_path(dimension)?;
     let ["layout", dimension_name] = dimension.as_slice() else {
         return None;
@@ -2070,9 +2070,9 @@ fn attachment_layout_fact(
         return None;
     };
     let layout = syntax
-        .records
+        .structs
         .iter()
-        .find(|record| record.name == "Layout")?;
+        .find(|structure| structure.name == "Layout")?;
     let field = layout
         .fields
         .iter()
@@ -2252,10 +2252,10 @@ fn syntax_receiver_matches(
         (SyntaxTypeRef::Named(name), TypeKind::Standard(actual)) => standard_library
             .type_by_name(syntax.type_name(name))
             .is_some_and(|expected| expected.id == *actual),
-        (SyntaxTypeRef::Named(name), TypeKind::Record(actual)) => syntax
-            .records
+        (SyntaxTypeRef::Named(name), TypeKind::Struct(actual)) => syntax
+            .structs
             .iter()
-            .any(|record| record.name == syntax.type_name(name) && record.id == *actual),
+            .any(|structure| structure.name == syntax.type_name(name) && structure.id == *actual),
         (SyntaxTypeRef::Named(name), TypeKind::Enum(actual)) => syntax
             .enums
             .iter()
@@ -2656,7 +2656,7 @@ whileAttached {
             );
         }
 
-        let source = "record Position { x: f32, }\nstate \"game.exe\" {\n    position: Pos\n}";
+        let source = "struct Position { x: f32, }\nstate \"game.exe\" {\n    position: Pos\n}";
         let mut typed = CompilerDatabase::new(source);
         let candidates = labels(&mut typed, "position: Pos");
         assert!(candidates.contains(&"Position".to_owned()));
@@ -2703,7 +2703,7 @@ split {
     #[test]
     fn every_type_grammar_position_uses_the_shared_type_catalog() {
         let declarations = r#"
-record Position {
+struct Position {
     x: i32,
 }
 enum Mode {
@@ -2740,7 +2740,7 @@ enum Mode {
                 "watched: ",
             ),
             (
-                format!("{declarations}\nrecord Holder {{ field: , }}\nstate \"game.exe\" {{}}"),
+                format!("{declarations}\nstruct Holder {{ field: , }}\nstate \"game.exe\" {{}}"),
                 "field: ",
             ),
             (
@@ -2816,7 +2816,7 @@ enum Mode {
     #[test]
     fn value_colons_are_not_mistaken_for_type_annotations() {
         let source = r#"
-record Position {
+struct Position {
     x: i32,
 }
 state "game.exe" {}
@@ -2883,7 +2883,7 @@ fn inspect() {
         let candidates = labels(&mut database, source);
         for expected in [
             "fn",
-            "record",
+            "struct",
             "enum",
             "let",
             "settings",
@@ -2944,7 +2944,7 @@ fn inspect() {
     #[test]
     fn completes_domains_catalogs_and_inferred_members() {
         let source = r#"
-record Position {
+struct Position {
     x: f32
 }
 
@@ -3042,7 +3042,7 @@ whileAttached {
     #[test]
     fn completes_methods_after_fields_on_expression_receivers() {
         let source = r#"
-record Path {
+struct Path {
     address: address
 }
 
@@ -3050,7 +3050,7 @@ fn Path.resolve() {
     return self.address
 }
 
-record Layout {
+struct Layout {
     isLoading: Path
 }
 
@@ -3176,7 +3176,7 @@ whileAttached {
     #[test]
     fn completes_catalog_methods_on_existing_expression_receiver_calls() {
         let source = r#"
-record Layout {
+struct Layout {
     isLoading: MemoryPath
 }
 

@@ -1,6 +1,6 @@
 //! Structural equality capabilities for nominal GC values.
 //!
-//! Primitive equality is intrinsic. Records and enums gain equality
+//! Primitive equality is intrinsic. Structs and enums gain equality
 //! automatically when every contained field or payload is itself equatable.
 //! This is shared by diagnostics, future editor queries, and Wasm helper
 //! generation rather than being inferred independently in the backend.
@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{EnumDecl, EnumId, RecordDecl, RecordId},
+    ast::{EnumDecl, EnumId, StructDecl, StructId},
     semantic::SemanticModel,
     stdlib::{StandardLibrary, StdlibCapabilityId},
     structural::{StructuralTypeId, StructuralTypes},
@@ -19,22 +19,22 @@ use crate::{
 pub struct EqualityCapabilities {
     standard_library: StandardLibrary,
     structural: StructuralTypes,
-    records: HashMap<RecordId, Result<(), String>>,
+    structs: HashMap<StructId, Result<(), String>>,
     enums: HashMap<EnumId, Result<(), String>>,
 }
 
 impl EqualityCapabilities {
-    pub fn build(records: &[RecordDecl], enums: &[EnumDecl], semantics: &SemanticModel) -> Self {
-        Self::build_with_library(records, enums, semantics, StandardLibrary::new())
+    pub fn build(structs: &[StructDecl], enums: &[EnumDecl], semantics: &SemanticModel) -> Self {
+        Self::build_with_library(structs, enums, semantics, StandardLibrary::new())
     }
 
     pub fn build_with_library(
-        records: &[RecordDecl],
+        structs: &[StructDecl],
         enums: &[EnumDecl],
         semantics: &SemanticModel,
         standard_library: StandardLibrary,
     ) -> Self {
-        let structural = StructuralTypes::build(records, enums, semantics);
+        let structural = StructuralTypes::build(structs, enums, semantics);
         Self::build_with_structural(structural, semantics, standard_library)
     }
 
@@ -46,15 +46,15 @@ impl EqualityCapabilities {
         let mut capabilities = Self {
             standard_library,
             structural,
-            records: HashMap::new(),
+            structs: HashMap::new(),
             enums: HashMap::new(),
         };
         let aggregates = capabilities.structural.iter().collect::<Vec<_>>();
         for (id, ty) in aggregates {
             let result = capabilities.check_aggregate(ty, semantics, &mut HashSet::new());
             match id {
-                StructuralTypeId::Record(record) => {
-                    capabilities.records.entry(record).or_insert(result);
+                StructuralTypeId::Struct(structure) => {
+                    capabilities.structs.entry(structure).or_insert(result);
                 }
                 StructuralTypeId::Enum(enumeration) => {
                     capabilities.enums.entry(enumeration).or_insert(result);
@@ -80,7 +80,7 @@ impl EqualityCapabilities {
             {
                 Ok(())
             }
-            TypeKind::Record(record) => self.record(*record).map_err(str::to_owned),
+            TypeKind::Struct(structure) => self.structure(*structure).map_err(str::to_owned),
             TypeKind::Enum(enumeration) => self.enumeration(*enumeration).map_err(str::to_owned),
             TypeKind::Option { value, .. } => self
                 .require(*value, semantics)
@@ -92,10 +92,10 @@ impl EqualityCapabilities {
         }
     }
 
-    pub fn record(&self, record: RecordId) -> Result<(), &str> {
-        self.records
-            .get(&record)
-            .expect("every record has an equality result")
+    pub fn structure(&self, structure: StructId) -> Result<(), &str> {
+        self.structs
+            .get(&structure)
+            .expect("every struct has an equality result")
             .as_ref()
             .copied()
             .map_err(String::as_str)
@@ -134,9 +134,9 @@ impl EqualityCapabilities {
             {
                 Ok(())
             }
-            TypeKind::Record(record) => self.check_aggregate(
+            TypeKind::Struct(structure) => self.check_aggregate(
                 self.structural
-                    .semantic_type(StructuralTypeId::Record(*record)),
+                    .semantic_type(StructuralTypeId::Struct(*structure)),
                 semantics,
                 visiting,
             ),
@@ -171,8 +171,8 @@ impl EqualityCapabilities {
             };
             self.check_type(member_ty, semantics, visiting)
                 .map_err(|error| match aggregate.id {
-                    StructuralTypeId::Record(_) => format!(
-                        "record `{}.{}` does not support equality: {error}",
+                    StructuralTypeId::Struct(_) => format!(
+                        "struct `{}.{}` does not support equality: {error}",
                         aggregate.name, member.name
                     ),
                     StructuralTypeId::Enum(_) => format!(

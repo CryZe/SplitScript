@@ -109,7 +109,7 @@ fn emulator_state_paths_accept_sibling_hardware_addresses() {
 }
 
 #[test]
-fn attachment_layout_dimensions_are_an_ordinary_typed_global_record() {
+fn attachment_layout_dimensions_are_an_ordinary_typed_global_struct() {
     let source = r#"
         enum Edition {
             BaseGame,
@@ -145,10 +145,10 @@ fn attachment_layout_dimensions_are_an_ordinary_typed_global_record() {
     "#;
 
     let wasm = splitscript::compile(source)
-        .expect("provider-independent layout dimensions should compile as an ordinary record");
+        .expect("provider-independent layout dimensions should compile as an ordinary struct");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
-        .expect("layout records should lower to valid Wasm GC");
+        .expect("layout structs should lower to valid Wasm GC");
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn attachment_layout_type_value_and_dimensions_have_source_identity() {
     else {
         panic!("Layout should navigate to the attachment declaration");
     };
-    assert!(matches!(layout_type.id, SourceDefinitionId::Record(_)));
+    assert!(matches!(layout_type.id, SourceDefinitionId::Struct(_)));
     assert_eq!(
         &source[layout_type.span.start..layout_type.span.end],
         "layout"
@@ -366,7 +366,7 @@ fn attachment_layout_type_value_and_dimensions_have_source_identity() {
     else {
         panic!("the dimension should navigate to its declaration");
     };
-    assert!(matches!(dimension.id, SourceDefinitionId::RecordField(_)));
+    assert!(matches!(dimension.id, SourceDefinitionId::StructField(_)));
     assert_eq!(&source[dimension.span.start..dimension.span.end], "edition");
 
     let hover = database.hover(dimension_use).unwrap().unwrap();
@@ -601,7 +601,7 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
             DlcDemo,
         }
 
-        record LevelTimeParts {
+        struct LevelTimeParts {
             minutes: f32,
             seconds: f32,
             hundredths: f32,
@@ -669,7 +669,7 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
         .diagnostics()
         .iter()
         .filter(|diagnostic| {
-            diagnostic.message.starts_with("unused record")
+            diagnostic.message.starts_with("unused struct")
                 || diagnostic.message.starts_with("unused enum")
         })
         .collect::<Vec<_>>();

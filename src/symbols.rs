@@ -79,15 +79,15 @@ pub fn document_symbols(document: &SourceDocument, program: &Program) -> Vec<Doc
         children: Vec::new(),
     }));
 
-    symbols.extend(program.records.iter().map(|record| {
+    symbols.extend(program.structs.iter().map(|structure| {
         DocumentSymbol {
-            name: record.name.clone(),
+            name: structure.name.clone(),
             detail: None,
             kind: DocumentSymbolKind::Struct,
-            range: record.span,
-            selection_range: identifier_in(document, record.span, &record.name)
-                .unwrap_or(record.span),
-            children: record
+            range: structure.span,
+            selection_range: identifier_in(document, structure.span, &structure.name)
+                .unwrap_or(structure.span),
+            children: structure
                 .fields
                 .iter()
                 .map(|field| DocumentSymbol {

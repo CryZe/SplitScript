@@ -177,7 +177,7 @@ impl Parser<'_> {
         }
     }
 
-    /// Consumes a source-defined name and records a focused diagnostic when
+    /// Consumes a source-defined name and constructs a focused diagnostic when
     /// the spelling is reserved by expression or statement grammar.
     ///
     /// SplitScript lexes words as identifiers and interprets many of them
@@ -362,7 +362,7 @@ impl Parser<'_> {
         matches!(
             &self.current().kind,
             TokenKind::Ident(name)
-                if matches!(name.as_str(), "state" | "tickRate" | "settings" | "image" | "let" | "const" | "var" | "debug" | "fn" | "func" | "function" | "record" | "enum")
+                if matches!(name.as_str(), "state" | "tickRate" | "settings" | "image" | "let" | "const" | "var" | "debug" | "fn" | "func" | "function" | "struct" | "record" | "enum")
                     || ActionKind::parse(name).is_some()
                     || legacy_lifecycle_diagnostic(name).is_some()
         )

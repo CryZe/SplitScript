@@ -222,10 +222,10 @@ impl SemanticHighlightIndex {
     ) -> Self {
         let mut value_kinds = ValueKindCollector::default();
         value_kinds.visit_program(syntax);
-        let record_names = syntax
-            .records
+        let struct_names = syntax
+            .structs
             .iter()
-            .map(|record| record.name.as_str())
+            .map(|structure| structure.name.as_str())
             .chain(
                 syntax
                     .managed_class_declarations()
@@ -252,7 +252,7 @@ impl SemanticHighlightIndex {
             value_kinds: value_kinds.kinds,
             debug_ranges: value_kinds.debug_ranges,
         };
-        collector.base_tokens(&record_names, &enum_names, &function_names);
+        collector.base_tokens(&struct_names, &enum_names, &function_names);
         collector.mark_managed_reference_types();
         collector.visit_program(syntax);
         collector.apply_debug_modifiers();
@@ -387,7 +387,7 @@ impl HighlightCollector<'_> {
 
     fn base_tokens(
         &mut self,
-        record_names: &HashSet<&str>,
+        struct_names: &HashSet<&str>,
         enum_names: &HashSet<&str>,
         function_names: &HashSet<&str>,
     ) {
@@ -419,7 +419,7 @@ impl HighlightCollector<'_> {
                         TokenKind::Ident(name) if is_builtin_type(&self.standard_library, name) => {
                             Some(SemanticTokenKind::Type)
                         }
-                        TokenKind::Ident(name) if record_names.contains(name.as_str()) => {
+                        TokenKind::Ident(name) if struct_names.contains(name.as_str()) => {
                             Some(SemanticTokenKind::Struct)
                         }
                         TokenKind::Ident(name) if enum_names.contains(name.as_str()) => {
@@ -763,7 +763,7 @@ impl HighlightCollector<'_> {
         // `address` from a field with the same name. Resolved member identities
         // take precedence over those source-wide name heuristics. Members are
         // a suffix because roots such as `current.field` can consume more than
-        // one written path segment before ordinary record/standard fields.
+        // one written path segment before ordinary struct/standard fields.
         let resolved_receiver = resolution.and_then(|call| match call {
             ResolvedCall::UserMethod { receiver, .. }
             | ResolvedCall::ManagedSnapshot { receiver, .. }
@@ -805,7 +805,7 @@ impl HighlightCollector<'_> {
                         SemanticTokenKind::Property,
                         MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY,
                     ),
-                    ResolvedMember::RecordField(_) => {
+                    ResolvedMember::StructField(_) => {
                         (SemanticTokenKind::Property, MODIFIER_READONLY)
                     }
                     ResolvedMember::ManagedField(_) => {
@@ -1038,24 +1038,24 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
         }
     }
 
-    fn visit_record(&mut self, record: &'ast crate::ast::RecordDecl) {
+    fn visit_struct(&mut self, structure: &'ast crate::ast::StructDecl) {
         let attachment_layout = self
             .syntax
             .state
             .as_ref()
             .and_then(|state| state.layout.as_ref())
-            .filter(|layout| layout.record == record.id);
+            .filter(|layout| layout.structure == structure.id);
         if let Some(layout) = attachment_layout {
             self.insert_language_token(layout.keyword_span, "layout", 0);
         } else {
             self.mark_ident(
-                record.span,
-                &record.name,
+                structure.span,
+                &structure.name,
                 SemanticTokenKind::Struct,
                 MODIFIER_DECLARATION,
             );
         }
-        for field in &record.fields {
+        for field in &structure.fields {
             self.mark_ident(
                 field.span,
                 &field.name,
@@ -1064,7 +1064,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             );
             self.mark_none_type(field.span, field.ty);
         }
-        visit::walk_record(self, record);
+        visit::walk_struct(self, structure);
     }
 
     fn visit_enum(&mut self, enumeration: &'ast crate::ast::EnumDecl) {
@@ -1285,7 +1285,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 self.insert(*name_span, SemanticTokenKind::Property, MODIFIER_READONLY)
             }
             ExprKind::Call { callee, .. } => self.mark_path(expression, callee, true),
-            ExprKind::Record {
+            ExprKind::Struct {
                 name: _,
                 name_span,
                 fields,
@@ -1446,7 +1446,7 @@ mod tests {
     #[test]
     fn implicit_method_self_is_highlighted_as_a_keyword() {
         let source = r#"
-record Position {
+struct Position {
     x: i32,
 }
 
@@ -1515,7 +1515,7 @@ setup {
     #[test]
     fn highlights_member_access_dots_as_operators_without_splitting_float_literals() {
         let source = r#"
-record Position {
+struct Position {
     x: f64,
 }
 
@@ -2119,7 +2119,7 @@ whileAttached {
 
     #[test]
     fn resolved_fields_override_builtin_type_name_highlighting() {
-        let source = r#"record Marker {
+        let source = r#"struct Marker {
     address: i32
 }
 state "game.exe" {}
@@ -2189,11 +2189,11 @@ fn inspect(module: Module, marker: Marker) {
 
     #[test]
     fn highlights_fields_and_methods_on_expression_receivers() {
-        let source = r#"record Path {
+        let source = r#"struct Path {
     address: address
 }
 fn Path.resolve() { return self.address }
-record Layout {
+struct Layout {
     isLoading: Path,
     level: Path,
     video: Path
@@ -2235,8 +2235,8 @@ state "game.exe" {
     }
 
     #[test]
-    fn record_shorthand_is_highlighted_as_the_destination_field() {
-        let source = r#"record Point { x: u32 }
+    fn struct_shorthand_is_highlighted_as_the_destination_field() {
+        let source = r#"struct Point { x: u32 }
 state "game.exe" {}
 fn point(value: u32) -> Point {
     let x = value

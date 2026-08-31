@@ -67,7 +67,7 @@ const env = {
                     : 50 + phase;
         const view = new DataView(instance.exports.memory.buffer);
         if (numericAddress === 0x6000) {
-            if (size !== 12) throw new Error(`unexpected record read size: ${size}`);
+            if (size !== 12) throw new Error(`unexpected struct read size: ${size}`);
             view.setFloat32(destination, 1 + phase, true);
             view.setFloat32(destination + 4, 2 + phase, true);
             view.setFloat32(destination + 8, 3 + phase, true);

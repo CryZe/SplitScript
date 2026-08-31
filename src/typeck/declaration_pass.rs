@@ -179,7 +179,7 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
 
     if let Some(layout_value) = state.layout_value {
         let ty = if let Some(layout) = &state.layout {
-            checker.record_type(layout.record)
+            checker.struct_type(layout.structure)
         } else if let Some(layout_enum) = &state.layout_enum {
             checker.enum_type(EnumTypeId::Source(layout_enum.id))
         } else {
@@ -502,23 +502,26 @@ fn setting_value_type(checker: &Checker, setting: &SettingDecl) -> Option<Type> 
 }
 
 fn collect_named_type_members(checker: &mut Checker, program: &Program) {
-    let attachment_layout_record = program
+    let attachment_layout_struct = program
         .state
         .as_ref()
         .and_then(|state| state.layout.as_ref())
-        .map(|layout| layout.record);
-    let mut record_names = HashSet::new();
-    for record in &program.records {
-        if !record_names.insert(record.name.clone()) {
-            checker.error(format!("duplicate record `{}`", record.name), record.span);
+        .map(|layout| layout.structure);
+    let mut struct_names = HashSet::new();
+    for structure in &program.structs {
+        if !struct_names.insert(structure.name.clone()) {
+            checker.error(
+                format!("duplicate struct `{}`", structure.name),
+                structure.span,
+            );
         }
         let mut fields = HashSet::new();
-        for field in &record.fields {
+        for field in &structure.fields {
             let field_ty = checker.syntax_type(field.ty);
             checker
                 .semantics
-                .resolve_record_field_type(field.id, field_ty);
-            if attachment_layout_record == Some(record.id) {
+                .resolve_struct_field_type(field.id, field_ty);
+            if attachment_layout_struct == Some(structure.id) {
                 let Type::Known(ty) = checker.shallow_type(field_ty) else {
                     checker.error(
                         "a layout dimension must use a concrete enum type",
@@ -542,17 +545,17 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
             if !fields.insert(field.name.clone()) {
                 checker.error(
                     format!(
-                        "duplicate field `{}` in record `{}`",
-                        field.name, record.name
+                        "duplicate field `{}` in struct `{}`",
+                        field.name, structure.name
                     ),
                     field.span,
                 );
             }
             if let Some(standard) = checker.standard_type_id(field_ty) {
                 let declaration = checker.standard_library.type_decl(standard);
-                if !declaration.value_usage.record_field {
+                if !declaration.value_usage.struct_field {
                     checker.error(
-                        format!("{} cannot be stored in a record field", declaration.name),
+                        format!("{} cannot be stored in a struct field", declaration.name),
                         field.span,
                     );
                 }
@@ -565,11 +568,11 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
         .as_ref()
         .and_then(|state| state.layout.as_ref())
     {
-        let record = program
-            .records
-            .get(layout.record.index())
-            .expect("generated attachment layout records retain stable indexes");
-        if record.fields.is_empty() {
+        let structure = program
+            .structs
+            .get(layout.structure.index())
+            .expect("generated attachment layout structs retain stable indexes");
+        if structure.fields.is_empty() {
             checker.error(
                 "an attachment layout needs at least one dimension",
                 layout.span,
@@ -616,7 +619,7 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
     let mut enum_names = HashSet::new();
     let enum_declarations = checker.declarations.enums.clone();
     for enumeration in &enum_declarations {
-        if !enum_names.insert(enumeration.name.clone()) || record_names.contains(&enumeration.name)
+        if !enum_names.insert(enumeration.name.clone()) || struct_names.contains(&enumeration.name)
         {
             checker.error(
                 format!("duplicate named type `{}`", enumeration.name),

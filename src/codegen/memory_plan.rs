@@ -2,7 +2,7 @@
 //!
 //! Scratch roles are packed into two alias banks according to their execution
 //! lifetimes. Immutable strings and parsed signatures start on the next Wasm
-//! page after those banks, so neither unusually large readable records nor
+//! page after those banks, so neither unusually large readable structs nor
 //! long signatures can silently overlap static data.
 
 pub(super) const WASM_PAGE_SIZE: u64 = 65_536;
@@ -86,7 +86,7 @@ impl ScratchRegion {
 /// Shared output storage for synchronous `process_read` ABI calls.
 ///
 /// Generated Wasm is single-threaded, and every consumer materializes the
-/// loaded scalar/record or helper local before another read can occur. Nested
+/// loaded scalar/struct or helper local before another read can occur. Nested
 /// helpers may therefore reuse this region, but no emitter may retain a view
 /// into it across a call. Keeping this role distinct from general scratch
 /// regions makes that aliasing contract explicit at every call site.

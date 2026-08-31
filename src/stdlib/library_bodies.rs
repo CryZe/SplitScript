@@ -198,7 +198,7 @@ fn managed_preparation_source(
         );
     }
 
-    let mut source = format!("record {PROVIDER_BINDINGS_TYPE} {{\n");
+    let mut source = format!("struct {PROVIDER_BINDINGS_TYPE} {{\n");
     if !classes.is_empty() {
         source.push_str(&format!("    {MANAGED_POINTER_SIZE_FIELD}: u32,\n"));
     }
@@ -782,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_context_and_managed_schema_share_one_attachment_record() {
+    fn provider_context_and_managed_schema_share_one_attachment_struct() {
         let program = crate::parse(
             r#"
                 image "Assembly-CSharp" {

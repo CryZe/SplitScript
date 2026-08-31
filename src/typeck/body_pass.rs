@@ -954,8 +954,8 @@ fn automatic_layout_selection(
         .as_ref()
         .and_then(|state| state.layout.as_ref())
     {
-        let record = &program.records[layout.record.index()];
-        for field in &record.fields {
+        let structure = &program.structs[layout.structure.index()];
+        for field in &structure.fields {
             let ty = checker.syntax_type(field.ty);
             let Type::Known(ty) = checker.shallow_type(ty) else {
                 continue;
@@ -1146,7 +1146,7 @@ fn action_return_type(
                 if automatic_attachment_layout {
                     checker.core_type(CoreTypeId::None)
                 } else if let Some(layout) = &state.layout {
-                    checker.record_type(layout.record)
+                    checker.struct_type(layout.structure)
                 } else if let Some(enumeration) = &state.layout_enum {
                     checker.enum_type(crate::types::EnumTypeId::Source(enumeration.id))
                 } else {

@@ -162,7 +162,7 @@ struct Checker {
     layout_available_in_on_attach: bool,
     active_state_layout: Option<crate::ast::EnumVariantId>,
     /// Physical state field whose source or transform is currently checked.
-    /// Sibling references record graph edges against this declaration.
+    /// Sibling references struct graph edges against this declaration.
     active_state_field: Option<ValueId>,
     active_layouts: Option<declarations::LayoutPredicate>,
     scopes: Vec<HashMap<String, Binding>>,
@@ -345,16 +345,16 @@ impl Checker {
         self.inference.standard_type(ty)
     }
 
-    fn record_type(&self, record: crate::ast::RecordId) -> Type {
-        Type::Known(self.inference.type_store().id_for_record(record))
+    fn struct_type(&self, structure: crate::ast::StructId) -> Type {
+        Type::Known(self.inference.type_store().id_for_struct(structure))
     }
 
-    fn source_record_id(&self, ty: Type) -> Option<crate::ast::RecordId> {
+    fn source_struct_id(&self, ty: Type) -> Option<crate::ast::StructId> {
         let Type::Known(id) = ty else {
             return None;
         };
         match self.inference.type_store().kind(id) {
-            TypeKind::Record(record) => Some(*record),
+            TypeKind::Struct(structure) => Some(*structure),
             _ => None,
         }
     }
@@ -741,7 +741,7 @@ fn resolved_type_ref(ty: ResolvedTypeRef, types: &TypeStore) -> Type {
         ResolvedTypeRef::Standard(standard) => Type::Known(types.id_for_standard(standard)),
         ResolvedTypeRef::StateSnapshot => Type::Known(types.id_for_state_snapshot()),
         ResolvedTypeRef::SettingsView => Type::Known(types.id_for_settings_view()),
-        ResolvedTypeRef::Record(record) => Type::Known(types.id_for_record(record)),
+        ResolvedTypeRef::Struct(structure) => Type::Known(types.id_for_struct(structure)),
         ResolvedTypeRef::Enum(enumeration) => Type::Known(types.id_for_enum(enumeration)),
         ResolvedTypeRef::ManagedClass(class) => Type::Known(types.id_for_managed_class(class)),
         ResolvedTypeRef::ManagedReference(class) => {

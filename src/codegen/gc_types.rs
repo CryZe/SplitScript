@@ -23,7 +23,7 @@ use super::{
     GcLayout, Type, array_element_type,
     async_frame::{AsyncFrameLayout, AsyncFrameLayouts},
     enum_variant_payload, managed_snapshot_field_type, option_value_type, reachability,
-    record_field_type, result_value_type, semantic_type, standard_field_type, value_type,
+    result_value_type, semantic_type, standard_field_type, struct_field_type, value_type,
 };
 
 pub(super) struct EncodedTypes {
@@ -192,20 +192,20 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
     });
     for ty in layout.dynamic_types() {
         let (inner, is_final, supertype_idx) = match ty {
-            Type::Record(id) => {
-                let record = program
-                    .records
+            Type::Struct(id) => {
+                let structure = program
+                    .structs
                     .iter()
-                    .find(|record| record.id == id)
-                    .expect("reachable record layouts have declarations");
+                    .find(|structure| structure.id == id)
+                    .expect("reachable struct layouts have declarations");
                 (
                     CompositeInnerType::Struct(StructType {
-                        fields: record
+                        fields: structure
                             .fields
                             .iter()
                             .map(|field| FieldType {
                                 element_type: layout
-                                    .storage_type(record_field_type(field.id, semantics)),
+                                    .storage_type(struct_field_type(field.id, semantics)),
                                 mutable: false,
                             })
                             .collect(),
@@ -448,7 +448,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                                     instantiated_catalog_type(field.ty, &variables, semantics),
                                     semantics,
                                 )),
-                                // These generic records currently back
+                                // These generic structs currently back
                                 // compiler-owned iterator cursors. Their
                                 // storage is source-private, while `next()`
                                 // advances the cursor in place.
@@ -804,7 +804,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
 
     // `TypeSection::len` counts encoded entries, while a recursive group can
     // contain multiple indexed subtypes. State, Duration, String, the attach
-    // Module, the attach continuation frame, and then user records occupy the
+    // Module, the attach continuation frame, and then user structs occupy the
     // first indices.
     EncodedTypes {
         section: types,

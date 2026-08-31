@@ -7,7 +7,7 @@
 use crate::{
     ast::{
         ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, ManagedClassId, OptionTypeId,
-        RangeTypeId, RecordId, ResultTypeId, TypeApplicationId,
+        RangeTypeId, ResultTypeId, StructId, TypeApplicationId,
     },
     stdlib::{
         CoreTypeId, DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibTypeId,
@@ -23,7 +23,7 @@ macro_rules! define_backend_type {
             Standard(StdlibTypeId),
             StateSnapshot,
             SettingsView,
-            Record(RecordId),
+            Struct(StructId),
             /// Immutable snapshot of the common fields declared by a managed class schema.
             ManagedClass(ManagedClassId),
             Enum(EnumId),

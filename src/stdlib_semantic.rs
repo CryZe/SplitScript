@@ -180,7 +180,7 @@ fn semantic_type_may_have_capability(
         TypeKind::Builtin(builtin) => library.core_type_has_capability(*builtin, capability),
         TypeKind::Standard(standard) => library.type_has_capability(*standard, capability),
         TypeKind::StateSnapshot | TypeKind::SettingsView => false,
-        TypeKind::Record(_) => matches!(
+        TypeKind::Struct(_) => matches!(
             behavior,
             CapabilityBehavior::StructuralEquality
                 | CapabilityBehavior::StructuralMemoryLayout

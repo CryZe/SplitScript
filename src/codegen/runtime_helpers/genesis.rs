@@ -3,7 +3,7 @@
 //! Several supported emulators expose work RAM with the two bytes in every
 //! native 16-bit word reversed. This helper deliberately normalizes that
 //! storage before the shared big-endian `MemoryReadable` decoder runs. Keeping
-//! the quirk here also makes unaligned scalar, record, array, and guest-pointer
+//! the quirk here also makes unaligned scalar, structure, array, and guest-pointer
 //! reads agree with one another.
 
 use wasm_encoder::{BlockType, Function, Instruction, ValType};

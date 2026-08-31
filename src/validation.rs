@@ -47,7 +47,7 @@ pub(crate) fn validate(
     let (scoped_globals, scoped_global_diagnostics) =
         crate::scoped_globals::analyze(syntax, hir, semantics);
     let capabilities = CapabilityAnalysis::build(
-        &syntax.records,
+        &syntax.structs,
         enum_types,
         &syntax.functions,
         semantics,
@@ -74,7 +74,7 @@ pub(crate) fn validate(
     ));
     diagnostics.extend(unused_declarations.diagnostics);
     diagnostics.extend(validate_static_setting_lookups(syntax, hir));
-    diagnostics.extend(validate_record_field_shorthand(syntax));
+    diagnostics.extend(validate_struct_field_shorthand(syntax));
     diagnostics.extend(validate_empty_future_races(hir));
     diagnostics.extend(validate_async_function_results(
         &standard_library,
@@ -315,7 +315,7 @@ pub(crate) fn validate(
     }
 }
 
-fn validate_record_field_shorthand(syntax: &Program) -> Vec<Diagnostic> {
+fn validate_struct_field_shorthand(syntax: &Program) -> Vec<Diagnostic> {
     #[derive(Default)]
     struct Collector {
         diagnostics: Vec<Diagnostic>,
@@ -323,7 +323,7 @@ fn validate_record_field_shorthand(syntax: &Program) -> Vec<Diagnostic> {
 
     impl<'ast> SyntaxVisitor<'ast> for Collector {
         fn visit_expr(&mut self, expression: &'ast ast::Expr) {
-            if let ast::ExprKind::Record { fields, .. } = &expression.kind {
+            if let ast::ExprKind::Struct { fields, .. } = &expression.kind {
                 for field in fields {
                     if field.shorthand
                         || !matches!(
@@ -337,8 +337,8 @@ fn validate_record_field_shorthand(syntax: &Program) -> Vec<Diagnostic> {
                     let span = field.name_span.join(field.value.span);
                     self.diagnostics.push(
                         Diagnostic::warning(
-                            DiagnosticCode::RecordFieldShorthand,
-                            format!("record field `{}` repeats its initializer name", field.name),
+                            DiagnosticCode::StructFieldShorthand,
+                            format!("struct field `{}` repeats its initializer name", field.name),
                             span,
                         )
                         .with_primary_label("use the shorthand field initializer")
@@ -596,8 +596,8 @@ fn capability_diagnostic(
     }
 
     let declaration = match semantics.types().kind(ty) {
-        TypeKind::Record(id) => syntax
-            .records
+        TypeKind::Struct(id) => syntax
+            .structs
             .iter()
             .find(|declaration| declaration.id == *id)
             .map(|declaration| declaration.name_span),
@@ -831,13 +831,13 @@ fn validate_future_storage(
         match semantics.types().kind(ty) {
             TypeKind::Error => false,
             TypeKind::Async { .. } => true,
-            TypeKind::Record(record) => syntax
-                .records
+            TypeKind::Struct(structure) => syntax
+                .structs
                 .iter()
-                .find(|declaration| declaration.id == *record)
+                .find(|declaration| declaration.id == *structure)
                 .is_some_and(|declaration| {
                     declaration.fields.iter().any(|field| {
-                        semantics.record_field_type(field.id).is_some_and(|field| {
+                        semantics.struct_field_type(field.id).is_some_and(|field| {
                             contains_future(field, syntax, semantics, enum_types, visited)
                         })
                     })
@@ -1547,7 +1547,7 @@ struct DeclarationDependencyCollector<'a> {
     observed_settings: HashSet<ast::ValueId>,
     literal_setting_keys: HashSet<String>,
     has_dynamic_setting_lookup: bool,
-    observed_record_fields: HashSet<ast::RecordFieldId>,
+    observed_struct_fields: HashSet<ast::StructFieldId>,
     observed_enum_variants: HashSet<ast::EnumVariantId>,
     fully_observed_types: HashSet<crate::types::TypeId>,
     capability_calls: HashMap<(crate::types::TypeId, StdlibItemId), UseProfiles>,
@@ -1569,7 +1569,7 @@ impl<'a> DeclarationDependencyCollector<'a> {
             observed_settings: HashSet::new(),
             literal_setting_keys: HashSet::new(),
             has_dynamic_setting_lookup: false,
-            observed_record_fields: HashSet::new(),
+            observed_struct_fields: HashSet::new(),
             observed_enum_variants: HashSet::new(),
             fully_observed_types: HashSet::new(),
             capability_calls: HashMap::new(),
@@ -1644,7 +1644,7 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
                 .extend(members.iter().filter_map(|member| match member {
                     ResolvedMember::StateField(field) => Some(*field),
                     ResolvedMember::SettingField(_)
-                    | ResolvedMember::RecordField(_)
+                    | ResolvedMember::StructField(_)
                     | ResolvedMember::ManagedField(_)
                     | ResolvedMember::StandardField(_) => None,
                 }));
@@ -1652,13 +1652,13 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
                 .extend(members.iter().filter_map(|member| match member {
                     ResolvedMember::SettingField(setting) => Some(*setting),
                     ResolvedMember::StateField(_)
-                    | ResolvedMember::RecordField(_)
+                    | ResolvedMember::StructField(_)
                     | ResolvedMember::ManagedField(_)
                     | ResolvedMember::StandardField(_) => None,
                 }));
-            self.observed_record_fields
+            self.observed_struct_fields
                 .extend(members.iter().filter_map(|member| match member {
-                    ResolvedMember::RecordField(field) => Some(*field),
+                    ResolvedMember::StructField(field) => Some(*field),
                     ResolvedMember::StateField(_)
                     | ResolvedMember::SettingField(_)
                     | ResolvedMember::ManagedField(_)
@@ -1686,7 +1686,7 @@ impl TypedVisitor for DeclarationDependencyCollector<'_> {
             }) => {
                 self.observed_enum_variants.insert(*variant);
             }
-            Some(ExpressionResolution::RecordLiteral { .. })
+            Some(ExpressionResolution::StructLiteral { .. })
             | Some(ExpressionResolution::EnumConstructor {
                 variant: ResolvedEnumVariantId::Standard(_),
             })
@@ -1839,7 +1839,7 @@ fn validate_unused_declarations(
     let mut observed_settings = HashSet::new();
     let mut literal_setting_keys = HashSet::new();
     let mut has_dynamic_setting_lookup = false;
-    let mut observed_record_fields = HashSet::new();
+    let mut observed_struct_fields = HashSet::new();
     let mut observed_enum_variants = HashSet::new();
     let mut fully_observed_types = HashSet::new();
     let mut pending = VecDeque::new();
@@ -1856,7 +1856,7 @@ fn validate_unused_declarations(
     observed_settings.extend(roots.observed_settings.iter().copied());
     literal_setting_keys.extend(roots.literal_setting_keys.iter().cloned());
     has_dynamic_setting_lookup |= roots.has_dynamic_setting_lookup;
-    observed_record_fields.extend(roots.observed_record_fields.iter().copied());
+    observed_struct_fields.extend(roots.observed_struct_fields.iter().copied());
     observed_enum_variants.extend(roots.observed_enum_variants.iter().copied());
     fully_observed_types.extend(roots.fully_observed_types.iter().copied());
     pending.extend(roots.dependencies);
@@ -1889,7 +1889,7 @@ fn validate_unused_declarations(
     observed_settings.extend(state_execution_roots.observed_settings.iter().copied());
     literal_setting_keys.extend(state_execution_roots.literal_setting_keys.iter().cloned());
     has_dynamic_setting_lookup |= state_execution_roots.has_dynamic_setting_lookup;
-    observed_record_fields.extend(state_execution_roots.observed_record_fields.iter().copied());
+    observed_struct_fields.extend(state_execution_roots.observed_struct_fields.iter().copied());
     observed_enum_variants.extend(state_execution_roots.observed_enum_variants.iter().copied());
     fully_observed_types.extend(state_execution_roots.fully_observed_types.iter().copied());
     pending.extend(state_execution_roots.dependencies);
@@ -1905,15 +1905,15 @@ fn validate_unused_declarations(
                 .filter_map(|field| semantics.value_type(field.id)),
         );
         // The attachment runtime constructs and consumes the generated Layout
-        // value even when user code never names the record directly. Its
+        // value even when user code never names the struct directly. Its
         // dimensions and every possible enum value participate in automatic
         // metadata selection, so none of those declarations are dead source.
         if let Some(layout) = &state.layout {
-            reachable_types.insert(semantics.types().id_for_record(layout.record));
-            if let Some(record) = syntax.records.get(layout.record.index()) {
-                observed_record_fields.extend(record.fields.iter().map(|field| field.id));
-                for field in &record.fields {
-                    let Some(ty) = semantics.record_field_type(field.id) else {
+            reachable_types.insert(semantics.types().id_for_struct(layout.structure));
+            if let Some(structure) = syntax.structs.get(layout.structure.index()) {
+                observed_struct_fields.extend(structure.fields.iter().map(|field| field.id));
+                for field in &structure.fields {
+                    let Some(ty) = semantics.struct_field_type(field.id) else {
                         continue;
                     };
                     let TypeKind::Enum(enumeration) = semantics.types().kind(ty) else {
@@ -2019,20 +2019,20 @@ fn validate_unused_declarations(
         observed_settings.extend(collector.observed_settings.iter().copied());
         literal_setting_keys.extend(collector.literal_setting_keys.iter().cloned());
         has_dynamic_setting_lookup |= collector.has_dynamic_setting_lookup;
-        observed_record_fields.extend(collector.observed_record_fields.iter().copied());
+        observed_struct_fields.extend(collector.observed_struct_fields.iter().copied());
         observed_enum_variants.extend(collector.observed_enum_variants.iter().copied());
         fully_observed_types.extend(collector.fully_observed_types.iter().copied());
         pending.extend(collector.dependencies);
     }
 
-    let (reachable_records, reachable_enums) =
+    let (reachable_structs, reachable_enums) =
         expand_reachable_nominal_types(&mut reachable_types, syntax, semantics);
     expand_fully_observed_types(
         fully_observed_types,
         syntax,
         semantics,
         &mut observed_state_fields,
-        &mut observed_record_fields,
+        &mut observed_struct_fields,
         &mut observed_enum_variants,
     );
     expand_observed_state_field_dependencies(&mut observed_state_fields, syntax, semantics);
@@ -2215,15 +2215,15 @@ fn validate_unused_declarations(
             );
         }
     }
-    for record in &syntax.records {
-        if !record.name.starts_with('_') && !reachable_records.contains(&record.id) {
+    for structure in &syntax.structs {
+        if !structure.name.starts_with('_') && !reachable_structs.contains(&structure.id) {
             diagnostics.push(
                 Diagnostic::warning(
                     DiagnosticCode::UnusedDeclaration,
-                    format!("unused record `{}`", record.name),
-                    record.name_span,
+                    format!("unused struct `{}`", structure.name),
+                    structure.name_span,
                 )
-                .with_primary_label("this record is never used by reachable code")
+                .with_primary_label("this struct is never used by reachable code")
                 .with_note("prefix the name with `_` to indicate that this is intentional"),
             );
         }
@@ -2241,21 +2241,21 @@ fn validate_unused_declarations(
             );
         }
     }
-    for record in syntax
-        .records
+    for structure in syntax
+        .structs
         .iter()
-        .filter(|record| reachable_records.contains(&record.id))
+        .filter(|structure| reachable_structs.contains(&structure.id))
     {
-        for field in &record.fields {
-            if !field.name.starts_with('_') && !observed_record_fields.contains(&field.id) {
+        for field in &structure.fields {
+            if !field.name.starts_with('_') && !observed_struct_fields.contains(&field.id) {
                 diagnostics.push(
                     Diagnostic::warning(
                         DiagnosticCode::UnusedMember,
-                        format!("unused record field `{}.{}`", record.name, field.name),
+                        format!("unused struct field `{}.{}`", structure.name, field.name),
                         field.name_span,
                     )
                     .with_primary_label("this field is never read from reachable code")
-                    .with_note("constructing or deserializing a record does not read its fields")
+                    .with_note("constructing or deserializing a struct does not read its fields")
                     .with_note(
                         "prefix the field name with `_` to indicate that this is intentional",
                     ),
@@ -2371,13 +2371,13 @@ fn expand_fully_observed_types(
     syntax: &Program,
     semantics: &SemanticModel,
     observed_state_fields: &mut HashSet<ast::ValueId>,
-    observed_record_fields: &mut HashSet<ast::RecordFieldId>,
+    observed_struct_fields: &mut HashSet<ast::StructFieldId>,
     observed_enum_variants: &mut HashSet<ast::EnumVariantId>,
 ) {
-    let records = syntax
-        .records
+    let structs = syntax
+        .structs
         .iter()
-        .map(|record| (record.id, record))
+        .map(|structure| (structure.id, structure))
         .collect::<HashMap<_, _>>();
     let enums = syntax
         .enums
@@ -2410,11 +2410,11 @@ fn expand_fully_observed_types(
                     .iter()
                     .filter_map(|setting| semantics.value_type(setting.id)),
             ),
-            TypeKind::Record(record) => {
-                if let Some(record) = records.get(record) {
-                    for field in &record.fields {
-                        observed_record_fields.insert(field.id);
-                        if let Some(ty) = semantics.record_field_type(field.id) {
+            TypeKind::Struct(structure) => {
+                if let Some(structure) = structs.get(structure) {
+                    for field in &structure.fields {
+                        observed_struct_fields.insert(field.id);
+                        if let Some(ty) = semantics.struct_field_type(field.id) {
                             pending.push_back(ty);
                         }
                     }
@@ -2458,11 +2458,11 @@ fn expand_reachable_nominal_types(
     roots: &mut HashSet<crate::types::TypeId>,
     syntax: &Program,
     semantics: &SemanticModel,
-) -> (HashSet<ast::RecordId>, HashSet<ast::EnumId>) {
-    let records = syntax
-        .records
+) -> (HashSet<ast::StructId>, HashSet<ast::EnumId>) {
+    let structs = syntax
+        .structs
         .iter()
-        .map(|record| (record.id, record))
+        .map(|structure| (structure.id, structure))
         .collect::<HashMap<_, _>>();
     let enums = syntax
         .enums
@@ -2471,7 +2471,7 @@ fn expand_reachable_nominal_types(
         .collect::<HashMap<_, _>>();
     let mut pending = roots.iter().copied().collect::<VecDeque<_>>();
     let mut expanded = HashSet::new();
-    let mut reachable_records = HashSet::new();
+    let mut reachable_structs = HashSet::new();
     let mut reachable_enums = HashSet::new();
 
     while let Some(ty) = pending.pop_front() {
@@ -2495,14 +2495,14 @@ fn expand_reachable_nominal_types(
                     .iter()
                     .filter_map(|setting| semantics.value_type(setting.id)),
             ),
-            TypeKind::Record(record) => {
-                reachable_records.insert(*record);
-                if let Some(record) = records.get(record) {
+            TypeKind::Struct(structure) => {
+                reachable_structs.insert(*structure);
+                if let Some(structure) = structs.get(structure) {
                     pending.extend(
-                        record
+                        structure
                             .fields
                             .iter()
-                            .filter_map(|field| semantics.record_field_type(field.id)),
+                            .filter_map(|field| semantics.struct_field_type(field.id)),
                     );
                 }
             }
@@ -2541,7 +2541,7 @@ fn expand_reachable_nominal_types(
     }
 
     roots.extend(expanded);
-    (reachable_records, reachable_enums)
+    (reachable_structs, reachable_enums)
 }
 
 fn validate_must_use(

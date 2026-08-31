@@ -471,19 +471,19 @@ fn strict_and_recovering_checks_share_post_type_validation() {
 }
 
 #[test]
-fn record_literals_resolve_their_nominal_identity_after_parsing() {
+fn struct_literals_resolve_their_nominal_identity_after_parsing() {
     let source = r#"
         state "game.exe" {}
         whileAttached {
             let value = Mystery { field: 1 }
         }
     "#;
-    let parsed = splitscript::parse(source).expect("record-literal shape is purely syntactic");
-    let errors = splitscript::check(parsed).expect_err("the nominal record must resolve later");
+    let parsed = splitscript::parse(source).expect("struct-literal shape is purely syntactic");
+    let errors = splitscript::check(parsed).expect_err("the nominal struct must resolve later");
     assert!(
         errors
             .iter()
-            .any(|error| error.message == "unknown record type `Mystery`")
+            .any(|error| error.message == "unknown struct type `Mystery`")
     );
 }
 
@@ -861,7 +861,7 @@ fn source_reference_queries_cover_all_declaration_kinds() {
     }
 
     let source = r#"
-        record Point { x: i32 }
+        struct Point { x: i32 }
         enum Mode { Active }
         let total = 0
         state "game.exe" {
@@ -884,7 +884,7 @@ fn source_reference_queries_cover_all_declaration_kinds() {
     database.check().expect("navigation fixture should check");
 
     for (needle, expected, count) in [
-        ("record Point", "Point", 4),
+        ("struct Point", "Point", 4),
         ("x: i32", "x", 4),
         ("enum Mode", "Mode", 4),
         ("Active }", "Active", 3),
@@ -1309,11 +1309,11 @@ fn rename_queries_validate_identifiers_reservations_and_binding_identity() {
 }
 
 #[test]
-fn record_shorthand_renames_expand_to_preserve_field_and_value_identity() {
+fn struct_shorthand_renames_expand_to_preserve_field_and_value_identity() {
     use splitscript::tooling::database::CompilerDatabase;
 
     let source = r#"
-        record Point { x: u32 }
+        struct Point { x: u32 }
         state "game.exe" {}
         fn point(x: u32) -> Point { return Point { x } }
     "#;
@@ -1355,11 +1355,11 @@ fn record_shorthand_renames_expand_to_preserve_field_and_value_identity() {
 }
 
 #[test]
-fn record_shorthand_tooling_uses_operation_specific_identity() {
+fn struct_shorthand_tooling_uses_operation_specific_identity() {
     use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
 
     let source = r#"
-        record Point { x: u32 }
+        struct Point { x: u32 }
         state "game.exe" {}
         fn point(value: u32) -> Point {
             let x = value
@@ -1372,7 +1372,7 @@ fn record_shorthand_tooling_uses_operation_specific_identity() {
     assert!(matches!(
         database.definition_at(shorthand).unwrap(),
         Some(DefinitionTarget::Source(definition))
-            if matches!(definition.id, SourceDefinitionId::RecordField(_))
+            if matches!(definition.id, SourceDefinitionId::StructField(_))
     ));
 
     let hover = database
@@ -1417,11 +1417,11 @@ fn record_shorthand_tooling_uses_operation_specific_identity() {
 }
 
 #[test]
-fn unrelated_renames_preserve_both_identities_of_unchanged_record_shorthand() {
+fn unrelated_renames_preserve_both_identities_of_unchanged_struct_shorthand() {
     use splitscript::tooling::database::CompilerDatabase;
 
     let source = r#"
-        record Point { x: u32, y: u32 }
+        struct Point { x: u32, y: u32 }
         state "game.exe" {}
         fn point(x: u32) -> Point { return Point { x, y: 0 } }
         fn inspect(point: Point) { print(point.x) }
@@ -1532,7 +1532,7 @@ fn underscore_suppression_reuses_validated_identity_renames() {
     use splitscript::tooling::database::CompilerDatabase;
 
     let source = r#"
-        record Snapshot {
+        struct Snapshot {
             used: i32,
             unusedField: i32
         }
@@ -1592,7 +1592,7 @@ fn document_symbols_preserve_source_order_and_domain_hierarchy() {
     use splitscript::{tooling::database::CompilerDatabase, tooling::symbols::DocumentSymbolKind};
 
     let source = r#"
-        record Point { x: i32 }
+        struct Point { x: i32 }
         let global = 1
         state "game.exe" { level = process.read<i32>(0) }
         settings {
@@ -1625,10 +1625,10 @@ fn document_symbols_preserve_source_order_and_domain_hierarchy() {
         ]
     );
 
-    let record = &symbols[0];
-    assert_eq!(record.kind, DocumentSymbolKind::Struct);
-    assert_eq!(record.children[0].name, "x");
-    assert_eq!(record.children[0].kind, DocumentSymbolKind::Field);
+    let structure = &symbols[0];
+    assert_eq!(structure.kind, DocumentSymbolKind::Struct);
+    assert_eq!(structure.children[0].name, "x");
+    assert_eq!(structure.children[0].kind, DocumentSymbolKind::Field);
 
     let state = &symbols[2];
     assert_eq!(state.kind, DocumentSymbolKind::Namespace);
@@ -1665,7 +1665,7 @@ fn compiler_database_preserves_semantics_around_type_errors() {
     };
 
     let source = r#"
-        record Counter { value: i32 }
+        struct Counter { value: i32 }
         state "game.exe" {}
 
         fn readCounter(counter: Counter) -> i32 {
@@ -1779,7 +1779,7 @@ fn compiler_database_resolves_expression_segments_to_definitions() {
     };
 
     let source = r#"
-        record Counter { value: i32 }
+        struct Counter { value: i32 }
         enum Mode {
             Idle,
             Active
@@ -1804,7 +1804,7 @@ fn compiler_database_resolves_expression_segments_to_definitions() {
     let global = checked.syntax().globals[0].id;
     let function = checked.syntax().functions[0].id;
     let parameter = checked.syntax().functions[0].params[0].id;
-    let field = checked.syntax().records[0].fields[0].id;
+    let field = checked.syntax().structs[0].fields[0].id;
     let enumeration = checked.syntax().enums[0].id;
     let active = checked.syntax().enums[0].variants[1].id;
 
@@ -1829,7 +1829,7 @@ fn compiler_database_resolves_expression_segments_to_definitions() {
     assert!(matches!(
         database.definition_at(value_path + "value.".len()).unwrap(),
         Some(DefinitionTarget::Source(definition))
-            if definition.id == SourceDefinitionId::RecordField(field)
+            if definition.id == SourceDefinitionId::StructField(field)
     ));
 
     let global_path = source.find("+ global").unwrap() + 2;
@@ -1886,8 +1886,8 @@ fn postfix_expression_receivers_preserve_member_and_method_navigation() {
     use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
 
     let source = r#"
-        record Counter { value: i32 }
-        record Wrapper { counter: Counter }
+        struct Counter { value: i32 }
+        struct Wrapper { counter: Counter }
         state "game.exe" {}
 
         fn wrapper() -> Wrapper {
@@ -1904,7 +1904,7 @@ fn postfix_expression_receivers_preserve_member_and_method_navigation() {
     "#;
     let mut database = CompilerDatabase::new(source);
     let checked = database.check().expect("postfix receiver should check");
-    let counter_field = checked.syntax().records[1].fields[0].id;
+    let counter_field = checked.syntax().structs[1].fields[0].id;
     let increment = checked.syntax().functions[1].id;
     let call = source.find("wrapper().counter.increment()").unwrap();
     let counter = call + "wrapper().".len();
@@ -1913,7 +1913,7 @@ fn postfix_expression_receivers_preserve_member_and_method_navigation() {
     assert!(matches!(
         database.definition_at(counter).unwrap(),
         Some(DefinitionTarget::Source(definition))
-            if definition.id == SourceDefinitionId::RecordField(counter_field)
+            if definition.id == SourceDefinitionId::StructField(counter_field)
     ));
     assert!(matches!(
         database.definition_at(method).unwrap(),
@@ -1987,12 +1987,12 @@ whileAttached {
 }
 
 #[test]
-fn compiler_database_resolves_type_record_and_pattern_syntax() {
+fn compiler_database_resolves_type_struct_and_pattern_syntax() {
     use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
 
     let source = r#"
-        record Counter { value: i32 }
-        record Wrapper { counter: Counter }
+        struct Counter { value: i32 }
+        struct Wrapper { counter: Counter }
         enum Mode {
             Idle,
             Active
@@ -2026,8 +2026,8 @@ fn compiler_database_resolves_type_record_and_pattern_syntax() {
     "#;
     let mut database = CompilerDatabase::new(source);
     let checked = database.check().unwrap();
-    let counter = checked.syntax().records[0].id;
-    let value_field = checked.syntax().records[0].fields[0].id;
+    let counter = checked.syntax().structs[0].id;
+    let value_field = checked.syntax().structs[0].fields[0].id;
     let mode = checked.syntax().enums[0].id;
     let idle = checked.syntax().enums[0].variants[0].id;
 
@@ -2035,26 +2035,26 @@ fn compiler_database_resolves_type_record_and_pattern_syntax() {
     assert!(matches!(
         database.definition_at(wrapper_type).unwrap(),
         Some(DefinitionTarget::Source(definition))
-            if definition.id == SourceDefinitionId::Record(counter)
+            if definition.id == SourceDefinitionId::Struct(counter)
     ));
 
     let parameter_type = source.find("value: Counter").unwrap() + "value: ".len();
     assert!(matches!(
         database.definition_at(parameter_type).unwrap(),
         Some(DefinitionTarget::Source(definition))
-            if definition.id == SourceDefinitionId::Record(counter)
+            if definition.id == SourceDefinitionId::Struct(counter)
     ));
     let return_type = source.find("-> Counter").unwrap() + "-> ".len();
     assert!(matches!(
         database.definition_at(return_type).unwrap(),
         Some(DefinitionTarget::Source(definition))
-            if definition.id == SourceDefinitionId::Record(counter)
+            if definition.id == SourceDefinitionId::Struct(counter)
     ));
     let payload_type = source.find("Counter(Counter)").unwrap() + "Counter(".len();
     assert!(matches!(
         database.definition_at(payload_type).unwrap(),
         Some(DefinitionTarget::Source(definition))
-            if definition.id == SourceDefinitionId::Record(counter)
+            if definition.id == SourceDefinitionId::Struct(counter)
     ));
 
     let pattern = source.find("Mode.Idle =>").unwrap();
@@ -2081,14 +2081,14 @@ fn compiler_database_resolves_type_record_and_pattern_syntax() {
     assert!(matches!(
         database.definition_at(literal + 1).unwrap(),
         Some(DefinitionTarget::Source(definition))
-            if definition.id == SourceDefinitionId::Record(counter)
+            if definition.id == SourceDefinitionId::Struct(counter)
     ));
     assert!(matches!(
         database
             .definition_at(literal + "Counter { ".len())
             .unwrap(),
         Some(DefinitionTarget::Source(definition))
-            if definition.id == SourceDefinitionId::RecordField(value_field)
+            if definition.id == SourceDefinitionId::StructField(value_field)
     ));
 }
 

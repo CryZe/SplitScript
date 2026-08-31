@@ -429,13 +429,13 @@ impl BackendDependencies {
                     | CoreTypeId::U64
                     | CoreTypeId::Address,
                 ) => self.require(RuntimeHelperId::FormatI64),
-                TypeKind::Record(record) => {
-                    let declaration = &program.records[record.index()];
+                TypeKind::Struct(structure) => {
+                    let declaration = &program.structs[structure.index()];
                     pending.extend(
                         declaration
                             .fields
                             .iter()
-                            .filter_map(|field| semantics.record_field_type(field.id)),
+                            .filter_map(|field| semantics.struct_field_type(field.id)),
                     );
                 }
                 TypeKind::Enum(enumeration) => {

@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn renders_multiple_locations_notes_and_fixes_as_source_annotations() {
-        let source = "record First {}\nrecord First {}\n";
+        let source = "struct First {}\nrecord First {}\n";
         let diagnostic =
             Diagnostic::type_error("duplicate declaration `First`", Span { start: 23, end: 28 })
                 .with_primary_label("`First` is declared again here")
@@ -113,7 +113,7 @@ mod tests {
         assert!(output.contains("the first declaration is here"));
         assert!(output.contains("declaration names must be unique"));
         assert!(output.contains("help: rename the second declaration"));
-        assert!(output.contains("record First {}"));
+        assert!(output.contains("struct First {}"));
         assert!(!output.contains("\u{1b}["));
     }
 

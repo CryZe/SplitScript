@@ -7,10 +7,10 @@ use super::{
     EnumReference, EnumVariant, Expr, FunctionDecl, FunctionId, ManagedClassDecl, ManagedClassId,
     ManagedFieldDecl, ManagedFieldId, ManagedImageDecl, ManagedImageId, ManagedItemDecl,
     ManagedMetadataName, ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId, Parameter,
-    Parser, PointerPath, PointerPathBase, RecordDecl, RecordField, RecordId, SettingChoiceOption,
-    SettingDecl, SettingExternalKey, SettingFamilyDecl, SettingFileFilter, SettingKind,
-    SettingTextPart, SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl,
-    StateMemoryDecoder, StateProviderRef, StateProviderSelectorRef, StateSource, StateTransform,
+    Parser, PointerPath, PointerPathBase, SettingChoiceOption, SettingDecl, SettingExternalKey,
+    SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span,
+    StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
+    StateProviderSelectorRef, StateSource, StateTransform, StructDecl, StructField, StructId,
     TickRateDecl, TickRateValue, TokenKind, TypeRef,
 };
 use crate::{
@@ -497,24 +497,28 @@ impl Parser<'_> {
         })
     }
 
-    pub(super) fn record_decl(&mut self) -> Result<RecordDecl, Diagnostic> {
-        let start = self.expect_ident("record")?.start;
-        let (name, name_span) = self.expect_declared_ident("expected a record name")?;
-        let id = RecordId::from_index(self.next_record_id);
-        self.next_record_id += 1;
-        self.expect(TokenKind::LBrace, "expected `{` after the record name")?;
+    pub(super) fn struct_decl(&mut self) -> Result<StructDecl, Diagnostic> {
+        let start = if self.at_ident("record") {
+            self.expect_ident("record")?.start
+        } else {
+            self.expect_ident("struct")?.start
+        };
+        let (name, name_span) = self.expect_declared_ident("expected a struct name")?;
+        let id = StructId::from_index(self.next_struct_id);
+        self.next_struct_id += 1;
+        self.expect(TokenKind::LBrace, "expected `{` after the struct name")?;
         let body_depth = self.brace_depth_before(self.cursor.position());
         let mut fields = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
-                self.record_missing_closing("unterminated record declaration");
+                self.record_missing_closing("unterminated struct declaration");
                 break;
             }
             let item_start = self.cursor.position();
             let documentation = self.take_source_documentation();
             if self.at(&TokenKind::RBrace) {
                 self.diagnostics
-                    .push(self.error("a documentation comment must precede a record field"));
+                    .push(self.error("a documentation comment must precede a struct field"));
                 break;
             }
             let parsed = (|| {
@@ -522,15 +526,15 @@ impl Parser<'_> {
                     self.expect_declared_ident("expected a field name")?;
                 self.expect(TokenKind::Colon, "expected `:` after the field name")?;
                 let (ty, type_span) = self.parse_type("expected a field type")?;
-                let field = RecordField {
-                    id: self.new_record_field_id(),
+                let field = StructField {
+                    id: self.new_struct_field_id(),
                     name: field_name,
                     name_span: field_start,
                     documentation,
                     ty,
                     span: field_start.join(type_span),
                 };
-                self.require_comma_between("record fields");
+                self.require_comma_between("struct fields");
                 Ok(field)
             })();
             if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
@@ -540,7 +544,7 @@ impl Parser<'_> {
         let end = self
             .eat(&TokenKind::RBrace)
             .map_or(self.current().span.end, |span| span.end);
-        Ok(RecordDecl {
+        Ok(StructDecl {
             id,
             name,
             documentation: None,
@@ -922,8 +926,8 @@ impl Parser<'_> {
     ) -> Result<AttachmentLayoutDecl, Diagnostic> {
         let keyword_span = self.expect_ident("layout")?;
         let opening_span = self.expect(TokenKind::LBrace, "expected `{` after `layout`")?;
-        let id = RecordId::from_index(self.next_record_id);
-        self.next_record_id += 1;
+        let id = StructId::from_index(self.next_struct_id);
+        self.next_struct_id += 1;
         let body_depth = self.brace_depth_before(self.cursor.position());
         let mut fields = Vec::new();
         while !self.at(&TokenKind::RBrace) {
@@ -941,8 +945,8 @@ impl Parser<'_> {
                     "expected `:` after the layout dimension name",
                 )?;
                 let (ty, type_span) = self.parse_type("expected a layout dimension type")?;
-                Ok(RecordField {
-                    id: self.new_record_field_id(),
+                Ok(StructField {
+                    id: self.new_struct_field_id(),
                     name,
                     name_span,
                     documentation: field_documentation,
@@ -960,7 +964,7 @@ impl Parser<'_> {
             .unwrap_or_else(|| self.current().span);
         let span = keyword_span.join(closing);
         let layout_documentation = documentation.clone();
-        self.generated_records.push(RecordDecl {
+        self.generated_structs.push(StructDecl {
             id,
             name: "Layout".to_owned(),
             documentation,
@@ -972,7 +976,7 @@ impl Parser<'_> {
             keyword_span,
             documentation: layout_documentation,
             opening_span,
-            record: id,
+            structure: id,
             span,
         })
     }

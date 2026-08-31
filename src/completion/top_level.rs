@@ -47,8 +47,8 @@ pub(super) fn complete_top_level(source: &str, syntax: &Program, offset: usize) 
     );
     add_catalog_snippet(
         &mut builder,
-        language.item(LanguageItemId::Record),
-        "record ${1:Name} {\n\t${2:field}: ${3:Type},\n}",
+        language.item(LanguageItemId::Struct),
+        "struct ${1:Name} {\n\t${2:field}: ${3:Type},\n}",
     );
     add_catalog_snippet(
         &mut builder,

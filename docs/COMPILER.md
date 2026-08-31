@@ -51,8 +51,8 @@ backend derives its attachment process list from the provider declaration.
 `LoweredProgram` as a whole is the resolution product. Nominal declaration conflicts and
 unknown type names are retained separately from parser recovery diagnostics:
 they do not invalidate the syntax tree or prevent formatting, but strict
-checking reports them before inference. Record literals retain their written
-name in syntax and publish their resolved `RecordId` through the semantic
+checking reports them before inference. Struct literals retain their written
+name in syntax and publish their resolved `StructId` through the semantic
 model instead of requiring parser-time nominal lookup. Enum-qualified paths,
 calls, match patterns, and choice settings also remain in their original
 path/reference syntax. `resolution::resolve_program` records their enum
@@ -65,7 +65,7 @@ Source `TypeRef` is likewise syntax-only: it contains primitive spellings,
 unresolved nominal `TypeNameId`s, and IDs for source-written constructed type
 expressions. Lowering maps nominal names to `ResolvedTypeRef` values in
 `ProgramResolutions`; inference and checked GC layouts use that semantic form.
-Consequently parsed nodes cannot contain `StdlibTypeId`, resolved record/enum
+Consequently parsed nodes cannot contain `StdlibTypeId`, resolved struct/enum
 identities, or the cross-source `EnumTypeId` union. Primitive spellings and
 their stable identity are owned by the dependency-light syntax crate, while
 the standard-library graph attaches capabilities and runtime layout facts.
@@ -105,7 +105,7 @@ bad local declaration does not discard later statements in the same function
 or lifecycle action. Failed expectations leave the unexpected token untouched,
 which prevents a missing delimiter from consuming a valid recovery boundary.
 
-Record and enum bodies use the same principle at member boundaries. Invalid
+Struct and enum bodies use the same principle at member boundaries. Invalid
 fields or variants are represented by recovery nodes, while later valid
 members remain in their enclosing declaration and retain ordinary stable IDs.
 State declarations recover field-by-field as well, for both the current DSL
@@ -123,7 +123,7 @@ Array literals and function calls recover each comma-delimited expression
 independently. A malformed element or argument therefore produces a localized
 recovery region while later values and the enclosing statement remain in the
 partial syntax tree.
-Record literals apply the same behavior at field boundaries. Template strings
+Struct literals apply the same behavior at field boundaries. Template strings
 recover within each interpolation boundary, so invalid embedded syntax does
 not discard later text, later interpolations, or the call containing the
 template.
@@ -151,7 +151,7 @@ lexing, `SS0002` for parsing, `SS0003` for type checking, and `SS0004` for
 post-type semantic validation. Actionable warnings use their own `SS1xxx`
 namespace: `SS1001` for discarded must-use values, `SS1002` for unread local
 bindings, `SS1003` for unreachable declarations, and `SS1004` for unused state
-fields, settings, record fields, or enum variants. `SS1009` identifies normal
+fields, settings, struct fields, or enum variants. `SS1009` identifies normal
 locals, globals, and functions reached exclusively from debug-only code, where
 release builds retain work without a release consumer. Clients can therefore
 configure and present a warning without parsing its human-readable message.
@@ -225,7 +225,7 @@ supported; an occurs check rejects polymorphic recursion that would require an
 infinite type with a focused diagnostic.
 
 Expected-type checking retains source provenance separately from the inferred
-type graph. An explicit parameter, result, variable, state field, record field,
+type graph. An explicit parameter, result, variable, state field, struct field,
 or enum payload therefore contributes both its semantic type and the span and
 wording of the declaration that imposed it. Nested collection and wrapper
 checking preserves that provenance. A mismatch labels the supplied expression
@@ -305,7 +305,7 @@ After inference, `check` materializes a `TypedProgram` body HIR. Every
 typed blocks likewise own variables, assignments, branches, returns, suspensions,
 and expression statements. Match arms own their pattern, optional guard, and
 result expression. Type-directed resolutions are attached to the relevant node:
-value-path roots and member chains, user or standard-library calls, record
+value-path roots and member chains, user or standard-library calls, struct
 field order, and enum constructors. Assignments and match patterns similarly
 carry their resolved targets, while choice settings carry resolved default and
 option variants. Node enumeration is stable-ID ordered for deterministic LSP
@@ -576,7 +576,7 @@ ordinary values and receivers are delegated through the expression module.
 [`src/codegen/gc_types.rs`](../src/codegen/gc_types.rs) owns deterministic GC
 layout construction. It emits one recursive group containing the state and
 built-in runtime types, the async continuation frame, and only reachable
-nominal records, enums, inferred arrays, Options, and Results. `GcLayout` owns
+nominal structs, enums, inferred arrays, Options, and Results. `GcLayout` owns
 their compact deterministic order and the encoder consumes that same order.
 It also derives standard type indices, standard field slots, enum variant
 indices, physical value representations, and the continuation-frame position
@@ -671,7 +671,7 @@ The plan packs typed settings, scanning, C-string, managed-UTF, and ABI-read
 roles into explicit primary/companion alias classes. The primary bank is sized
 from the largest analyzed readable layout, logical API capacities, and actual
 signature overlap; the companion bank holds values that must coexist with it.
-A readable record larger than one page therefore moves static data rather than
+A readable struct larger than one page therefore moves static data rather than
 overflowing a historical buffer. Unbounded host String staging begins at the
 first page after immutable data and grows memory before writing, preventing
 long runtime messages from corrupting static strings or signatures. A distinct aligned
@@ -737,7 +737,7 @@ recursive call cycles. Function planning/body emission and static-data/helper/
 import analysis all consume the same result. Dead functions therefore cannot
 retain their strings, signature literals, generated helpers, or host imports.
 Reachable equality operands additionally close over nested source or catalog
-record fields, enum payloads, and `T?`/`T!` values; `T!` errors retain
+struct fields, enum payloads, and `T?`/`T!` values; `T!` errors retain
 String equality. Thus
 structural-equality signatures/bodies and the String equality helper are emitted
 only when a live comparison can call them. The same analysis
@@ -770,7 +770,7 @@ globals, generated function signatures, ordinary/async locals, aggregate
 instructions, memory decoding, settings initialization, runtime helpers, and
 failure propagation. The fixed built-in type conversion rejects dynamic GC
 types, preventing semantic IDs from being mistaken for physical Wasm indices.
-`GcLayout` compactly orders only the reachable records, enums, arrays, Options,
+`GcLayout` compactly orders only the reachable structs, enums, arrays, Options,
 and Results and exposes that same order to type encoding. Removing an earlier
 semantic layout therefore remaps all physical Wasm indices centrally without
 changing individual emitters.
@@ -898,7 +898,7 @@ operations, explicit casts, result `TypeId`s, and implicit `T?`/`T!` lift
 edges are copied into backend-owned nodes. Ordinary emission consumes those
 nodes without asking typed HIR which operation or path was selected. String
 literals and interpolation, compile-time signatures, arrays, and resolved
-record/enum constructors have moved to the same plan; static string/signature
+struct/enum constructors have moved to the same plan; static string/signature
 data collection consumes it as well. Calls now carry their argument IDs and
 complete resolved target in this plan: user-function IDs, method receiver
 paths, standard-library item IDs, and inferred generic arguments are no longer
@@ -1021,7 +1021,7 @@ lowering.
 
 Bodies may perform any operation reachable through their permitted intrinsic
 leaves. All `Duration` constructors are source-defined: their arithmetic and
-physical GC-record construction live in `standard.split`, so the type has no
+physical GC-struct construction live in `standard.split`, so the type has no
 intrinsic operations. This includes zero, exact integer and fractional unit
 constructors, frames, and parts. Capability-directed implementation cases let
 one public `T: Numeric` constructor retain separate `Integer` and `Float`
@@ -1099,8 +1099,8 @@ semantic facts: `SemanticModel::value_type` covers globals, parameters, locals,
 await bindings, state fields, settings, and match payload bindings, while
 `SemanticModel::function_result` covers function results. Optional source
 annotations remain optional in checked syntax instead of being overwritten by
-inference. Record fields, enum payloads, and array elements likewise publish
-their resolved `TypeId` layouts through `RecordFieldId`, `EnumVariantId`, and
+inference. Struct fields, enum payloads, and array elements likewise publish
+their resolved `TypeId` layouts through `StructFieldId`, `EnumVariantId`, and
 dedicated constructed-type identities; WebAssembly GC layout construction reads those
 semantic queries rather than the AST annotations. `TypeKind::Array` retains
 its `ArrayTypeId` layout identity, element `TypeId`, and optional exact length,
@@ -1112,7 +1112,7 @@ parallel legacy type representation: Wasm storage/value selection lowers
 `TypeId` / `TypeKind` directly into backend-local physical categories.
 
 The semantic `TypeStore` is created before inference. Core primitives,
-standard-library types, and source record/enum types enter inference as their
+standard-library types, and source struct/enum types enter inference as their
 canonical `TypeId` and retain that exact identity through checked publication,
 rather than passing through parallel enums and post-inference conversion
 tables. Only inference variables and temporarily unresolved `[T]`, `T?`, and
@@ -1130,7 +1130,7 @@ completion, while inferred constraints and rendered signatures retain only the
 strongest non-redundant capabilities. Concrete integer types consequently
 declare `Integer` once instead of separately repeating those memberships.
 Capabilities may also declare structural method requirements in privileged
-source. `Display` requires `fn toString() -> String`; user records and enums
+source. `Display` requires `fn toString() -> String`; user structs and enums
 derive a structural implementation by default, while a corresponding
 `fn Type.toString()` method overrides it. The checker matches the semantic
 receiver, parameters, and result against the catalog requirement, and implicit
@@ -1148,13 +1148,13 @@ conversions as calls to the ordinary hidden library body.
 `FileVersion.toString()` is the first such implementation: casts,
 interpolation, `print`, and `setVariable` all dispatch to it, while codegen has
 no `FileVersion` formatting case.
-`MemoryReadable` GC records derive their naturally aligned field layout from
+`MemoryReadable` GC structs derive their naturally aligned field layout from
 catalog field declarations through the same semantic-`TypeId` layout engine as
-source records. `Equatable` catalog records similarly receive generated
+source structs. `Equatable` catalog structs similarly receive generated
 structural equality helpers whose dependencies close over nested declared
 fields. Catalog validation rejects readable or equatable declarations whose
 representation and fields cannot satisfy those contracts. A test-only ordinary
-record, with no intrinsic implementation, passes through name resolution,
+struct, with no intrinsic implementation, passes through name resolution,
 checking, memory layout, equality, hover, completion, and Wasm GC generation;
 this guards the promise that future ordinary types do not need compiler-wide
 type matches.
@@ -1221,9 +1221,9 @@ globals. Assignment statements have stable `AssignmentId` values and publish
 their `ValueId` targets too, so backend writes use the same ID-keyed storage.
 Match payload bindings also have `ValueId` values. Method receivers are lowered
 from their semantic `ResolvedValue` roots, so compiler-created receiver paths
-and their former local/global/setting name maps are gone. Records, enums,
-record fields, enum variants, and compiler-provided fields have distinct typed
-IDs. Path expressions publish ordered `ResolvedMember` chains, while record
+and their former local/global/setting name maps are gone. Structs, enums,
+struct fields, enum variants, and compiler-provided fields have distinct typed
+IDs. Path expressions publish ordered `ResolvedMember` chains, while struct
 literals and enum constructors publish the selected field/variant IDs. The
 backend therefore does not reinterpret member-path or constructor spelling.
 Match arms have `PatternId` values, and choice options have
@@ -1339,7 +1339,7 @@ in the settings DSL keep each label and `=>` on the same line, including
 boolean, choice, file, choice-option, and file-filter entries; nested block
 contents and closing braces are then anchored from that line. Interpolated
 string chunks remain byte-for-byte source text, while expressions inside
-`{...}` use the ordinary spacing rules. Record fields and enum variants are
+`{...}` use the ordinary spacing rules. Struct fields and enum variants are
 always laid out one per line, including their trailing commas.
 
 The command-line frontend exposes the same operation as `splitc fmt <file>`.
@@ -1384,9 +1384,9 @@ scope. One lexical type-prefix parser remains usable while the recovering AST
 contains a missing or partial type and covers annotations, return arrows,
 casts, enum payloads, nested arrays and generic arguments. All of these sites
 consume one catalog-backed candidate builder, so primitives, standard-library
-types and named constructors, source records and enums, and structural type
+types and named constructors, source structs and enums, and structural type
 syntax cannot drift between grammar positions. Declaration-role checks keep
-record-literal fields and other value colons on the expression-completion path.
+struct-literal fields and other value colons on the expression-completion path.
 
 Semantic highlighting is a compiler query rather than an LSP-specific AST
 walk. [`src/highlight.rs`](../src/highlight.rs) merges lossless lexer tokens,
@@ -1426,16 +1426,16 @@ while the user is typing instead of introducing a second effect analysis.
 Member completion handles snapshots and nominal enum names directly, then uses
 a temporary source probe with the unfinished member suffix removed to recover
 the receiver's semantic `TypeKind`. That supports
-record fields, compiler-provided fields, user methods, and catalog methods even
+struct fields, compiler-provided fields, user methods, and catalog methods even
 for the normal mid-edit spelling `receiver.`. The LSP adapter converts the
 replacement span to UTF-16 and emits standard snippet text edits; it does not
 reimplement candidate or documentation rules.
 
 Source navigation is likewise a compiler query. `DefinitionIndex` records the
 exact declaration identifier and every exact identifier-token reference by
-stable `ValueId`, `FunctionId`, `RecordId`, `RecordFieldId`, `EnumId`, or
+stable `ValueId`, `FunctionId`, `StructId`, `StructFieldId`, `EnumId`, or
 `EnumVariantId`. It covers declarations, annotations, patterns, paths, calls,
-constructors, record literals, and assignment targets, including recovered
+constructors, struct literals, and assignment targets, including recovered
 semantic models. `CompilerDatabase::definition_at` resolves the token under the
 cursor, while `CompilerDatabase::references_at` filters the same index by
 identity and optionally excludes its declaration. The LSP adapter emits
@@ -1466,7 +1466,7 @@ The LSP layer only converts the returned spans into one same-document
 [`src/symbols.rs`](../src/symbols.rs) owns the editor-neutral document outline.
 It converts the recovered syntax tree into source-ordered symbols even though
 the AST stores declarations by category. State and settings are domain
-containers, setting-title spans recover their nested hierarchy, records and
+containers, setting-title spans recover their nested hierarchy, structs and
 enums contain fields and variants, and methods and lifecycle blocks retain
 distinct kinds. `CompilerDatabase::document_symbols` caches this result; the
 LSP adapter recursively converts its byte ranges and selection ranges to UTF-16
@@ -1484,8 +1484,8 @@ notes, labels, and fix metadata consistent.
 signature-help queries. Hover first uses the shared definition and position
 analysis to select a stable source, standard-library, or language-catalog
 identity. Source definitions are joined with semantic type facts, so globals,
-locals, parameters, state and setting fields, record fields, functions and
-methods, records, enums, and variants show their inferred source-level types.
+locals, parameters, state and setting fields, struct fields, functions and
+methods, structs, enums, and variants show their inferred source-level types.
 User-function and method hover additionally consumes the interprocedural
 `OperationAnalysis`, exposing transitive catalog effects, attachment
 constraints, synchronous behavior, and debug-only build availability. Recovery

@@ -119,7 +119,7 @@ links, or anchors. `cargo xtask docs` writes a local preview to the ignored
 
 SplitScript already supports native process attachment, typed memory paths,
 transactional state snapshots, settings, timer actions and observers, failure
-and optional values, async discovery, closures and iterators, records and enums,
+and optional values, async discovery, closures and iterators, structs and enums,
 strings and collections, layouts, source-defined Unity schemas, and typed
 emulator providers. The compiler-owned reference is the canonical source for
 exact symbols, signatures, effects, runtime availability, and examples.

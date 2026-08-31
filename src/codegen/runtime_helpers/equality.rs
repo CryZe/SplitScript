@@ -13,8 +13,8 @@ use crate::{
 
 use super::super::{
     EqualityFunctions, GcLayout, RuntimeHelperPlan, Type, emit_typed_struct_get,
-    enum_variant_payload, option_value_type, record_field_type, result_value_type,
-    standard_field_type,
+    enum_variant_payload, option_value_type, result_value_type, standard_field_type,
+    struct_field_type,
 };
 #[allow(clippy::too_many_arguments)]
 pub(in crate::codegen) fn compile_equality(
@@ -34,10 +34,13 @@ pub(in crate::codegen) fn compile_equality(
     let string_equality = plan
         .optional_function(RuntimeHelperId::StringEquality)
         .unwrap_or(0);
-    for record in gc.standard_library.all_types() {
-        if equality_functions.standard_records.contains_key(&record.id) {
-            equality.push(compile_standard_record_equality(
-                record.id,
+    for structure in gc.standard_library.all_types() {
+        if equality_functions
+            .standard_structs
+            .contains_key(&structure.id)
+        {
+            equality.push(compile_standard_struct_equality(
+                structure.id,
                 semantics,
                 equality_functions,
                 string_equality,
@@ -45,13 +48,13 @@ pub(in crate::codegen) fn compile_equality(
             ));
         }
     }
-    for (_, record) in structural.records() {
-        let StructuralTypeId::Record(record_id) = record.id else {
+    for (_, structure) in structural.structs() {
+        let StructuralTypeId::Struct(struct_id) = structure.id else {
             unreachable!()
         };
-        if equality_functions.records.contains_key(&record_id) {
-            equality.push(compile_record_equality(
-                record,
+        if equality_functions.structs.contains_key(&struct_id) {
+            equality.push(compile_struct_equality(
+                structure,
                 semantics,
                 equality_functions,
                 string_equality,
@@ -154,25 +157,25 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_eq(gc: &GcLayout) -> F
     function
 }
 
-fn compile_record_equality(
-    record: &StructuralType,
+fn compile_struct_equality(
+    structure: &StructuralType,
     semantics: &SemanticModel,
     equality_functions: &EqualityFunctions,
     string_eq: u32,
     gc: &GcLayout,
 ) -> Function {
     let mut function = Function::new([]);
-    let StructuralTypeId::Record(record_id) = record.id else {
+    let StructuralTypeId::Struct(struct_id) = structure.id else {
         unreachable!()
     };
-    let type_index = gc.index(Type::Record(record_id));
+    let type_index = gc.index(Type::Struct(struct_id));
 
     function.instruction(&Instruction::I32Const(1));
-    for (field_index, field) in record.members.iter().enumerate() {
-        let StructuralMemberId::RecordField(field_id) = field.source else {
+    for (field_index, field) in structure.members.iter().enumerate() {
+        let StructuralMemberId::StructField(field_id) = field.source else {
             unreachable!()
         };
-        let ty = record_field_type(field_id, semantics);
+        let ty = struct_field_type(field_id, semantics);
         function
             .instruction(&Instruction::LocalGet(0))
             .instruction(&Instruction::RefAsNonNull);
@@ -188,19 +191,19 @@ fn compile_record_equality(
     function
 }
 
-fn compile_standard_record_equality(
-    record: StdlibTypeId,
+fn compile_standard_struct_equality(
+    structure: StdlibTypeId,
     semantics: &SemanticModel,
     equality_functions: &EqualityFunctions,
     string_eq: u32,
     gc: &GcLayout,
 ) -> Function {
     let mut function = Function::new([]);
-    let ty = Type::Standard(record);
+    let ty = Type::Standard(structure);
     let type_index = gc.index(ty);
 
     function.instruction(&Instruction::I32Const(1));
-    for (field_index, field) in gc.standard_library.fields_of(record).enumerate() {
+    for (field_index, field) in gc.standard_library.fields_of(structure).enumerate() {
         let field_ty = standard_field_type(field.id, semantics);
         function
             .instruction(&Instruction::LocalGet(0))
@@ -408,13 +411,13 @@ pub(in crate::codegen) fn emit_value_equality(
                 return;
             }
             RuntimeRepresentation::GcStruct { .. } => {
-                Instruction::Call(equality_functions.standard_records[&standard])
+                Instruction::Call(equality_functions.standard_structs[&standard])
             }
             RuntimeRepresentation::GcArray { .. } | RuntimeRepresentation::Enum { .. } => {
                 unreachable!("catalog validation rejected unsupported equality for `{standard:?}`")
             }
         },
-        Type::Record(record) => Instruction::Call(equality_functions.records[&record]),
+        Type::Struct(structure) => Instruction::Call(equality_functions.structs[&structure]),
         Type::Enum(enumeration) => Instruction::Call(equality_functions.enums[&enumeration]),
         Type::Option(option) => Instruction::Call(equality_functions.options[&option]),
         Type::Result(result) => Instruction::Call(equality_functions.results[&result]),

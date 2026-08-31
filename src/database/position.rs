@@ -147,12 +147,12 @@ pub(super) fn syntax_expression_resolution(
                 .to_vec(),
         }),
         ExprKind::Call { .. } => None,
-        ExprKind::Record { .. } => semantics
-            .record_literal_fields(expression.id)
-            .map(|fields| ExpressionResolution::RecordLiteral {
-                record: semantics
-                    .record_literal(expression.id)
-                    .expect("resolved record fields have a nominal record"),
+        ExprKind::Struct { .. } => semantics
+            .struct_literal_fields(expression.id)
+            .map(|fields| ExpressionResolution::StructLiteral {
+                structure: semantics
+                    .struct_literal(expression.id)
+                    .expect("resolved struct fields have a nominal struct"),
                 fields: fields.to_vec(),
             }),
         _ => None,

@@ -373,7 +373,7 @@ fn add_dimension_completion(builder: &mut CompletionBuilder) {
         "layout dimension",
         "enum-valued layout dimension",
         "${1:name}: ${2:Enum},",
-        "Adds one independent enum-valued fact to the attachment-wide `Layout` record.",
+        "Adds one independent enum-valued fact to the attachment-wide `Layout` structure.",
     );
 }
 

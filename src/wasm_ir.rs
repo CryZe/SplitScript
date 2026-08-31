@@ -27,7 +27,7 @@ use crate::{
     intrinsic_registry::{self, ScratchPolicy, ScratchType},
     semantic::{
         FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedReceiver,
-        ResolvedRecordFieldId, ResolvedRecordId, ResolvedValue, ResolvedWrapperPattern,
+        ResolvedStructFieldId, ResolvedStructId, ResolvedValue, ResolvedWrapperPattern,
         SemanticModel, ValueConversion,
     },
     stdlib::{CancellationKind, Implementation, IntrinsicId, StandardLibrary, SuspensionKind},
@@ -158,9 +158,9 @@ pub enum ExpressionKind {
     ValueBlock,
     /// Statement-aware marker for a value-producing infinite loop.
     Loop,
-    Record {
-        record: ResolvedRecordId,
-        fields: Vec<(ResolvedRecordFieldId, ExprId)>,
+    Struct {
+        structure: ResolvedStructId,
+        fields: Vec<(ResolvedStructFieldId, ExprId)>,
     },
     Enum {
         enumeration: EnumTypeId,
@@ -1205,18 +1205,18 @@ fn lower_expression(
         },
         TypedExpressionKind::Block { .. } => ExpressionKind::ValueBlock,
         TypedExpressionKind::Loop { .. } => ExpressionKind::Loop,
-        TypedExpressionKind::Record { record, fields } => {
-            let Some(ExpressionResolution::RecordLiteral {
-                record: resolved_record,
+        TypedExpressionKind::Struct { structure, fields } => {
+            let Some(ExpressionResolution::StructLiteral {
+                structure: resolved_struct,
                 fields: resolved_fields,
             }) = &expression.resolution
             else {
-                unreachable!("checked record literals have resolved field IDs")
+                unreachable!("checked struct literals have resolved field IDs")
             };
-            debug_assert_eq!(record, resolved_record);
+            debug_assert_eq!(structure, resolved_struct);
             debug_assert_eq!(fields.len(), resolved_fields.len());
-            ExpressionKind::Record {
-                record: *resolved_record,
+            ExpressionKind::Struct {
+                structure: *resolved_struct,
                 fields: resolved_fields
                     .iter()
                     .copied()
@@ -1997,7 +1997,7 @@ fn closure_captures(
                     crate::semantic::DynamicCallCallee::Expression(_),
                 ))
                 | Some(hir::ExpressionResolution::FunctionValue(_))
-                | Some(hir::ExpressionResolution::RecordLiteral { .. })
+                | Some(hir::ExpressionResolution::StructLiteral { .. })
                 | Some(hir::ExpressionResolution::EnumConstructor { .. })
                 | None => {}
             }
@@ -3291,8 +3291,8 @@ fn map_expression_children(
             end: map(end),
             kind,
         },
-        ExpressionKind::Record { record, fields } => ExpressionKind::Record {
-            record,
+        ExpressionKind::Struct { structure, fields } => ExpressionKind::Struct {
+            structure,
             fields: fields
                 .into_iter()
                 .map(|(field, value)| (field, map(value)))

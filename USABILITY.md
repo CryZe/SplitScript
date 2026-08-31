@@ -132,7 +132,7 @@ order would be:
 4. state fields and memory reads;
 5. settings and timer decisions;
 6. `T?`, `T!`, `else`, `?`, `retry`, and `await`;
-7. records, enums, arrays, sets, ranges, closures, and iterators;
+7. structs, enums, arrays, sets, ranges, closures, and iterators;
 8. layouts, Unity schemas, emulators, and other advanced topics; and
 9. exact syntax and API reference.
 
@@ -200,7 +200,7 @@ The manual documents and generated reference currently disagree:
 - `docs/STANDARD_LIBRARY.md:435-436` and `:473` refer to future browsable or
   generated documentation even though `splitc docs` and the VS Code reference
   already exist.
-- `docs/LANGUAGE.md:2225` calls arrays, strings, records, closures, and generic
+- `docs/LANGUAGE.md:2225` calls arrays, strings, structs, closures, and generic
   collections future GC values after the document has repeatedly described
   their current GC implementations.
 - The generated `String` page includes `isBlank`, while the method table in
@@ -271,7 +271,7 @@ Add a “Which state form should I use?” guide:
 - fixed address or pointer chain read every tick -> `at`;
 - address discovered once during attachment -> bare global initialized in
   `onAttach`, then an expression-backed state field;
-- several values that must update atomically -> one record or fixed array;
+- several values that must update atomically -> one struct or fixed array;
 - absence is meaningful -> explicit `T?` field;
 - failed reads should retain the last accepted value -> required field;
 - a transient value should be rejected -> trailing field `if`;
@@ -366,7 +366,7 @@ SplitScript include:
 - async loop header/exit lowering (`:706`);
 - Wasm IR reachability and DWARF compilation-unit details (`:746-775`);
 - the typed HIR representation of `?` (`:871`);
-- GC storage details for records, arrays, ranges, and continuation frames; and
+- GC storage details for structs, arrays, ranges, and continuation frames; and
 - the complete “Why GC and linear memory both appear” section (`:2217`).
 
 Move those to `docs/COMPILER.md`, `docs/ABI.md`, or a dedicated debugging
@@ -448,7 +448,7 @@ tables.
 
 There is no curated examples index and no obviously beginner-level example.
 `examples/hello_lunistice.split` sounds introductory but is 77 lines and uses a
-Unity schema, enums, records, array mutation, module discovery, pointer size,
+Unity schema, enums, structs, array mutation, module discovery, pointer size,
 signature scans, pointer following, retries, relative reads, interpolation,
 and custom variables. It is a feature/conformance probe, not “hello world.”
 

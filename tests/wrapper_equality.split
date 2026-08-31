@@ -1,4 +1,4 @@
-record Wrapped {
+struct Wrapped {
     optional: i32?,
     result: i32!,
 }

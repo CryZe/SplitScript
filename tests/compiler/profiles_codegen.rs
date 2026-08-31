@@ -449,7 +449,7 @@ fn structural_display_helpers_are_materialized_only_when_reachable() {
             r#"
                 state "game.exe" {{}}
 
-                record Point {{
+                struct Point {{
                     x: u32,
                     y: u32,
                 }}
@@ -475,7 +475,7 @@ fn structural_display_helpers_are_materialized_only_when_reachable() {
         unused_names
             .iter()
             .all(|(_, name)| name != "__splitscript::debug::Point"),
-        "declaring a displayable record must not eagerly generate its formatter"
+        "declaring a displayable struct must not eagerly generate its formatter"
     );
 
     let displayed = compile_debug("print(Point { x: 1, y: 2 })");
@@ -534,7 +534,7 @@ fn float_format_helpers_and_tables_are_materialized_by_reachable_width() {
 
     let custom = splitscript::compile_with_options(
         r#"
-            record Measurement { value: f32 }
+            struct Measurement { value: f32 }
 
             fn Measurement.toString() -> String {
                 return "measurement"
@@ -1350,10 +1350,10 @@ fn linear_memory_moves_static_data_after_large_read_scratch() {
         .join("\n");
     let source = format!(
         r#"
-            record Chunk {{
+            struct Chunk {{
                 {chunk_fields}
             }}
-            record Large {{
+            struct Large {{
                 {large_fields}
             }}
             state "game.exe" {{}}
@@ -1363,7 +1363,7 @@ fn linear_memory_moves_static_data_after_large_read_scratch() {
         "#
     );
     let wasm =
-        splitscript::compile(&source).expect("large readable records should size scratch storage");
+        splitscript::compile(&source).expect("large readable structs should size scratch storage");
     let minimum_pages = Parser::new(0)
         .parse_all(&wasm)
         .find_map(
@@ -1384,7 +1384,7 @@ fn linear_memory_moves_static_data_after_large_read_scratch() {
     assert!(minimum_pages >= 2);
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
-        .expect("large-record WebAssembly GC should validate");
+        .expect("large-struct WebAssembly GC should validate");
 }
 
 #[test]

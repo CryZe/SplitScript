@@ -1,4 +1,4 @@
-record LevelTimeParts {
+struct LevelTimeParts {
     minutes: f32,
     seconds: f32,
     hundredths: f32,

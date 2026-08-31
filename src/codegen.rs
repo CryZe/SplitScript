@@ -3,8 +3,8 @@ use wasm_encoder::{
 };
 
 use crate::ast::{
-    ActionKind, ArrayTypeId, EnumDecl, EnumVariantId, ExprId, OptionTypeId, Program, RecordFieldId,
-    ResultTypeId, ValueId,
+    ActionKind, ArrayTypeId, EnumDecl, EnumVariantId, ExprId, OptionTypeId, Program, ResultTypeId,
+    StructFieldId, ValueId,
 };
 use crate::equality::EqualityCapabilities;
 use crate::memory::{MemoryLayouts, MemoryTypeLayout};
@@ -534,7 +534,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         equality_functions: &equality_functions,
         array_functions: &array_functions,
         set_functions: &set_functions,
-        records: &program.records,
+        structs: &program.structs,
         managed: &managed,
         managed_state_reads: &managed_state_reads,
         managed_state_read_functions: &managed_state_read_functions,
@@ -889,7 +889,7 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
         TypeKind::Standard(standard) => Type::Standard(*standard),
         TypeKind::StateSnapshot => Type::StateSnapshot,
         TypeKind::SettingsView => Type::SettingsView,
-        TypeKind::Record(record) => Type::Record(*record),
+        TypeKind::Struct(structure) => Type::Struct(*structure),
         TypeKind::Enum(enumeration) => Type::Enum(*enumeration),
         TypeKind::ManagedClass(class) => Type::ManagedClass(*class),
         TypeKind::ManagedReference(_) => Type::Address,
@@ -962,11 +962,11 @@ fn state_storage_index(field: ValueId, semantics: &SemanticModel) -> (u32, Value
     (index as u32, storage)
 }
 
-fn record_field_type(field: RecordFieldId, semantics: &SemanticModel) -> Type {
+fn struct_field_type(field: StructFieldId, semantics: &SemanticModel) -> Type {
     semantic_type(
         semantics
-            .record_field_type(field)
-            .expect("checked record fields have semantic types"),
+            .struct_field_type(field)
+            .expect("checked struct fields have semantic types"),
         semantics,
     )
 }
@@ -1139,7 +1139,7 @@ fn emit_memory_value(
                 byte_order,
             );
         }
-        MemoryTypeLayout::Record(layout) => {
+        MemoryTypeLayout::Struct(layout) => {
             for field in &layout.fields {
                 emit_memory_value(
                     function,

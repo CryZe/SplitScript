@@ -179,7 +179,7 @@ and RetroArch cores for BlastEm, Genesis Plus GX, Genesis Plus GX Wide, and
 PicoDrive.
 
 ```splitscript
-record PlayerState {
+struct PlayerState {
     score: u32,
     velocity: i16,
 }
@@ -196,7 +196,7 @@ provider normalizes the reversed bytes within each native 16-bit word used by
 Gens, BlastEm, Sega Classics, and the supported libretro cores, including
 unaligned reads that cross word boundaries. Explicit [`GenesisEmulator.read`]
 calls and state pointer paths then share the ordinary recursive big-endian
-decoder for primitives, records, fixed arrays, and guest pointers.
+decoder for primitives, structs, fixed arrays, and guest pointers.
 
 ## Nintendo GameCube emulator support
 
@@ -205,7 +205,7 @@ addresses in `0x80000000..=0x817fffff`. The source-defined provider supports
 Dolphin and 64-bit RetroArch with `dolphin_libretro.dll`.
 
 ```splitscript
-record PlayerState {
+struct PlayerState {
     health: u16,
     position: [f32; 3],
 }
@@ -216,7 +216,7 @@ state GCN {
 ```
 
 GameCube reads use provider-owned big-endian decoding. The same recursive
-decoder handles primitive values, every field of a readable record, fixed
+decoder handles primitive values, every field of a readable struct, fixed
 arrays, and intermediate `u32` pointers in state-field pointer paths.
 
 ## Nintendo Wii emulator support
@@ -267,7 +267,7 @@ library boundary adapter grows the exported memory when necessary, copies the
 GC string to scratch space, and invokes the host. Language code never receives
 or manages that scratch pointer.
 
-Reusable functions, type-directed methods, named immutable GC records, payload
+Reusable functions, type-directed methods, named immutable GC structs, payload
 enums with exhaustive matching, mutable arrays, sets, ranges, iterators,
 closures, optional and fallible wrappers, UTF-16 decoding, numeric formatting,
 and string construction are part of the value layer. They can be nested and
@@ -286,7 +286,7 @@ The reusable ASR surface is grouped by responsibility:
 - Compile-time parsed `sig"..."` literals and overlapping page-based module
   scanning, including full-byte and nibble wildcards.
 - Typed synchronous and retrying reads for fixed-width primitives and naturally
-  laid-out readable records, non-null address discovery, 64-bit pointer
+  laid-out readable structs, non-null address discovery, 64-bit pointer
   traversal, RIP-relative decoding, and arbitrary-range scans.
 - [`nextTick`] as a host-independent one-update suspension integrated with the
   implicit async action state machine and process-lifetime cancellation. The
@@ -435,8 +435,8 @@ dependents are skipped for that poll and retain their own accepted values,
 preventing a stale candidate address from being dereferenced.
 [`Process.read`] infers its
 `MemoryReadable` type from the field, annotation, or later usage. This includes
-fixed-width primitives and both source- and catalog-declared records containing
-only readable fields. Record fields use declaration order and natural
+fixed-width primitives and both source- and catalog-declared structs containing
+only readable fields. Struct fields use declaration order and natural
 alignment; one host read obtains the complete layout before the compiler
 recursively constructs its GC value.
 [`Result.discardError`] is ordinary source-defined library composition over

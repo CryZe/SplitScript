@@ -189,14 +189,14 @@ pub(crate) fn hover(
     let shorthand_value = if matches!(
         &target,
         DefinitionTarget::Source(SourceDefinition {
-            id: SourceDefinitionId::RecordField(_),
+            id: SourceDefinitionId::StructField(_),
             ..
         })
     ) {
         let definitions = database.definition_index()?;
         let references = definitions.references_at_offset(offset).collect::<Vec<_>>();
         let field_span = references.iter().find_map(|reference| {
-            matches!(reference.target, SourceDefinitionId::RecordField(_)).then_some(reference.span)
+            matches!(reference.target, SourceDefinitionId::StructField(_)).then_some(reference.span)
         });
         field_span.and_then(|field_span| {
             references
@@ -443,7 +443,7 @@ fn root_value_for_resolution(
         ExpressionResolution::Member { .. }
         | ExpressionResolution::DynamicCall(_)
         | ExpressionResolution::FunctionValue(_)
-        | ExpressionResolution::RecordLiteral { .. }
+        | ExpressionResolution::StructLiteral { .. }
         | ExpressionResolution::EnumConstructor { .. } => None,
     }
 }
@@ -695,14 +695,14 @@ fn append_attachment_layouts(
     }
 }
 
-fn record_field_memory_layout(
-    record: &crate::ast::RecordDecl,
-    field: crate::ast::RecordFieldId,
+fn struct_field_memory_layout(
+    structure: &crate::ast::StructDecl,
+    field: crate::ast::StructFieldId,
     context: &SemanticContext,
 ) -> Option<(u32, u32)> {
     let checked = context.snapshot.checked()?;
-    let record_layout = checked.memory_layouts().record(record.id).ok()?;
-    let field_layout = record_layout
+    let struct_layout = checked.memory_layouts().structure(structure.id).ok()?;
+    let field_layout = struct_layout
         .fields
         .iter()
         .find(|layout| layout.field == crate::memory::MemoryFieldId::Source(field))?;
@@ -887,28 +887,30 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             };
             Some(source_markdown(&signature, &description))
         }
-        SourceDefinitionId::RecordField(field) => {
-            let ty = semantics.record_field_type(field)?;
+        SourceDefinitionId::StructField(field) => {
+            let ty = semantics.struct_field_type(field)?;
             let ty = render_type(ty, context);
-            let record = syntax
-                .records
-                .iter()
-                .find(|record| record.fields.iter().any(|candidate| candidate.id == field))?;
-            let field = record
+            let structure = syntax.structs.iter().find(|structure| {
+                structure
+                    .fields
+                    .iter()
+                    .any(|candidate| candidate.id == field)
+            })?;
+            let field = structure
                 .fields
                 .iter()
                 .find(|candidate| candidate.id == field)?;
             let mut description =
-                documented_description("Record field", field.documentation.as_deref());
-            if let Some((offset, size)) = record_field_memory_layout(record, field.id, context) {
+                documented_description("Struct field", field.documentation.as_deref());
+            if let Some((offset, size)) = struct_field_memory_layout(structure, field.id, context) {
                 let unit = if size == 1 { "byte" } else { "bytes" };
                 description.push_str(&format!(
                     "\n\n**Process-memory layout:** byte offset `0x{offset:x}` from the start of `{}`; size `{size}` {unit}.",
-                    record.name
+                    structure.name
                 ));
             }
             Some(source_markdown(
-                &format!("{}.{}: {ty}", record.name, definition.name),
+                &format!("{}.{}: {ty}", structure.name, definition.name),
                 &description,
             ))
         }
@@ -1017,20 +1019,20 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 &description,
             ))
         }
-        SourceDefinitionId::Record(record) => {
-            let record = syntax
-                .records
+        SourceDefinitionId::Struct(structure) => {
+            let structure = syntax
+                .structs
                 .iter()
-                .find(|candidate| candidate.id == record)?;
+                .find(|candidate| candidate.id == structure)?;
             let mut description =
-                documented_description("Record type", record.documentation.as_deref());
+                documented_description("Struct type", structure.documentation.as_deref());
             append_source_capabilities(
                 &mut description,
-                semantics.types().id_for_record(record.id),
+                semantics.types().id_for_struct(structure.id),
                 context,
             );
             Some(source_markdown(
-                &format!("record {}", record.name),
+                &format!("struct {}", structure.name),
                 &description,
             ))
         }
@@ -1193,11 +1195,11 @@ fn append_parameter_effect_dependencies(
             let mut path = parameter.name.clone();
             for member in &latent.fields {
                 let name = match member {
-                    ResolvedMember::RecordField(field) => context
+                    ResolvedMember::StructField(field) => context
                         .syntax()
-                        .records
+                        .structs
                         .iter()
-                        .flat_map(|record| &record.fields)
+                        .flat_map(|structure| &structure.fields)
                         .find(|candidate| candidate.id == *field)
                         .map(|field| field.name.as_str()),
                     ResolvedMember::ManagedField(field) => context
@@ -1763,7 +1765,7 @@ onDetach {
     #[test]
     fn method_self_hover_combines_receiver_type_and_language_documentation() {
         let source = r#"
-record Position {
+struct Position {
     x: i32,
 }
 
@@ -2372,7 +2374,7 @@ selectProcess { return process.path()?.endsWith("game.exe") }"#;
     #[test]
     fn source_hover_renders_inferred_value_and_field_types() {
         let source = r#"
-record Point { x: i32 }
+struct Point { x: i32 }
 let global = 1
 state "game.exe" {
     point: Point = process.read(0);
@@ -2407,7 +2409,7 @@ whileAttached {
             (
                 source.find("point.x").unwrap() + "point.".len(),
                 "Point.x: i32",
-                "Record field",
+                "Struct field",
             ),
             (
                 source.find("local as").unwrap(),
@@ -2470,25 +2472,25 @@ whileAttached {
     }
 
     #[test]
-    fn memory_readable_record_field_hover_shows_canonical_offset_and_size() {
+    fn memory_readable_struct_field_hover_shows_canonical_offset_and_size() {
         let source = r#"
-record Header {
+struct Header {
     tag: u8,
     count: u32,
     flags: u16,
 }
-record Packet {
+struct Packet {
     header: Header,
     samples: [u16; 3],
 }
-record Metadata {
+struct Metadata {
     label: String,
 }
 state "game.exe" {}
 "#;
         let mut database = CompilerDatabase::new(source);
 
-        for (field, record, offset, size, unit) in [
+        for (field, structure, offset, size, unit) in [
             ("tag", "Header", 0, 1, "byte"),
             ("count", "Header", 4, 4, "bytes"),
             ("flags", "Header", 8, 2, "bytes"),
@@ -2498,9 +2500,9 @@ state "game.exe" {}
             let hover = database
                 .hover(source.find(&format!("{field}:")).unwrap() + 1)
                 .unwrap()
-                .unwrap_or_else(|| panic!("{record}.{field} hover"));
+                .unwrap_or_else(|| panic!("{structure}.{field} hover"));
             let expected = format!(
-                "**Process-memory layout:** byte offset `0x{offset:x}` from the start of `{record}`; size `{size}` {unit}."
+                "**Process-memory layout:** byte offset `0x{offset:x}` from the start of `{structure}`; size `{size}` {unit}."
             );
             assert!(hover.markdown.contains(&expected), "{}", hover.markdown);
         }
@@ -2845,7 +2847,7 @@ state Unity ["game.exe"] {}
     fn source_hover_includes_user_documentation() {
         let source = r#"
 /// A point in game memory.
-record Point {
+struct Point {
     /// Horizontal position.
     x: i32
 }
@@ -2875,7 +2877,7 @@ whileAttached {
 "#;
         let mut database = CompilerDatabase::new(source);
         for (needle, expected) in [
-            ("record Point", "A point in game memory."),
+            ("struct Point", "A point in game memory."),
             ("point.x", "Horizontal position."),
             ("enum Mode", "The current run mode."),
             ("Mode.Active", "Normal gameplay."),
@@ -2888,7 +2890,7 @@ whileAttached {
         ] {
             let offset = source.find(needle).unwrap()
                 + match needle {
-                    "record Point" => "record ".len(),
+                    "struct Point" => "struct ".len(),
                     "enum Mode" => "enum ".len(),
                     "point.x" => "point.".len(),
                     "Mode.Active" => "Mode.".len(),
@@ -3218,7 +3220,7 @@ whileAttached {
     #[test]
     fn source_type_hover_shows_structurally_satisfied_capabilities() {
         let source = r#"
-record Position { x: i32, }
+struct Position { x: i32, }
 fn Position.toString() -> String { return `{self.x}` }
 state "game.exe" {}
 whileAttached { print(Position { x: 3 }) }
@@ -3227,7 +3229,7 @@ whileAttached { print(Position { x: 3 }) }
         let hover = database
             .hover(source.find("Position").unwrap() + 1)
             .unwrap()
-            .expect("record hover");
+            .expect("struct hover");
         assert!(
             hover.markdown.contains("**Capabilities:**")
                 && hover.markdown.contains("`Display` (custom)"),
@@ -3236,7 +3238,7 @@ whileAttached { print(Position { x: 3 }) }
         );
 
         let derived_source = r#"
-record Position { x: i32, }
+struct Position { x: i32, }
 state "game.exe" {}
 whileAttached { print(Position { x: 3 }) }
 "#;
@@ -3244,7 +3246,7 @@ whileAttached { print(Position { x: 3 }) }
         let hover = database
             .hover(derived_source.find("Position").unwrap() + 1)
             .unwrap()
-            .expect("derived record hover");
+            .expect("derived struct hover");
         assert!(
             hover.markdown.contains("`Debug` (derived)"),
             "{}",

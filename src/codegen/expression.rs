@@ -6,12 +6,12 @@ use wasm_encoder::{AbstractHeapType, BlockType, Function, HeapType, Instruction,
 
 use crate::{
     abi::AbiImportId,
-    ast::{ActionKind, BinaryOp, EnumDecl, ExprId, RangeKind, RecordDecl, ResultTypeId, ValueId},
+    ast::{ActionKind, BinaryOp, EnumDecl, ExprId, RangeKind, ResultTypeId, StructDecl, ValueId},
     intrinsic_registry::RuntimeHelperId,
     memory::MemoryLayouts,
     semantic::{
-        FunctionInstance, ResolvedMember, ResolvedReceiver, ResolvedRecordFieldId,
-        ResolvedRecordId, ResolvedValue, SemanticModel, ValueConversionKind,
+        FunctionInstance, ResolvedMember, ResolvedReceiver, ResolvedStructFieldId,
+        ResolvedStructId, ResolvedValue, SemanticModel, ValueConversionKind,
     },
     stdlib::{
         IntrinsicId, MANAGED_POINTER_SIZE_FIELD, PROVIDER_BINDINGS_TYPE, RuntimeRepresentation,
@@ -35,10 +35,11 @@ use super::{
     managed_state_reads::ManagedStateReadCache,
     memarg,
     memory_plan::AbiReadScratch,
-    range_bound_type, record_field_type, resolved_intrinsic, result_value_type,
+    range_bound_type, resolved_intrinsic, result_value_type,
     runtime_helpers::emit_value_equality,
     script_functions::emit_action_default,
-    semantic_type, standard_field_type, state_storage_index, try_array_element_type, value_type,
+    semantic_type, standard_field_type, state_storage_index, struct_field_type,
+    try_array_element_type, value_type,
 };
 
 #[derive(Default)]
@@ -118,7 +119,7 @@ pub(super) struct ExprContext<'a> {
     pub equality_functions: &'a EqualityFunctions,
     pub array_functions: &'a super::ArrayFunctions,
     pub set_functions: &'a SetFunctions,
-    pub records: &'a [RecordDecl],
+    pub structs: &'a [StructDecl],
     pub managed: &'a crate::managed::ManagedBindingPlan,
     /// Snapshot-transaction cache. The generated runtime activates it only
     /// while assembling a candidate state, allowing transitively called
@@ -207,7 +208,7 @@ impl<'a> ExprContext<'a> {
             equality_functions: lowering.equality_functions,
             array_functions: lowering.array_functions,
             set_functions: lowering.set_functions,
-            records: lowering.records,
+            structs: lowering.structs,
             managed: lowering.managed,
             managed_state_reads: lowering.managed_state_reads,
             managed_state_read_functions: lowering.managed_state_read_functions,
@@ -1535,19 +1536,19 @@ pub(super) fn compile_resolved_path(
                 .contexts
                 .get(context_index as usize)
                 .expect("resolved provider contexts use catalog indices");
-            let record = context
-                .records
+            let structure = context
+                .structs
                 .iter()
-                .find(|record| record.name == PROVIDER_BINDINGS_TYPE)
-                .expect("reachable provider contexts generate a binding record");
+                .find(|structure| structure.name == PROVIDER_BINDINGS_TYPE)
+                .expect("reachable provider contexts generate a binding struct");
             let name = provider_context_field_name(context_index as usize);
-            let (field_index, field) = record
+            let (field_index, field) = structure
                 .fields
                 .iter()
                 .enumerate()
                 .find(|(_, field)| field.name == name)
-                .expect("provider binding records contain every reachable context");
-            let field_type = record_field_type(field.id, context.semantics);
+                .expect("provider binding structs contain every reachable context");
+            let field_type = struct_field_type(field.id, context.semantics);
             function
                 .instruction(&Instruction::GlobalGet(
                     context
@@ -1558,7 +1559,7 @@ pub(super) fn compile_resolved_path(
                 .instruction(&Instruction::RefAsNonNull);
             emit_typed_struct_get(
                 function,
-                context.gc.index(Type::Record(record.id)),
+                context.gc.index(Type::Struct(structure.id)),
                 field_index as u32,
                 field_type,
             );
@@ -2432,24 +2433,24 @@ pub(super) fn emit_path_fields(
                     _ => unreachable!("fields have type or type-constructor owners"),
                 }
             }
-            ResolvedMember::RecordField(field) => {
-                let (record, field_index, field) = context
-                    .records
+            ResolvedMember::StructField(field) => {
+                let (structure, field_index, field) = context
+                    .structs
                     .iter()
-                    .find_map(|record| {
-                        record
+                    .find_map(|structure| {
+                        structure
                             .fields
                             .iter()
                             .enumerate()
                             .find(|(_, candidate)| candidate.id == *field)
-                            .map(|(index, field)| (record, index as u32, field))
+                            .map(|(index, field)| (structure, index as u32, field))
                     })
-                    .expect("resolved record field belongs to a checked declaration");
-                debug_assert_eq!(current_type, Type::Record(record.id));
+                    .expect("resolved struct field belongs to a checked declaration");
+                debug_assert_eq!(current_type, Type::Struct(structure.id));
                 (
-                    context.gc.index(Type::Record(record.id)),
+                    context.gc.index(Type::Struct(structure.id)),
                     field_index,
-                    record_field_type(field.id, context.semantics),
+                    struct_field_type(field.id, context.semantics),
                 )
             }
             ResolvedMember::ManagedField(field) => {
@@ -2617,7 +2618,7 @@ fn emit_uncached_managed_static_read(
 
 /// Reads an instance field from a `T.Ref` address already on the stack after
 /// the attached process handle. Metadata lookup is absent here: the offset is
-/// loaded from the attachment-scoped binding record.
+/// loaded from the attachment-scoped binding structure.
 pub(super) fn emit_managed_field_read(
     function: &mut Function,
     field: crate::ast::ManagedFieldId,
@@ -2767,18 +2768,18 @@ pub(super) fn emit_managed_binding_field(
     name: &str,
     context: &ExprContext<'_>,
 ) {
-    let record = context
-        .records
+    let structure = context
+        .structs
         .iter()
-        .find(|record| record.name == PROVIDER_BINDINGS_TYPE)
-        .expect("managed schemas generate an attachment binding record");
-    let (field_index, field) = record
+        .find(|structure| structure.name == PROVIDER_BINDINGS_TYPE)
+        .expect("managed schemas generate an attachment binding struct");
+    let (field_index, field) = structure
         .fields
         .iter()
         .enumerate()
         .find(|(_, field)| field.name == name)
-        .expect("managed binding records contain every generated metadata field");
-    let field_type = record_field_type(field.id, context.semantics);
+        .expect("managed binding structs contain every generated metadata field");
+    let field_type = struct_field_type(field.id, context.semantics);
     function
         .instruction(&Instruction::GlobalGet(
             context
@@ -2789,7 +2790,7 @@ pub(super) fn emit_managed_binding_field(
         .instruction(&Instruction::RefAsNonNull);
     emit_typed_struct_get(
         function,
-        context.gc.index(Type::Record(record.id)),
+        context.gc.index(Type::Struct(structure.id)),
         field_index as u32,
         field_type,
     );
@@ -2844,7 +2845,7 @@ pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context:
             }
             (ValueConversionKind::LiftResult, Type::Result(result)) => {
                 // The successful value is already on the stack. Tag 0 and a
-                // null error complete the monomorphized result struct.
+                // null error complete the monomorphized result structure.
                 function
                     .instruction(&Instruction::I32Const(0))
                     .instruction(&Instruction::RefNull(HeapType::Concrete(
@@ -3021,41 +3022,43 @@ fn compile_expr_unconverted(
                 context.gc.index(Type::Range(range)),
             ));
         }
-        wasm_ir::ExpressionKind::Record { record, fields } => match record {
-            ResolvedRecordId::Source(record) => {
+        wasm_ir::ExpressionKind::Struct { structure, fields } => match structure {
+            ResolvedStructId::Source(structure) => {
                 let declaration = context
-                    .records
+                    .structs
                     .iter()
-                    .find(|declaration| declaration.id == *record)
+                    .find(|declaration| declaration.id == *structure)
                     .unwrap();
                 for declared_field in &declaration.fields {
                     let (_, value) = fields
                         .iter()
                         .find(|(field, _)| {
-                            *field == ResolvedRecordFieldId::Source(declared_field.id)
+                            *field == ResolvedStructFieldId::Source(declared_field.id)
                         })
-                        .expect("checked record literals initialize every declared field");
+                        .expect("checked struct literals initialize every declared field");
                     compile_expr(function, *value, context);
                 }
                 function.instruction(&Instruction::StructNew(
-                    context.gc.index(Type::Record(*record)),
+                    context.gc.index(Type::Struct(*structure)),
                 ));
             }
-            ResolvedRecordId::Standard(record) => {
-                for declared_field in context.standard_library.fields_of(*record) {
+            ResolvedStructId::Standard(structure) => {
+                for declared_field in context.standard_library.fields_of(*structure) {
                     let (_, value) = fields
                         .iter()
                         .find(|(field, _)| {
-                            *field == ResolvedRecordFieldId::Standard(declared_field.id)
+                            *field == ResolvedStructFieldId::Standard(declared_field.id)
                         })
-                        .expect("checked library record literals initialize every field");
+                        .expect("checked library struct literals initialize every field");
                     compile_expr(function, *value, context);
                 }
-                function.instruction(&Instruction::StructNew(context.gc.standard_index(*record)));
+                function.instruction(&Instruction::StructNew(
+                    context.gc.standard_index(*structure),
+                ));
             }
-            ResolvedRecordId::StandardConstructor(_application) => {
+            ResolvedStructId::StandardConstructor(_application) => {
                 let Type::Application(concrete_application) = ty else {
-                    unreachable!("constructed standard records have application types")
+                    unreachable!("constructed standard structs have application types")
                 };
                 let constructor = context
                     .semantics
@@ -3069,14 +3072,14 @@ fn compile_expr_unconverted(
                         } if *layout == concrete_application => Some(*constructor),
                         _ => None,
                     })
-                    .expect("checked standard-library record constructors have layouts");
+                    .expect("checked standard-library struct constructors have layouts");
                 for declared_field in context.standard_library.fields_of_constructor(constructor) {
                     let (_, value) = fields
                         .iter()
                         .find(|(field, _)| {
-                            *field == ResolvedRecordFieldId::Standard(declared_field.id)
+                            *field == ResolvedStructFieldId::Standard(declared_field.id)
                         })
-                        .expect("checked constructed record literals initialize every field");
+                        .expect("checked constructed struct literals initialize every field");
                     compile_expr(function, *value, context);
                 }
                 function.instruction(&Instruction::StructNew(
@@ -5335,7 +5338,7 @@ fn emit_process_memory_ranges(
         .instruction(&Instruction::BrIf(1));
 
     // Preserve the current host flag word in the otherwise hidden logical
-    // length field while the range record is assembled.
+    // length field while the range struct is assembled.
     function
         .instruction(&Instruction::LocalGet(output))
         .instruction(&Instruction::RefAsNonNull);
@@ -5948,7 +5951,7 @@ fn compile_intrinsic_equality(
         function.instruction(&Instruction::I32Eq);
     } else if matches!(
         operand_type,
-        Type::Standard(_) | Type::Record(_) | Type::Enum(_) | Type::Option(_) | Type::Result(_)
+        Type::Standard(_) | Type::Struct(_) | Type::Enum(_) | Type::Option(_) | Type::Result(_)
     ) {
         compile_receiver(function, target, context);
         compile_expr(function, other, context);

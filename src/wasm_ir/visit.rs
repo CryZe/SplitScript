@@ -245,7 +245,7 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
             visit(*start);
             visit(*end);
         }
-        ExpressionKind::Record { fields, .. } => {
+        ExpressionKind::Struct { fields, .. } => {
             fields.iter().map(|(_, value)| *value).for_each(&mut visit);
         }
         ExpressionKind::Enum { payload, .. } => payload.iter().copied().for_each(&mut visit),

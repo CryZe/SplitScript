@@ -4,7 +4,7 @@
 // source autosplitter's defaults.
 
 /// A mission endpoint and its expected player position.
-record MissionPoint {
+struct MissionPoint {
     /// Stable string key used by the autosplitter settings map.
     settingKey: String,
     /// Expected vertical coordinate.

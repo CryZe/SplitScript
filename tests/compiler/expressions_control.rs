@@ -31,7 +31,7 @@ fn binary_integer_literals_type_check_and_report_boolean_misuse() {
 #[test]
 fn user_call_type_mismatches_name_the_argument_and_label_the_parameter() {
     let source = r#"
-        record Pos {
+        struct Pos {
             x: u16,
         }
 
@@ -70,11 +70,11 @@ fn user_call_type_mismatches_name_the_argument_and_label_the_parameter() {
 #[test]
 fn declared_type_mismatches_point_to_every_source_of_the_expectation() {
     let source = r#"
-        record Pos {
+        struct Pos {
             x: u16,
         }
 
-        record Boxed {
+        struct Boxed {
             value: Pos,
         }
 
@@ -116,7 +116,7 @@ fn declared_type_mismatches_point_to_every_source_of_the_expectation() {
         "function `badReturn` is declared to return `Pos`",
         "variable `badLocal` is declared as `Pos`",
         "variable `localPos` has type `Pos`",
-        "record field `Boxed.value` is declared as `Pos`",
+        "struct field `Boxed.value` is declared as `Pos`",
         "variant `Wrapped.Value` declares a payload of type `Pos`",
     ] {
         assert!(
@@ -129,7 +129,7 @@ fn declared_type_mismatches_point_to_every_source_of_the_expectation() {
 #[test]
 fn expected_type_provenance_survives_wrappers_nesting_and_generic_constraints() {
     let source = r#"
-        record Pos {
+        struct Pos {
             x: u16,
         }
 
@@ -720,7 +720,7 @@ fn unused_declarations_follow_reachable_calls_and_global_reads() {
             Dormant
         }
 
-        record LiveRecord {
+        struct LiveStruct {
             kind: LiveKind,
             ignored: i32,
             _reserved: i32
@@ -730,7 +730,7 @@ fn unused_declarations_follow_reachable_calls_and_global_reads() {
             Inactive
         }
 
-        record DeadRecord {
+        struct DeadStruct {
             kind: DeadKind
         }
 
@@ -738,7 +738,7 @@ fn unused_declarations_follow_reachable_calls_and_global_reads() {
             Reserved
         }
 
-        record _IntentionalRecord {
+        struct _IntentionalStruct {
             value: i32
         }
 
@@ -760,8 +760,8 @@ fn unused_declarations_follow_reachable_calls_and_global_reads() {
             print(actionRoot)
         }
 
-        fn reachableType() -> LiveRecord {
-            return LiveRecord {
+        fn reachableType() -> LiveStruct {
+            return LiveStruct {
                 kind: LiveKind.Active,
                 ignored: 1,
                 _reserved: 2
@@ -780,7 +780,7 @@ fn unused_declarations_follow_reachable_calls_and_global_reads() {
             deadRecursive()
         }
 
-        fn deadTyped(_value: DeadRecord) {}
+        fn deadTyped(_value: DeadStruct) {}
 
         fn _intentionalFunction() {
             print("reserved")
@@ -798,14 +798,14 @@ fn unused_declarations_follow_reachable_calls_and_global_reads() {
         .filter(|diagnostic| {
             diagnostic.message.starts_with("unused global")
                 || diagnostic.message.starts_with("unused function")
-                || diagnostic.message.starts_with("unused record")
+                || diagnostic.message.starts_with("unused struct")
                 || diagnostic.message.starts_with("unused enum")
         })
         .collect::<Vec<_>>();
 
     assert!(unused.iter().all(|diagnostic| {
         diagnostic.code
-            == if diagnostic.message.starts_with("unused record field")
+            == if diagnostic.message.starts_with("unused struct field")
                 || diagnostic.message.starts_with("unused enum variant")
             {
                 splitscript::DiagnosticCode::UnusedMember
@@ -820,9 +820,9 @@ fn unused_declarations_follow_reachable_calls_and_global_reads() {
         ("deadLeaf", "deadLeaf"),
         ("deadRecursive", "deadRecursive"),
         ("deadTyped", "deadTyped"),
-        ("DeadRecord", "DeadRecord"),
+        ("DeadStruct", "DeadStruct"),
         ("DeadKind", "DeadKind"),
-        ("LiveRecord.ignored", "ignored"),
+        ("LiveStruct.ignored", "ignored"),
         ("LiveKind.Dormant", "Dormant"),
     ] {
         let diagnostic = unused
@@ -841,14 +841,14 @@ fn unused_declarations_follow_reachable_calls_and_global_reads() {
         "reachableRoot",
         "reachableLeaf",
         "reachableType",
-        "LiveRecord",
+        "LiveStruct",
         "LiveKind",
-        "LiveRecord.kind",
-        "LiveRecord._reserved",
+        "LiveStruct.kind",
+        "LiveStruct._reserved",
         "LiveKind.Active",
         "_intentionalGlobal",
         "_intentionalFunction",
-        "_IntentionalRecord",
+        "_IntentionalStruct",
         "_IntentionalEnum",
     ] {
         assert!(
@@ -1120,9 +1120,9 @@ fn shared_layout_state_fields_produce_one_logical_unused_warning() {
 }
 
 #[test]
-fn structural_equality_observes_complete_record_and_enum_shapes() {
+fn structural_equality_observes_complete_struct_and_enum_shapes() {
     let source = r#"
-        record Pair {
+        struct Pair {
             left: i32,
             right: i32
         }
@@ -1134,7 +1134,7 @@ fn structural_equality_observes_complete_record_and_enum_shapes() {
 
         state "game.exe" {}
 
-        fn recordsEqual(left: Pair, right: Pair) -> bool {
+        fn structsEqual(left: Pair, right: Pair) -> bool {
             return left == right
         }
 
@@ -1142,17 +1142,17 @@ fn structural_equality_observes_complete_record_and_enum_shapes() {
             return left == right
         }
 
-        fn recordsDiffer(left: Pair, right: Pair) -> bool {
+        fn structsDiffer(left: Pair, right: Pair) -> bool {
             return left.notEquals(right)
         }
 
         whileAttached {
-            if recordsEqual(
+            if structsEqual(
                 Pair { left: 1, right: 2 },
                 Pair { left: 1, right: 2 }
             ) {}
             if modesEqual(Mode.First, Mode.First) {}
-            if recordsDiffer(
+            if structsDiffer(
                 Pair { left: 1, right: 2 },
                 Pair { left: 1, right: 3 }
             ) {}
@@ -1164,7 +1164,7 @@ fn structural_equality_observes_complete_record_and_enum_shapes() {
         .diagnostics()
         .iter()
         .filter(|diagnostic| {
-            diagnostic.message.starts_with("unused record field")
+            diagnostic.message.starts_with("unused struct field")
                 || diagnostic.message.starts_with("unused enum variant")
         })
         .collect::<Vec<_>>();
@@ -1187,12 +1187,12 @@ fn structural_equality_observes_complete_record_and_enum_shapes() {
 #[test]
 fn implicit_display_marks_custom_formatters_and_derived_fields_as_used() {
     let source = r#"
-        record RawPosition {
+        struct RawPosition {
             x: u16,
             y: u16,
         }
 
-        record Position {
+        struct Position {
             x: u16,
             y: u16,
         }
@@ -1557,9 +1557,9 @@ fn final_if_else_supplies_the_value_of_a_multi_statement_block() {
 }
 
 #[test]
-fn record_field_shorthand_compiles_formats_and_guides_repeated_initializers() {
+fn struct_field_shorthand_compiles_formats_and_guides_repeated_initializers() {
     let source = r#"
-        record Point {
+        struct Point {
             x: u32,
             y: u32,
         }
@@ -1579,7 +1579,7 @@ fn record_field_shorthand_compiles_formats_and_guides_repeated_initializers() {
     splitscript::compile(&formatted).expect("formatted shorthand should remain valid");
 
     let repeated = r#"
-        record Point { x: u32, y: u32 }
+        struct Point { x: u32, y: u32 }
         state "game.exe" {}
         fn point(x: u32, y: u32) -> Point {
             return Point { x: x, y: y + 1 }
@@ -1590,7 +1590,7 @@ fn record_field_shorthand_compiles_formats_and_guides_repeated_initializers() {
     let warning = checked
         .diagnostics()
         .iter()
-        .find(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::RecordFieldShorthand)
+        .find(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::StructFieldShorthand)
         .expect("an exact `x: x` initializer should suggest shorthand");
     assert_eq!(warning.fixes.len(), 1, "{warning:#?}");
     assert_eq!(
@@ -1607,7 +1607,7 @@ fn record_field_shorthand_compiles_formats_and_guides_repeated_initializers() {
             .diagnostics()
             .iter()
             .filter(|diagnostic| {
-                diagnostic.code == splitscript::DiagnosticCode::RecordFieldShorthand
+                diagnostic.code == splitscript::DiagnosticCode::StructFieldShorthand
             })
             .count(),
         1,
@@ -1616,9 +1616,9 @@ fn record_field_shorthand_compiles_formats_and_guides_repeated_initializers() {
 }
 
 #[test]
-fn record_shorthand_does_not_consume_control_flow_blocks() {
+fn struct_shorthand_does_not_consume_control_flow_blocks() {
     let source = r#"
-        record Point { x: u32 }
+        struct Point { x: u32 }
         state "game.exe" {}
 
         fn valid(point: Point) -> bool { return point.x > 0 }
@@ -1632,7 +1632,7 @@ fn record_shorthand_does_not_consume_control_flow_blocks() {
         }
     "#;
     splitscript::compile(source).expect(
-        "a header's outer brace starts its body while nested delimiters still accept records",
+        "a header's outer brace starts its body while nested delimiters still accept structs",
     );
 }
 
@@ -2111,10 +2111,10 @@ fn runtime_text_outputs_accept_display_values() {
 
     for call in ["print(value)", "setVariable(\"Value\", value)"] {
         let source = format!(
-            "record Value {{ number: i32 }} state \"game.exe\" {{}} whileAttached {{ let value = Value {{ number: 1 }}; {call} }}"
+            "struct Value {{ number: i32 }} state \"game.exe\" {{}} whileAttached {{ let value = Value {{ number: 1 }}; {call} }}"
         );
         let wasm = splitscript::compile(&source)
-            .expect("records should receive a derived Display implementation");
+            .expect("structs should receive a derived Display implementation");
         Validator::new_with_features(WasmFeatures::all())
             .validate_all(&wasm)
             .expect("derived runtime text output should produce valid Wasm");
@@ -2187,14 +2187,14 @@ fn template_strings_interpolate_strings_castable_values_and_nested_templates() {
 #[test]
 fn template_strings_use_derived_structural_display() {
     let source = r#"
-        record Value { number: i32 }
+        struct Value { number: i32 }
         state "game.exe" {}
         fn format(value: Value) -> String {
             return `value={value}`
         }
     "#;
     let wasm = splitscript::compile(source)
-        .expect("template strings should derive Display for source records");
+        .expect("template strings should derive Display for source structs");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("derived template conversion should produce valid Wasm");
@@ -2231,7 +2231,7 @@ fn user_function_and_method_calls_expose_stable_callable_ids() {
     let source = r#"
         state "game.exe" {}
 
-        record Counter { value: i32 }
+        struct Counter { value: i32 }
 
         fn answer() -> i32 {
             return 42
@@ -2303,7 +2303,7 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
     let source = r#"
         state "game.exe" {}
 
-        record Counter { value: i32 }
+        struct Counter { value: i32 }
         enum MaybeCounter {
             Counter(Counter),
             Empty
@@ -2440,12 +2440,12 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
 }
 
 #[test]
-fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
+fn member_paths_resolve_struct_and_standard_fields_to_stable_ids() {
     let source = r#"
         state "game.exe" {}
 
-        record Inner { value: i32 }
-        record Outer { inner: Inner }
+        struct Inner { value: i32 }
+        struct Outer { inner: Inner }
 
         fn Inner.increment() -> i32 {
             return self.value + 1
@@ -2460,8 +2460,8 @@ fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
         }
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
-    let inner_value = checked.syntax().records[0].fields[0].id;
-    let outer_inner = checked.syntax().records[1].fields[0].id;
+    let inner_value = checked.syntax().structs[0].fields[0].id;
+    let outer_inner = checked.syntax().structs[1].fields[0].id;
     assert_ne!(inner_value, outer_inner);
 
     let statements = &checked.syntax().actions[0].body.statements;
@@ -2471,14 +2471,14 @@ fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
     assert_eq!(
         checked
             .semantics()
-            .record_literal_fields(outer.value.as_ref().unwrap().id),
-        Some([ResolvedRecordFieldId::Source(outer_inner)].as_slice())
+            .struct_literal_fields(outer.value.as_ref().unwrap().id),
+        Some([ResolvedStructFieldId::Source(outer_inner)].as_slice())
     );
     assert_eq!(
         checked
             .typed_hir()
-            .record_literal_fields(outer.value.as_ref().unwrap().id),
-        Some([ResolvedRecordFieldId::Source(outer_inner)].as_slice())
+            .struct_literal_fields(outer.value.as_ref().unwrap().id),
+        Some([ResolvedStructFieldId::Source(outer_inner)].as_slice())
     );
     let splitscript::compiler::ast::Stmt::Variable(nested) = &statements[2] else {
         panic!("expected the nested field binding");
@@ -2489,8 +2489,8 @@ fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
             .path_members(nested.value.as_ref().unwrap().id),
         Some(
             [
-                ResolvedMember::RecordField(outer_inner),
-                ResolvedMember::RecordField(inner_value),
+                ResolvedMember::StructField(outer_inner),
+                ResolvedMember::StructField(inner_value),
             ]
             .as_slice()
         )
@@ -2503,8 +2503,8 @@ fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
     assert_eq!(
         nested_members,
         [
-            ResolvedMember::RecordField(outer_inner),
-            ResolvedMember::RecordField(inner_value),
+            ResolvedMember::StructField(outer_inner),
+            ResolvedMember::StructField(inner_value),
         ]
     );
 
@@ -2520,7 +2520,7 @@ fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
         receiver,
         &ResolvedReceiver::Path {
             root: ResolvedValue::Variable(outer.id),
-            members: vec![ResolvedMember::RecordField(outer_inner)],
+            members: vec![ResolvedMember::StructField(outer_inner)],
         }
     );
 

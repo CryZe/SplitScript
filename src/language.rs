@@ -44,7 +44,7 @@ pub struct ActionReferenceFacts {
 
 const DECLARATIONS_SOURCE: &str = r#"state "game.exe" {}
 
-record Position {
+struct Position {
     x: f32,
     y: f32,
 }
@@ -680,7 +680,7 @@ const CALLABLE_TYPE_EXAMPLE: &[Example] = &[
 focused_example!(
     RECORD_EXAMPLE,
     "Group related values",
-    "record Position {\n    x: f32,\n    y: f32,\n}",
+    "struct Position {\n    x: f32,\n    y: f32,\n}",
     DECLARATIONS_SOURCE
 );
 focused_example!(
@@ -1234,12 +1234,12 @@ define_language_catalog! {
         CALLABLE_TYPE_EXAMPLE
     ),
     language_item!(
-        Record,
-        "record",
+        Struct,
+        "struct",
         LanguageItemKind::Declaration,
-        "record Name { field: Type }",
-        "Declares an immutable nominal record.",
-        "Records provide named fields, structural equality when their fields support it, and fixed process-memory layouts when every field is readable. In a literal, `Name { field }` is shorthand for `Name { field: field }`; an explicit repeated initializer receives a safe shorthand fix, and renaming either identity expands the shorthand when needed.",
+        "struct Name { field: Type }",
+        "Declares an immutable nominal structure.",
+        "Structs provide named fields, structural equality when their fields support it, and fixed process-memory layouts when every field is readable. In a literal, `Name { field }` is shorthand for `Name { field: field }`; an explicit repeated initializer receives a safe shorthand fix, and renaming either identity expands the shorthand when needed.",
         RECORD_EXAMPLE
     ),
     language_item!(
@@ -1466,7 +1466,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "left == right",
         "Compares two values for equality.",
-        "Equality is typed and never coerces between unrelated representations. [`String`] values compare by text content, while records and enums compare structurally when their contents satisfy [`Equatable`].",
+        "Equality is typed and never coerces between unrelated representations. [`String`] values compare by text content, while structs and enums compare structurally when their contents satisfy [`Equatable`].",
         EQUALITY_EXAMPLE
     ),
     language_item!(
@@ -1886,7 +1886,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "/// documentation text",
         "Documents a source declaration, state field, setting, or heading.",
-        "On functions and methods, global variables, state fields, records and their fields, and enums and their variants, the documentation appears in editor hovers. On settings and headings, it becomes a tooltip in the settings UI. Consecutive documentation-comment lines form paragraphs; use an empty [`///`] line to start a new paragraph.",
+        "On functions and methods, global variables, state fields, structs and their fields, and enums and their variants, the documentation appears in editor hovers. On settings and headings, it becomes a tooltip in the settings UI. Consecutive documentation-comment lines form paragraphs; use an empty [`///`] line to start a new paragraph.",
         DOCUMENTATION_COMMENT_EXAMPLES
     ),
     language_item!(

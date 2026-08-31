@@ -124,7 +124,7 @@
           "match": "\\b(?:static(?=\\s+[A-Za-z_$\\[])|from(?=\\s*(?:\"|\\[)))\\b"
         },
         {
-          "match": "\\b(record|enum)\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
+          "match": "\\b(struct|enum)\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
           "captures": {
             "1": {
               "name": "keyword.declaration.splitscript"
@@ -177,7 +177,7 @@
         },
         {
           "name": "keyword.declaration.splitscript",
-          "match": "\\b(state|settings|record|enum|fn|let)\\b"
+          "match": "\\b(state|settings|struct|enum|fn|let)\\b"
         },
         {
           "name": "keyword.other.lifecycle.splitscript",

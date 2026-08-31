@@ -3,15 +3,15 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{EnumId, OptionTypeId, RecordId, ResultTypeId},
+    ast::{EnumId, OptionTypeId, ResultTypeId, StructId},
     stdlib::{StandardLibrary, StdlibTypeId},
 };
 
 #[derive(Default)]
 pub(super) struct EqualityFunctions {
     pub standard_library: StandardLibrary,
-    pub standard_records: HashMap<StdlibTypeId, u32>,
-    pub records: HashMap<RecordId, u32>,
+    pub standard_structs: HashMap<StdlibTypeId, u32>,
+    pub structs: HashMap<StructId, u32>,
     pub enums: HashMap<EnumId, u32>,
     pub options: HashMap<OptionTypeId, u32>,
     pub results: HashMap<ResultTypeId, u32>,

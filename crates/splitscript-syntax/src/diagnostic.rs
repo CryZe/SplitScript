@@ -19,7 +19,7 @@ pub enum DiagnosticCode {
     StaticSettingLookup,
     SuspiciousInterpolation,
     DebugOnlyUse,
-    RecordFieldShorthand,
+    StructFieldShorthand,
     EmptyFutureRace,
 }
 
@@ -34,7 +34,7 @@ impl DiagnosticCode {
         Self::StaticSettingLookup,
         Self::SuspiciousInterpolation,
         Self::DebugOnlyUse,
-        Self::RecordFieldShorthand,
+        Self::StructFieldShorthand,
         Self::EmptyFutureRace,
     ];
 
@@ -53,7 +53,7 @@ impl DiagnosticCode {
             Self::StaticSettingLookup => "SS1007",
             Self::SuspiciousInterpolation => "SS1008",
             Self::DebugOnlyUse => "SS1009",
-            Self::RecordFieldShorthand => "SS1010",
+            Self::StructFieldShorthand => "SS1010",
             Self::EmptyFutureRace => "SS1011",
         }
     }
@@ -70,7 +70,7 @@ impl DiagnosticCode {
                 | Self::StaticSettingLookup
                 | Self::SuspiciousInterpolation
                 | Self::DebugOnlyUse
-                | Self::RecordFieldShorthand
+                | Self::StructFieldShorthand
                 | Self::EmptyFutureRace
         )
     }
@@ -94,7 +94,7 @@ impl FromStr for DiagnosticCode {
             "SS1007" => Ok(Self::StaticSettingLookup),
             "SS1008" => Ok(Self::SuspiciousInterpolation),
             "SS1009" => Ok(Self::DebugOnlyUse),
-            "SS1010" => Ok(Self::RecordFieldShorthand),
+            "SS1010" => Ok(Self::StructFieldShorthand),
             "SS1011" => Ok(Self::EmptyFutureRace),
             _ => Err(()),
         }

@@ -154,14 +154,14 @@ pub(super) fn add_type_completions(
             is_snippet: true,
         });
     }
-    for record in &syntax.records {
+    for structure in &syntax.structs {
         builder.add(CompletionItem {
-            label: record.name.clone(),
+            label: structure.name.clone(),
             kind: CompletionKind::Struct,
-            detail: Some("record type".to_owned()),
-            documentation: record.documentation.clone(),
+            detail: Some("struct type".to_owned()),
+            documentation: structure.documentation.clone(),
             documentation_uri: None,
-            insert_text: record.name.clone(),
+            insert_text: structure.name.clone(),
             is_snippet: false,
         });
     }
@@ -325,7 +325,7 @@ fn is_declaration_type_colon(tokens: &[&Token], colon: usize) -> bool {
         return true;
     }
     nearest_unclosed(tokens, colon, TokenKind::LBrace, TokenKind::RBrace).is_some_and(|open| {
-        is_named_declaration_body(tokens, open, "record")
+        is_named_declaration_body(tokens, open, "struct")
             || is_named_declaration_body(tokens, open, "layout")
             || is_state_body(tokens, open)
     })

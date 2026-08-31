@@ -257,7 +257,7 @@ impl DocumentationReference {
             title: ty.name.to_owned(),
             kind: match ty.kind {
                 StdlibTypeKind::Intrinsic => "type",
-                StdlibTypeKind::Struct => "record",
+                StdlibTypeKind::Struct => "struct",
                 StdlibTypeKind::Enum => "enum",
             },
             summary: compact_prose(ty.documentation.summary),
@@ -635,7 +635,7 @@ impl DocumentationReference {
                             value.name.to_owned(),
                             match value.kind {
                                 StdlibTypeKind::Intrinsic => "type",
-                                StdlibTypeKind::Struct => "record",
+                                StdlibTypeKind::Struct => "struct",
                                 StdlibTypeKind::Enum => "enum",
                             },
                             Some(render_type_declaration(value)),
@@ -1548,7 +1548,7 @@ fn type_constructor_slug(constructor: &crate::stdlib::StdlibTypeConstructor) -> 
 fn render_type_declaration(ty: &crate::stdlib::StdlibType) -> String {
     match ty.kind {
         StdlibTypeKind::Intrinsic => ty.name.to_owned(),
-        StdlibTypeKind::Struct => format!("record {}", ty.name),
+        StdlibTypeKind::Struct => format!("struct {}", ty.name),
         StdlibTypeKind::Enum => format!("enum {}", ty.name),
     }
 }
@@ -2279,7 +2279,7 @@ mod tests {
             "capability",
             "type constructor",
             "type",
-            "record",
+            "struct",
             "enum",
             "field",
             "enum variant",

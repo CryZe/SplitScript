@@ -23,7 +23,7 @@ this longer page as a concept reference:
   and [discovered state and watchers](#discovered-state-and-watchers).
 - Express ordinary logic: [variables and inference](#variables-and-inference),
   [value blocks](#value-blocks), and [functions](#functions).
-- Model values and collections: [records](#records),
+- Model values and collections: [structs](#structs),
   [pattern matching](#pattern-matching), [arrays](#arrays), [sets](#sets), and
   [integer ranges](#integer-ranges).
 - Configure and control the timer: [settings](#settings) and [actions](#actions).
@@ -65,8 +65,8 @@ may otherwise run before a start, such as `setup`, `onAttach`, `onDetach`,
 declaration remains module-scoped.
 
 Closed comma-separated forms use punctuation rather than line breaks to
-separate items. This includes arguments, array and record literals, match arms,
-record fields, enum variants, state layouts, settings, choice options, and file
+separate items. This includes arguments, array and struct literals, match arms,
+struct fields, enum variants, state layouts, settings, choice options, and file
 filters. A trailing comma is always optional. The formatter adds one when it
 lays a list out across multiple lines and omits it for a compact one-line list.
 State fields are instead separated by semicolons because their unclosed pointer
@@ -213,7 +213,7 @@ same-named field with a conflicting type remains specific to its layout.
 
 When several independent build facts affect state fields, managed classes, or
 both, declare those facts once in an unnamed `layout` block. Every dimension is
-an enum. You can always select the generated `Layout` record explicitly in
+an enum. You can always select the generated `Layout` struct explicitly in
 [`onAttach`]:
 
 ```splitscript
@@ -393,9 +393,9 @@ types may come from their initializer or from any later use. An annotation is
 only needed to constrain an otherwise ambiguous value or document an important
 boundary.
 
-Record member access participates in the same whole-program inference. The
+Struct member access participates in the same whole-program inference. The
 compiler can defer resolving a field path until a later call site supplies the
-parameter's nominal record type, so helpers do not need redundant annotations:
+parameter's nominal struct type, so helpers do not need redundant annotations:
 
 ```text
 fn levelTimeText(parts) {
@@ -405,9 +405,9 @@ fn levelTimeText(parts) {
 levelTimeText(current.levelTimeParts)
 ```
 
-Several accessed fields can jointly identify a unique record even without a
+Several accessed fields can jointly identify a unique struct even without a
 call-site constraint. If the remaining field set matches multiple nominal
-records, the compiler reports those candidates instead of guessing.
+structs, the compiler reports those candidates instead of guessing.
 
 Annotations and integer suffixes are constraints, not a routine requirement.
 Integer literals may be decimal (`42`), hexadecimal (`0xff`), or binary
@@ -482,13 +482,13 @@ the compiler does not silently remove process reads or other effects. Prefix an
 intentionally observation-only field with `_`; the editor's validated rename
 fix updates every shared layout declaration.
 
-The compiler also warns about private globals, functions, records, and enums
+The compiler also warns about private globals, functions, structs, and enums
 that cannot be reached from lifecycle behavior, state polling expressions, or
 the host-visible settings interface. Reachability is transitive and follows
 resolved identities: a helper called only by another dead helper is still
 unused, while a helper called by an unused state field still executes and
 remains reachable. Types in a reachable function signature and types nested
-inside runtime state storage or a reachable record or enum remain live. Debug
+inside runtime state storage or a reachable struct or enum remain live. Debug
 statements participate in this analysis in both build profiles so editor
 warnings do not change when publishing a release build. Prefix an intentionally
 reserved declaration with `_` to suppress its warning.
@@ -503,9 +503,9 @@ when erasing the whole declaration is safe. If release-visible code still
 assigns a global or local, the warning remains but no unsafe edit is offered.
 Declarations already nested in debug-only code do not warn.
 
-Reachable records and enums receive member-level checks without cascading from
-an entirely dead type. Accessing a record member reads that field; merely
-constructing or deserializing the record does not. Constructing or matching an
+Reachable structs and enums receive member-level checks without cascading from
+an entirely dead type. Accessing a struct member reads that field; merely
+constructing or deserializing the struct does not. Constructing or matching an
 enum variant observes that variant, and variants exposed by a choice setting
 are host-visible. Structural `==` and `!=` observe every field or variant in the
 recursively compared shape. Unobserved fields and variants produce non-fatal
@@ -523,9 +523,9 @@ explicit host key, which keeps existing saved settings compatible.
 
 Warning codes are stable tooling identifiers: `SS1001` denotes a discarded
 must-use value, `SS1002` an unread local binding, `SS1003` an unreachable
-declaration, `SS1004` an unused state field, setting, record field, or enum
+declaration, `SS1004` an unused state field, setting, struct field, or enum
 variant, `SS1009` a declaration consumed only by debug code, and `SS1010` an
-explicit record initializer that can use field shorthand. The wording may
+explicit struct initializer that can use field shorthand. The wording may
 improve without requiring editor integrations to classify messages by text.
 
 Compiler hosts can configure every warning code as `allow`, `warn`, or `deny`.
@@ -539,7 +539,7 @@ all warning codes. Later arguments override earlier selectors.
 The language server offers preferred quick fixes that apply the `_`
 suppression convention. For ordinary declarations, state fields, and nominal
 members, the action is a complete validated rename: references in dead helper
-code, shared layout declarations, and record-literal labels are updated as
+code, shared layout declarations, and struct-literal labels are updated as
 well, name collisions gain additional underscores, and the edited program must
 still preserve every resolved declaration identity. An unused setting instead
 retains or introduces its original host key while changing only its statically
@@ -822,7 +822,7 @@ equality. Two absent `T?` values are equal; an absent and present value are not;
 two present values compare their payloads. Fallible values first compare
 whether they are successes or errors. Successes compare their values, errors compare their
 error strings by content, and a success never equals an error. This composes
-through records and enums that contain wrapper fields or payloads.
+through structs and enums that contain wrapper fields or payloads.
 
 Standard-library operations that return a value without mutating their receiver
 are must-use by default. Writing such a call as a bare expression statement
@@ -1008,7 +1008,7 @@ formats its decimal value. Other reference and domain types are not castable.
 ## Functions
 
 `///` documentation comments can precede functions and methods, global
-variables, state fields, records and their fields, and enums and their
+variables, state fields, structs and their fields, and enums and their
 variants. The language server includes this documentation in hover information
 alongside inferred types and function effects. Consecutive non-empty lines form
 one paragraph; an empty `///` line starts a new Markdown paragraph.
@@ -1019,7 +1019,7 @@ fn isFinalLevel(level) {
     return stage(level) == 7
 }
 
-record Position {
+struct Position {
     /// Horizontal position in world units.
     x: f32,
     /// Vertical position in world units.
@@ -1109,15 +1109,15 @@ the same assignments. [`return`] exits the closure itself; [`break`] and
 [`continue`] cannot target a loop outside it. Callable values do not implement
 [`Equatable`].
 
-## Records
+## Structs
 
-Records are immutable, named value shapes. Declarations can refer to records
-declared later in the file. Record
+Structs are immutable, named value shapes. Declarations can refer to structs
+declared later in the file. Struct
 literals are checked for unknown, duplicate, missing, and incorrectly typed
 fields; their source order does not matter.
 
 ```text
-record Digits {
+struct Digits {
     minutes: f32,
     seconds: f32,
     hundredths: f32,
@@ -1138,16 +1138,16 @@ When a local has the same name as a field, the field name alone is shorthand
 for the repeated initializer: `Position { x, y }` means
 `Position { x: x, y: y }`. Writing the repeated form produces `SS1010` with a
 safe quick fix. The two names still have independent identities: renaming the
-record field expands the shorthand to `horizontal: x`, while renaming the
+struct field expands the shorthand to `horizontal: x`, while renaming the
 local expands it to `x: horizontal`.
 
-Records may contain other records and strings, pass through functions, and
+Structs may contain other structs and strings, pass through functions, and
 remain live across `await`. Immutability keeps
 shared metadata bindings predictable; a new value is constructed when a
 snapshot needs to change.
 
-A record whose fields are all fixed-width primitive memory values or other
-readable records also implements the compiler-known `MemoryReadable`
+A struct whose fields are all fixed-width primitive memory values or other
+readable structs also implements the compiler-known `MemoryReadable`
 capability. Its process-memory layout follows declaration order with natural
 alignment: every field starts at the next multiple of its own alignment, and
 the final size is rounded up to the largest field alignment. For example,
@@ -1158,7 +1158,7 @@ endianness controls are intentionally deferred until a real target needs them.
 ## Pattern matching
 
 Enums model values that can have one of several shapes. Each variant may carry
-one typed payload; a record can be used when a variant needs multiple values.
+one typed payload; a struct can be used when a variant needs multiple values.
 `match` destructures payloads and is checked for duplicate, foreign, unknown,
 and missing variants.
 
@@ -1217,15 +1217,15 @@ its pattern. Enum matches must cover every variant, boolean matches must cover
 open-ended and require an unguarded `_` arm. A wildcard can also make an enum
 or boolean match exhaustive.
 
-Enums are immutable values and can be nested in records, passed through
+Enums are immutable values and can be nested in structs, passed through
 functions, and retained across `await`. This directly models the original
 Lunistice autosplitter's base-game level number versus DLC-demo scene name.
 
 Enums support `==` and `!=`. Equality is structural: variants must match, and
-payload variants then compare their active payloads. Records are structural as
+payload variants then compare their active payloads. Structs are structural as
 well, comparing fields in declaration order. The capability is derived
 recursively, so an enum carrying numbers, strings, other equatable enums, or
-equatable records needs no declaration or implementation boilerplate. A
+equatable structs needs no declaration or implementation boilerplate. A
 comparison is rejected at compile time with the field or variant path when a
 contained type, such as an array, does not yet support equality.
 
@@ -1248,7 +1248,7 @@ if game.location.isFirst() {
 ```
 
 Methods can have additional typed parameters and may be invoked through nested
-record paths. Method syntax provides type-directed organization and an implicit
+struct paths. Method syntax provides type-directed organization and an implicit
 receiver; calls otherwise behave like global helpers.
 
 ## Arrays
@@ -1295,8 +1295,8 @@ once in that order; compiler temporaries preserve them across `await` and
 `indexOf(value)` returns the first matching `u32` index or `None`. These search
 methods are available when the element type supports `Equatable`; they are
 ordinary source-defined library loops rather than dedicated compiler
-operations. Arrays can contain records, enums, strings, and other arrays, and
-can themselves be stored in records or retained across suspension.
+operations. Arrays can contain structs, enums, strings, and other arrays, and
+can themselves be stored in structs or retained across suspension.
 
 Only growable `[T]` arrays provide `push(value)`, `extend(values)`,
 `removeAt(index)`, `remove(value)`, `pop()`, and `clear()`. Extension appends a
@@ -1744,7 +1744,7 @@ failure from either `follow` or `read` rejects this field's candidate value. The
 first snapshot requires all required fields to succeed together and initializes
 `old` and `current` to the same value. On later polls, an error keeps that
 field's accepted value while successful fields advance. Put values that must
-advance atomically into one record- or array-valued state field; the whole
+advance atomically into one struct- or array-valued state field; the whole
 aggregate is then one acceptance unit.
 
 When one field is genuinely optional, make its value type optional and convert
@@ -1909,7 +1909,7 @@ polling the body.
 Intrinsically asynchronous operations behave the same way, so
 `let pending = process.module("game.dll")` creates a future that may be passed
 or stored before `await pending`. An `async T` value can be held in a local,
-record, enum, option, result, or array and passed as a parameter. Once complete,
+struct, enum, option, result, or array and passed as a parameter. Once complete,
 the future retains `T`, so another await returns the same value without rerunning the
 operation. Merely creating a future is synchronous. Futures are owned by the
 attached-process lifetime and therefore cannot be stored in globals.
@@ -1985,13 +1985,13 @@ let elapsed: f32 = process.read(object + 0x18) else 0.0
 let next: address = retry process.read(object + 0x20)
 ```
 
-Named `MemoryReadable` records use the same call. The runtime performs one host
-read for the complete naturally aligned record, then constructs its immutable
-value. Nested readable records are decoded recursively,
+Named `MemoryReadable` structs use the same call. The runtime performs one host
+read for the complete naturally aligned struct, then constructs its immutable
+value. Nested readable structs are decoded recursively,
 so a state snapshot cannot observe a torn mixture of individually read fields.
 
 ```text
-record LevelTimeParts {
+struct LevelTimeParts {
     minutes: f32,
     seconds: f32,
     hundredths: f32,
@@ -2032,7 +2032,7 @@ ASL UTF-16 behavior while naming the byte order explicitly.
 
 When no context determines the representation, add an annotation or use an
 explicit type argument such as `process.read<u8>(address)`. Any
-`MemoryReadable` type can be written there, including named records and
+`MemoryReadable` type can be written there, including named structs and
 fixed-length arrays. An ambiguous generic read produces a diagnostic showing
 both fixes. `address` is nominal
 rather than an alias for `u64`, preventing a module size or counter from being
@@ -2050,7 +2050,7 @@ let executablePath = executable.path() else "Unavailable"
 
 For Windows PE modules, `module.fileVersion()` and `module.productVersion()`
 parse the bounded numeric `VS_FIXEDFILEINFO` resource directly from process
-memory. They return equatable `FileVersion` records with `major`, `minor`,
+memory. They return equatable `FileVersion` structs with `major`, `minor`,
 `build`, and `privatePart` fields. This keeps version selection typed instead
 of relying on legacy version strings with inconsistent separators. When both
 identities are needed, `module.versionInfo()` returns them from one resource
@@ -2195,7 +2195,7 @@ without special syntax. [`FileVersion`] uses this mechanism to render
 `major.minor.build.private`. [`Timer.state`] and [`setTickRate`] expose the
 corresponding runtime facilities.
 
-User records and enums derive [`Display`] automatically. The default is a
+User structs and enums derive [`Display`] automatically. The default is a
 stable multiline structural representation containing the type, variant,
 field, and payload names. That derived implementation is materialized only when
 a reachable conversion needs the concrete type. Defining the exact method
@@ -2207,7 +2207,7 @@ source method, and implicit uses preserve those effects through their call
 graphs.
 
 ```splitscript
-record Position {
+struct Position {
     x: i32,
     y: i32,
 }

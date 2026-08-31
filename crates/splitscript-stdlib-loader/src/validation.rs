@@ -1224,7 +1224,7 @@ impl<'a> Validator<'a> {
         if values.iter().any(|value| {
             !matches!(
                 value.as_str(),
-                "recordField" | "enumPayload" | "stateField" | "localVariable" | "globalVariable"
+                "structField" | "enumPayload" | "stateField" | "localVariable" | "globalVariable"
             )
         }) {
             self.error(format!("`{owner}` has an invalid value-usage rule"));

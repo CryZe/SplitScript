@@ -64,11 +64,11 @@ impl AssignmentId {
     }
 }
 
-/// Stable identity for a user-declared record in one parsed program.
+/// Stable identity for a user-declared struct in one parsed program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RecordId(u32);
+pub struct StructId(u32);
 
-impl RecordId {
+impl StructId {
     pub fn index(self) -> usize {
         self.0 as usize
     }
@@ -212,11 +212,11 @@ impl ManagedReferenceTypeId {
     }
 }
 
-/// Stable identity for a field declared by a record in one parsed program.
+/// Stable identity for a field declared by a struct in one parsed program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RecordFieldId(u32);
+pub struct StructFieldId(u32);
 
-impl RecordFieldId {
+impl StructFieldId {
     pub fn index(self) -> usize {
         self.0 as usize
     }
@@ -275,7 +275,7 @@ macro_rules! display_stable_id {
 }
 
 display_stable_id!(
-    RecordId,
+    StructId,
     EnumId,
     ArrayTypeId,
     OptionTypeId,
@@ -285,7 +285,7 @@ display_stable_id!(
     RangeTypeId,
     TypeApplicationId,
     ManagedReferenceTypeId,
-    RecordFieldId,
+    StructFieldId,
     EnumVariantId,
     ManagedImageId,
     ManagedNamespaceId,
@@ -355,7 +355,7 @@ pub struct Program {
     pub setting_families: Vec<SettingFamilyDecl>,
     pub settings: Vec<SettingDecl>,
     pub globals: Vec<VariableDecl>,
-    pub records: Vec<RecordDecl>,
+    pub structs: Vec<StructDecl>,
     pub enums: Vec<EnumDecl>,
     /// Declarative managed-code metadata schemas used by engine providers.
     pub managed_images: Vec<ManagedImageDecl>,
@@ -841,18 +841,18 @@ pub struct EnumVariant {
 }
 
 #[derive(Debug, Clone)]
-pub struct RecordDecl {
-    pub id: RecordId,
+pub struct StructDecl {
+    pub id: StructId,
     pub name: String,
     pub documentation: Option<String>,
     pub name_span: Span,
-    pub fields: Vec<RecordField>,
+    pub fields: Vec<StructField>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
-pub struct RecordField {
-    pub id: RecordFieldId,
+pub struct StructField {
+    pub id: StructFieldId,
     pub name: String,
     pub name_span: Span,
     pub documentation: Option<String>,
@@ -901,7 +901,7 @@ pub struct StateDecl {
     /// written predicate.
     pub conditional_fields: Vec<ConditionalFieldsDecl<StateField>>,
     /// Independent attachment-wide layout dimensions. The generated `Layout`
-    /// record is an ordinary nominal source type whose fields are the written
+    /// struct is an ordinary nominal source type whose fields are the written
     /// dimensions; the read-only `layout` value has this type while attached.
     pub layout: Option<AttachmentLayoutDecl>,
     /// Versioned memory layouts. Semantic analysis projects compatible fields
@@ -919,15 +919,15 @@ pub struct StateDecl {
 ///
 /// This belongs to the state language rather than any individual provider.
 /// Native processes, emulators, and managed runtimes all consume the same
-/// generated record and refinement model.
+/// generated struct and refinement model.
 #[derive(Debug, Clone)]
 pub struct AttachmentLayoutDecl {
     pub keyword_span: Span,
     pub documentation: Option<String>,
     pub opening_span: Span,
-    /// Stable identity of the generated ordinary `Layout` record stored in
-    /// [`Program::records`].
-    pub record: RecordId,
+    /// Stable identity of the generated ordinary `Layout` struct stored in
+    /// [`Program::structs`].
+    pub structure: StructId,
     pub span: Span,
 }
 
@@ -1069,7 +1069,7 @@ pub enum PointerPathBase {
     Module { name: String, offset: i64 },
     /// An address supplied by another state field in the same active layout.
     /// The type checker resolves the expression to that field's stable identity
-    /// and records the dependency used to order snapshot polling.
+    /// and structs the dependency used to order snapshot polling.
     Expression(Expr),
 }
 
@@ -1427,14 +1427,14 @@ impl Expr {
     }
 }
 
-/// One field supplied by a record literal.
+/// One field supplied by a struct literal.
 ///
 /// Shorthand fields retain their source shape even though `value` contains the
 /// equivalent synthesized path expression. Downstream semantic passes can
 /// therefore treat both spellings uniformly, while formatting and refactoring
 /// can preserve the shorthand's two source identities.
 #[derive(Debug, Clone)]
-pub struct RecordLiteralField {
+pub struct StructLiteralField {
     pub name: String,
     pub name_span: Span,
     pub value: Expr,
@@ -1470,10 +1470,10 @@ pub enum ExprKind {
     /// Repeats until a `break`, with break values determining the expression's
     /// type. A loop without a reachable break has type `Never`.
     Loop(Block),
-    Record {
+    Struct {
         name: String,
         name_span: Span,
-        fields: Vec<RecordLiteralField>,
+        fields: Vec<StructLiteralField>,
     },
     Match {
         value: Box<Expr>,

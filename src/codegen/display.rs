@@ -16,7 +16,7 @@ use crate::{
 use super::{
     DisplayFunctions, GcLayout, RuntimeHelperPlan, Type, array_value, emit_array_get,
     emit_string_literal, emit_typed_struct_get, enum_variant_payload,
-    function_plan::UserFunctionPlan, record_field_type, try_array_element_type,
+    function_plan::UserFunctionPlan, struct_field_type, try_array_element_type,
 };
 
 pub(super) struct DisplayInputs<'a> {
@@ -39,7 +39,7 @@ pub(super) fn compile(inputs: &DisplayInputs<'_>) -> Vec<Function> {
         .map(|ty| {
             if let Some(structural) = inputs.structural.get(ty) {
                 return match structural.id {
-                    StructuralTypeId::Record(_) => compile_record(structural, inputs),
+                    StructuralTypeId::Struct(_) => compile_struct(structural, inputs),
                     StructuralTypeId::Enum(_) => compile_enum(structural, inputs),
                 };
             }
@@ -70,21 +70,25 @@ pub(super) fn compile(inputs: &DisplayInputs<'_>) -> Vec<Function> {
         .collect()
 }
 
-fn compile_record(record: &StructuralType, inputs: &DisplayInputs<'_>) -> Function {
+fn compile_struct(structure: &StructuralType, inputs: &DisplayInputs<'_>) -> Function {
     let mut function = Function::new([]);
     begin_recursion_guard(&mut function, inputs);
-    let StructuralTypeId::Record(record_id) = record.id else {
+    let StructuralTypeId::Struct(struct_id) = structure.id else {
         unreachable!()
     };
-    let type_index = inputs.gc.index(Type::Record(record_id));
-    emit_string_literal(&mut function, &format!("{} {{\n", record.name), inputs.gc);
-    for (field_index, field) in record.members.iter().enumerate() {
+    let type_index = inputs.gc.index(Type::Struct(struct_id));
+    emit_string_literal(
+        &mut function,
+        &format!("{} {{\n", structure.name),
+        inputs.gc,
+    );
+    for (field_index, field) in structure.members.iter().enumerate() {
         emit_string_literal(&mut function, &format!("    {}: ", field.name), inputs.gc);
-        let StructuralMemberId::RecordField(field_id) = field.source else {
+        let StructuralMemberId::StructField(field_id) = field.source else {
             unreachable!()
         };
-        let field_type_id = field.ty.expect("record fields have semantic types");
-        let field_type = record_field_type(field_id, inputs.semantics);
+        let field_type_id = field.ty.expect("struct fields have semantic types");
+        let field_type = struct_field_type(field_id, inputs.semantics);
         function
             .instruction(&Instruction::LocalGet(0))
             .instruction(&Instruction::RefAsNonNull);
@@ -96,7 +100,11 @@ fn compile_record(record: &StructuralType, inputs: &DisplayInputs<'_>) -> Functi
         emit_string_literal(&mut function, ",\n", inputs.gc);
     }
     emit_string_literal(&mut function, "}", inputs.gc);
-    join_pieces(&mut function, 2 + record.members.len() as u32 * 3, inputs);
+    join_pieces(
+        &mut function,
+        2 + structure.members.len() as u32 * 3,
+        inputs,
+    );
     finish_recursion_guard(&mut function, inputs);
     function
 }

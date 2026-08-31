@@ -1,6 +1,6 @@
 state "game.exe" {}
 
-record DebugValue {
+struct DebugValue {
     value: i32,
 }
 

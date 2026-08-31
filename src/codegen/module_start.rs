@@ -6,7 +6,7 @@ use wasm_encoder::{Function, Instruction};
 
 use crate::{
     abi::AbiImportId,
-    ast::{Program, RecordDecl, RecordId, ValueId},
+    ast::{Program, StructDecl, StructId, ValueId},
     semantic::SemanticModel,
     types::{TypeId, TypeKind},
 };
@@ -151,7 +151,7 @@ fn emit_runtime_global_initializers(
         equality_functions: lowering.equality_functions,
         array_functions: lowering.array_functions,
         set_functions: lowering.set_functions,
-        records: lowering.records,
+        structs: lowering.structs,
         managed: lowering.managed,
         managed_state_reads: lowering.managed_state_reads,
         managed_state_read_functions: lowering.managed_state_read_functions,
@@ -186,7 +186,7 @@ fn emit_runtime_global_initializers(
 }
 
 /// Constructs source-language state defaults instead of relying on Wasm's
-/// `struct.new_default`, because nested records are non-null source values.
+/// `structure.new_default`, because nested structs are non-null source values.
 fn emit_initial_state(
     function: &mut Function,
     program: &Program,
@@ -200,7 +200,7 @@ fn emit_initial_state(
         emit_source_default(
             function,
             ty,
-            &program.records,
+            &program.structs,
             semantics,
             gc,
             &mut Vec::new(),
@@ -212,32 +212,32 @@ fn emit_initial_state(
 fn emit_source_default(
     function: &mut Function,
     ty: TypeId,
-    records: &[RecordDecl],
+    structs: &[StructDecl],
     semantics: &SemanticModel,
     gc: &GcLayout,
-    visiting: &mut Vec<RecordId>,
+    visiting: &mut Vec<StructId>,
 ) {
-    let TypeKind::Record(record) = semantics.types().kind(ty) else {
+    let TypeKind::Struct(structure) = semantics.types().kind(ty) else {
         emit_default(function, semantic_type(ty, semantics), gc);
         return;
     };
 
-    if visiting.contains(record) {
-        emit_default(function, Type::Record(*record), gc);
+    if visiting.contains(structure) {
+        emit_default(function, Type::Struct(*structure), gc);
         return;
     }
 
-    visiting.push(*record);
-    let declaration = records
+    visiting.push(*structure);
+    let declaration = structs
         .iter()
-        .find(|declaration| declaration.id == *record)
-        .expect("semantic record types belong to source declarations");
+        .find(|declaration| declaration.id == *structure)
+        .expect("semantic struct types belong to source declarations");
     for field in &declaration.fields {
         let field_type = semantics
-            .record_field_type(field.id)
-            .expect("checked record fields have semantic types");
-        emit_source_default(function, field_type, records, semantics, gc, visiting);
+            .struct_field_type(field.id)
+            .expect("checked struct fields have semantic types");
+        emit_source_default(function, field_type, structs, semantics, gc, visiting);
     }
     visiting.pop();
-    function.instruction(&Instruction::StructNew(gc.index(Type::Record(*record))));
+    function.instruction(&Instruction::StructNew(gc.index(Type::Struct(*structure))));
 }

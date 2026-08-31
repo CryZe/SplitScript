@@ -11,6 +11,7 @@ Keep these common spelling changes in mind:
 - C# `int` becomes SplitScript [`i32`].
 - C# `string` becomes SplitScript [`String`].
 - C# `TimeSpan` becomes SplitScript [`Duration`].
+- C# `record` declarations become SplitScript [`struct`] declarations.
 
 ## Declarations and types
 
@@ -39,17 +40,19 @@ whileAttached {
 ```
 
 Backtick strings interpolate with `{expression}` without C#'s leading `$`.
-Use arrays as [`[T]`], fixed memory arrays as [`[T; N]`], records for named product
-types, and enums with exhaustive [`match`].
+Use arrays as [`[T]`], fixed memory arrays as [`[T; N]`], [`struct`] declarations
+for named product types, and enums with exhaustive [`match`]. SplitScript uses
+the familiar [`struct`] spelling for immutable value shapes too; C# `record` is
+not an alias, but the compiler offers a direct migration fix.
 
 There is no class override or interface declaration for textual display.
-Records and enums receive a readable multiline [`Display`] representation by
+Structs and enums receive a readable multiline [`Display`] representation by
 default. Define `fn Type.toString() -> String` only to override it; the compiler
 can infer the result. Use lower-camel `toString`, not C#'s `ToString`.
 
 ```splitscript
 # state "game.exe" {}
-record Position {
+struct Position {
     x: i32,
     y: i32,
 }

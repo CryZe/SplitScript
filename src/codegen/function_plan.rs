@@ -134,35 +134,35 @@ pub(super) fn encode<'a>(
         standard_library: standard_library.clone(),
         ..EqualityFunctions::default()
     };
-    for record in standard_library.all_types().iter().filter(|record| {
-        reachability.requires_standard_record_equality(record.id)
+    for structure in standard_library.all_types().iter().filter(|structure| {
+        reachability.requires_standard_struct_equality(structure.id)
             && matches!(
-                record.representation,
+                structure.representation,
                 RuntimeRepresentation::GcStruct { .. }
             )
     }) {
-        let record_type = gc.val_type(Type::Standard(record.id));
+        let struct_type = gc.val_type(Type::Standard(structure.id));
         let function = declare(
-            format!("__splitscript::equals::{}", record.name),
-            vec![record_type, record_type],
+            format!("__splitscript::equals::{}", structure.name),
+            vec![struct_type, struct_type],
             vec![ValType::I32],
         );
-        equality.standard_records.insert(record.id, function);
+        equality.standard_structs.insert(structure.id, function);
     }
-    for (_, record) in structural.records() {
-        let StructuralTypeId::Record(record_id) = record.id else {
+    for (_, structure) in structural.structs() {
+        let StructuralTypeId::Struct(struct_id) = structure.id else {
             unreachable!()
         };
-        if reachability.requires_record_equality(record_id)
-            && equality_capabilities.record(record_id).is_ok()
+        if reachability.requires_struct_equality(struct_id)
+            && equality_capabilities.structure(struct_id).is_ok()
         {
-            let record_type = gc.val_type(Type::Record(record_id));
+            let struct_type = gc.val_type(Type::Struct(struct_id));
             let function = declare(
-                format!("__splitscript::equals::{}", record.name),
-                vec![record_type, record_type],
+                format!("__splitscript::equals::{}", structure.name),
+                vec![struct_type, struct_type],
                 vec![ValType::I32],
             );
-            equality.records.insert(record_id, function);
+            equality.structs.insert(struct_id, function);
         }
     }
     for (_, enumeration) in structural.enums() {

@@ -124,8 +124,8 @@ and value APIs should follow the GC-managed `externref` direction recorded in
 The compiler derives GC layouts and type indices from the reachable catalog and
 source program; consumers must not rely on fixed numeric indices. Eight- and
 sixteen-bit fields use packed GC fields, while wider numbers and references use
-their native value types. Standard-library records such as `Duration` and
-`Instant`, source records and enums, constructed arrays, wrapper types, state
+their native value types. Standard-library structs such as `Duration` and
+`Instant`, source structs and enums, constructed arrays, wrapper types, state
 snapshots, and an attach continuation frame are included only as required.
 String backing arrays are internally mutable so decoders and formatters can
 construct dynamically sized values, but the source language exposes strings as

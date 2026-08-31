@@ -18,13 +18,13 @@ use crate::{
         ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId, ManagedReferenceTypeDecl,
         ManagedReferenceTypeId, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter,
         PatternBinding, PatternId, PointerPath, PointerPathBase, Program, RangeKind, RangeTypeDecl,
-        RangeTypeId, RecordDecl, RecordField, RecordFieldId, RecordId, ResultTypeDecl,
-        ResultTypeId, SettingChoiceOption, SettingChoiceOptionId, SettingDecl, SettingExternalKey,
-        SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern,
-        Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
-        StateProviderSelectorRef, StateSource, StateTransform, Stmt, SuspensionMode, TickRateDecl,
-        TickRateValue, TypeApplicationDecl, TypeApplicationId, TypeApplicationOccurrence,
-        TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
+        RangeTypeId, ResultTypeDecl, ResultTypeId, SettingChoiceOption, SettingChoiceOptionId,
+        SettingDecl, SettingExternalKey, SettingFamilyDecl, SettingFileFilter, SettingKind,
+        SettingTextPart, SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl,
+        StateMemoryDecoder, StateProviderRef, StateProviderSelectorRef, StateSource,
+        StateTransform, Stmt, StructDecl, StructField, StructFieldId, StructId, SuspensionMode,
+        TickRateDecl, TickRateValue, TypeApplicationDecl, TypeApplicationId,
+        TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     diagnostic::{Diagnostic, DiagnosticFix, FixApplicability, TextEdit},
     migration::{ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
@@ -95,11 +95,11 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         constructed_type_ids: ConstructedTypeIdAllocator::starting_at(0),
         next_expression_id: 0,
         next_function_id: 0,
-        next_record_id: 0,
+        next_struct_id: 0,
         next_enum_id: 0,
         next_value_id: 0,
         next_assignment_id: 0,
-        next_record_field_id: 0,
+        next_struct_field_id: 0,
         next_enum_variant_id: 0,
         next_managed_image_id: 0,
         next_managed_namespace_id: 0,
@@ -107,8 +107,8 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         next_managed_field_id: 0,
         next_pattern_id: 0,
         next_setting_choice_option_id: 0,
-        generated_records: Vec::new(),
-        record_literals_allowed: true,
+        generated_structs: Vec::new(),
+        struct_literals_allowed: true,
         diagnostics: Vec::new(),
         recovery_nodes: Vec::new(),
     }
@@ -141,11 +141,11 @@ struct Parser<'a> {
     constructed_type_ids: ConstructedTypeIdAllocator,
     next_expression_id: u32,
     next_function_id: u32,
-    next_record_id: u32,
+    next_struct_id: u32,
     next_enum_id: u32,
     next_value_id: u32,
     next_assignment_id: u32,
-    next_record_field_id: u32,
+    next_struct_field_id: u32,
     next_enum_variant_id: u32,
     next_managed_image_id: u32,
     next_managed_namespace_id: u32,
@@ -153,14 +153,14 @@ struct Parser<'a> {
     next_managed_field_id: u32,
     next_pattern_id: u32,
     next_setting_choice_option_id: u32,
-    /// Domain declarations lower generated nominal records through the same
-    /// ordinary record pipeline. They are merged by stable ID before parsing
+    /// Domain declarations lower generated nominal structs through the same
+    /// ordinary struct pipeline. They are merged by stable ID before parsing
     /// completes so downstream consumers never need a parallel type registry.
-    generated_records: Vec<RecordDecl>,
-    /// Whether an immediately following `{ ... }` may form a record literal.
+    generated_structs: Vec<StructDecl>,
+    /// Whether an immediately following `{ ... }` may form a struct literal.
     /// Header expressions disable this at their outer level so their following
     /// block remains unambiguous; nested delimiters enable it again.
-    record_literals_allowed: bool,
+    struct_literals_allowed: bool,
     diagnostics: Vec<Diagnostic>,
     recovery_nodes: Vec<RecoveryNode>,
 }
@@ -187,14 +187,14 @@ impl DelimiterDepth {
 }
 
 impl Parser<'_> {
-    fn with_record_literals<T>(
+    fn with_struct_literals<T>(
         &mut self,
         allowed: bool,
         operation: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        let previous = std::mem::replace(&mut self.record_literals_allowed, allowed);
+        let previous = std::mem::replace(&mut self.struct_literals_allowed, allowed);
         let output = operation(self);
-        self.record_literals_allowed = previous;
+        self.struct_literals_allowed = previous;
         output
     }
 
@@ -216,9 +216,9 @@ impl Parser<'_> {
         id
     }
 
-    fn new_record_field_id(&mut self) -> RecordFieldId {
-        let id = RecordFieldId::from_index(self.next_record_field_id);
-        self.next_record_field_id += 1;
+    fn new_struct_field_id(&mut self) -> StructFieldId {
+        let id = StructFieldId::from_index(self.next_struct_field_id);
+        self.next_struct_field_id += 1;
         id
     }
 
@@ -257,7 +257,7 @@ impl Parser<'_> {
                 || self.at_ident("fn")
                 || self.at_ident("func")
                 || self.at_ident("function")
-                || self.at_ident("record")
+                || self.at_ident("struct")
                 || self.at_ident("enum")
                 || self.at_ident("image")
                 || (self.at_ident("debug")
@@ -265,7 +265,7 @@ impl Parser<'_> {
                         if matches!(name.as_str(), "let" | "const" | "var" | "fn" | "func" | "function")));
             if documentation.is_some() && !supports_documentation {
                 self.diagnostics.push(self.error(
-                    "documentation comments are supported on functions, global variables, records, and enums",
+                    "documentation comments are supported on functions, global variables, structs, and enums",
                 ));
                 documentation = None;
             }
@@ -354,10 +354,18 @@ impl Parser<'_> {
                     function.documentation = documentation.take();
                     program.functions.push(function);
                 })
-            } else if self.at_ident("record") {
-                self.record_decl().map(|mut record| {
-                    record.documentation = documentation.take();
-                    program.records.push(record);
+            } else if self.at_ident("struct") || self.at_ident("record") {
+                if self.at_ident("record") {
+                    let span = self.current().span;
+                    self.record_foreign_spelling_diagnostic(
+                        span,
+                        "record",
+                        crate::migration::ForeignSpellingContext::StructDeclaration,
+                    );
+                }
+                self.struct_decl().map(|mut structure| {
+                    structure.documentation = documentation.take();
+                    program.structs.push(structure);
                 })
             } else if self.at_ident("enum") {
                 self.enum_decl().map(|mut enumeration| {
@@ -376,7 +384,7 @@ impl Parser<'_> {
                     .map(|action| program.actions.push(action))
             } else {
                 Err(self.error(
-                    "expected `state`, `tickRate`, `settings`, `image`, `record`, `enum`, `fn`, a global `let`, or an action block",
+                    "expected `state`, `tickRate`, `settings`, `image`, `struct`, `enum`, `fn`, a global `let`, or an action block",
                 ))
             };
 
@@ -436,8 +444,10 @@ impl Parser<'_> {
         program.type_names = self.type_names;
         program.type_name_spans = self.type_name_spans;
         program.type_name_occurrences = self.type_name_occurrences;
-        program.records.append(&mut self.generated_records);
-        program.records.sort_by_key(|record| record.id.index());
+        program.structs.append(&mut self.generated_structs);
+        program
+            .structs
+            .sort_by_key(|structure| structure.id.index());
         ParseOutput {
             program,
             diagnostics: self.diagnostics,
@@ -550,7 +560,7 @@ mod tests {
             ),
             ("state \"game.exe\" {} fn await() {}", "await", "await_"),
             (
-                "state \"game.exe\" {} record Example { return: u32, }",
+                "state \"game.exe\" {} struct Example { return: u32, }",
                 "return",
                 "return_",
             ),
@@ -607,7 +617,7 @@ mod tests {
         let source = r#"
             state "game.exe" {}
 
-            record ContextualNames {
+            struct ContextualNames {
                 at: u32,
                 from: u32,
                 key: u32,
@@ -1049,15 +1059,15 @@ mod tests {
         let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
         let state = program.state.as_ref().unwrap();
         let layout = state.layout.as_ref().expect("attachment layout");
-        let record = &program.records[layout.record.index()];
-        assert_eq!(record.name, "Layout");
-        assert_eq!(record.fields.len(), 2);
-        assert_eq!(record.fields[0].name, "edition");
+        let structure = &program.structs[layout.structure.index()];
+        assert_eq!(structure.name, "Layout");
+        assert_eq!(structure.fields.len(), 2);
+        assert_eq!(structure.fields[0].name, "edition");
         assert_eq!(
-            record.fields[0].documentation.as_deref(),
+            structure.fields[0].documentation.as_deref(),
             Some("Product edition.")
         );
-        assert_eq!(record.fields[1].name, "storefront");
+        assert_eq!(structure.fields[1].name, "storefront");
         assert_eq!(state.fields[0].name, "frameCount");
         assert!(state.layout_enum.is_none());
         assert!(state.layout_value.is_some());
@@ -1192,7 +1202,7 @@ mod tests {
     fn array_types_use_brackets_and_compose_with_wrappers() {
         let source = r#"
             state "game.exe" {}
-            record Arrays {
+            struct Arrays {
                 bytes: [u8],
                 nested: [[String]],
                 optional: [i32]?,
@@ -1201,7 +1211,7 @@ mod tests {
             }
         "#;
         let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
-        let fields = &program.records[0].fields;
+        let fields = &program.structs[0].fields;
 
         let TypeRef::Array(bytes) = fields[0].ty else {
             panic!("expected [u8]");
@@ -1417,7 +1427,7 @@ mod tests {
     fn declaration_lists_are_comma_delimited_and_accept_trailing_commas() {
         let valid = r#"
             enum Mode { First, Second, }
-            record Pair { left: i32, right: i32, }
+            struct Pair { left: i32, right: i32, }
             settings {
                 "Mode" => mode: choice {
                     "First" => Mode.First,
@@ -1445,8 +1455,8 @@ mod tests {
             .expect("every comma-separated construct should accept a trailing comma");
 
         for source in [
-            "record Pair { left: i32 right: i32 }",
-            "record Pair { left: i32\nright: i32 }",
+            "struct Pair { left: i32 right: i32 }",
+            "struct Pair { left: i32\nright: i32 }",
             "enum Mode { First Second }",
             "enum Mode { First\nSecond }",
             "state \"game.exe\" { left: i32 at 0x100\nright: i32 at 0x104 }",
@@ -1952,7 +1962,7 @@ mod tests {
             /// Global second paragraph.
             let total = 0
             /// A point in game memory.
-            record Point {
+            struct Point {
                 /// Horizontal position.
                 x: i32
             }
@@ -1978,11 +1988,11 @@ mod tests {
             Some("Current stage.")
         );
         assert_eq!(
-            program.records[0].documentation.as_deref(),
+            program.structs[0].documentation.as_deref(),
             Some("A point in game memory.")
         );
         assert_eq!(
-            program.records[0].fields[0].documentation.as_deref(),
+            program.structs[0].fields[0].documentation.as_deref(),
             Some("Horizontal position.")
         );
         assert_eq!(

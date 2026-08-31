@@ -719,11 +719,6 @@ concepts rather than maintaining a parallel inventory.
   repair probe, return compact receiver facts rather than cloned programs, and
   use binary search/`partition_point` for ordered token and definition-reference
   cursor lookups with boundary/trivia regressions.
-- [ ] Debounce and coalesce diagnostic work by document URI/version and suppress
-  every superseded result. Add cancellation checkpoints to recovering analysis
-  if benchmarks show one pass still blocks completion or hover. Keep full-sync
-  text transport until measurement demonstrates that incremental synchronization
-  and stage invalidation are worth their complexity.
 - [ ] Replace deep per-stage ownership copies with shared immutable compiler
   products. Share source documents, syntax, and stable resolution inputs through
   `Arc` or borrowing; let each later stage own only transformed facts. Measure
@@ -1056,6 +1051,13 @@ remaining work is product hardening and distribution.
 
 ## P2 / deliberately deferred
 
+- [ ] Reconsider diagnostic debouncing or cancellation only if interactive
+  measurements or a reproduced editor stall identify diagnostics as the cause.
+  Current synchronous publication is simple and no observed problem justifies
+  adding clocks, queues, version coordination, and separate native/WebAssembly
+  scheduling paths. Keep full-sync text transport until measurement likewise
+  demonstrates that incremental synchronization is worth its complexity.
+
 - [ ] After ASR has a tested SNES provider, align SplitScript with its higan,
   bsnes, Snes9x, BizHawk, RetroArch, and lsnes-bsnes discovery and memory
   semantics rather than independently inventing them from the Super Metroid
@@ -1160,8 +1162,9 @@ remaining work is product hardening and distribution.
    and reorganize lifecycle, state-form, failure/async, string-unit, and
    migration navigation around user tasks.
 3. Use the recorded editor latency/heap baselines to remove repeated completion
-   lexing and linear cursor scans, coalesce superseded diagnostics, and share
-   immutable query-stage products according to measured bottlenecks.
+   lexing and linear cursor scans, then share immutable query-stage products
+   only where measurements identify meaningful remaining costs. Do not add
+   diagnostic scheduling machinery without a reproduced diagnostic bottleneck.
 4. Add profile-aware unused analysis for declarations whose only consumers are
    erased `debug` code, with a safe quick fix to mark erasable declarations
    `debug` before release emission retains them unnecessarily.

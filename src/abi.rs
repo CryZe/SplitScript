@@ -43,6 +43,7 @@ pub struct AbiValue {
 pub enum AbiEffect {
     ReadsTimer,
     ReadsRuntime,
+    ReadsFileSystem,
     WritesTimer,
     WritesRuntime,
     ManagesProcess,
@@ -113,6 +114,7 @@ const fn input_output(name: &'static str) -> AbiValue {
 
 const TIMER_READ: &[AbiEffect] = &[AbiEffect::ReadsTimer];
 const RUNTIME_READ: &[AbiEffect] = &[AbiEffect::ReadsRuntime];
+const FILESYSTEM_READ: &[AbiEffect] = &[AbiEffect::ReadsFileSystem];
 const TIMER_WRITE: &[AbiEffect] = &[AbiEffect::WritesTimer];
 const RUNTIME_WRITE: &[AbiEffect] = &[AbiEffect::WritesRuntime];
 const PROCESS_MANAGEMENT: &[AbiEffect] = &[AbiEffect::ManagesProcess];
@@ -323,6 +325,95 @@ abi_catalog! {
         RUNTIME_READ,
         "Writes one unsigned 64-bit monotonic timestamp to guest memory.",
         "Reads the WASI monotonic clock in nanoseconds."
+    ),
+    import!(
+        WasiEnvironSizesGet,
+        in "wasi_snapshot_preview1",
+        "environ_sizes_get",
+        &[output("count_pointer"), output("buffer_size_pointer")],
+        &[value("errno", AbiType::I32)],
+        FILESYSTEM_READ,
+        "Writes the environment entry count and total byte length to guest memory.",
+        "Sizes the WASI environment used to resolve a relative file path."
+    ),
+    import!(
+        WasiEnvironGet,
+        in "wasi_snapshot_preview1",
+        "environ_get",
+        &[output("entries_pointer"), output("buffer_pointer")],
+        &[value("errno", AbiType::I32)],
+        FILESYSTEM_READ,
+        "Writes environment pointers and NUL-terminated bytes to guest memory.",
+        "Reads the WASI environment used to locate the loaded autosplitter."
+    ),
+    import!(
+        WasiFdPrestatGet,
+        in "wasi_snapshot_preview1",
+        "fd_prestat_get",
+        &[value("descriptor", AbiType::I32), output("prestat_pointer")],
+        &[value("errno", AbiType::I32)],
+        FILESYSTEM_READ,
+        "Writes one WASI preopen descriptor record to guest memory.",
+        "Inspects a preopened filesystem directory."
+    ),
+    import!(
+        WasiFdPrestatDirName,
+        in "wasi_snapshot_preview1",
+        "fd_prestat_dir_name",
+        &[
+            value("descriptor", AbiType::I32),
+            output("path_pointer"),
+            value("path_length", AbiType::I32)
+        ],
+        &[value("errno", AbiType::I32)],
+        FILESYSTEM_READ,
+        "Writes exactly path_length preopen-name bytes to guest memory.",
+        "Reads the portable path of a preopened filesystem directory."
+    ),
+    import!(
+        WasiPathOpen,
+        in "wasi_snapshot_preview1",
+        "path_open",
+        &[
+            value("directory_descriptor", AbiType::I32),
+            value("lookup_flags", AbiType::I32),
+            input("path_pointer"),
+            value("path_length", AbiType::I32),
+            value("open_flags", AbiType::I32),
+            value("rights_base", AbiType::I64),
+            value("rights_inheriting", AbiType::I64),
+            value("descriptor_flags", AbiType::I32),
+            output("opened_descriptor_pointer")
+        ],
+        &[value("errno", AbiType::I32)],
+        FILESYSTEM_READ,
+        "The path is borrowed for this call; a successful descriptor is owned until fd_close.",
+        "Opens a file read-only beneath a WASI preopened directory."
+    ),
+    import!(
+        WasiFdRead,
+        in "wasi_snapshot_preview1",
+        "fd_read",
+        &[
+            value("descriptor", AbiType::I32),
+            input("iovec_pointer"),
+            value("iovec_count", AbiType::I32),
+            output("bytes_read_pointer")
+        ],
+        &[value("errno", AbiType::I32)],
+        FILESYSTEM_READ,
+        "The descriptor is borrowed; the iovec destinations are written for this call only.",
+        "Reads bytes from an open WASI file descriptor."
+    ),
+    import!(
+        WasiFdClose,
+        in "wasi_snapshot_preview1",
+        "fd_close",
+        &[owned("descriptor", AbiType::I32)],
+        &[value("errno", AbiType::I32)],
+        FILESYSTEM_READ,
+        "Consumes the owned file descriptor.",
+        "Closes a WASI file descriptor."
     ),
     import!(
         ProcessAttach,

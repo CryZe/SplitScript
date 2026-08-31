@@ -39,6 +39,8 @@ mod diagnostics_migration;
 mod expressions_control;
 #[path = "compiler/failure_semantics.rs"]
 mod failure_semantics;
+#[path = "compiler/file_runtime.rs"]
+mod file_runtime;
 #[path = "compiler/inference_language.rs"]
 mod inference_language;
 #[path = "compiler/iterators.rs"]

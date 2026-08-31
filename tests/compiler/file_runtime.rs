@@ -1,0 +1,323 @@
+//! Whole-file API integration tests against a deliberately partial WASI host.
+
+use std::collections::HashMap;
+
+#[derive(Default)]
+struct FileTestHost {
+    files: HashMap<String, Vec<u8>>,
+    open_files: HashMap<i32, (String, usize)>,
+    opened_paths: Vec<String>,
+    closed_descriptors: usize,
+    messages: Vec<String>,
+    next_descriptor: i32,
+}
+
+fn write_memory(caller: &mut wasmtime::Caller<'_, FileTestHost>, pointer: i32, bytes: &[u8]) {
+    let memory = caller
+        .get_export("memory")
+        .and_then(wasmtime::Extern::into_memory)
+        .expect("generated modules export memory");
+    memory
+        .write(caller, pointer as usize, bytes)
+        .expect("mock WASI output belongs to guest memory");
+}
+
+fn read_memory(
+    caller: &mut wasmtime::Caller<'_, FileTestHost>,
+    pointer: i32,
+    length: i32,
+) -> Vec<u8> {
+    let memory = caller
+        .get_export("memory")
+        .and_then(wasmtime::Extern::into_memory)
+        .expect("generated modules export memory");
+    let mut bytes = vec![0; length as usize];
+    memory
+        .read(caller, pointer as usize, &mut bytes)
+        .expect("mock WASI input belongs to guest memory");
+    bytes
+}
+
+fn execute(source: &str) -> FileTestHost {
+    use wasmtime::{Config, Engine, ExternType, Linker, Module, Store, Val, ValType};
+
+    let wasm = splitscript::compile(source).expect("file API fixture should compile");
+    wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("file helpers should produce valid Wasm GC");
+
+    let mut config = Config::new();
+    config.wasm_gc(true);
+    config.wasm_function_references(true);
+    let engine = Engine::new(&config).expect("GC-enabled Wasmtime should initialize");
+    let module = Module::new(&engine, wasm).expect("Wasmtime should compile generated Wasm");
+    let mut linker: Linker<FileTestHost> = Linker::new(&engine);
+
+    for import in module.imports() {
+        let ExternType::Func(function_type) = import.ty() else {
+            panic!("SplitScript host ABI imports only functions")
+        };
+        let module_name = import.module().to_owned();
+        let name = import.name().to_owned();
+        let host_name = name.clone();
+        let result_types = function_type.results().collect::<Vec<_>>();
+        linker
+            .func_new(
+                &module_name,
+                &name,
+                function_type,
+                move |mut caller, parameters, results| {
+                    for (result, ty) in results.iter_mut().zip(&result_types) {
+                        *result = match ty {
+                            ValType::I32 => Val::I32(0),
+                            ValType::I64 => Val::I64(0),
+                            ValType::F32 => Val::F32(0),
+                            ValType::F64 => Val::F64(0),
+                            ty => panic!("mock host does not return `{ty}`"),
+                        };
+                    }
+                    match host_name.as_str() {
+                        "environ_sizes_get" => {
+                            let entry = b"SCRIPT_PATH=/mnt/c/autosplitter/test.wasm\0";
+                            write_memory(
+                                &mut caller,
+                                parameters[0].unwrap_i32(),
+                                &1_u32.to_le_bytes(),
+                            );
+                            write_memory(
+                                &mut caller,
+                                parameters[1].unwrap_i32(),
+                                &(entry.len() as u32).to_le_bytes(),
+                            );
+                        }
+                        "environ_get" => {
+                            let entry = b"SCRIPT_PATH=/mnt/c/autosplitter/test.wasm\0";
+                            let bytes_pointer = parameters[1].unwrap_i32();
+                            write_memory(
+                                &mut caller,
+                                parameters[0].unwrap_i32(),
+                                &(bytes_pointer as u32).to_le_bytes(),
+                            );
+                            write_memory(&mut caller, bytes_pointer, entry);
+                        }
+                        "fd_prestat_get" => {
+                            if parameters[0].unwrap_i32() == 3 {
+                                let pointer = parameters[1].unwrap_i32();
+                                write_memory(&mut caller, pointer, &[0, 0, 0, 0]);
+                                write_memory(&mut caller, pointer + 4, &6_u32.to_le_bytes());
+                            } else {
+                                results[0] = Val::I32(8); // __WASI_ERRNO_BADF
+                            }
+                        }
+                        "fd_prestat_dir_name" => {
+                            assert_eq!(parameters[0].unwrap_i32(), 3);
+                            assert_eq!(parameters[2].unwrap_i32(), 6);
+                            write_memory(&mut caller, parameters[1].unwrap_i32(), b"/mnt/c");
+                        }
+                        "path_open" => {
+                            assert_eq!(parameters[0].unwrap_i32(), 3);
+                            assert_eq!(parameters[1].unwrap_i32(), 1);
+                            assert_eq!(parameters[4].unwrap_i32(), 0);
+                            assert_eq!(parameters[5].unwrap_i64(), 2);
+                            assert_eq!(parameters[6].unwrap_i64(), 0);
+                            assert_eq!(parameters[7].unwrap_i32(), 0);
+                            let path = String::from_utf8(read_memory(
+                                &mut caller,
+                                parameters[2].unwrap_i32(),
+                                parameters[3].unwrap_i32(),
+                            ))
+                            .expect("portable test paths are UTF-8");
+                            caller.data_mut().opened_paths.push(path.clone());
+                            if caller.data().files.contains_key(&path) {
+                                let descriptor = caller.data().next_descriptor;
+                                caller.data_mut().next_descriptor += 1;
+                                caller.data_mut().open_files.insert(descriptor, (path, 0));
+                                write_memory(
+                                    &mut caller,
+                                    parameters[8].unwrap_i32(),
+                                    &(descriptor as u32).to_le_bytes(),
+                                );
+                            } else {
+                                results[0] = Val::I32(44); // __WASI_ERRNO_NOENT
+                            }
+                        }
+                        "fd_read" => {
+                            assert_eq!(parameters[2].unwrap_i32(), 1);
+                            let descriptor = parameters[0].unwrap_i32();
+                            let iovec = read_memory(&mut caller, parameters[1].unwrap_i32(), 8);
+                            let pointer = i32::from_le_bytes(iovec[0..4].try_into().unwrap());
+                            let capacity =
+                                u32::from_le_bytes(iovec[4..8].try_into().unwrap()) as usize;
+                            let (path, offset) = caller
+                                .data()
+                                .open_files
+                                .get(&descriptor)
+                                .cloned()
+                                .expect("reads use an open descriptor");
+                            if path == "autosplitter/read-error.bin" && offset != 0 {
+                                results[0] = Val::I32(5); // __WASI_ERRNO_IO
+                                return Ok(());
+                            }
+                            let file = &caller.data().files[&path];
+                            // Force partial reads so the guest must preserve and
+                            // append every chunk rather than assuming one call.
+                            let length = (file.len() - offset).min(capacity).min(8_191);
+                            let chunk = file[offset..offset + length].to_vec();
+                            caller.data_mut().open_files.get_mut(&descriptor).unwrap().1 += length;
+                            write_memory(&mut caller, pointer, &chunk);
+                            write_memory(
+                                &mut caller,
+                                parameters[3].unwrap_i32(),
+                                &(length as u32).to_le_bytes(),
+                            );
+                        }
+                        "fd_close" => {
+                            let descriptor = parameters[0].unwrap_i32();
+                            assert!(caller.data_mut().open_files.remove(&descriptor).is_some());
+                            caller.data_mut().closed_descriptors += 1;
+                        }
+                        "runtime_print_message" => {
+                            let bytes = read_memory(
+                                &mut caller,
+                                parameters[0].unwrap_i32(),
+                                parameters[1].unwrap_i32(),
+                            );
+                            caller
+                                .data_mut()
+                                .messages
+                                .push(String::from_utf8(bytes).expect("printed text is UTF-8"));
+                        }
+                        _ => {}
+                    }
+                    Ok(())
+                },
+            )
+            .expect("mock host import should be unique");
+    }
+
+    let mut split_utf8 = vec![b'a'; 8_190];
+    split_utf8.extend_from_slice("é終".as_bytes());
+    let mut binary = (0..70_003).map(|index| index as u8).collect::<Vec<_>>();
+    binary[42] = 0;
+    let mut store = Store::new(
+        &engine,
+        FileTestHost {
+            files: HashMap::from([
+                ("autosplitter/configuration.txt".to_owned(), split_utf8),
+                ("absolute.bin".to_owned(), binary),
+                (
+                    "autosplitter/invalid.txt".to_owned(),
+                    vec![0xf0, 0x28, 0x8c, 0x28],
+                ),
+                ("autosplitter/read-error.bin".to_owned(), vec![42; 9_000]),
+                ("autosplitter/empty.txt".to_owned(), Vec::new()),
+            ]),
+            next_descriptor: 4,
+            ..FileTestHost::default()
+        },
+    );
+    let instance = linker
+        .instantiate(&mut store, &module)
+        .expect("generated module should instantiate against mock WASI");
+    instance
+        .get_typed_func::<(), ()>(&mut store, "_start")
+        .unwrap()
+        .call(&mut store, ())
+        .unwrap();
+    assert!(
+        store.data().open_files.is_empty(),
+        "every opened file is closed"
+    );
+    store.into_data()
+}
+
+#[test]
+fn whole_file_apis_resolve_paths_read_partially_and_validate_utf8() {
+    let host = execute(
+        r#"
+            state "game.exe" {}
+
+            setup {
+                let text = File.readAllText("configuration.txt") else "text-error"
+                print(text.byteLength())
+                print(text.byteAt(8190) else 0)
+
+                let bytes = File.readAllBytes("/mnt/c/absolute.bin") else []
+                print(bytes.length())
+                print(bytes[42])
+                print(bytes[70002])
+
+                let invalid = File.readAllText("invalid.txt") else "invalid"
+                print(invalid)
+                let missing = File.readAllBytes("missing.bin") else []
+                print(missing.length())
+                let incomplete = File.readAllBytes("read-error.bin") else []
+                print(incomplete.length())
+                let empty = File.readAllText("empty.txt") else "empty-error"
+                print(empty.byteLength())
+            }
+        "#,
+    );
+
+    assert_eq!(
+        host.messages,
+        ["8195", "195", "70003", "0", "114", "invalid", "0", "0", "0"]
+    );
+    assert_eq!(
+        host.opened_paths,
+        [
+            "autosplitter/configuration.txt",
+            "absolute.bin",
+            "autosplitter/invalid.txt",
+            "autosplitter/missing.bin",
+            "autosplitter/read-error.bin",
+            "autosplitter/empty.txt",
+        ]
+    );
+    assert_eq!(host.closed_descriptors, 5);
+}
+
+#[test]
+fn filesystem_imports_are_demand_driven() {
+    let imports = |source| {
+        let wasm = splitscript::compile(source).expect("fixture should compile");
+        wasmparser::Parser::new(0)
+            .parse_all(&wasm)
+            .filter_map(Result::ok)
+            .filter_map(|payload| match payload {
+                wasmparser::Payload::ImportSection(section) => Some(section),
+                _ => None,
+            })
+            .flat_map(|section| section.into_imports().filter_map(Result::ok))
+            .map(|import| (import.module.to_owned(), import.name.to_owned()))
+            .collect::<Vec<_>>()
+    };
+    let unused = imports(r#"state "game.exe" {}"#);
+    assert!(
+        !unused
+            .iter()
+            .any(|(module, _)| module == "wasi_snapshot_preview1")
+    );
+
+    let used = imports(
+        r#"
+            state "game.exe" {}
+            setup { File.readAllText("settings.txt") else "" }
+        "#,
+    );
+    for name in [
+        "environ_sizes_get",
+        "environ_get",
+        "fd_prestat_get",
+        "fd_prestat_dir_name",
+        "path_open",
+        "fd_read",
+        "fd_close",
+    ] {
+        assert!(
+            used.iter()
+                .any(|(module, import)| { module == "wasi_snapshot_preview1" && import == name }),
+            "missing demand-driven WASI import `{name}`: {used:?}"
+        );
+    }
+}

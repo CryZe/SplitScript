@@ -2,9 +2,9 @@
 
 SplitScript primarily targets the `env` imports used by the ASL v2 prototype
 and the LiveSplit sandboxed Auto Splitting Runtime. Features that need a
-standardized host facility may also use a narrowly scoped WASI import; the
-monotonic `Instant` clock uses
-`wasi_snapshot_preview1.clock_time_get`.
+standardized host facility use narrowly scoped WASI Preview 1 imports. The
+monotonic `Instant` clock uses `clock_time_get`; whole-file reads use the
+environment, preopen, path-open, descriptor-read, and descriptor-close APIs.
 
 This is an internal compiler/runtime contract, not part of the source-language
 standard library or its editor documentation. `src/abi.rs` is the source of
@@ -42,6 +42,13 @@ describes only the contract that generated modules implement today.
 | `timer_set_variable` | `(i32, i32, i32, i32) -> ()` |
 | `runtime_set_tick_rate` | `(f64) -> ()` |
 | `clock_time_get` | `(i32, i64, i32) -> i32` |
+| `environ_sizes_get` | `(i32, i32) -> i32` |
+| `environ_get` | `(i32, i32) -> i32` |
+| `fd_prestat_get` | `(i32, i32) -> i32` |
+| `fd_prestat_dir_name` | `(i32, i32, i32) -> i32` |
+| `path_open` | `(i32, i32, i32, i32, i32, i64, i64, i32, i32) -> i32` |
+| `fd_read` | `(i32, i32, i32, i32) -> i32` |
+| `fd_close` | `(i32) -> i32` |
 | `process_attach` | `(i32, i32) -> i64` |
 | `process_attach_by_pid` | `(i64) -> i64` |
 | `process_list_by_name` | `(i32, i32, i32, i32) -> i32` |
@@ -83,6 +90,15 @@ the small lifecycle baseline; optional facilities such as process reads,
 settings, logging, and the monotonic clock are imported only when reachable
 source needs them. Import identities and ordering remain deterministic through
 the ABI catalog.
+
+`File.readAllBytes` and `File.readAllText` only request read rights. Absolute
+paths use the runtime's portable WASI namespace, such as `/mnt/c/...` on
+Windows. Relative paths are resolved against the directory of the loaded
+autosplitter using the runtime-provided `SCRIPT_PATH` environment entry, then
+matched to the longest applicable preopened directory. Every successfully
+opened descriptor is closed before the intrinsic returns, including read-error
+paths. `readAllText` validates strict UTF-8 after the complete read; it does not
+perform lossy replacement or normalize the contents.
 
 Ordinary scripts import `process_attach(name)` and preserve the host's efficient
 single-candidate attachment path. A script declaring `selectProcess` instead

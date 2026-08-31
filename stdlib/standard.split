@@ -4399,6 +4399,67 @@ intrinsic type String {
     ) -> String;
 }
 
+/// Provides whole-file, read-only filesystem operations.
+///
+/// These associated functions open, consume, and close a file within one call;
+/// no file handle escapes into SplitScript. Paths use the runtime's portable
+/// WASI spelling. Absolute paths commonly begin with `/mnt`, while relative
+/// paths resolve beside the loaded autosplitter when its path is available.
+///
+/// # Example
+///
+/// Read a selected data file
+///
+/// ```splitscript
+/// let bytes = File.readAllBytes("/mnt/c/Games/example/data.bin")?
+/// print(`Loaded {bytes.length()} bytes`)
+/// ```
+@representation(scalar, i32)
+@valueUsage()
+intrinsic type File {
+    /// Reads an entire file as raw bytes.
+    ///
+    /// The file is opened read-only and closed before this function returns.
+    /// An empty file produces an empty array. Missing files, directories,
+    /// inaccessible paths, and interrupted reads return an error. Repeated
+    /// calls always consult the filesystem and are not cached.
+    ///
+    /// # Example
+    ///
+    /// Load a binary lookup table
+    ///
+    /// ```splitscript
+    /// let table = File.readAllBytes("tables/rooms.bin")?
+    /// ```
+    @mustUse("The file contents or error must be used.")
+    @intrinsic(FileReadAllBytes)
+    static fn readAllBytes(
+        /// Absolute portable WASI path, or a path relative to the autosplitter.
+        path: String,
+    ) -> [u8]!;
+
+    /// Reads an entire UTF-8 text file.
+    ///
+    /// This is the text counterpart to [`File.readAllBytes`]. The bytes must
+    /// contain valid UTF-8; malformed text returns an error rather than being
+    /// replaced lossily. The result preserves a UTF-8 BOM, line endings, and
+    /// embedded NUL bytes exactly as text.
+    ///
+    /// # Example
+    ///
+    /// Load adjacent configuration text
+    ///
+    /// ```splitscript
+    /// let configuration = File.readAllText("configuration.json")?
+    /// ```
+    @mustUse("The file text or error must be used.")
+    @intrinsic(FileReadAllText)
+    static fn readAllText(
+        /// Absolute portable WASI path, or a path relative to the autosplitter.
+        path: String,
+    ) -> String!;
+}
+
 /// Stores a compiled process-memory signature.
 ///
 /// Signature values are created by signature literals and consumed by scanning operations.

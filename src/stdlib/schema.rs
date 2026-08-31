@@ -63,6 +63,7 @@ pub enum Effect {
     MutatesValue,
     ReadsTimer,
     ReadsRuntime,
+    ReadsFileSystem,
     ReadsProcess,
     RequiresAttachedProcess,
     RequiresStateSnapshots,
@@ -74,12 +75,13 @@ pub enum Effect {
 }
 
 impl Effect {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 14] = [
         Self::Pure,
         Self::Allocates,
         Self::MutatesValue,
         Self::ReadsTimer,
         Self::ReadsRuntime,
+        Self::ReadsFileSystem,
         Self::ReadsProcess,
         Self::RequiresAttachedProcess,
         Self::RequiresStateSnapshots,
@@ -101,6 +103,7 @@ impl Effect {
             Self::MutatesValue => "mutates the receiver",
             Self::ReadsTimer => "reads timer state",
             Self::ReadsRuntime => "reads runtime state",
+            Self::ReadsFileSystem => "reads the filesystem",
             Self::ReadsProcess => "reads process memory",
             Self::RequiresAttachedProcess => "requires an attached process",
             Self::RequiresStateSnapshots => "requires state snapshots",

@@ -4351,6 +4351,31 @@ fn compile_expr_unconverted(
                     context.abi.function(AbiImportId::RuntimeSetTickRate),
                 ));
             }
+            IntrinsicId::FileReadAllBytes | IntrinsicId::FileReadAllText => {
+                compile_expr(function, args[0], context);
+                let (helper, message) = if builtin == IntrinsicId::FileReadAllBytes {
+                    (
+                        RuntimeHelperId::FileReadAllBytes,
+                        "file could not be read completely",
+                    )
+                } else {
+                    (
+                        RuntimeHelperId::FileReadAllText,
+                        "file could not be read completely as UTF-8 text",
+                    )
+                };
+                function.instruction(&Instruction::Call(context.runtime_helpers.function(helper)));
+                let Type::Result(result) = context.expression_type(expression) else {
+                    unreachable!("whole-file reads return Result values")
+                };
+                emit_status_result(
+                    function,
+                    expression,
+                    result_value_type(result, context.semantics),
+                    message,
+                    context,
+                );
+            }
             IntrinsicId::InstantNow => {
                 let destination = context.abi_read.destination(8);
                 emit_monotonic_nanoseconds(function, context.abi, destination);

@@ -47,6 +47,7 @@ pub(super) enum HelperValueType {
     Standard(StdlibTypeId),
     StringArray,
     I64Array,
+    U8Array,
     StringResult,
     OptionalStringResult,
 }
@@ -86,7 +87,7 @@ macro_rules! helper {
 
 use HelperValueType::{
     F32, F64, I32, I64, I64Array, OptionalStringResult, Standard, String as StringValue,
-    StringArray, StringResult,
+    StringArray, StringResult, U8Array,
 };
 
 /// Canonical function-index and body order. Dependencies always occur before
@@ -123,6 +124,11 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(ReadRelative32, (I64, I64) -> (I64), deps [], imports [ProcessRead], build_read_relative32),
     helper!(ScanRelative32TargetRange, (I64, I64, I64, I32, I32, I32, I64, I64) -> (I64), deps [ScanProcessRange, ReadRelative32], imports [], build_scan_relative32_target_range),
     helper!(StringFromMemory, (I32, I32) -> (StringValue), deps [], imports [], build_string_from_memory),
+    helper!(FileOpenReadOnly, (StringValue) -> (I32), deps [], imports [WasiEnvironSizesGet, WasiEnvironGet, WasiFdPrestatGet, WasiFdPrestatDirName, WasiPathOpen], build_file_open_read_only),
+    helper!(FileReadAllStorage, (StringValue) -> (I32, StringValue, I32), deps [FileOpenReadOnly], imports [WasiFdRead, WasiFdClose], build_file_read_all_storage),
+    helper!(FileReadAllBytes, (StringValue) -> (I32, U8Array), deps [FileReadAllStorage], imports [], build_file_read_all_bytes),
+    helper!(Utf8StringFromStorage, (StringValue, I32) -> (I32, StringValue), deps [], imports [], build_utf8_string_from_storage),
+    helper!(FileReadAllText, (StringValue) -> (I32, StringValue), deps [FileReadAllStorage, Utf8StringFromStorage], imports [], build_file_read_all_text),
     helper!(FormatF32, (F32) -> (StringValue), deps [ZmijDecimalF32, StringFromMemory], imports [], build_format_f32),
     helper!(FormatF64, (F64) -> (StringValue), deps [ZmijDecimalF64, StringFromMemory], imports [], build_format_f64),
     helper!(Utf16StringFromMemory, (I32) -> (StringValue), deps [], imports [], build_utf16_string_from_memory),
@@ -189,6 +195,7 @@ pub(super) fn validate_intrinsic_effects() -> Vec<String> {
         for effect in [
             Effect::ReadsTimer,
             Effect::ReadsRuntime,
+            Effect::ReadsFileSystem,
             Effect::ReadsProcess,
             Effect::WritesCurrentState,
             Effect::WritesTimer,
@@ -239,6 +246,7 @@ fn collect_abi_effects(import: AbiImportId, effects: &mut EffectSet, errors: &mu
         let mapped = match effect {
             AbiEffect::ReadsTimer => Some(Effect::ReadsTimer),
             AbiEffect::ReadsRuntime => Some(Effect::ReadsRuntime),
+            AbiEffect::ReadsFileSystem => Some(Effect::ReadsFileSystem),
             AbiEffect::WritesTimer => Some(Effect::WritesTimer),
             AbiEffect::WritesRuntime => Some(Effect::WritesRuntime),
             AbiEffect::ReadsProcess => Some(Effect::ReadsProcess),
@@ -273,10 +281,11 @@ pub(super) fn resolve_signature(
         HelperValueType::OptionalStringResult => {
             gc.val_type(managed_string_result_type(semantics, true))
         }
-        HelperValueType::StringArray | HelperValueType::I64Array => gc.val_type(Type::Array(
-            required_array_layout(ty, arrays, semantics)
-                .expect("runtime array helper has a reachable layout"),
-        )),
+        HelperValueType::StringArray | HelperValueType::I64Array | HelperValueType::U8Array => gc
+            .val_type(Type::Array(
+                required_array_layout(ty, arrays, semantics)
+                    .expect("runtime array helper has a reachable layout"),
+            )),
     };
     (
         signature.params.iter().copied().map(resolve).collect(),
@@ -308,6 +317,7 @@ fn required_array_layout(
     let element = match ty {
         HelperValueType::StringArray => Type::Standard(StdlibTypeId::String),
         HelperValueType::I64Array => Type::I64,
+        HelperValueType::U8Array => Type::U8,
         HelperValueType::I32
         | HelperValueType::I64
         | HelperValueType::F32

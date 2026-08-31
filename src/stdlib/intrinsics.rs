@@ -17,6 +17,8 @@ macro_rules! trusted_intrinsics {
             NextTick,
             FutureRace,
             FutureTimeout,
+            FileReadAllBytes,
+            FileReadAllText,
             BoolNot,
             IntegerBitNot,
             NumericSwapBytes,

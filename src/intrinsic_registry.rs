@@ -67,6 +67,11 @@ pub(crate) enum RuntimeHelperId {
     ReadRelative32,
     ScanRelative32TargetRange,
     StringFromMemory,
+    FileOpenReadOnly,
+    FileReadAllStorage,
+    FileReadAllBytes,
+    Utf8StringFromStorage,
+    FileReadAllText,
     FormatF32,
     FormatF64,
     Utf16StringFromMemory,
@@ -527,6 +532,8 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
             scratch(ScratchType::Core(CoreTypeId::I32), 1)
         }
         IntrinsicId::ProcessFollow
+        | IntrinsicId::FileReadAllBytes
+        | IntrinsicId::FileReadAllText
         | IntrinsicId::ProcessReadRelative32
         | IntrinsicId::ProcessReadUtf8
         | IntrinsicId::ProcessReadUtf16Le
@@ -567,6 +574,8 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::InstantNow | IntrinsicId::FutureTimeout => {
             &[HostImport(Host::WasiClockTimeGet)]
         }
+        IntrinsicId::FileReadAllBytes => &[Helper(Runtime::FileReadAllBytes)],
+        IntrinsicId::FileReadAllText => &[Helper(Runtime::FileReadAllText)],
         IntrinsicId::TimerState => &[HostImport(Host::TimerGetState)],
         IntrinsicId::TimerCurrentSplitIndex => &[HostImport(Host::TimerCurrentSplitIndex)],
         IntrinsicId::TimerSegmentWasSplit => &[HostImport(Host::TimerSegmentWasSplit)],
@@ -715,6 +724,8 @@ const NEXT_TICK: EffectSet = EffectSet::one(Effect::RequiresAttachedProcess)
     .with(Effect::Suspends)
     .with(Effect::CancelsOnProcessClose);
 const TIMEOUT: EffectSet = NEXT_TICK.with(Effect::ReadsRuntime);
+const FILESYSTEM_READ_ALLOCATES: EffectSet =
+    EffectSet::one(Effect::ReadsFileSystem).with(Effect::Allocates);
 
 const NONE: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::None);
 const NEVER: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Never);
@@ -812,6 +823,10 @@ const I64_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
     arguments: &[I64],
 };
+const U8_ARRAY: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Array,
+    arguments: &[U8],
+};
 const U64_OPTION: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Option,
     arguments: &[U64],
@@ -851,6 +866,10 @@ const ADDRESS_RESULT: ContractTypeRef = ContractTypeRef::Application {
 const STRING_RESULT: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Result,
     arguments: &[STRING],
+};
+const U8_ARRAY_RESULT: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Result,
+    arguments: &[U8_ARRAY],
 };
 const STRING_ARRAY_RESULT: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Result,
@@ -1011,6 +1030,32 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             TIMEOUT,
             OnAttach,
             Suspension
+        ),
+        IntrinsicId::FileReadAllBytes => contract!(
+            FileReadAllBytes,
+            Function,
+            signature(
+                NO_TYPE_PARAMETERS,
+                None,
+                params![value(STRING)],
+                U8_ARRAY_RESULT,
+            ),
+            FILESYSTEM_READ_ALLOCATES,
+            Everywhere,
+            Retryable
+        ),
+        IntrinsicId::FileReadAllText => contract!(
+            FileReadAllText,
+            Function,
+            signature(
+                NO_TYPE_PARAMETERS,
+                None,
+                params![value(STRING)],
+                STRING_RESULT,
+            ),
+            FILESYSTEM_READ_ALLOCATES,
+            Everywhere,
+            Retryable
         ),
         IntrinsicId::NumericMin => contract!(
             NumericMin,

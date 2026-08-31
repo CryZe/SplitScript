@@ -607,14 +607,15 @@ const fn effect_order(effect: Effect) -> u8 {
         Effect::MutatesValue => 2,
         Effect::ReadsTimer => 3,
         Effect::ReadsRuntime => 4,
-        Effect::ReadsProcess => 5,
-        Effect::RequiresAttachedProcess => 6,
-        Effect::RequiresStateSnapshots => 7,
-        Effect::WritesCurrentState => 8,
-        Effect::Suspends => 9,
-        Effect::CancelsOnProcessClose => 10,
-        Effect::WritesTimer => 11,
-        Effect::WritesRuntime => 12,
+        Effect::ReadsFileSystem => 5,
+        Effect::ReadsProcess => 6,
+        Effect::RequiresAttachedProcess => 7,
+        Effect::RequiresStateSnapshots => 8,
+        Effect::WritesCurrentState => 9,
+        Effect::Suspends => 10,
+        Effect::CancelsOnProcessClose => 11,
+        Effect::WritesTimer => 12,
+        Effect::WritesRuntime => 13,
     }
 }
 

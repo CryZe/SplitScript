@@ -20,6 +20,7 @@ use super::{GcLayout, RuntimeHelperPlan, SettingStorage, Type, settings, try_arr
 
 mod decimal_conversion;
 mod equality;
+mod file;
 pub(super) mod float_format;
 mod float_parse;
 mod gba;
@@ -543,6 +544,47 @@ pub(super) fn build_genesis_read_memory(inputs: &RuntimeHelperInputs<'_>) -> Fun
 
 pub(super) fn build_string_from_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {
     settings::compile_string_from_memory(inputs.gc)
+}
+
+pub(super) fn build_file_open_read_only(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    file::compile_open_read_only(inputs.abi, inputs.gc, inputs.memory.scratch())
+}
+
+pub(super) fn build_file_read_all_storage(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    file::compile_read_all_storage(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::FileOpenReadOnly),
+        inputs.gc,
+        inputs.memory.scratch(),
+    )
+}
+
+pub(super) fn build_file_read_all_bytes(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    let array = inputs
+        .arrays
+        .iter()
+        .find(|array| try_array_element_type(array.id, inputs.semantics) == Some(Type::U8))
+        .expect("File.readAllBytes requires a reachable [u8] layout")
+        .id;
+    let storage = super::array_value::storage_id(array, inputs.arrays, inputs.semantics);
+    file::compile_read_all_bytes(
+        inputs.plan.function(RuntimeHelperId::FileReadAllStorage),
+        array,
+        storage,
+        inputs.gc,
+    )
+}
+
+pub(super) fn build_utf8_string_from_storage(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    file::compile_utf8_string_from_storage(inputs.gc)
+}
+
+pub(super) fn build_file_read_all_text(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    file::compile_read_all_text(
+        inputs.plan.function(RuntimeHelperId::FileReadAllStorage),
+        inputs.plan.function(RuntimeHelperId::Utf8StringFromStorage),
+        inputs.gc,
+    )
 }
 
 pub(super) fn build_refresh_settings(inputs: &RuntimeHelperInputs<'_>) -> Function {

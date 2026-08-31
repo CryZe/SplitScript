@@ -1,5 +1,19 @@
 # SplitScript roadmap
 
+## 2026-08-31: interactive query latency and heap baselines
+
+- Expanded the release tooling runner from one generated hover probe to small,
+  maintained Lunistice, and generated-large fixtures covering diagnostics,
+  root and member completion, hover, semantic tokens, repeated full-sync edits,
+  a warm multi-query sequence, and in-process language-service recovery.
+- Added allocator-backed retained and peak heap measurements without another
+  benchmark dependency. The runner separates repeated-query growth from the
+  complete live cache retained by each query shape.
+- Recorded p50/p95 and heap baselines with explicit interaction targets. Member
+  completion is the first measured bottleneck: it reaches 166 ms on the focused
+  source, 262 ms on Lunistice, and 413 ms on the 500-function fixture, while
+  diagnostics remain within the initial target.
+
 ## 2026-08-30: deduplicated runtime verification artifacts
 
 - Separated `cargo xtask check` artifact definitions from runtime scenarios.

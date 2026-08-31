@@ -713,12 +713,6 @@ concepts rather than maintaining a parallel inventory.
 
 ## P1 — measure and improve interactive compiler queries
 
-- [ ] Establish repeatable latency and retained-heap benchmarks before an
-  incremental-analysis redesign. Measure `didChange` to diagnostics, root and
-  member completion, hover, semantic tokens, repeated edits, worker recovery,
-  and a warm multi-query sequence on representative small, medium, and large
-  scripts. Record p95 latency and retained-byte targets so optimization has a
-  finish line.
 - [ ] Build one request-scoped completion context from the existing recovered
   `SourceDocument`, token stream, syntax, cursor, and lazy semantic facts.
   Remove repeated `lex_lossless` calls, use the current database before a
@@ -1165,7 +1159,7 @@ remaining work is product hardening and distribution.
    canonical exact reference. Then publish renderer-produced static Markdown
    and reorganize lifecycle, state-form, failure/async, string-unit, and
    migration navigation around user tasks.
-3. Establish editor latency/heap benchmarks, then remove repeated completion
+3. Use the recorded editor latency/heap baselines to remove repeated completion
    lexing and linear cursor scans, coalesce superseded diagnostics, and share
    immutable query-stage products according to measured bottlenecks.
 4. Add profile-aware unused analysis for declarations whose only consumers are

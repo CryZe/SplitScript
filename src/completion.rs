@@ -23,13 +23,14 @@ use crate::{
     effects::{OperationAnalysis, action_has_attached_process, action_has_state_snapshots},
     hir::ExpressionResolution,
     language::{LanguageCatalog, LanguageItem, LanguageItemId, LanguageItemKind},
-    lexer::{self, TokenKind},
+    lexer::TokenKind,
     semantic::ResolvedCall,
     stdlib::{
         ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibItemId, StdlibNamespace,
         StdlibSymbolId, StdlibTypeConstructorId, StdlibTypeId, TypeRef,
     },
     stdlib_semantic::StandardLibrarySemanticExt,
+    syntax::SourceDocument,
     types::TypeKind,
     visit::{self, Visitor},
 };
@@ -77,41 +78,78 @@ struct ContextAvailability {
     process_selection: bool,
 }
 
+/// Immutable lexical and syntactic facts shared by every completion strategy
+/// for one cursor request. The lossless parser already owns this token stream;
+/// keeping one indexed view prevents each grammar-specific strategy from
+/// lexing and linearly rebuilding it independently.
+pub(super) struct CompletionRequest<'a> {
+    pub(super) source: &'a str,
+    pub(super) syntax: &'a Program,
+    pub(super) tokens: Vec<&'a crate::lexer::Token>,
+    pub(super) offset: usize,
+    pub(super) replacement: Span,
+}
+
+impl<'a> CompletionRequest<'a> {
+    fn new(document: &'a SourceDocument, syntax: &'a Program, offset: usize) -> Self {
+        let source = document.source();
+        let offset = floor_char_boundary(source, offset.min(source.len()));
+        Self {
+            source,
+            syntax,
+            tokens: document
+                .tokens()
+                .filter(|token| !matches!(token.kind, TokenKind::Eof))
+                .collect(),
+            offset,
+            replacement: identifier_span(source, offset),
+        }
+    }
+}
+
 pub(crate) fn complete(
     database: &mut CompilerDatabase,
     offset: usize,
 ) -> SemanticQueryResult<CompletionList> {
-    let source = database.source().to_owned();
     let compiler_context = database.context();
     let standard_library = compiler_context.standard_library();
-    let offset = floor_char_boundary(&source, offset.min(source.len()));
-    let syntax = database.recovering_parse()?.syntax().clone();
-    if let Some(completions) = complete_setting_key(&source, &syntax, offset) {
+    // Keep the revision's shared recovery product alive for the entire request.
+    // Completion only borrows its source and syntax; cloning the whole program
+    // here used to make every query own an unnecessary deep syntax copy.
+    let recovered = database.recovering_parse()?;
+    let request = CompletionRequest::new(recovered.source_document(), recovered.syntax(), offset);
+    let source = request.source;
+    let syntax = request.syntax;
+    let offset = request.offset;
+    if let Some(completions) = complete_setting_key(&request) {
         Ok(completions)
-    } else if let Some(completions) = complete_tick_rate_field(&source, offset) {
+    } else if let Some(completions) = complete_tick_rate_field(&request) {
         Ok(completions)
-    } else if let Some(completions) = complete_settings_dsl(&source, offset) {
+    } else if let Some(completions) = complete_settings_dsl(&request) {
         Ok(completions)
-    } else if let Some(completions) = complete_state_header(&source, offset, &standard_library) {
+    } else if let Some(completions) = complete_state_header(&request, &standard_library) {
         Ok(completions)
-    } else if let Some(completions) = complete_state_decoder(&source, offset) {
+    } else if let Some(completions) = complete_state_decoder(source, offset) {
         Ok(completions)
-    } else if let Some(completions) = complete_managed_field_modifier(&source, &syntax, offset) {
-        Ok(completions)
-    } else if let Some(completions) =
-        complete_explicit_type_argument(&source, &syntax, offset, &standard_library)
-    {
-        Ok(completions)
-    } else if let Some(completions) =
-        complete_type_position(&source, &syntax, offset, &standard_library)
-    {
+    } else if let Some(completions) = complete_managed_field_modifier(&request) {
         Ok(completions)
     } else if let Some(completions) =
-        complete_state_dsl(&source, &syntax, offset, &standard_library)
+        complete_explicit_type_argument(source, syntax, offset, &standard_library)
     {
         Ok(completions)
-    } else if let Some(context) = member_context(&source, offset) {
-        Ok(complete_member(&source, &syntax, context, compiler_context))
+    } else if let Some(completions) = complete_type_position(&request, &standard_library) {
+        Ok(completions)
+    } else if let Some(completions) = complete_state_dsl(&request, &standard_library) {
+        Ok(completions)
+    } else if let Some(context) = member_context(&request) {
+        Ok(complete_member(
+            database,
+            source,
+            syntax,
+            &request.tokens,
+            context,
+            compiler_context,
+        ))
     } else {
         let action = syntax
             .actions
@@ -122,7 +160,7 @@ pub(crate) fn complete(
             .functions
             .iter()
             .any(|function| contains_offset(function.body.span, offset));
-        let top_level = action.is_none() && is_top_level_offset(&syntax, offset);
+        let top_level = action.is_none() && is_top_level_offset(syntax, offset);
         let has_attached_process = action.is_none_or(action_has_attached_process);
         let has_state_snapshots = action
             .map(action_has_state_snapshots)
@@ -131,15 +169,15 @@ pub(crate) fn complete(
             .then(|| {
                 completion_operation_analysis(
                     database,
-                    &source,
-                    identifier_span(&source, offset),
+                    source,
+                    identifier_span(source, offset),
                     compiler_context,
                 )
             })
             .flatten();
         Ok(complete_root(
-            &source,
-            &syntax,
+            source,
+            syntax,
             offset,
             standard_library,
             ContextAvailability {
@@ -153,12 +191,11 @@ pub(crate) fn complete(
     }
 }
 
-fn complete_managed_field_modifier(
-    source: &str,
-    syntax: &Program,
-    offset: usize,
-) -> Option<CompletionList> {
-    let replacement = identifier_span(source, offset);
+fn complete_managed_field_modifier(request: &CompletionRequest<'_>) -> Option<CompletionList> {
+    let source = request.source;
+    let syntax = request.syntax;
+    let offset = request.offset;
+    let replacement = request.replacement;
     if !syntax
         .managed_class_declarations()
         .into_iter()
@@ -170,9 +207,12 @@ fn complete_managed_field_modifier(
     let segment_start = source[..replacement.start]
         .rfind(['{', '}', ';'])
         .map_or(0, |index| index + 1);
-    let fragment = &source[segment_start..replacement.start];
-    let lexed = lexer::lex_lossless(fragment).ok()?;
-    let tokens = lexed.tokens().collect::<Vec<_>>();
+    let tokens = request
+        .tokens
+        .iter()
+        .copied()
+        .filter(|token| segment_start <= token.span.start && token.span.end <= replacement.start)
+        .collect::<Vec<_>>();
     let mut identifiers = tokens.iter().filter_map(|token| match &token.kind {
         TokenKind::Ident(name) => Some(name.as_str()),
         _ => None,
@@ -200,9 +240,11 @@ fn complete_managed_field_modifier(
     Some(builder.finish())
 }
 
-fn complete_setting_key(source: &str, syntax: &Program, offset: usize) -> Option<CompletionList> {
-    let lexed = lexer::lex_lossless(source).ok()?;
-    let tokens = lexed.tokens().collect::<Vec<_>>();
+fn complete_setting_key(request: &CompletionRequest<'_>) -> Option<CompletionList> {
+    let source = request.source;
+    let syntax = request.syntax;
+    let offset = request.offset;
+    let tokens = &request.tokens;
     let (index, token) = tokens.iter().enumerate().find(|(_, token)| {
         matches!(token.kind, TokenKind::String(_))
             && token.span.start < offset
@@ -282,10 +324,11 @@ fn escape_string_contents(value: &str) -> String {
     escaped
 }
 
-fn complete_tick_rate_field(source: &str, offset: usize) -> Option<CompletionList> {
-    let replacement = identifier_span(source, offset);
-    let lexed = lexer::lex_lossless(source).ok()?;
-    let tokens = lexed.tokens().collect::<Vec<_>>();
+fn complete_tick_rate_field(request: &CompletionRequest<'_>) -> Option<CompletionList> {
+    let source = request.source;
+    let offset = request.offset;
+    let replacement = request.replacement;
+    let tokens = &request.tokens;
 
     let (open, close) = tokens.iter().enumerate().find_map(|(index, token)| {
         if !matches!(&token.kind, TokenKind::Ident(name) if name == "tickRate") {
@@ -296,7 +339,7 @@ fn complete_tick_rate_field(source: &str, offset: usize) -> Option<CompletionLis
             .position(|token| matches!(token.kind, TokenKind::LBrace))?
             + index
             + 1;
-        let close = matching_closing_brace(&tokens, open).unwrap_or(tokens.len());
+        let close = matching_closing_brace(tokens, open).unwrap_or(tokens.len());
         let closing_start = tokens
             .get(close)
             .map_or(source.len(), |token| token.span.start);
@@ -458,6 +501,7 @@ fn complete_state_decoder(source: &str, offset: usize) -> Option<CompletionList>
 #[derive(Debug, Clone)]
 struct MemberContext {
     receiver_path: Vec<String>,
+    receiver_offset: usize,
     dot: usize,
     prefix: String,
     replacement: Span,
@@ -702,8 +746,10 @@ fn is_top_level_offset(syntax: &Program, offset: usize) -> bool {
 }
 
 fn complete_member(
+    database: &mut CompilerDatabase,
     source: &str,
     syntax: &Program,
+    tokens: &[&crate::lexer::Token],
     context: MemberContext,
     compiler_context: crate::CompilerContext,
 ) -> CompletionList {
@@ -726,7 +772,7 @@ fn complete_member(
                         "state field",
                     ));
                 }
-                if let Some(layout) = active_state_layout(syntax, source, context.dot) {
+                if let Some(layout) = active_state_layout(syntax, source, tokens, context.dot) {
                     for field in &layout.fields {
                         if !state.is_common_field(&field.name) {
                             builder.add(simple_completion(
@@ -902,21 +948,19 @@ fn complete_member(
         add_standard_library_path_members(&mut builder, &path, &standard_library);
     }
 
-    if let Some((receiver, constraints, probe_syntax)) =
-        infer_receiver(source, &context, compiler_context)
-    {
+    if let Some(receiver) = infer_receiver(database, source, tokens, &context, compiler_context) {
         add_inferred_fields(
             &mut builder,
-            &probe_syntax,
-            &receiver,
+            syntax,
+            &receiver.ty,
             &standard_library,
             &active_layout_facts,
         );
         add_inferred_methods(
             &mut builder,
-            &probe_syntax,
-            &receiver,
-            &constraints,
+            syntax,
+            &receiver.ty,
+            &receiver.constraints,
             &standard_library,
         );
     }
@@ -1726,6 +1770,7 @@ fn add_constructor_fields(
 fn active_state_layout<'a>(
     syntax: &'a Program,
     source: &str,
+    tokens: &[&crate::lexer::Token],
     offset: usize,
 ) -> Option<&'a crate::ast::StateLayoutDecl> {
     struct Finder<'a> {
@@ -1785,12 +1830,12 @@ fn active_state_layout<'a>(
         .filter(|_| {
             finder
                 .match_start
-                .is_some_and(|start| cursor_is_inside_braces(source, start, offset))
+                .is_some_and(|start| cursor_is_inside_braces(tokens, start, offset))
         })
         .or_else(|| {
             let before = source.get(..offset)?;
             let match_start = before.rfind("match layout")?;
-            if !cursor_is_inside_braces(source, match_start, offset) {
+            if !cursor_is_inside_braces(tokens, match_start, offset) {
                 return None;
             }
             let state = syntax.state.as_ref()?;
@@ -2099,14 +2144,12 @@ fn completion_expression_path(expression: &Expr) -> Option<Vec<&str>> {
     }
 }
 
-fn cursor_is_inside_braces(source: &str, start: usize, offset: usize) -> bool {
-    let Ok(lexed) = lexer::lex_lossless(source) else {
-        return false;
-    };
-    let tokens = lexed.tokens().collect::<Vec<_>>();
-    let Some(open) = tokens
+fn cursor_is_inside_braces(tokens: &[&crate::lexer::Token], start: usize, offset: usize) -> bool {
+    let search_start = tokens.partition_point(|token| token.span.start < start);
+    let Some(open) = tokens[search_start..]
         .iter()
-        .position(|token| token.span.start >= start && matches!(token.kind, TokenKind::LBrace))
+        .position(|token| matches!(token.kind, TokenKind::LBrace))
+        .map(|relative| search_start + relative)
     else {
         return false;
     };
@@ -2265,35 +2308,41 @@ fn syntax_receiver_matches(
     }
 }
 
+#[derive(Debug, Clone)]
+struct ReceiverFacts {
+    ty: TypeKind,
+    constraints: Vec<StdlibCapabilityId>,
+    recovered: bool,
+}
+
 fn infer_receiver(
+    database: &mut CompilerDatabase,
     source: &str,
+    tokens: &[&crate::lexer::Token],
     context: &MemberContext,
     compiler_context: crate::CompilerContext,
-) -> Option<(TypeKind, Vec<StdlibCapabilityId>, Program)> {
-    let receiver_offset = context.dot.checked_sub(1)?;
+) -> Option<ReceiverFacts> {
+    let receiver_offset = context.receiver_offset;
     // When completing `receiver.method`, analysis at the end of `receiver`
     // can resolve the surrounding call. Its recorded receiver type is the
     // type whose methods we need. For `receiver.method().`, however, the
     // completed call is itself the new receiver, so its result type is the
     // correct one. Non-path receivers have no textual receiver segments.
     let use_resolved_call_receiver = !context.receiver_path.is_empty();
-    let direct = analyze_receiver_source(
-        source.to_owned(),
-        receiver_offset,
-        compiler_context.clone(),
-        use_resolved_call_receiver,
-    );
-    if let Some((receiver, constraints, syntax, false)) = direct.as_ref() {
-        return Some((receiver.clone(), constraints.clone(), syntax.clone()));
+    // Reuse the current revision before considering a repaired source. In LSP
+    // use this database normally already contains the diagnostic pass, so a
+    // second database used to repeat the complete semantic pipeline merely to
+    // discover one receiver type.
+    let direct = analyze_receiver_database(database, receiver_offset, use_resolved_call_receiver);
+    if direct.as_ref().is_some_and(|facts| !facts.recovered) {
+        return direct;
     }
 
     let mut probe_source = String::with_capacity(source.len());
     probe_source.push_str(&source[..context.dot]);
-    let suffix_start = completion_probe_suffix_end(source, context.replacement.end);
+    let suffix_start = completion_probe_suffix_end(tokens, context.replacement.end);
     probe_source.push_str(&source[suffix_start..]);
-    analyze_receiver_source(probe_source, receiver_offset, compiler_context, false)
-        .or(direct)
-        .map(|(receiver, constraints, syntax, _)| (receiver, constraints, syntax))
+    analyze_receiver_source(probe_source, receiver_offset, compiler_context, false).or(direct)
 }
 
 fn analyze_receiver_source(
@@ -2301,8 +2350,16 @@ fn analyze_receiver_source(
     receiver_offset: usize,
     compiler_context: crate::CompilerContext,
     use_resolved_call_receiver: bool,
-) -> Option<(TypeKind, Vec<StdlibCapabilityId>, Program, bool)> {
+) -> Option<ReceiverFacts> {
     let mut database = CompilerDatabase::with_context(compiler_context, source);
+    analyze_receiver_database(&mut database, receiver_offset, use_resolved_call_receiver)
+}
+
+fn analyze_receiver_database(
+    database: &mut CompilerDatabase,
+    receiver_offset: usize,
+    use_resolved_call_receiver: bool,
+) -> Option<ReceiverFacts> {
     let analysis = database.analysis_at(receiver_offset).ok()??;
     let snapshot = database.semantic_snapshot().ok()?;
     let recovered = snapshot.checked().is_none();
@@ -2325,9 +2382,12 @@ fn analyze_receiver_source(
         .semantics()
         .generic_parameter_constraints(receiver_type)
         .to_vec();
-    let receiver = snapshot.semantics().types().kind(receiver_type).clone();
-    let syntax = database.recovering_parse().ok()?.syntax().clone();
-    Some((receiver, constraints, syntax, recovered))
+    let ty = snapshot.semantics().types().kind(receiver_type).clone();
+    Some(ReceiverFacts {
+        ty,
+        constraints,
+        recovered,
+    })
 }
 
 /// Removes an already-written call and propagation suffix from a completion
@@ -2336,17 +2396,11 @@ fn analyze_receiver_source(
 /// expression (or fail to type it entirely). The probe needs the type of the
 /// expression before the member dot, regardless of whether the member text is
 /// partial or already followed by its postfix syntax.
-fn completion_probe_suffix_end(source: &str, identifier_end: usize) -> usize {
-    let Ok(lexed) = lexer::lex_lossless(source) else {
+fn completion_probe_suffix_end(tokens: &[&crate::lexer::Token], identifier_end: usize) -> usize {
+    let mut index = tokens.partition_point(|token| token.span.start < identifier_end);
+    if index == tokens.len() {
         return identifier_end;
-    };
-    let tokens = lexed.tokens().collect::<Vec<_>>();
-    let Some(mut index) = tokens
-        .iter()
-        .position(|token| token.span.start >= identifier_end)
-    else {
-        return identifier_end;
-    };
+    }
     if !matches!(tokens[index].kind, TokenKind::LParen) {
         return identifier_end;
     }
@@ -2381,29 +2435,43 @@ fn completion_probe_suffix_end(source: &str, identifier_end: usize) -> usize {
     end
 }
 
-fn member_context(source: &str, offset: usize) -> Option<MemberContext> {
-    let replacement = identifier_span(source, offset);
-    let dot = replacement.start.checked_sub(1)?;
-    if source.as_bytes().get(dot) != Some(&b'.') {
+fn member_context(request: &CompletionRequest<'_>) -> Option<MemberContext> {
+    let source = request.source;
+    let offset = request.offset;
+    let replacement = request.replacement;
+    let dot_index = request
+        .tokens
+        .partition_point(|token| token.span.end <= replacement.start)
+        .checked_sub(1)?;
+    let dot_token = request.tokens[dot_index];
+    if !matches!(dot_token.kind, TokenKind::Dot) {
         return None;
     }
-    let mut receiver_start = dot;
-    while receiver_start > 0 {
-        let byte = source.as_bytes()[receiver_start - 1];
-        if is_identifier_byte(byte) || byte == b'.' {
-            receiver_start -= 1;
-        } else {
+    let receiver = request.tokens.get(dot_index.checked_sub(1)?)?;
+    if matches!(receiver.kind, TokenKind::Eof) || receiver.span.start == receiver.span.end {
+        return None;
+    }
+
+    let mut receiver_path = Vec::new();
+    let mut index = dot_index;
+    while let Some(identifier_index) = index.checked_sub(1) {
+        let TokenKind::Ident(name) = &request.tokens[identifier_index].kind else {
+            break;
+        };
+        receiver_path.push(name.clone());
+        let Some(previous_dot) = identifier_index.checked_sub(1) else {
+            break;
+        };
+        if !matches!(request.tokens[previous_dot].kind, TokenKind::Dot) {
             break;
         }
+        index = previous_dot;
     }
-    let receiver_path = source[receiver_start..dot]
-        .split('.')
-        .filter(|segment| !segment.is_empty())
-        .map(str::to_owned)
-        .collect();
+    receiver_path.reverse();
     Some(MemberContext {
         receiver_path,
-        dot,
+        receiver_offset: receiver.span.end.checked_sub(1)?,
+        dot: dot_token.span.start,
         prefix: source[replacement.start..offset].to_owned(),
         replacement,
     })
@@ -3299,6 +3367,24 @@ split {
             "slice",
         ] {
             assert!(local.contains(&member.to_owned()), "{local:#?}");
+        }
+    }
+
+    #[test]
+    fn member_completion_uses_token_boundaries_across_trivia_and_eof() {
+        for expression in ["number.", "number.   ", "number. /* gap */ cl"] {
+            let source = format!(
+                "state \"game.exe\" {{}}\nsetup {{\n    let number: i32 = 4\n    {expression}\n}}"
+            );
+            let offset = source.find(expression).unwrap() + expression.len();
+            let mut database = CompilerDatabase::new(source);
+            let completion = database
+                .completions(offset)
+                .expect("member completion should survive trivia and token boundaries");
+            assert!(
+                completion.items.iter().any(|item| item.label == "clamp"),
+                "{expression}: {completion:#?}"
+            );
         }
     }
 

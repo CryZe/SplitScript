@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-31: completion reuses one revision context
+
+- Completion now borrows one recovered source document, syntax tree, cursor,
+  replacement span, and indexed lossless token stream. Grammar-specific paths
+  no longer re-lex the complete source or deep-clone the recovered program.
+- Receiver inference consults the current revision's semantic snapshot before
+  constructing a repaired probe and returns compact type/constraint facts
+  rather than another cloned program. Token-boundary member lookup now remains
+  correct across comments, whitespace, and end of file.
+- On the fixed 30-sample runner this cuts warm-sequence p95 from 166 to 82 ms
+  (small), 259 to 177 ms (Lunistice), and 385 to 236 ms (generated large),
+  without increasing the sequence's retained cache.
+
 ## 2026-08-31: interactive query latency and heap baselines
 
 - Expanded the release tooling runner from one generated hover probe to small,

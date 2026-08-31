@@ -1,8 +1,8 @@
 //! Type-directed completion and lexical recognition of type grammar positions.
 
 use super::{
-    CompletionBuilder, CompletionItem, CompletionKind, CompletionList, catalog_language_completion,
-    identifier_span, lexer, render_documentation,
+    CompletionBuilder, CompletionItem, CompletionKind, CompletionList, CompletionRequest,
+    catalog_language_completion, identifier_span, render_documentation,
 };
 use crate::{
     ast::{Program, Span},
@@ -13,15 +13,17 @@ use crate::{
 };
 
 pub(super) fn complete_type_position(
-    source: &str,
-    syntax: &Program,
-    offset: usize,
+    request: &CompletionRequest<'_>,
     library: &StandardLibrary,
 ) -> Option<CompletionList> {
-    let replacement = identifier_span(source, offset);
-    let lexed = lexer::lex_lossless(source).ok()?;
-    let tokens = lexed
-        .tokens()
+    let source = request.source;
+    let syntax = request.syntax;
+    let offset = request.offset;
+    let replacement = request.replacement;
+    let tokens = request
+        .tokens
+        .iter()
+        .copied()
         .filter(|token| !matches!(token.kind, TokenKind::DocComment(_) | TokenKind::Eof))
         .collect::<Vec<_>>();
     let prefix_end = tokens.partition_point(|token| token.span.end <= replacement.start);

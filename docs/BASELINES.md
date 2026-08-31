@@ -140,6 +140,34 @@ Initial optimization targets for this fixed runner are:
 - at most 8 MiB retained by that complete sequence; and
 - at most 20 MiB transient heap growth during one sequence.
 
+### 2026-08-31 completion-context follow-up
+
+The first optimization pass made completion borrow the revision's recovered
+source document, syntax, and lossless token stream; consult the current
+database before constructing a repair probe; and carry only the inferred
+receiver type and constraints out of a probe. It also replaced the completion
+cursor's ordered-token searches with `partition_point`. The same 30-sample run
+then measured:
+
+| Fixture | Query | Baseline p95 | Follow-up p95 |
+| --- | --- | ---: | ---: |
+| small | edit → member completion | 166.4 ms | 179.2 ms |
+| small | warm multi-query sequence | 166.1 ms | 82.4 ms |
+| Lunistice | edit → member completion | 262.4 ms | 258.9 ms |
+| Lunistice | warm multi-query sequence | 259.2 ms | 177.1 ms |
+| generated large | edit → member completion | 412.9 ms | 373.2 ms |
+| generated large | warm multi-query sequence | 385.3 ms | 235.6 ms |
+
+The standalone member row includes the semantic pass needed by a newly edited,
+otherwise cold database, so the small-fixture variation is within the observed
+machine noise rather than evidence of a regression. The realistic warm
+sequence benefits directly: it no longer repeats semantic analysis in a second
+database for member completion. Its retained cache remains 2.5 MiB, 4.8 MiB,
+and 10.7 MiB respectively; sequence peak deltas remain 8.0 MiB, 11.0 MiB, and
+27.9 MiB. The remaining medium and large sequence misses therefore point to
+semantic-stage ownership/copying and candidate construction, not another
+completion lexer pass.
+
 Diagnostics already satisfy the interaction target. Completion—especially
 member completion—and the semantic products it requests are the first measured
 bottleneck. Optimize those paths before changing full-sync transport or adding

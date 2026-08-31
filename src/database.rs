@@ -279,7 +279,19 @@ impl DefinitionIndex {
     /// choose an operation-specific interpretation without depending on
     /// collector insertion order.
     pub fn references_at_offset(&self, offset: usize) -> impl Iterator<Item = &SyntaxReference> {
-        self.syntax_references
+        let end = self
+            .syntax_references
+            .partition_point(|reference| reference.span.start <= offset);
+        // Reference spans are exact identifier tokens. Distinct spans cannot
+        // overlap; the only repeated span represents multiple identities such
+        // as struct-field shorthand. Walk back across that tiny equal-span run
+        // instead of rescanning every reference in the document.
+        let matching = self.syntax_references[..end]
+            .iter()
+            .rev()
+            .take_while(|reference| offset < reference.span.end)
+            .count();
+        self.syntax_references[end - matching..end]
             .iter()
             .filter(move |reference| reference.span.start <= offset && offset < reference.span.end)
     }

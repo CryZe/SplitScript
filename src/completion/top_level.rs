@@ -1,8 +1,8 @@
 //! Completion for the declaration-only module grammar and state headers.
 
 use super::{
-    CompletionBuilder, CompletionItem, CompletionKind, CompletionList, catalog_language_completion,
-    identifier_span, lexer, render_documentation,
+    CompletionBuilder, CompletionItem, CompletionKind, CompletionList, CompletionRequest,
+    catalog_language_completion, identifier_span, render_documentation,
 };
 use crate::{
     ast::{ActionKind, Program},
@@ -106,14 +106,14 @@ pub(super) fn complete_top_level(source: &str, syntax: &Program, offset: usize) 
 }
 
 pub(super) fn complete_state_header(
-    source: &str,
-    offset: usize,
+    request: &CompletionRequest<'_>,
     standard_library: &StandardLibrary,
 ) -> Option<CompletionList> {
-    let replacement = identifier_span(source, offset);
-    let lexed = lexer::lex_lossless(source).ok()?;
-    let tokens = lexed.tokens().collect::<Vec<_>>();
-    let state = top_level_state_header(&tokens, offset)?;
+    let source = request.source;
+    let offset = request.offset;
+    let replacement = request.replacement;
+    let tokens = &request.tokens;
+    let state = top_level_state_header(tokens, offset)?;
     let tail = tokens[state + 1..]
         .iter()
         .copied()

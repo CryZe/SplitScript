@@ -1,8 +1,6 @@
 //! Contextual completion for the declarative settings grammar.
 
-use super::{
-    CompletionBuilder, CompletionItem, CompletionKind, CompletionList, identifier_span, lexer,
-};
+use super::{CompletionBuilder, CompletionItem, CompletionKind, CompletionList, CompletionRequest};
 use crate::{ast::Span, lexer::TokenKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,10 +11,11 @@ enum Context {
     FamilyEntry,
 }
 
-pub(super) fn complete_settings_dsl(source: &str, offset: usize) -> Option<CompletionList> {
-    let replacement = identifier_span(source, offset);
-    let lexed = lexer::lex_lossless(source).ok()?;
-    let tokens = lexed.tokens().collect::<Vec<_>>();
+pub(super) fn complete_settings_dsl(request: &CompletionRequest<'_>) -> Option<CompletionList> {
+    let source = request.source;
+    let offset = request.offset;
+    let replacement = request.replacement;
+    let tokens = &request.tokens;
     let mut braces = Vec::<(usize, Option<Context>)>::new();
     let mut previous: Option<usize> = None;
 
@@ -37,7 +36,7 @@ pub(super) fn complete_settings_dsl(source: &str, offset: usize) -> Option<Compl
                         Some(Context::Entries)
                     }
                     _ if parent == Some(Context::Entries)
-                        && segment_starts_with_for(&tokens, braces.last().unwrap().0, index) =>
+                        && segment_starts_with_for(tokens, braces.last().unwrap().0, index) =>
                     {
                         Some(Context::FamilyEntry)
                     }
@@ -55,7 +54,7 @@ pub(super) fn complete_settings_dsl(source: &str, offset: usize) -> Option<Compl
 
     let (open, context) = braces.last().copied()?;
     let context = context?;
-    let segment = current_segment(&tokens, open, offset);
+    let segment = current_segment(tokens, open, offset);
     let prefix = source[replacement.start..offset].to_owned();
     let mut builder = CompletionBuilder::new(prefix, replacement);
 

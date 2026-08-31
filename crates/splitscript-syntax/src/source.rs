@@ -51,7 +51,10 @@ impl SourceDocument {
     /// intentionally not skipped: an offset in whitespace or a comment has no
     /// token.
     pub fn token_at(&self, offset: usize) -> Option<&Token> {
-        self.lexemes.iter().find_map(|lexeme| match lexeme {
+        let index = self
+            .lexemes
+            .partition_point(|lexeme| lexeme.span().end <= offset);
+        self.lexemes.get(index).and_then(|lexeme| match lexeme {
             Lexeme::Token(token)
                 if token.span.start <= offset
                     && offset < token.span.end

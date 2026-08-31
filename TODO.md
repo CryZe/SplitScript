@@ -713,7 +713,7 @@ concepts rather than maintaining a parallel inventory.
 
 ## P1 — measure and improve interactive compiler queries
 
-- [ ] Build one request-scoped completion context from the existing recovered
+- [x] Build one request-scoped completion context from the existing recovered
   `SourceDocument`, token stream, syntax, cursor, and lazy semantic facts.
   Remove repeated `lex_lossless` calls, use the current database before a
   repair probe, return compact receiver facts rather than cloned programs, and

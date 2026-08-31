@@ -1,14 +1,10 @@
 //! Contextual completion for state declarations and named memory layouts.
 
 use super::{
-    CompletionBuilder, CompletionItem, CompletionKind, CompletionList, identifier_span, lexer,
+    CompletionBuilder, CompletionItem, CompletionKind, CompletionList, CompletionRequest,
     types::add_type_completions,
 };
-use crate::{
-    ast::{Program, Span},
-    lexer::TokenKind,
-    stdlib::StandardLibrary,
-};
+use crate::{ast::Span, lexer::TokenKind, stdlib::StandardLibrary};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Context {
@@ -26,16 +22,16 @@ enum StateBodyKind {
 }
 
 pub(super) fn complete_state_dsl(
-    source: &str,
-    syntax: &Program,
-    offset: usize,
+    request: &CompletionRequest<'_>,
     standard_library: &StandardLibrary,
 ) -> Option<CompletionList> {
-    let replacement = identifier_span(source, offset);
-    let lexed = lexer::lex_lossless(source).ok()?;
-    let tokens = lexed.tokens().collect::<Vec<_>>();
-    let state_open = state_open_containing(&tokens, source.len(), offset)?;
-    let (context_open, context) = innermost_context(&tokens, state_open, offset)?;
+    let source = request.source;
+    let syntax = request.syntax;
+    let offset = request.offset;
+    let replacement = request.replacement;
+    let tokens = &request.tokens;
+    let state_open = state_open_containing(tokens, source.len(), offset)?;
+    let (context_open, context) = innermost_context(tokens, state_open, offset)?;
     let provider_is_specialized = syntax
         .state
         .as_ref()
@@ -43,14 +39,14 @@ pub(super) fn complete_state_dsl(
     let body_kind = if context != Context::State {
         StateBodyKind::Fields
     } else {
-        state_body_kind(&tokens, state_open, offset)
+        state_body_kind(tokens, state_open, offset)
     };
     let delimiter = if body_kind == StateBodyKind::Layouts {
         TokenKind::Comma
     } else {
         TokenKind::Semicolon
     };
-    let segment = current_segment(&tokens, context_open, offset, delimiter);
+    let segment = current_segment(tokens, context_open, offset, delimiter);
     let significant = segment
         .iter()
         .copied()

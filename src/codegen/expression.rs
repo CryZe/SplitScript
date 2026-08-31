@@ -98,6 +98,7 @@ pub(super) enum BareReturn {
 pub(super) struct ExprContext<'a> {
     pub standard_library: &'a StandardLibrary,
     pub reachability: &'a super::reachability::Reachability,
+    pub failure_payloads: &'a super::failure_payload::FailurePayloadDemand,
     pub abi: &'a Abi,
     pub state: &'a crate::ast::StateDecl,
     pub locals: LocalStorage<'a>,
@@ -186,6 +187,7 @@ impl<'a> ExprContext<'a> {
         Self {
             standard_library: lowering.standard_library,
             reachability: lowering.reachability,
+            failure_payloads: lowering.failure_payloads,
             abi: lowering.abi,
             state: lowering.state,
             locals: LocalStorage::Wasm {
@@ -660,9 +662,13 @@ fn compile_block_with_loop(
                 let Type::Result(target_result) = context.ty(*target) else {
                     unreachable!("throw targets are result values")
                 };
-                emit_failure_return(function, target_result, context, |function| {
-                    compile_expr(function, *error, context)
-                });
+                emit_failure_return(
+                    function,
+                    target_result,
+                    context,
+                    error_may_have_effects(*error, context),
+                    |function| compile_expr(function, *error, context),
+                );
             }
             crate::hir::FailureTarget::Retry { .. } => {
                 compile_expr(function, *error, context);
@@ -2695,6 +2701,7 @@ fn emit_managed_read_at_address(
             value_type,
             "managed field contained a null reference",
             context.gc,
+            context.failure_payloads,
         );
         function.instruction(&Instruction::Else);
         emit_managed_pointer_from_scratch(function, context);
@@ -2707,6 +2714,7 @@ fn emit_managed_read_at_address(
             value_type,
             "managed field could not be read",
             context.gc,
+            context.failure_payloads,
         );
         function.instruction(&Instruction::End);
     } else {
@@ -2742,6 +2750,7 @@ fn emit_managed_read_at_address(
             value_type,
             "managed field could not be read",
             context.gc,
+            context.failure_payloads,
         );
         function.instruction(&Instruction::End);
     }
@@ -3290,9 +3299,13 @@ fn compile_expr_unconverted(
                 let Type::Result(target_result) = context.ty(*target) else {
                     unreachable!("throw targets are result values")
                 };
-                emit_failure_return(function, target_result, context, |function| {
-                    compile_expr(function, *error, context)
-                });
+                emit_failure_return(
+                    function,
+                    target_result,
+                    context,
+                    error_may_have_effects(*error, context),
+                    |function| compile_expr(function, *error, context),
+                );
             }
             crate::hir::FailureTarget::Retry { .. } => {
                 compile_expr(function, *error, context);
@@ -3324,7 +3337,7 @@ fn compile_expr_unconverted(
                     let Type::Result(target_result) = context.ty(*target) else {
                         unreachable!("propagation targets are result values")
                     };
-                    emit_failure_return(function, target_result, context, |function| {
+                    emit_failure_return(function, target_result, context, false, |function| {
                         function
                             .instruction(&Instruction::LocalGet(input_local))
                             .instruction(&Instruction::RefAsNonNull);
@@ -3786,6 +3799,9 @@ fn compile_expr_unconverted(
                 helper_result,
                 ..
             } => {
+                let Type::Result(output_result) = ty else {
+                    unreachable!("Unity component traversal produces a Result")
+                };
                 compile_receiver(function, target, context);
                 emit_managed_binding_field(
                     function,
@@ -3811,15 +3827,21 @@ fn compile_expr_unconverted(
                         field_type,
                     );
                 }
-                function
-                    .instruction(&Instruction::LocalGet(local))
-                    .instruction(&Instruction::RefAsNonNull);
-                emit_typed_struct_get(
-                    function,
-                    context.gc.index(Type::Result(helper_layout)),
-                    2,
-                    Type::Standard(StdlibTypeId::String),
-                );
+                if context.failure_payloads.is_demanded(output_result) {
+                    function
+                        .instruction(&Instruction::LocalGet(local))
+                        .instruction(&Instruction::RefAsNonNull);
+                    emit_typed_struct_get(
+                        function,
+                        context.gc.index(Type::Result(helper_layout)),
+                        2,
+                        Type::Standard(StdlibTypeId::String),
+                    );
+                } else {
+                    function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                        context.gc.standard_index(StdlibTypeId::String),
+                    )));
+                }
                 function.instruction(&Instruction::StructNew(
                     context.gc.index(Type::Result(*result)),
                 ));
@@ -3843,7 +3865,17 @@ fn compile_expr_unconverted(
                     context.gc,
                 );
                 function.instruction(&Instruction::I32Const(1));
-                compile_expr(function, args[0], context);
+                if context.failure_payloads.is_demanded(result) {
+                    compile_expr(function, args[0], context);
+                } else {
+                    if error_may_have_effects(args[0], context) {
+                        compile_expr(function, args[0], context);
+                        function.instruction(&Instruction::Drop);
+                    }
+                    function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                        context.gc.standard_index(StdlibTypeId::String),
+                    )));
+                }
                 function.instruction(&Instruction::StructNew(
                     context.gc.index(Type::Result(result)),
                 ));
@@ -4806,15 +4838,18 @@ pub(super) fn emit_failure_return(
     function: &mut Function,
     target_result: ResultTypeId,
     context: &ExprContext<'_>,
+    preserve_discarded_payload: bool,
     emit_error: impl FnOnce(&mut Function),
 ) {
     if matches!(context.bare_return, BareReturn::AsyncAttach { .. }) {
         // `onAttach` catches ordinary errors as rejection of this acquired
         // process. Retain the process handle until it closes so discovery
         // cannot select the same live process again on the next update.
-        emit_error(function);
+        if context.failure_payloads.is_demanded(target_result) || preserve_discarded_payload {
+            emit_error(function);
+            function.instruction(&Instruction::Drop);
+        }
         function
-            .instruction(&Instruction::Drop)
             .instruction(&Instruction::I32Const(ATTACH_REJECTED))
             .instruction(&Instruction::GlobalSet(
                 context.runtime_globals.attach_ready,
@@ -4830,8 +4865,21 @@ pub(super) fn emit_failure_return(
         target_result,
         result_value_type(target_result, context.semantics),
         context.gc,
+        context.failure_payloads.is_demanded(target_result),
+        preserve_discarded_payload,
         emit_error,
     );
+}
+
+pub(super) fn error_may_have_effects(error: ExprId, context: &ExprContext<'_>) -> bool {
+    !matches!(
+        context
+            .wasm_ir
+            .expression(error)
+            .expect("error expressions belong to Wasm IR")
+            .kind,
+        wasm_ir::ExpressionKind::String(_)
+    )
 }
 
 fn compile_user_argument(function: &mut Function, argument: ExprId, context: &ExprContext<'_>) {
@@ -5473,7 +5521,14 @@ fn emit_process_read_from_stack(
     );
     emit_result_success(function, result_type, context.gc);
     function.instruction(&Instruction::Else);
-    emit_result_error(function, result_type, physical_type, error, context.gc);
+    emit_result_error(
+        function,
+        result_type,
+        physical_type,
+        error,
+        context.gc,
+        context.failure_payloads,
+    );
     function.instruction(&Instruction::End);
 }
 
@@ -5498,7 +5553,14 @@ fn emit_sentinel_result(
         .instruction(&Instruction::If(BlockType::Result(
             context.gc.val_type(Type::Result(result)),
         )));
-    emit_result_error(function, result, value_type, message, context.gc);
+    emit_result_error(
+        function,
+        result,
+        value_type,
+        message,
+        context.gc,
+        context.failure_payloads,
+    );
     function
         .instruction(&Instruction::Else)
         .instruction(&Instruction::LocalGet(value_local));
@@ -5525,7 +5587,14 @@ fn emit_status_result(
         .instruction(&Instruction::If(BlockType::Result(
             context.gc.val_type(Type::Result(result)),
         )));
-    emit_result_error(function, result, value_type, message, context.gc);
+    emit_result_error(
+        function,
+        result,
+        value_type,
+        message,
+        context.gc,
+        context.failure_payloads,
+    );
     function
         .instruction(&Instruction::Else)
         .instruction(&Instruction::LocalGet(value_local));
@@ -5912,6 +5981,7 @@ fn compile_provider_read(
         context.ty(read_type),
         contract.invalid_address,
         context.gc,
+        context.failure_payloads,
     );
     function.instruction(&Instruction::Else);
     emit_result_error(
@@ -5920,6 +5990,7 @@ fn compile_provider_read(
         context.ty(read_type),
         contract.read_failure,
         context.gc,
+        context.failure_payloads,
     );
     function.instruction(&Instruction::End);
     function.instruction(&Instruction::End);

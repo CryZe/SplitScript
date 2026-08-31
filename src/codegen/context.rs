@@ -32,6 +32,7 @@ pub(super) struct EmissionContext<'a> {
     pub program: &'a crate::ast::Program,
     pub standard_library: &'a StandardLibrary,
     pub reachability: &'a super::reachability::Reachability,
+    pub failure_payloads: &'a super::failure_payload::FailurePayloadDemand,
     pub capabilities: &'a crate::capabilities::CapabilityAnalysis,
     pub abi: &'a Abi,
     pub state: &'a crate::ast::StateDecl,

@@ -32,6 +32,7 @@ pub(super) struct UpdateContext<'a> {
     pub standard_library: &'a crate::stdlib::StandardLibrary,
     pub abi: &'a Abi,
     pub gc: &'a GcLayout,
+    pub failure_payloads: &'a super::failure_payload::FailurePayloadDemand,
     pub runtime_globals: RuntimeGlobals,
     pub semantics: &'a crate::semantic::SemanticModel,
     pub managed: &'a crate::managed::ManagedBindingPlan,
@@ -1588,6 +1589,7 @@ fn emit_state_field_poll(
             field_type,
             "state field dependency was unavailable",
             lowering.gc,
+            lowering.failure_payloads,
         );
         function
             .instruction(&Instruction::LocalSet(poll_result_local))

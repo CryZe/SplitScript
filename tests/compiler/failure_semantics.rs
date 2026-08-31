@@ -2,6 +2,120 @@
 
 use super::*;
 
+fn fixed_array_sizes(wasm: &[u8]) -> Vec<u32> {
+    let mut sizes = Vec::new();
+    for payload in Parser::new(0).parse_all(wasm) {
+        let Ok(Payload::CodeSectionEntry(body)) = payload else {
+            continue;
+        };
+        let mut operators = body
+            .get_operators_reader()
+            .expect("generated function bodies contain readable operators");
+        while !operators.eof() {
+            if let wasmparser::Operator::ArrayNewFixed { array_size, .. } =
+                operators.read().expect("generated instructions decode")
+            {
+                sizes.push(array_size);
+            }
+        }
+    }
+    sizes
+}
+
+#[test]
+fn error_payloads_are_materialized_once_per_result_layout_when_any_use_observes_them() {
+    let message = "payload-demand-marker-".repeat(19);
+    let discarded = format!(
+        r#"
+            state "game.exe" {{}}
+
+            fn fail() -> u32! {{
+                throw "{message}"
+            }}
+
+            whileAttached {{
+                let value = fail() else 0
+                print(value)
+            }}
+        "#
+    );
+    let discarded = splitscript::compile(&discarded).expect("discarded errors should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&discarded)
+        .expect("erased error payloads must preserve the Result layout");
+    assert!(
+        !fixed_array_sizes(&discarded).contains(&(message.len() as u32)),
+        "an error used only through `else` must not retain its literal payload"
+    );
+
+    let mixed = format!(
+        r#"
+            state "game.exe" {{}}
+
+            fn fail() -> u32! {{
+                throw "{message}"
+            }}
+
+            fn inspectFailure() {{
+                let text = match fail() {{
+                    Err(error) => error,
+                    Ok(value) => value as String,
+                }}
+                print(text)
+            }}
+
+            whileAttached {{
+                let value = fail() else 0
+                print(value)
+                inspectFailure()
+            }}
+        "#
+    );
+    let mixed = splitscript::compile(&mixed).expect("mixed error uses should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&mixed)
+        .expect("materialized error payloads must validate");
+    assert!(
+        fixed_array_sizes(&mixed).contains(&(message.len() as u32)),
+        "one observing caller must retain the shared function's payload for every caller"
+    );
+}
+
+#[test]
+fn observed_outer_results_retain_payloads_forwarded_by_question_mark() {
+    let message = "propagated-payload-marker-".repeat(17);
+    let source = format!(
+        r#"
+            state "game.exe" {{}}
+
+            fn inner() -> u32! {{
+                throw "{message}"
+            }}
+
+            fn outer() -> bool! {{
+                inner()?
+                return true
+            }}
+
+            whileAttached {{
+                let text = match outer() {{
+                    Err(error) => error,
+                    Ok(value) => value as String,
+                }}
+                print(text)
+            }}
+        "#
+    );
+    let wasm = splitscript::compile(&source).expect("propagated errors should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("propagated payload demand must produce valid WebAssembly");
+    assert!(
+        fixed_array_sizes(&wasm).contains(&(message.len() as u32)),
+        "payload demand must flow backward through `?` across different Result layouts"
+    );
+}
+
 #[test]
 fn process_selection_is_a_fallible_boolean_boundary() {
     let source = r#"

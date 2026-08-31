@@ -935,6 +935,20 @@ result type and ordinary result control flow rather than through a new
 backend-only failure channel. This keeps semantic facts and backend physical
 types separate.
 
+Error payload construction is planned by a conservative whole-program demand
+analysis after reachability and specialization. Every `T!` keeps the same GC
+layout and failure flag; only its nullable payload field may be left empty when
+no reachable operation can observe it. Demand includes `Err(error)` pattern
+bindings, result equality, derived debug/display formatting, and errors
+forwarded through `?` or managed-result adapters. Demand is joined across each
+existing result identity: the backend never clones a function merely because
+one caller discards its error while another observes it. Compiler-generated
+messages and inert source string literals can therefore disappear completely;
+other source error expressions still execute and are dropped when their value
+is unused, preserving side effects. This pass changes neither source semantics
+nor the physical result ABI and remains independent of any future structured
+error design.
+
 `T?` and `T!` are first-class constructed type annotations. Parsing assigns
 stable layout identities, inference preserves their value types, and the
 semantic store exposes `TypeKind::Option` and `TypeKind::Result` for the

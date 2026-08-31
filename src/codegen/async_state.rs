@@ -34,7 +34,7 @@ use super::{
         compile_assignment, compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
         compile_for_has_next, compile_for_init, compile_receiver, compile_statement_pattern,
         compile_temporary_set, emit_failure_return, emit_managed_binding_field,
-        store_match_binding,
+        error_may_have_effects, store_match_binding,
     },
     imports::Abi,
     memarg, plan_wasm_locals, resolved_intrinsic, semantic_type, unity_layout,
@@ -207,6 +207,7 @@ pub(super) fn compile_leaf_future_poll(
     let context = ExprContext {
         standard_library: runtime.lowering.standard_library,
         reachability: runtime.lowering.reachability,
+        failure_payloads: runtime.lowering.failure_payloads,
         abi: runtime.abi,
         state: runtime.lowering.state,
         locals: LocalStorage::Hybrid {
@@ -348,6 +349,7 @@ fn compile_async_body(
     let context = ExprContext {
         standard_library: runtime.lowering.standard_library,
         reachability: runtime.lowering.reachability,
+        failure_payloads: runtime.lowering.failure_payloads,
         abi: runtime.abi,
         state: runtime.lowering.state,
         locals: LocalStorage::Hybrid {
@@ -2631,6 +2633,7 @@ fn emit_future_timeout_poll(
             timeout_value,
             "future timed out",
             context.gc,
+            context.failure_payloads,
         );
         function.instruction(&Instruction::StructSet {
             struct_type_index: context.locals.frame().struct_type,
@@ -3836,9 +3839,15 @@ fn compile_async_flow(
                 let Type::Result(target_result) = context.ty(*target) else {
                     unreachable!("throw targets are result values")
                 };
-                emit_failure_return(function, target_result, context, |function| {
-                    compile_expr(function, *error, context);
-                });
+                emit_failure_return(
+                    function,
+                    target_result,
+                    context,
+                    error_may_have_effects(*error, context),
+                    |function| {
+                        compile_expr(function, *error, context);
+                    },
+                );
             }
             crate::hir::FailureTarget::Retry { .. } => {
                 compile_expr(function, *error, context);

@@ -129,6 +129,7 @@ fn emit_runtime_global_initializers(
     let context = ExprContext {
         standard_library: lowering.standard_library,
         reachability: lowering.reachability,
+        failure_payloads: lowering.failure_payloads,
         abi: lowering.abi,
         state: lowering.state,
         locals: LocalStorage::Wasm {

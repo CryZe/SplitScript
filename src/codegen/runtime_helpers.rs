@@ -46,6 +46,7 @@ pub(super) struct RuntimeHelperInputs<'a> {
     pub settings: &'a settings::SettingsContext<'a>,
     pub settings_map: &'a HashMap<ValueId, SettingStorage>,
     pub gc: &'a GcLayout,
+    pub failure_payloads: &'a super::failure_payload::FailurePayloadDemand,
     pub memory: LinearMemoryLayout,
     pub float_format: Option<&'a FloatFormatData>,
 }
@@ -345,6 +346,7 @@ fn build_managed_string_field(inputs: &RuntimeHelperInputs<'_>, optional: bool) 
         inputs.memory.scratch().abi_read,
         result,
         option,
+        inputs.failure_payloads,
     )
 }
 

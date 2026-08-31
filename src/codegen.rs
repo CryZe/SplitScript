@@ -32,6 +32,7 @@ mod display;
 mod display_plan;
 mod equality_plan;
 mod expression;
+mod failure_payload;
 mod function_plan;
 mod gc_layout;
 mod gc_types;
@@ -65,6 +66,7 @@ use self::data_plan::StaticData;
 use self::dependencies::BackendDependencies;
 use self::display_plan::DisplayFunctions;
 use self::equality_plan::EqualityFunctions;
+use self::failure_payload::FailurePayloadDemand;
 use self::gc_layout::GcLayout;
 use self::global_plan::SettingStorage;
 use self::imports::Abi;
@@ -401,6 +403,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let dependencies =
         BackendDependencies::analyze(program, semantics, wasm_ir, &reachability, automatic_layout);
     reachability.require_runtime_helper_types(&dependencies, array_types, semantics);
+    let failure_payloads = FailurePayloadDemand::analyze(semantics, wasm_ir, &reachability);
     let static_data = StaticData::collect(
         program,
         &process_names,
@@ -517,6 +520,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         program,
         standard_library: &standard_library,
         reachability: &reachability,
+        failure_payloads: &failure_payloads,
         capabilities,
         abi: &abi,
         state,
@@ -613,6 +617,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         standard_library: &standard_library,
         abi: &abi,
         gc: &gc,
+        failure_payloads: &failure_payloads,
         runtime_globals,
         semantics,
         managed: &managed,
@@ -640,6 +645,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         settings: &settings_context,
         settings_map: &setting_indices,
         gc: &gc,
+        failure_payloads: &failure_payloads,
         memory: static_data.layout(),
         float_format: static_data.float_format.as_ref(),
     };
@@ -1296,10 +1302,17 @@ fn emit_result_error(
     value_type: Type,
     message: &str,
     gc: &GcLayout,
+    failure_payloads: &FailurePayloadDemand,
 ) {
     emit_default(function, value_type, gc);
     function.instruction(&Instruction::I32Const(1));
-    emit_string_literal(function, message, gc);
+    if failure_payloads.is_demanded(result) {
+        emit_string_literal(function, message, gc);
+    } else {
+        function.instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.standard_index(StdlibTypeId::String),
+        )));
+    }
     function.instruction(&Instruction::StructNew(gc.index(Type::Result(result))));
 }
 
@@ -1313,11 +1326,23 @@ fn emit_failure_transfer(
     target: ResultTypeId,
     target_value: Type,
     gc: &GcLayout,
+    materialize_payload: bool,
+    preserve_discarded_payload: bool,
     emit_error: impl FnOnce(&mut Function),
 ) {
     emit_default(function, target_value, gc);
     function.instruction(&Instruction::I32Const(1));
-    emit_error(function);
+    if materialize_payload {
+        emit_error(function);
+    } else {
+        if preserve_discarded_payload {
+            emit_error(function);
+            function.instruction(&Instruction::Drop);
+        }
+        function.instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.standard_index(StdlibTypeId::String),
+        )));
+    }
     function
         .instruction(&Instruction::StructNew(gc.index(Type::Result(target))))
         .instruction(&Instruction::Return);

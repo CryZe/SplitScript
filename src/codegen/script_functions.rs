@@ -41,6 +41,7 @@ pub(super) fn compile_read(
         let context = ExprContext {
             standard_library: lowering.standard_library,
             reachability: lowering.reachability,
+            failure_payloads: lowering.failure_payloads,
             abi: lowering.abi,
             state: lowering.state,
             locals: LocalStorage::Wasm {
@@ -176,6 +177,7 @@ pub(super) fn compile_read(
             optional,
             "process module was not found",
             lowering.gc,
+            lowering.failure_payloads,
         );
         function.instruction(&Instruction::Else);
         emit_pointer_read_failure(
@@ -185,6 +187,7 @@ pub(super) fn compile_read(
             optional,
             "process read failed",
             lowering.gc,
+            lowering.failure_payloads,
         );
         function
             .instruction(&Instruction::End)
@@ -213,6 +216,7 @@ pub(super) fn compile_read(
             optional,
             "process module was not found",
             lowering.gc,
+            lowering.failure_payloads,
         );
         function
             .instruction(&Instruction::Return)
@@ -245,6 +249,7 @@ pub(super) fn compile_read(
         optional,
         result_type,
         gc: lowering.gc,
+        failure_payloads: lowering.failure_payloads,
         abi_read: lowering.abi_read,
         read_failure: "process read failed",
     };
@@ -290,6 +295,7 @@ pub(super) fn compile_read(
             optional,
             failure,
             lowering.gc,
+            lowering.failure_payloads,
         );
         function
             .instruction(&Instruction::Return)
@@ -388,6 +394,7 @@ pub(super) fn compile_state_transform(
     let context = ExprContext {
         standard_library: lowering.standard_library,
         reachability: lowering.reachability,
+        failure_payloads: lowering.failure_payloads,
         abi: lowering.abi,
         state: lowering.state,
         locals: LocalStorage::Wasm {
@@ -560,6 +567,7 @@ fn emit_provider_read(
         optional,
         contract.invalid_address,
         lowering.gc,
+        lowering.failure_payloads,
     );
     function.instruction(&Instruction::Else);
     emit_pointer_read_failure(
@@ -569,6 +577,7 @@ fn emit_provider_read(
         optional,
         contract.read_failure,
         lowering.gc,
+        lowering.failure_payloads,
     );
     function
         .instruction(&Instruction::End)
@@ -583,6 +592,7 @@ struct ProcessReadEmission<'a> {
     optional: Option<crate::ast::OptionTypeId>,
     result_type: ResultTypeId,
     gc: &'a GcLayout,
+    failure_payloads: &'a super::failure_payload::FailurePayloadDemand,
     abi_read: memory_plan::AbiReadScratch,
     read_failure: &'a str,
 }
@@ -605,6 +615,7 @@ fn emit_process_read(function: &mut Function, emission: &ProcessReadEmission<'_>
         emission.optional,
         emission.read_failure,
         emission.gc,
+        emission.failure_payloads,
     );
     function
         .instruction(&Instruction::Return)
@@ -618,6 +629,7 @@ fn emit_pointer_read_failure(
     optional: Option<crate::ast::OptionTypeId>,
     message: &str,
     gc: &GcLayout,
+    failure_payloads: &super::failure_payload::FailurePayloadDemand,
 ) {
     if let Some(option) = optional {
         function.instruction(&Instruction::RefNull(HeapType::Concrete(
@@ -625,7 +637,14 @@ fn emit_pointer_read_failure(
         )));
         emit_result_success(function, result_type, gc);
     } else {
-        emit_result_error(function, result_type, field_type, message, gc);
+        emit_result_error(
+            function,
+            result_type,
+            field_type,
+            message,
+            gc,
+            failure_payloads,
+        );
     }
 }
 
@@ -779,6 +798,7 @@ pub(super) fn compile_user_function(
     let context = ExprContext {
         standard_library: lowering.standard_library,
         reachability: lowering.reachability,
+        failure_payloads: lowering.failure_payloads,
         abi: lowering.abi,
         state: lowering.state,
         locals: LocalStorage::Wasm {
@@ -958,6 +978,7 @@ pub(super) fn compile_closure(
     let context = ExprContext {
         standard_library: lowering.standard_library,
         reachability: lowering.reachability,
+        failure_payloads: lowering.failure_payloads,
         abi: lowering.abi,
         state: lowering.state,
         locals: LocalStorage::Wasm {
@@ -1184,6 +1205,7 @@ pub(super) fn compile_action(
     let context = ExprContext {
         standard_library: lowering.standard_library,
         reachability: lowering.reachability,
+        failure_payloads: lowering.failure_payloads,
         abi: lowering.abi,
         state: lowering.state,
         locals: LocalStorage::Wasm {

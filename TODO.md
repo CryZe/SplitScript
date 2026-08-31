@@ -919,13 +919,6 @@ remaining work is product hardening and distribution.
   threads or unconstrained background tasks. Keep bounded concurrent scanning
   as a separate scheduling decision rather than silently making an unbounded
   race array consume arbitrary work per update.
-- [ ] Replace string-only errors with a structured identity plus human-readable
-  message. Code must be able to distinguish compiler/runtime error kinds such
-  as a future timeout from an operand's own failure without comparing display
-  text, while `T!`, `?`, `retry`, `throw`, and existing fallback syntax retain
-  one ergonomic propagation channel. Decide the user construction, matching,
-  querying, and custom-error story together rather than reserving ad hoc
-  strings or special cases for `future.timeout`.
 - [ ] Broaden suspending control flow incrementally from real ports and add a
   host-executed conformance fixture for each new shape.
 - [ ] Finish first-class function values and lexical closures for iterator
@@ -1050,6 +1043,16 @@ remaining work is product hardening and distribution.
   Keep extension versioning independent only if release policy says so.
 
 ## P2 / deliberately deferred
+
+- [ ] Replace string-only errors with a structured identity plus human-readable
+  message after concrete error inspection needs justify the language surface.
+  Code must eventually distinguish compiler/runtime error kinds such as a
+  future timeout from an operand's own failure without comparing display text,
+  while `T!`, `?`, `retry`, `throw`, and existing fallback syntax retain one
+  ergonomic propagation channel. Decide user construction, matching, querying,
+  and custom errors together rather than reserving ad hoc strings or special
+  cases for `future.timeout`. This is separate from the implemented backend
+  optimization that omits unobserved payload construction.
 
 - [ ] Reconsider diagnostic debouncing or cancellation only if interactive
   measurements or a reproduced editor stall identify diagnostics as the cause.

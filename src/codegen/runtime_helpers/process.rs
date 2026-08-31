@@ -1099,6 +1099,7 @@ pub(super) fn compile_read_managed_string_field(
     abi_read: AbiReadScratch,
     result: ResultTypeId,
     option: Option<OptionTypeId>,
+    failure_payloads: &super::super::failure_payload::FailurePayloadDemand,
 ) -> Function {
     let mut nullable_string = gc.val_type(Type::Standard(StdlibTypeId::String));
     let ValType::Ref(reference) = &mut nullable_string else {
@@ -1151,6 +1152,7 @@ pub(super) fn compile_read_managed_string_field(
             value_type,
             "managed field contained a null string",
             gc,
+            failure_payloads,
         );
     }
     function
@@ -1176,6 +1178,7 @@ pub(super) fn compile_read_managed_string_field(
         value_type,
         "managed string could not be read within its declared maximum length",
         gc,
+        failure_payloads,
     );
     function
         .instruction(&Instruction::End)
@@ -1187,6 +1190,7 @@ pub(super) fn compile_read_managed_string_field(
         value_type,
         "managed string field pointer could not be read",
         gc,
+        failure_payloads,
     );
     function
         .instruction(&Instruction::End)

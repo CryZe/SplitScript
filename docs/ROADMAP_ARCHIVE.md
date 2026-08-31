@@ -4327,3 +4327,18 @@ language catalog document the refinement rule.
   coverage for read propagation, explicit throws, pending cancellation,
   explicit layouts, attachment globals, implicit initialization, and ordinary
   successful detach.
+
+# 2026-08-31: demand-driven error payload construction
+
+- Added a whole-program failure-payload demand pass after reachability. Result
+  status and value fields keep their stable representation, while an
+  unobserved error field is populated with null instead of allocating and
+  embedding a message.
+- Joined demand across existing result identities and propagation edges rather
+  than cloning functions per call site. If any reachable caller observes a
+  shared function's error, that function keeps the payload for every caller.
+- Counted `Err` bindings, result equality, derived formatting, `?` forwarding,
+  and managed-result conversion as observers. Source error expressions with
+  possible effects still execute even when their produced string is discarded.
+- Deferred a user-visible structured error identity to the lower-priority
+  roadmap; payload erasure does not require or prejudge that language design.

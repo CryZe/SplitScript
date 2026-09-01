@@ -93,6 +93,23 @@ fn native_review_fixture_preserves_identity_build_lifecycle_settings_width_and_f
         "settings Add loop",
         "/migration/asl/settings/registration.md",
     );
+    for query in ["DeepPointer", "ASL native state numeric root"] {
+        assert_search_leads_to(query, "/migration/asl/memory/deep-pointer.md");
+    }
+    let pointer_migration = DocumentationReference::default()
+        .page("/migration/asl/memory/deep-pointer.md")
+        .expect("the native pointer migration page should exist");
+    assert!(pointer_migration.markdown.contains("main-module-relative"));
+    assert!(
+        pointer_migration
+            .markdown
+            .contains("`at offset` form is an absolute virtual address")
+    );
+    assert!(
+        pointer_migration
+            .markdown
+            .contains("asl-numeric-roots-are-module-relative")
+    );
 }
 
 #[test]

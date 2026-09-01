@@ -1953,15 +1953,15 @@ pub const CONCEPTS: &[MigrationConcept] = &[
     },
     MigrationConcept {
         id: MigrationConceptId::new("asl.memory.deep-pointer"),
-        name: "DeepPointer",
+        name: "DeepPointer and native state roots",
         sources: ASL,
         support: MigrationSupport::Direct,
-        summary: "Use typed state paths for polled fields or `process.follow` for discovered paths.",
+        summary: "A bare numeric root in an ASL native state field or `DeepPointer` is normally main-module-relative. Preserve it as `at \"game.exe\", offset`; SplitScript's `at offset` form is an absolute virtual address. Use typed state paths for polled fields or `process.follow` for dynamically discovered paths.",
         targets: &[
             MigrationTarget::Language("state"),
             MigrationTarget::StandardLibraryItem("Process.follow"),
         ],
-        cookbook_anchor: None,
+        cookbook_anchor: Some("asl-numeric-roots-are-module-relative"),
         spellings: &[],
     },
     MigrationConcept {

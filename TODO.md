@@ -46,8 +46,9 @@ Start with the unchecked tasks in
 in their written order. The managed collection schema panic is now stopped at
 the shared remote-memory validation boundary, and expression-valued optional
 state fields now apply the same contextual `None` conversion as other typed
-positions. Address the silent address-base migration trap next, followed by the
-broken compiler-owned example and focused
+positions, and the ASL numeric-root migration now distinguishes main-module
+offsets from SplitScript absolute addresses. Fix the broken compiler-owned
+`choice` example next, followed by the focused
 documentation/diagnostic defects as one small verified guidance sequence. Do
 not begin managed collection support itself until ASR has a tested
 representation, and bring every language, standard-library, provider, or
@@ -429,7 +430,7 @@ corpus.
   special-casing `String` or weakening transactional field typing. Add positive
   coverage for multiple optional value types and preserve a useful mismatch
   diagnostic when no optional target is expected.
-- [ ] Explain the legacy ASL address-base semantic explicitly. The ASL porting
+- [x] Explain the legacy ASL address-base semantic explicitly. The ASL porting
   journey and exact `DeepPointer` / native-state migration searches must show
   that a bare numeric ASL root is normally main-module-relative and therefore
   becomes `at "game.exe", offset`; copying it as an integer SplitScript root is

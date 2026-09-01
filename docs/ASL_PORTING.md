@@ -168,6 +168,33 @@ implicitly return a final loop expression: write `return loop { ... }`.
 Value-carrying [`break`] is limited to [`loop`]; a nested [`while`] or runtime
 [`for`] always captures its own bare break.
 
+## ASL numeric roots are module-relative
+
+A numeric root in a legacy ASL native state field or `DeepPointer`
+is normally an offset from the selected process's main module. Preserve that
+base explicitly in SplitScript. For example, this ASL watcher:
+
+```asl
+state("game") {
+    int health: 0x1234, 0x10;
+}
+```
+
+becomes:
+
+```splitscript
+state "game.exe" {
+    health: i32 at "game.exe", 0x1234, 0x10;
+}
+```
+
+The string root tells [`at`](syntax@at) to resolve `0x1234` relative to that
+module. Writing `at 0x1234, 0x10` instead gives SplitScript the absolute virtual
+address `0x1234`. Both forms compile because both meanings are useful, but they
+do not read the same location. Do not copy an ASL numeric root into the absolute
+form merely because the literals look identical. If the ASL explicitly builds
+an absolute address at runtime, preserve that absolute meaning instead.
+
 ## Signed pointer offsets
 
 ASL `DeepPointer` paths commonly contain negative offsets. Preserve them

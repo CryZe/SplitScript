@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-09-01: ASL numeric roots retain their module base
+
+- Added a self-contained ASL porting recipe showing that a bare numeric native
+  state or `DeepPointer` root is normally relative to the selected executable's
+  main module, while SplitScript's integer-rooted `at` form is an absolute
+  virtual address. The side-by-side source makes the required module string
+  explicit and explains why both compile despite reading different locations.
+- Expanded the compiler-owned `DeepPointer` migration concept and generated
+  capability index with the same semantic warning and a direct recipe link.
+  Exact `DeepPointer` and native-state numeric-root searches are regression
+  tested against that canonical migration page.
+
 ## 2026-09-01: optional state expressions contextualize absence
 
 - Expression-valued optional state fields now resolve a bare `None`, including

@@ -467,6 +467,18 @@ impl DocumentationReference {
             })
             .map(|concept| migration_concept_uri(concept.id))
             .collect::<Vec<_>>();
+        uris.extend(
+            migration
+                .query_aliases()
+                .iter()
+                .filter(|aliases| {
+                    aliases
+                        .queries
+                        .iter()
+                        .any(|alias| alias.eq_ignore_ascii_case(query))
+                })
+                .map(|aliases| migration_concept_uri(aliases.concept)),
+        );
         uris.sort();
         uris.dedup();
         uris
@@ -1790,6 +1802,13 @@ fn migration_search_text(concept: &MigrationConcept, migration: &MigrationCatalo
         parts.push(spelling.message.to_owned());
         parts.push(spelling.primary_label.to_owned());
     }
+    parts.extend(
+        migration
+            .query_aliases()
+            .iter()
+            .filter(|aliases| aliases.concept == concept.id)
+            .flat_map(|aliases| aliases.queries.iter().map(|query| (*query).to_owned())),
+    );
     for diagnostic in migration
         .diagnostics()
         .iter()
@@ -2798,6 +2817,26 @@ mod tests {
             .topic("timer.CurrentPhase")
             .expect("an unambiguous foreign spelling resolves directly");
         assert_eq!(timer.uri, "/migration/asl/timer/state.md");
+
+        let migration = MigrationCatalog::default();
+        for aliases in migration.query_aliases() {
+            let expected_uri = migration_concept_uri(aliases.concept);
+            for query in aliases.queries {
+                assert_eq!(
+                    reference.topic(query).map(|page| page.uri),
+                    Some(expected_uri.clone()),
+                    "exact migration alias `{query}`",
+                );
+                assert_eq!(
+                    reference
+                        .search(query)
+                        .first()
+                        .map(|entry| entry.uri.as_str()),
+                    Some(expected_uri.as_str()),
+                    "migration search alias `{query}`",
+                );
+            }
+        }
 
         for (query, expected_uri) in [
             ("modules.First()", "/migration/asl/process/modules.md"),

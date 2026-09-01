@@ -29,6 +29,8 @@ Start with the [complete ASL porting guide](ASL_PORTING.md) for lifecycle and se
 
 ### Process and memory
 
+- **ASL primitive state types** (*Use a typed pattern*): Preserve the bytes read by the ASL state declaration: `bool` is one byte; signed and unsigned integers and floating-point values map to the corresponding explicit-width SplitScript type. Treat `stringN`, `byteN`, pointers, enums, and values created in C# action code according to their actual representation rather than their nearest-looking name. Canonical: `bool`, `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `f32`, `f64`. [Porting recipe](ASL_PORTING.md#asl-primitive-state-types).
+
 - **DeepPointer and native state roots** (*Supported directly*): A bare numeric root in an ASL native state field or `DeepPointer` is normally main-module-relative. Preserve it as `at "game.exe", offset`; SplitScript's `at offset` form is an absolute virtual address. Use typed state paths for polled fields or `process.follow` for dynamically discovered paths. Canonical: `state`, `Process.follow`. [Porting recipe](ASL_PORTING.md#asl-numeric-roots-are-module-relative).
 
 - **Background signature scans** (*Use a typed pattern*): Remove legacy worker threads and await a module, explicit-range, or process-wide scan. Scans inspect a bounded window per tick and process closure cancels pending discovery. Canonical: `Module.scan`, `Module.scanAny`, `Process.scan`, `Process.scanMemory`, `Process.scanMemoryAny`. [Porting recipe](ASL_PORTING.md#background-signature-scans).

@@ -112,6 +112,64 @@ root is available only during attachment-owned lifecycle phases; [`old`] and
 [`current`] are unavailable before the first complete snapshot and are not
 guaranteed during [`onDetach`].
 
+## ASL primitive state types
+
+For a type written directly in an ASL [`state`] declaration, preserve the exact
+bytes that LiveSplit reads. The scalar mappings are:
+
+| ASL state type | SplitScript type | Bytes read |
+| --- | --- | ---: |
+| <code>bool</code> | [`bool`] | 1 |
+| `byte` | [`u8`] | 1 |
+| `sbyte` | [`i8`] | 1 |
+| `short` | [`i16`] | 2 |
+| `ushort` | [`u16`] | 2 |
+| `int` | [`i32`] | 4 |
+| `uint` | [`u32`] | 4 |
+| `long` | [`i64`] | 8 |
+| `ulong` | [`u64`] | 8 |
+| `float` | [`f32`] | 4 |
+| `double` | [`f64`] | 8 |
+
+In particular, ASL deliberately reads <code>bool</code> as one byte; do not
+substitute a four-byte C or platform ABI boolean. For example:
+
+```asl
+state("game") {
+    bool loading: 0x1234;
+    int room: 0x1238;
+}
+```
+
+becomes:
+
+```splitscript
+state "game.exe" {
+    loading: bool at "game.exe", 0x1234;
+    room: i32 at "game.exe", 0x1238;
+}
+```
+
+This table applies to ASL state fields, not every similarly named value in the
+C# action bodies. Inspect the source and target representation in these cases:
+
+- ASL `byteN` reads exactly `N` raw bytes. Preserve that as a fixed
+  [`[T; N]`] of [`u8`] only when the port still needs the same raw
+  buffer; otherwise decode the actual format deliberately.
+- ASL `stringN` also reads `N` bytes, then guesses UTF-16LE from the second byte
+  and otherwise decodes as UTF-8. SplitScript requires the real encoding and
+  bound; follow [Bounded native `stringN` state](#bounded-native-stringn-state).
+- An enum, flags value, sentinel, or pointer stored in a numeric field still
+  has the width and signedness declared by the ASL watcher. Give it a richer
+  local type only after the memory read preserves those bytes.
+- C# locals, `vars` entries, casts, `IntPtr` values, custom structs, and manual
+  `ReadValue<T>` calls are not ASL primitive state declarations. Inspect the
+  type or runtime read that creates the value instead of choosing a
+  SplitScript type from its variable name.
+
+The compiler documentation recognizes qualified searches such as
+`ASL bool`, `ASL int`, and `ASL bool byte int` and opens this mapping directly.
+
 ## Translating statement-heavy expressions
 
 ASL and C# helpers often need several statements to choose one value. In an

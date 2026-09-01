@@ -88,7 +88,7 @@ const COMMON_ASL_CONCEPTS: &[MigrationConceptId] = &[
     MigrationConceptId::new("asl.timer.current-split-index"),
     MigrationConceptId::new("asl.lifecycle.exit-game-time-cleanup"),
     MigrationConceptId::new("asl.runtime.refresh-rate"),
-    MigrationConceptId::new("type.fixed-width-number"),
+    MigrationConceptId::new("asl.memory.primitive-types"),
     MigrationConceptId::new("asl.process.modules"),
     MigrationConceptId::new("asl.settings.dynamic-lookup"),
     MigrationConceptId::new("asl.settings.finite-family"),

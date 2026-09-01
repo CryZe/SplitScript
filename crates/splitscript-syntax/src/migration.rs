@@ -141,6 +141,18 @@ pub struct MigrationConcept {
     pub spellings: &'static [ForeignSpelling],
 }
 
+/// A documentation-search phrase that names a migration concept without being
+/// source syntax itself.
+///
+/// Keep these separate from [`ForeignSpelling`]: query aliases may include a
+/// source-language qualifier or several representative tokens, and must never
+/// accidentally become compiler rewrite candidates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MigrationQueryAliases {
+    pub concept: MigrationConceptId,
+    pub queries: &'static [&'static str],
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MigrationDiagnostic {
     pub id: MigrationDiagnosticId,
@@ -1893,6 +1905,28 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         spellings: NUMERIC_SPELLINGS,
     },
     MigrationConcept {
+        id: MigrationConceptId::new("asl.memory.primitive-types"),
+        name: "ASL primitive state types",
+        sources: ASL,
+        support: MigrationSupport::TypedPattern,
+        summary: "Preserve the bytes read by the ASL state declaration: [`bool`] is one byte; signed and unsigned integers and floating-point values map to the corresponding explicit-width SplitScript type. Treat `stringN`, `byteN`, pointers, enums, and values created in C# action code according to their actual representation rather than their nearest-looking name.",
+        targets: &[
+            MigrationTarget::Language("bool"),
+            MigrationTarget::Language("i8"),
+            MigrationTarget::Language("u8"),
+            MigrationTarget::Language("i16"),
+            MigrationTarget::Language("u16"),
+            MigrationTarget::Language("i32"),
+            MigrationTarget::Language("u32"),
+            MigrationTarget::Language("i64"),
+            MigrationTarget::Language("u64"),
+            MigrationTarget::Language("f32"),
+            MigrationTarget::Language("f64"),
+        ],
+        cookbook_anchor: Some("asl-primitive-state-types"),
+        spellings: &[],
+    },
+    MigrationConcept {
         id: MigrationConceptId::new("asl.state.attachment"),
         name: "Attachment state declaration",
         sources: ASL,
@@ -2401,6 +2435,30 @@ pub const CONCEPTS: &[MigrationConcept] = &[
     },
 ];
 
+/// Exact documentation queries that are useful discovery phrases but are not
+/// literal foreign syntax. These aliases are shared by CLI and editor search.
+pub const QUERY_ALIASES: &[MigrationQueryAliases] = &[MigrationQueryAliases {
+    concept: MigrationConceptId::new("asl.memory.primitive-types"),
+    queries: &[
+        "ASL primitive types",
+        "ASL state types",
+        "ASL numeric types",
+        "ASL bool byte int",
+        "ASL bool",
+        "ASL byte",
+        "ASL sbyte",
+        "ASL short",
+        "ASL ushort",
+        "ASL int",
+        "ASL uint",
+        "ASL long",
+        "ASL ulong",
+        "ASL float",
+        "ASL double",
+        "ASL byteN",
+    ],
+}];
+
 pub fn concept(id: MigrationConceptId) -> Option<&'static MigrationConcept> {
     CONCEPTS.iter().find(|concept| concept.id == id)
 }
@@ -2430,6 +2488,7 @@ mod tests {
         let mut ids = HashSet::new();
         let mut diagnostic_ids = HashSet::new();
         let mut spellings = HashSet::new();
+        let mut query_aliases = HashSet::new();
         for concept in CONCEPTS {
             assert!(
                 ids.insert(concept.id),
@@ -2448,6 +2507,21 @@ mod tests {
                 if let ForeignSpellingReplacement::Text(replacement) = spelling.replacement {
                     assert!(!replacement.is_empty());
                 }
+            }
+        }
+        for aliases in QUERY_ALIASES {
+            assert!(
+                concept(aliases.concept).is_some(),
+                "query aliases reference an unknown concept {}",
+                aliases.concept.as_str()
+            );
+            assert!(!aliases.queries.is_empty());
+            for query in aliases.queries {
+                assert!(!query.trim().is_empty());
+                assert!(
+                    query_aliases.insert(query.to_ascii_lowercase()),
+                    "duplicate query alias {query}"
+                );
             }
         }
         for diagnostic in DIAGNOSTICS {

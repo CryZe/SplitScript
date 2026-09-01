@@ -3,11 +3,11 @@
 pub use splitscript_syntax::migration::{
     ASL_SETTINGS_ADD_DIAGNOSTIC, ASL_SETTINGS_LOOKUP_DIAGNOSTIC, ForeignSpelling,
     ForeignSpellingContext, ForeignSpellingReplacement, MigrationConcept, MigrationConceptId,
-    MigrationDiagnostic, MigrationDiagnosticId, MigrationSupport, MigrationTarget, SourceLanguage,
-    diagnostic as migration_diagnostic, foreign_spelling, legacy_array_field_diagnostic,
-    legacy_managed_method_diagnostic, legacy_set_field_diagnostic, legacy_static_call_diagnostic,
-    legacy_string_field_diagnostic, legacy_string_method_diagnostic, legacy_type_diagnostic,
-    legacy_value_path_diagnostic,
+    MigrationDiagnostic, MigrationDiagnosticId, MigrationQueryAliases, MigrationSupport,
+    MigrationTarget, SourceLanguage, diagnostic as migration_diagnostic, foreign_spelling,
+    legacy_array_field_diagnostic, legacy_managed_method_diagnostic, legacy_set_field_diagnostic,
+    legacy_static_call_diagnostic, legacy_string_field_diagnostic, legacy_string_method_diagnostic,
+    legacy_type_diagnostic, legacy_value_path_diagnostic,
 };
 
 use crate::{CompilerContext, language::LanguageCatalog};
@@ -147,6 +147,10 @@ impl MigrationCatalog {
         splitscript_syntax::migration::DIAGNOSTICS
     }
 
+    pub fn query_aliases(&self) -> &'static [MigrationQueryAliases] {
+        splitscript_syntax::migration::QUERY_ALIASES
+    }
+
     /// Validates that migration metadata points into the active compiler
     /// catalogs instead of forming a stale parallel API inventory.
     pub fn validate(&self) -> Vec<String> {
@@ -205,6 +209,15 @@ impl MigrationCatalog {
                     "migration diagnostic `{}` references missing concept `{}`",
                     diagnostic.id.as_str(),
                     diagnostic.concept.as_str(),
+                ));
+            }
+        }
+
+        for aliases in self.query_aliases() {
+            if self.concept(aliases.concept).is_none() {
+                errors.push(format!(
+                    "migration query aliases reference missing concept `{}`",
+                    aliases.concept.as_str(),
                 ));
             }
         }

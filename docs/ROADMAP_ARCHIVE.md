@@ -1,5 +1,19 @@
 # SplitScript roadmap
 
+## 2026-09-01: ASL primitive state widths are explicit
+
+- Added a compiler-owned ASL primitive-state migration concept and a
+  self-contained porting table for every scalar type, including LiveSplit's
+  deliberate one-byte `bool` read.
+- Distinguished exact scalar mappings from `stringN`, `byteN`, pointers,
+  enums, manual reads, and values created in C# action code, where the source
+  or runtime representation must be inspected rather than guessed from a
+  familiar name.
+- Added catalogued, case-insensitive documentation query aliases such as
+  `ASL bool`, `ASL int`, and `ASL bool byte int`. Query aliases remain separate
+  from source spellings, so search vocabulary cannot accidentally become a
+  parser diagnostic or rewrite candidate.
+
 ## 2026-09-01: fixed-array memory bounds are visible before design
 
 - Documented the 4,096-element and 65,536-byte process-read bounds on both the

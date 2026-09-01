@@ -56,7 +56,9 @@ the catalog-owned choices, repair only clear typos, and link a dedicated
 provider index. Statement-shaped match arms now point at the missing braces and
 offer a complete rewrite instead of blaming an existing comma. Bare-global
 lifetime errors now spell out the one direct `onAttach`/`onStart` assignment
-rule and the helper-call boundary. Continue with the focused
+rule and the helper-call boundary. ASL primitive state types now have a
+physical-width mapping and qualified exact search aliases that do not
+masquerade as compiler rewrite spellings. Continue with the focused
 documentation/diagnostic defects as one small verified guidance sequence. Do
 not begin managed collection support itself until ASR has a tested
 representation, and bring every language, standard-library, provider, or
@@ -468,7 +470,7 @@ corpus.
   `onStart` boundary and that assignments hidden in called helpers do not
   establish lifetime. Preserve the existing excellent dual-boundary labels and
   avoid promising interprocedural definite-initialization analysis.
-- [ ] Add a concise ASL primitive-type migration topic and exact search aliases
+- [x] Add a concise ASL primitive-type migration topic and exact search aliases
   for queries such as `ASL bool byte int`. Show physical-width mappings and the
   cases that require inspecting source/runtime representation rather than
   blindly choosing a similarly named SplitScript type.

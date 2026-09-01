@@ -2257,6 +2257,23 @@ fn language_catalog_is_valid_documented_and_compilable() {
             "`{contextual}` needs its grammatical context"
         );
     }
+    let fixed_array = language.item(LanguageItemId::ArrayType);
+    assert!(fixed_array.documentation.details.contains("4,096 elements"));
+    assert!(fixed_array.documentation.details.contains("65,536 bytes"));
+    assert!(
+        fixed_array
+            .documentation
+            .details
+            .contains("expression-valued [`state`] field")
+    );
+    let state_path = language.item(LanguageItemId::StatePointerField);
+    assert!(state_path.documentation.details.contains("4,096 elements"));
+    assert!(
+        state_path
+            .documentation
+            .details
+            .contains("growable [`[T]`]")
+    );
     assert!(language.item_for_source_token("Array").is_none());
     assert_eq!(
         StandardLibrary::new()

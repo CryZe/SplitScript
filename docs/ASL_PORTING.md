@@ -389,7 +389,31 @@ Use [`[T; N]`], not growable [`[T]`], for process-memory layout. The fixed array
 still supports indexing and iteration, while its exact length prevents a port
 from silently reading a different number of bytes. A struct or fixed array is
 [`MemoryReadable`] only when every contained field or element has a fixed
-readable layout.
+readable layout. One fixed-array process read is limited to 4,096 elements and
+65,536 bytes so generated code and host-memory traffic remain bounded.
+
+Do not model a much larger native region as one fixed array when the script only
+needs a few selected values. An expression-valued state field can construct a
+growable [`[T]`] transactionally from focused reads:
+
+```splitscript
+state "game.exe" {
+    sampledFlags: [u8] = {
+        let flags: [u8] = []
+        flags.push(process.read<u8>(0x1000)?)
+        flags.push(process.read<u8>(0x5000)?)
+        flags.push(process.read<u8>(0x9000)?)
+        flags
+    };
+}
+
+whileAttached {
+    print(current.sampledFlags)
+}
+```
+
+Every focused read must succeed before the new array is published, preserving
+the state transaction without reading the unused bytes between samples.
 
 ## C# string operations
 

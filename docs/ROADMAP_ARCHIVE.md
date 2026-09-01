@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-09-01: fixed-array memory bounds are visible before design
+
+- Documented the 4,096-element and 65,536-byte process-read bounds on both the
+  exact `[T; N]` language reference and static `at` memory paths.
+- Expanded the ASL contiguous-memory recipe with a compiler-checked
+  expression-valued state field that transactionally constructs a growable
+  array from sparse focused reads. This gives authors a concrete alternative to
+  an oversized fixed array when the unused bytes need not be copied.
+- Added catalog regressions that keep the limits and alternative visible on the
+  canonical pages.
+
 ## 2026-09-01: language examples validate their complete source
 
 - Fixed the rendered `choice` setting example by adding the required commas to

@@ -50,7 +50,8 @@ positions, and the ASL numeric-root migration now distinguishes main-module
 offsets from SplitScript absolute addresses. The compiler-owned `choice`
 example is corrected and language-catalog validation now parses, formats, and
 type-checks every complete fixture while classifying focused fragments
-explicitly. Continue with the focused
+explicitly. The fixed-array reference now exposes its process-read bounds and
+the transactional sparse-read alternative. Continue with the focused
 documentation/diagnostic defects as one small verified guidance sequence. Do
 not begin managed collection support itself until ASR has a tested
 representation, and bring every language, standard-library, provider, or
@@ -444,7 +445,7 @@ corpus.
   parse, format, and type-check in an automated documentation test. Keep
   intentionally partial syntax fragments explicitly classified so catalog
   prose cannot silently publish uncompilable examples again.
-- [ ] Document the 4,096-element fixed-array limit on the exact [`[T; N]`]
+- [x] Document the 4,096-element fixed-array limit on the exact [`[T; N]`]
   reference and memory-state paths before authors design large native blobs
   around an impossible schema. Link to growable state value blocks as the
   current selective-read alternative while keeping the existing precise

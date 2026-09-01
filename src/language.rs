@@ -1414,7 +1414,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "field: T at module-or-field, offset, ... | field: T? at module-or-field, offset, ...",
         "Reads a persistent state field through a pointer path.",
-        "A string selects a module-relative pointer base, an integer selects an absolute base, and a sibling field name uses that field's candidate value as a dynamic base. Each following integer is an address offset. Sibling references are independent of declaration order, must stay within the active named layout, and may also appear in expression-backed fields. The compiler evaluates their dependency graph in order and rejects cycles. If a dependency fails, the dependent read is skipped and retains its previous accepted value. A required `T` field is a [`T!`] boundary: initialization waits for it, while a later failed read retains its last accepted value. An explicitly optional [`T?`] field instead accepts its own read failure as [`None`] and a successful read as [`Some`]`(T)`, so absence is observable in [`current`] and [`old`]. The exact memory representation must be explicit or inferred from an exact use; optional read semantics require the [`T?`] annotation.",
+        "A string selects a module-relative pointer base, an integer selects an absolute base, and a sibling field name uses that field's candidate value as a dynamic base. Each following integer is an address offset. Sibling references are independent of declaration order, must stay within the active named layout, and may also appear in expression-backed fields. The compiler evaluates their dependency graph in order and rejects cycles. If a dependency fails, the dependent read is skipped and retains its previous accepted value. A required `T` field is a [`T!`] boundary: initialization waits for it, while a later failed read retains its last accepted value. An explicitly optional [`T?`] field instead accepts its own read failure as [`None`] and a successful read as [`Some`]`(T)`, so absence is observable in [`current`] and [`old`]. The exact memory representation must be explicit or inferred from an exact use; optional read semantics require the [`T?`] annotation. A memory-readable [`[T; N]`] field reads the complete contiguous array in one operation and is limited to 4,096 elements and 65,536 bytes. For a larger region when only selected values are needed, use an expression-valued state field that constructs a growable [`[T]`] from focused reads instead of declaring one oversized fixed array.",
         STATE_POINTER_EXAMPLE
     ),
     language_item!(
@@ -1729,7 +1729,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "[Element] or [Element; Length]",
         "Names a garbage-collected array type.",
-        "[`[T]`] accepts any length. [`[T; N]`] carries an exact compile-time length, can be used wherever [`[T]`] is expected, and has a fixed process-memory layout when `T` satisfies [`MemoryReadable`].",
+        "[`[T]`] accepts any length. [`[T; N]`] carries an exact compile-time length, can be used wherever [`[T]`] is expected, and has a fixed process-memory layout when `T` satisfies [`MemoryReadable`]. Process-memory reads of a fixed array are limited to 4,096 elements and 65,536 bytes so generated code and host-memory traffic remain bounded. When a larger native region only needs sparse values, construct a growable [`[T]`] in an expression-valued [`state`] field from focused reads instead of declaring an oversized [`[T; N]`].",
         ARRAY_TYPE_EXAMPLE
     ),
     language_item!(

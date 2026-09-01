@@ -282,9 +282,27 @@ fn check_state_expression_inner(checker: &mut Checker, field: &StateField) {
     if let StateSource::Expression(expression) = &field.source {
         let boundary = contains_propagation(expression)
             .then(|| Type::Result(checker.inference.result_type(field_type)));
+        let contextual_poll_result = super::expressions::expression_is_bare_none(expression)
+            .then(|| Type::Result(checker.inference.result_type(field_type)));
         let (actual, failure) = checker.with_failure_context(
             boundary.map_or(FailureContext::None, FailureContext::boundary),
-            |checker| checker.expr(expression, None),
+            |checker| {
+                if contextual_poll_result.is_some() {
+                    let field_type_name = checker.type_name(field_type);
+                    checker.with_expected_type_source(
+                        super::ExpectedTypeSource {
+                            span: state_field_declaration_span(field),
+                            label: format!(
+                                "state field `{}` is declared as `{field_type_name}`",
+                                field.name
+                            ),
+                        },
+                        |checker| checker.expr(expression, contextual_poll_result),
+                    )
+                } else {
+                    checker.expr(expression, None)
+                }
+            },
         );
         let used_propagation = failure.propagated();
         if let Some(actual) = actual {

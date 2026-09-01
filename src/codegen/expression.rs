@@ -2826,18 +2826,18 @@ pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context:
     if let Some(conversion) = expression_ir.conversion {
         let source = context.ty(conversion.source);
         let target = context.ty(conversion.target);
-        match (conversion.kind, target) {
-            (ValueConversionKind::NoneToOptional, Type::Option(option)) => {
-                function.instruction(&Instruction::RefNull(HeapType::Concrete(
-                    context.gc.index(Type::Option(option)),
-                )));
+        match conversion.kind {
+            ValueConversionKind::NoneToOptional => {
+                emit_contextual_none(function, target, context);
                 return;
             }
-            (ValueConversionKind::NoneToDomainNullable, Type::Bool) => {
+            ValueConversionKind::NoneToDomainNullable if target == Type::Bool => {
                 function.instruction(&Instruction::I32Const(-1));
                 return;
             }
-            (ValueConversionKind::NoneToDomainNullable, Type::Standard(StdlibTypeId::Duration)) => {
+            ValueConversionKind::NoneToDomainNullable
+                if target == Type::Standard(StdlibTypeId::Duration) =>
+            {
                 function.instruction(&Instruction::RefNull(HeapType::Concrete(
                     context.gc.standard_index(StdlibTypeId::Duration),
                 )));
@@ -2874,6 +2874,39 @@ pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context:
     // structurally present but unreachable continuation remains stack-valid.
     if ty == Type::Never {
         function.instruction(&Instruction::Unreachable);
+    }
+}
+
+/// Materializes a contextual `None` through successful result layers until it
+/// reaches the option that represents absence.
+///
+/// State expressions and other implicit failure boundaries expect a result,
+/// so a bare `None` in an optional success position is represented as
+/// `Ok(None)`. Keeping this recursive mirrors the type checker's contextual
+/// wrapper handling and avoids boundary-specific code generation.
+fn emit_contextual_none(function: &mut Function, target: Type, context: &ExprContext<'_>) {
+    match target {
+        Type::Option(option) => {
+            function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                context.gc.index(Type::Option(option)),
+            )));
+        }
+        Type::Result(result) => {
+            emit_contextual_none(
+                function,
+                result_value_type(result, context.semantics),
+                context,
+            );
+            function
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::RefNull(HeapType::Concrete(
+                    context.gc.standard_index(StdlibTypeId::String),
+                )))
+                .instruction(&Instruction::StructNew(
+                    context.gc.index(Type::Result(result)),
+                ));
+        }
+        _ => unreachable!("contextual `None` targets an option through result layers"),
     }
 }
 

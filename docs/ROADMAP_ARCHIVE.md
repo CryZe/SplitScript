@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-09-01: optional state expressions contextualize absence
+
+- Expression-valued optional state fields now resolve a bare `None`, including
+  a transparent value block ending in `None`, against the declared field type
+  before lowering the field's implicit transactional result boundary.
+- Generalized contextual absence lowering through successful result layers, so
+  these fields produce `Ok(None)` without a state- or `String`-specific backend
+  path. Non-optional fields still diagnose the declared value mismatch and
+  point back to the field annotation.
+- Added debug/release Wasm validation for `String?` and `u32?`, retained the
+  representative propagated-read regression, and compiled the original
+  porting probe without its false `Some("")` substitution.
+
 ## 2026-09-01: managed schema layout failures stop before code generation
 
 - Added one post-inference remote-memory validation boundary shared by native

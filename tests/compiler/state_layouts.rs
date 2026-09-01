@@ -1,6 +1,61 @@
 use wasmparser::{Validator, WasmFeatures};
 
 #[test]
+fn optional_expression_state_fields_contextualize_none() {
+    let source = r#"
+        state "game.exe" {
+            label: String? = None;
+            count: u32? = { None };
+        }
+
+        whileAttached {
+            print(current.label)
+            print(current.count)
+        }
+    "#;
+
+    for profile in [
+        splitscript::BuildProfile::Debug,
+        splitscript::BuildProfile::Release,
+    ] {
+        let checked = splitscript::check(splitscript::parse(source).unwrap())
+            .expect("bare `None` should use the optional state field's declared type");
+        let wasm = splitscript::codegen_with_options(
+            &checked,
+            splitscript::CompilerOptions {
+                profile,
+                ..splitscript::CompilerOptions::default()
+            },
+        );
+        Validator::new_with_features(WasmFeatures::all())
+            .validate_all(&wasm)
+            .expect("optional state expressions should emit valid Wasm GC");
+    }
+}
+
+#[test]
+fn none_state_expression_still_explains_a_non_optional_field() {
+    let source = r#"
+        state "game.exe" {
+            score: u32 = None;
+        }
+    "#;
+
+    let diagnostics = splitscript::check(splitscript::parse(source).unwrap())
+        .expect_err("`None` must not flow into a non-optional state field");
+    let mismatch = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("expected `u32`, found `None`"))
+        .expect("the mismatch should name the declared value type rather than the poll wrapper");
+    assert!(mismatch.labels.iter().any(|label| {
+        label
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("state field `score` is declared as `u32`"))
+    }));
+}
+
+#[test]
 fn state_fields_can_depend_on_later_siblings_and_dynamic_at_bases() {
     let source = r#"
         state "game.exe" {

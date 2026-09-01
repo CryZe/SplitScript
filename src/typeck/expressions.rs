@@ -31,7 +31,7 @@ impl Checker {
             ExprKind::None => {
                 let none = self.core_type(crate::stdlib::CoreTypeId::None);
                 match expected.map(|ty| self.shallow_type(ty)) {
-                    Some(expected @ Type::Option(_)) => {
+                    Some(expected) if self.expected_accepts_none(expected) => {
                         self.semantics.resolve_value_conversion(
                             expr.id,
                             crate::semantic::ValueConversionKind::NoneToOptional,
@@ -48,6 +48,12 @@ impl Checker {
                             expected,
                         );
                         expected
+                    }
+                    Some(Type::Result(result))
+                        if self.shallow_type(self.inference.result_value(result)) != none =>
+                    {
+                        let value = self.inference.result_value(result);
+                        self.expect_expression(expr.id, none, Some(value), expr.span)?
                     }
                     Some(expected) => {
                         self.expect_expression(expr.id, none, Some(expected), expr.span)?
@@ -227,7 +233,7 @@ impl Checker {
                 } else {
                     let none = self.core_type(crate::stdlib::CoreTypeId::None);
                     match expected.map(|expected| self.shallow_type(expected)) {
-                        Some(expected @ Type::Option(_)) => {
+                        Some(expected) if self.expected_accepts_none(expected) => {
                             self.semantics.resolve_value_conversion(
                                 expr.id,
                                 crate::semantic::ValueConversionKind::NoneToOptional,
@@ -1529,6 +1535,24 @@ impl Checker {
         Some(ty)
     }
 
+    /// Whether a contextual wrapper type has an optional success value to
+    /// which a bare `None` can flow.
+    ///
+    /// Result layers are transparent here because an ordinary value is lifted
+    /// into their successful branch. The first option layer consumes `None` as
+    /// absence. This lets implicit failure boundaries contextualize `None`
+    /// without inventing a special state-field conversion.
+    fn expected_accepts_none(&mut self, expected: Type) -> bool {
+        match self.shallow_type(expected) {
+            Type::Option(_) => true,
+            Type::Result(result) => {
+                let value = self.inference.result_value(result);
+                self.expected_accepts_none(value)
+            }
+            _ => false,
+        }
+    }
+
     fn invoke_expression(
         &mut self,
         callee: &Expr,
@@ -1990,7 +2014,7 @@ impl Checker {
     }
 }
 
-fn expression_is_bare_none(expression: &Expr) -> bool {
+pub(super) fn expression_is_bare_none(expression: &Expr) -> bool {
     match &expression.kind {
         ExprKind::None => true,
         ExprKind::Block(block) => block

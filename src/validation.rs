@@ -285,33 +285,107 @@ pub(crate) fn validate(
         }
     }
 
-    if let Some(state) = &syntax.state {
-        for field in state.all_fields() {
-            if matches!(
-                field.source,
-                StateSource::Pointer(ref path) if path.decoder.is_none()
-            ) {
-                let ty = semantics
-                    .value_type(field.id)
-                    .expect("checked state fields have semantic types");
-                let memory_ty = match semantics.types().kind(ty) {
-                    crate::types::TypeKind::Option { value, .. } => *value,
-                    _ => ty,
-                };
-                if let Err(error) =
-                    capabilities.require(memory_ty, StdlibCapabilityId::MemoryReadable, semantics)
-                {
-                    diagnostics.push(Diagnostic::semantic(error, field.span));
-                }
-            }
-        }
-    }
+    diagnostics.extend(validate_remote_memory_layouts(
+        syntax,
+        semantics,
+        &capabilities,
+    ));
 
     ValidationOutput {
         scoped_globals,
         capabilities,
         effects,
         diagnostics,
+    }
+}
+
+/// Validates every source declaration whose runtime implementation performs a
+/// fixed-layout process-memory read.
+///
+/// This is deliberately a post-inference semantic boundary shared by native
+/// state fields and managed terminal fields. Code generation may rely on the
+/// resulting invariant without rediscovering which source types are readable.
+/// Managed references and bounded managed strings have dedicated decoders and
+/// therefore do not participate in the ordinary `MemoryReadable` contract.
+fn validate_remote_memory_layouts(
+    syntax: &Program,
+    semantics: &SemanticModel,
+    capabilities: &CapabilityAnalysis,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    if let Some(state) = &syntax.state {
+        for field in state.all_fields() {
+            if !matches!(
+                field.source,
+                StateSource::Pointer(ref path) if path.decoder.is_none()
+            ) {
+                continue;
+            }
+            let ty = semantics
+                .value_type(field.id)
+                .expect("checked state fields have semantic types");
+            let memory_ty = match semantics.types().kind(ty) {
+                TypeKind::Option { value, .. } => *value,
+                _ => ty,
+            };
+            if let Err(error) =
+                capabilities.require(memory_ty, StdlibCapabilityId::MemoryReadable, semantics)
+            {
+                diagnostics.push(Diagnostic::semantic(error, field.span));
+            }
+        }
+    }
+
+    for class in syntax.managed_class_declarations() {
+        for field in class.all_fields() {
+            let ty = semantics
+                .managed_field_value_type(field.id)
+                .expect("checked managed fields have semantic types");
+            if managed_field_has_dedicated_decoder(ty, semantics) {
+                continue;
+            }
+            let Err(error) =
+                capabilities.require(ty, StdlibCapabilityId::MemoryReadable, semantics)
+            else {
+                continue;
+            };
+            let mut diagnostic = Diagnostic::semantic(
+                format!(
+                    "managed field `{}.{}` has no fixed process-memory layout",
+                    class.name, field.name
+                ),
+                field.type_span,
+            )
+            .with_primary_label("this managed value needs a fixed `MemoryReadable` representation")
+            .with_note(error);
+            if matches!(
+                semantics.types().kind(ty),
+                TypeKind::Array { length: None, .. }
+            ) {
+                diagnostic = diagnostic.with_note(
+                    "a growable `[T]` does not describe the runtime layout of a managed array or list; managed collections need dedicated schema support",
+                );
+            }
+            diagnostics.push(diagnostic);
+        }
+    }
+
+    diagnostics
+}
+
+fn managed_field_has_dedicated_decoder(
+    ty: crate::types::TypeId,
+    semantics: &SemanticModel,
+) -> bool {
+    match semantics.types().kind(ty) {
+        TypeKind::ManagedReference(_) => true,
+        TypeKind::Standard(crate::stdlib::StdlibTypeId::String) => true,
+        TypeKind::Option { value, .. } => matches!(
+            semantics.types().kind(*value),
+            TypeKind::Standard(crate::stdlib::StdlibTypeId::String)
+        ),
+        _ => false,
     }
 }
 

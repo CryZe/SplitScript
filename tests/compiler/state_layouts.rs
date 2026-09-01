@@ -724,6 +724,61 @@ fn managed_string_fields_require_a_valid_explicit_bound() {
 }
 
 #[test]
+fn unsupported_managed_value_layouts_are_diagnosed_before_codegen() {
+    let source = r#"
+        image "Assembly-CSharp" {
+            class WorldSaveData {
+                static WorldSaveData instance;
+                [String] coinFlags;
+            }
+        }
+
+        state Unity ["game.exe"] {
+            coinFlags: [String] = WorldSaveData.instance?.coinFlags?;
+        }
+
+        whileAttached {
+            print(current.coinFlags)
+        }
+    "#;
+
+    for profile in [
+        splitscript::BuildProfile::Debug,
+        splitscript::BuildProfile::Release,
+    ] {
+        let diagnostics = splitscript::compile_with_options(
+            source,
+            splitscript::CompilerOptions {
+                profile,
+                ..splitscript::CompilerOptions::default()
+            },
+        )
+        .expect_err("unsupported managed collections must stop before code generation");
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.message.contains(
+                    "managed field `WorldSaveData.coinFlags` has no fixed process-memory layout",
+                )
+            })
+            .expect("the managed field declaration should receive a source diagnostic");
+        assert_eq!(
+            &source[diagnostic.span.start..diagnostic.span.end],
+            "[String]"
+        );
+        assert!(diagnostic.labels.iter().any(|label| {
+            label
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("fixed `MemoryReadable` representation"))
+        }));
+        assert!(diagnostic.notes.iter().any(|note| {
+            note.contains("managed array or list") && note.contains("dedicated schema support")
+        }));
+    }
+}
+
+#[test]
 fn sonic_three_air_shaped_range_discovery_and_filtered_state_compile_cleanly() {
     let source = r#"
         let wramBase

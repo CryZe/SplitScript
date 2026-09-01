@@ -1,5 +1,19 @@
 # SplitScript roadmap
 
+## 2026-09-01: managed schema layout failures stop before code generation
+
+- Added one post-inference remote-memory validation boundary shared by native
+  state paths and terminal managed fields. Managed references and bounded
+  managed strings retain their dedicated decoders; every other managed value
+  must satisfy the ordinary `MemoryReadable` contract before lowering.
+- Replaced the `[String]` managed-field code-generation assertion with a source
+  diagnostic anchored on the field type. It names the managed field, explains
+  the missing fixed layout, and distinguishes a growable SplitScript array from
+  a managed array/list representation without prematurely designing the
+  ASR-dependent collection API.
+- Added debug and release regressions for the original Here Comes Niko-shaped
+  source, plus the complete state-layout suite and all-target validation.
+
 ## 2026-08-31: completion reuses one revision context
 
 - Completion now borrows one recovered source document, syntax tree, cursor,

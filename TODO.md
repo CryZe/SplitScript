@@ -43,15 +43,15 @@ General rules:
 
 Start with the unchecked tasks in
 [Fix the confirmed 2026-08-30 campaign defects](#fix-the-confirmed-2026-08-30-campaign-defects),
-in their written order. The managed collection schema panic is first because
-normal source must never reach a compiler assertion even while collection
-support is deliberately deferred. The inconsistent `None` conversion for state
-fields is second because it forces a compile-clean but semantically false
-`Some("")` substitution. Then address the silent address-base migration trap,
-broken compiler-owned example, and focused documentation/diagnostic defects as
-one small verified guidance sequence. Do not begin managed collection support
-itself until ASR has a tested representation, and bring every language,
-standard-library, provider, or host-surface decision below back to the user.
+in their written order. The managed collection schema panic is now stopped at
+the shared remote-memory validation boundary. The inconsistent `None`
+conversion for state fields is next because it forces a compile-clean but
+semantically false `Some("")` substitution. Then address the silent address-base
+migration trap, broken compiler-owned example, and focused
+documentation/diagnostic defects as one small verified guidance sequence. Do
+not begin managed collection support itself until ASR has a tested
+representation, and bring every language, standard-library, provider, or
+host-surface decision below back to the user.
 
 ## Unity schema foundation and deferred follow-ups
 
@@ -416,7 +416,7 @@ corpus.
 
 ### Fix the confirmed 2026-08-30 campaign defects
 
-- [ ] Stop unsupported managed collection fields during schema checking rather
+- [x] Stop unsupported managed collection fields during schema checking rather
   than letting `[String]` reach the code-generation assertion that every
   managed value field is [`MemoryReadable`]. Emit a normal source diagnostic on
   the field type in every profile and retain a minimized no-panic regression.
@@ -1321,36 +1321,32 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Replace the managed `[String]` schema panic with a checked source diagnostic
-   and a no-panic regression. This does not unblock collection fields; it makes
-   unsupported source safe while the ASR-dependent representation remains
-   deferred.
-2. Fix contextual `None` conversion for expression-valued state fields and
+1. Fix contextual `None` conversion for expression-valued state fields and
    verify optional state values across more than `String?`.
-3. Close the small but high-impact docs-first defects: explain ASL numeric-root
+2. Close the small but high-impact docs-first defects: explain ASL numeric-root
    semantics, fix and compile-check the `choice` example, document fixed-array
    limits and primitive mappings, and improve provider, match-arm, lifecycle,
    and constant guest-address diagnostics.
-4. Bring the finite-scan design back for a decision using OpenGOAL and Abe's
+3. Bring the finite-scan design back for a decision using OpenGOAL and Abe's
    Oddysee as evidence, then separately decide how a Metal Slug framebuffer can
    be rediscovered after attachment. Reuse future cancellation/composition
    rather than multiplying unrelated `Once` APIs.
-5. Resolve the PS2 provider's low-memory product-code gap against ASR, then
+4. Resolve the PS2 provider's low-memory product-code gap against ASR, then
    decide one provider-independent bounded guest-string facility. Keep SNES and
    Unity managed arrays/lists deferred until ASR has tested implementations.
-6. Decide whether multi-console legacy scripts become separate provider-specific
+5. Decide whether multi-console legacy scripts become separate provider-specific
    SplitScript packages or justify a typed multi-provider source model.
-7. Design the read-only timer metadata/time surface, imperative timer-control
+6. Design the read-only timer metadata/time surface, imperative timer-control
    boundary, and writable persistent file API as separate decisions. Abe's
    Oddysee is the acceptance case for current timer time and persistence; Ato,
    Spider-Man, and the SEGA Master Splitter supply the remaining evidence.
-8. Add safe module enumeration and decide deterministic executable identity
+7. Add safe module enumeration and decide deterministic executable identity
    without weakening exact source hashes to version metadata.
-9. Decide fixed-array equality/patterns and runtime-varying watched types using
+8. Decide fixed-array equality/patterns and runtime-varying watched types using
    the Code: Veronica X and FNaF ports. Prefer reusable static typing and
    ordinary aggregate architecture over compatibility-shaped intrinsics.
-10. Resume measured editor/compiler performance, release hardening, hosted IDE,
+9. Resume measured editor/compiler performance, release hardening, hosted IDE,
     and debugging work after the porting correctness and design sequence above.
-11. Keep `unity.time`, SNES, and managed collections gated on ASR evidence, and
+10. Keep `unity.time`, SNES, and managed collections gated on ASR evidence, and
     keep writes/injection, physical `None` specialization, and other broad host
     powers deferred until their explicit dependencies and policies are ready.

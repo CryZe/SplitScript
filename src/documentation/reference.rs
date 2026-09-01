@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-use super::{StandardLibraryDocumentation, bundled, code, intra_doc};
+use super::{STATE_PROVIDER_INDEX_URI, StandardLibraryDocumentation, bundled, code, intra_doc};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -146,6 +146,16 @@ impl DocumentationReference {
                     .to_owned(),
                 raw_summary: "Guidance from ASL and familiar languages to canonical SplitScript.",
                 search_text: "ASL C# JavaScript Rust porting migration guidance".to_owned(),
+                signature: None,
+            },
+            DocumentationIndexEntry {
+                uri: STATE_PROVIDER_INDEX_URI.to_owned(),
+                title: "State providers".to_owned(),
+                kind: "index",
+                summary: "Process and emulator environments available to state declarations."
+                    .to_owned(),
+                raw_summary: "Process and emulator environments available to state declarations.",
+                search_text: "state providers process emulator environment".to_owned(),
                 signature: None,
             },
         ];
@@ -502,6 +512,10 @@ impl DocumentationReference {
 
         if uri == "/migration/index.md" {
             return Some(self.migration_index_page());
+        }
+
+        if uri == STATE_PROVIDER_INDEX_URI {
+            return Some(self.state_provider_index_page());
         }
 
         if let Some(mut page) = bundled::page(uri, &self.library, self.semantic_examples) {
@@ -1379,6 +1393,34 @@ impl DocumentationReference {
         DocumentationPage {
             uri: "/index.md".to_owned(),
             title: "SplitScript reference".to_owned(),
+            markdown,
+        }
+    }
+
+    fn state_provider_index_page(&self) -> DocumentationPage {
+        let entries = self.index();
+        let mut providers = entries
+            .iter()
+            .filter(|entry| entry.kind == "state provider")
+            .collect::<Vec<_>>();
+        providers.sort_by_key(|entry| entry.title.to_ascii_lowercase());
+
+        let mut markdown = String::from(
+            "# State providers\n\n\
+             A [`state`](../../language/state.md) declaration selects one of these compiler-supported process or emulator environments.\n",
+        );
+        append_reference_table_header(&mut markdown, &["Provider", "Description"]);
+        for entry in providers {
+            markdown.push_str(&format!(
+                "\n| [{}]({}) | {} |",
+                escape_markdown_table_cell(&entry.title),
+                relative_document_link(STATE_PROVIDER_INDEX_URI, &entry.uri),
+                table_prose(entry.raw_summary, STATE_PROVIDER_INDEX_URI, &self.library)
+            ));
+        }
+        DocumentationPage {
+            uri: STATE_PROVIDER_INDEX_URI.to_owned(),
+            title: "State providers".to_owned(),
             markdown,
         }
     }
@@ -2603,6 +2645,23 @@ mod tests {
             "/guides/asl-porting.md"
         );
         assert!(reference.topic("read").is_none());
+    }
+
+    #[test]
+    fn state_provider_index_lists_every_catalog_provider() {
+        let reference = DocumentationReference::default();
+        let page = reference
+            .page(STATE_PROVIDER_INDEX_URI)
+            .expect("state providers have a navigable index");
+
+        for provider in reference.library.state_providers() {
+            assert!(
+                page.markdown.contains(&format!("[{}]", provider.name)),
+                "{} should be linked from the state-provider index",
+                provider.name
+            );
+        }
+        assert!(page.markdown.contains("[Unity](Unity.md)"));
     }
 
     #[test]

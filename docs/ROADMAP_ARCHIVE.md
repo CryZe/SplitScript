@@ -4402,3 +4402,17 @@ language catalog document the refinement rule.
   possible effects still execute even when their produced string is discarded.
 - Deferred a user-visible structured error identity to the lower-priority
   roadmap; payload erasure does not require or prejudge that language design.
+
+# 2026-09-01: catalog-guided state-provider diagnostics
+
+- Made unknown state providers list every currently supported provider from
+  the compiler-owned standard-library catalog rather than maintaining a second
+  diagnostic list.
+- Added machine-applicable spelling repairs for unambiguous single edits, case
+  mistakes, and adjacent transpositions. Distinct unsupported platform names
+  such as `SNES` remain unsupported names rather than being misleadingly
+  rewritten to a nearby provider.
+- Added a generated state-provider index and a generic compact diagnostic
+  documentation target shared by the LSP, CLI, and embedded compiler service.
+  Migration topics and direct reference pages remain distinct while occupying
+  one optional pointer in parser diagnostics.

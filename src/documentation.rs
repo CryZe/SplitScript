@@ -13,6 +13,8 @@ pub(crate) use reference::migration_topic_uri;
 pub use reference::{DocumentationIndexEntry, DocumentationPage, DocumentationReference};
 pub(crate) use reference::{language_item_uri, symbol_uri};
 
+pub(crate) const STATE_PROVIDER_INDEX_URI: &str = "/stdlib/state-providers/index.md";
+
 /// Joins the short and extended prose without manufacturing an empty or
 /// duplicated paragraph. Catalog producers preserve these as distinct fields,
 /// while this defensive equality check also keeps externally supplied or old

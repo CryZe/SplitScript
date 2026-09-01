@@ -51,11 +51,12 @@ offsets from SplitScript absolute addresses. The compiler-owned `choice`
 example is corrected and language-catalog validation now parses, formats, and
 type-checks every complete fixture while classifying focused fragments
 explicitly. The fixed-array reference now exposes its process-read bounds and
-the transactional sparse-read alternative. Continue with the focused
-documentation/diagnostic defects as one small verified guidance sequence. Do
-not begin managed collection support itself until ASR has a tested
-representation, and bring every language, standard-library, provider, or
-host-surface decision below back to the user.
+the transactional sparse-read alternative. Unknown state providers now list
+the catalog-owned choices, repair only clear typos, and link a dedicated
+provider index. Continue with the focused documentation/diagnostic defects as
+one small verified guidance sequence. Do not begin managed collection support
+itself until ASR has a tested representation, and bring every language,
+standard-library, provider, or host-surface decision below back to the user.
 
 ## Unity schema foundation and deferred follow-ups
 
@@ -450,7 +451,7 @@ corpus.
   around an impossible schema. Link to growable state value blocks as the
   current selective-read alternative while keeping the existing precise
   declaration diagnostic.
-- [ ] Improve unknown-provider diagnostics. List the currently valid state
+- [x] Improve unknown-provider diagnostics. List the currently valid state
   providers, suggest the nearest spelling when applicable, and link the state
   provider index. Do not imply that a correctly spelled unsupported provider
   such as `SNES` exists; the separate ASR-dependent SNES task remains deferred.

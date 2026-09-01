@@ -35,6 +35,7 @@ mod lsp;
 mod managed;
 mod memory;
 pub mod migration;
+mod name_matching;
 use splitscript_syntax::parser;
 mod refactor;
 mod resolution;

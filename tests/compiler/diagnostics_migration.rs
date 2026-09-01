@@ -1367,7 +1367,7 @@ fn current_state_fields_can_be_replaced_but_old_state_remains_read_only() {
             .any(|note| note.contains("`current`"))
     );
     assert_eq!(
-        diagnostics[0].migration_topic.as_deref(),
+        diagnostics[0].migration_topic(),
         Some("asl.state.mutable-current")
     );
 }
@@ -1398,9 +1398,11 @@ fn current_state_assignment_uses_field_types_and_snapshot_availability() {
             .message
             .contains("requires state snapshots and is unavailable in `onDetach`")
     }));
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.migration_topic.as_deref() == Some("asl.state.helper-snapshots")
-    }));
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.migration_topic() == Some("asl.state.helper-snapshots")
+        })
+    );
 
     let wrong_type = source.replace("current.scene = 1", "current.scene = false");
     let diagnostics = splitscript::compile(&wrong_type)
@@ -2479,10 +2481,7 @@ fn legacy_main_module_query_points_to_explicit_executable_discovery() {
     );
     assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "First");
     assert!(diagnostic.fixes.is_empty());
-    assert_eq!(
-        diagnostic.migration_topic.as_deref(),
-        Some("asl.process.modules")
-    );
+    assert_eq!(diagnostic.migration_topic(), Some("asl.process.modules"));
     assert!(
         diagnostic
             .notes
@@ -3163,7 +3162,7 @@ fn reported_asl_helper_gaps_produce_focused_migration_diagnostics() {
             .iter()
             .find(|diagnostic| diagnostic.message == expected_message)
             .unwrap_or_else(|| panic!("missing focused diagnostic in {diagnostics:#?}"));
-        assert_eq!(diagnostic.migration_topic.as_deref(), Some(expected_topic));
+        assert_eq!(diagnostic.migration_topic(), Some(expected_topic));
         assert!(diagnostic.fixes.is_empty());
     }
 }
@@ -3191,9 +3190,7 @@ fn legacy_unity_traversal_points_to_managed_schemas() {
             .expect_err("legacy managed traversal should receive focused guidance");
         let diagnostic = diagnostics
             .iter()
-            .find(|diagnostic| {
-                diagnostic.migration_topic.as_deref() == Some("asl.unity.managed-schema")
-            })
+            .find(|diagnostic| diagnostic.migration_topic() == Some("asl.unity.managed-schema"))
             .unwrap_or_else(|| panic!("missing managed-schema diagnostic in {diagnostics:#?}"));
         assert_eq!(
             diagnostic.message,
@@ -3222,7 +3219,7 @@ fn settings_map_syntax_guides_to_typed_settings_view_operations() {
         .find(|diagnostic| diagnostic.message.contains("settings-map lookup"))
         .expect("settings indexing diagnostic");
     assert_eq!(
-        diagnostic.migration_topic.as_deref(),
+        diagnostic.migration_topic(),
         Some("asl.settings.dynamic-lookup")
     );
     let [fix] = diagnostic.fixes.as_slice() else {

@@ -151,6 +151,7 @@ pub struct ServiceDiagnostic {
     pub labels: Vec<ServiceDiagnosticLabel>,
     pub notes: Vec<String>,
     pub fixes: Vec<ServiceDiagnosticFix>,
+    pub documentation_uri: Option<String>,
     pub migration_topic: Option<String>,
 }
 
@@ -344,6 +345,8 @@ fn cancelled_service_error(cancelled: crate::CompilationCancelled) -> CompileSer
 
 impl From<Diagnostic> for ServiceDiagnostic {
     fn from(diagnostic: Diagnostic) -> Self {
+        let documentation_uri = diagnostic.documentation_uri().map(str::to_owned);
+        let migration_topic = diagnostic.migration_topic().map(str::to_owned);
         Self {
             code: diagnostic.code.as_str().to_owned(),
             severity: diagnostic.severity.into(),
@@ -363,7 +366,8 @@ impl From<Diagnostic> for ServiceDiagnostic {
                 .into_iter()
                 .map(ServiceDiagnosticFix::from)
                 .collect(),
-            migration_topic: diagnostic.migration_topic.map(Into::into),
+            documentation_uri,
+            migration_topic,
         }
     }
 }

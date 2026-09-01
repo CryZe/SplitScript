@@ -845,6 +845,24 @@ fn migration_diagnostics_link_to_their_compiler_owned_reference_page() {
 }
 
 #[test]
+fn diagnostics_can_link_to_non_migration_reference_pages() {
+    use crate::ast::Span;
+
+    let diagnostic = Diagnostic::new("unknown provider", Span { start: 0, end: 5 })
+        .with_documentation_uri("/stdlib/state-providers/index.md");
+    let converted = diagnostic_json("file:///game.split", "Untiy", &diagnostic);
+
+    assert_eq!(
+        converted["codeDescription"]["href"],
+        "splitscript-docs:/stdlib/state-providers/index.md"
+    );
+    assert_eq!(
+        converted["data"]["documentationUri"],
+        "/stdlib/state-providers/index.md"
+    );
+}
+
+#[test]
 fn shutdown_requires_a_following_exit_notification() {
     let mut server = LanguageServer::default();
     initialize(&mut server);

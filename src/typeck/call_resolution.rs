@@ -13,6 +13,7 @@ use crate::{
         legacy_set_field_diagnostic, legacy_static_call_diagnostic, legacy_string_field_diagnostic,
         legacy_string_method_diagnostic, legacy_value_path_diagnostic, migration_diagnostic,
     },
+    name_matching::closest_name,
     semantic::{PendingResolvedCall, ResolvedMember, ResolvedValue},
     signature::parse_signature,
     stdlib::{
@@ -26,7 +27,7 @@ use crate::{
 
 use super::{
     CallSyntax, Checker, DeferredMemberPath, ExpectedTypeSource, MethodReceiver, PathResolution,
-    ResolvedReceiver, catalog_type_argument, closest_name,
+    ResolvedReceiver, catalog_type_argument,
     context::{CallableContext, ExpressionMode},
     declarations::{FunctionParameterDeclaration, RuntimeSettingDeclaration, RuntimeSettingKind},
 };

@@ -44,6 +44,7 @@ export interface EmbeddedServiceDiagnostic {
     labels: readonly unknown[];
     notes: readonly string[];
     fixes: readonly unknown[];
+    documentationUri?: string | null;
     migrationTopic?: string;
 }
 

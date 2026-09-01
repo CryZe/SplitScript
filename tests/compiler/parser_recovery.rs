@@ -116,10 +116,7 @@ fn missing_state_uses_canonical_attachment_syntax() {
             .iter()
             .all(|note| !note.contains("state(process"))
     );
-    assert_eq!(
-        diagnostic.migration_topic.as_deref(),
-        Some("asl.state.attachment")
-    );
+    assert_eq!(diagnostic.migration_topic(), Some("asl.state.attachment"));
 }
 
 #[test]
@@ -167,7 +164,7 @@ fn legacy_lifecycle_blocks_get_semantic_migration_guidance() {
     let topics = recovered
         .diagnostics()
         .iter()
-        .map(|diagnostic| diagnostic.migration_topic.as_deref().unwrap())
+        .map(|diagnostic| diagnostic.migration_topic().unwrap())
         .collect::<Vec<_>>();
     assert!(topics.contains(&"asl.lifecycle.startup"));
     assert!(topics.contains(&"asl.lifecycle.init"));

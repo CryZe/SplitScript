@@ -304,7 +304,7 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
             diagnostic
                 .message
                 .contains("declare Unity managed metadata with an `image` schema")
-                && diagnostic.migration_topic.as_deref() == Some("asl.unity.managed-schema")
+                && diagnostic.migration_topic() == Some("asl.unity.managed-schema")
         }),
         "{diagnostics:#?}"
     );
@@ -1124,6 +1124,51 @@ fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
         .expect("the provider name should have catalog documentation");
     assert!(hover.markdown.contains("state GBA { ... }"));
     assert!(hover.markdown.contains("gba: GBAEmulator"));
+}
+
+#[test]
+fn unknown_state_providers_list_valid_choices_and_fix_clear_typos() {
+    let diagnostics = splitscript::check(splitscript::lower(
+        splitscript::parse(r#"state Untiy ["game.exe"] {}"#).unwrap(),
+    ))
+    .expect_err("the misspelled provider should be rejected");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("unknown state provider"))
+        .expect("resolution should explain the unknown provider");
+
+    assert_eq!(
+        diagnostic.message,
+        "unknown state provider `Untiy`; did you mean `Unity`?"
+    );
+    assert!(diagnostic.notes.iter().any(|note| {
+        note == "valid state providers are `GBA`, `GCN`, `Genesis`, `Native`, `PS1`, `PS2`, `SMS`, `Unity`, `Wii`"
+    }));
+    assert_eq!(
+        diagnostic.documentation_uri(),
+        Some("/stdlib/state-providers/index.md")
+    );
+    assert_eq!(diagnostic.fixes.len(), 1);
+    assert_eq!(diagnostic.fixes[0].edits[0].replacement, "Unity");
+}
+
+#[test]
+fn unsupported_state_provider_names_are_not_recast_as_typos() {
+    let diagnostics = splitscript::check(splitscript::lower(
+        splitscript::parse("state SNES {}").unwrap(),
+    ))
+    .expect_err("an unsupported provider should be rejected");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("unknown state provider"))
+        .expect("resolution should explain the unknown provider");
+
+    assert_eq!(diagnostic.message, "unknown state provider `SNES`");
+    assert!(diagnostic.fixes.is_empty());
+    assert_eq!(
+        diagnostic.documentation_uri(),
+        Some("/stdlib/state-providers/index.md")
+    );
 }
 
 #[test]

@@ -1428,9 +1428,7 @@ fn legacy_manual_managed_paths_point_to_the_schema_workflow() {
         .expect_err("manual managed traversal should not remain a public API");
     let diagnostic = diagnostics
         .iter()
-        .find(|diagnostic| {
-            diagnostic.migration_topic.as_deref() == Some("asl.unity.managed-schema")
-        })
+        .find(|diagnostic| diagnostic.migration_topic() == Some("asl.unity.managed-schema"))
         .expect("legacy Unity traversal should point to the managed-schema guide");
     assert!(diagnostic.message.contains("`image` schema"));
 }

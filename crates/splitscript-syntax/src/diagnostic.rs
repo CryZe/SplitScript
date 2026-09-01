@@ -160,6 +160,12 @@ pub struct DiagnosticFix {
     pub edits: Vec<TextEdit>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DiagnosticDocumentation {
+    Page(String),
+    MigrationTopic(String),
+}
+
 /// Lazily allocated collection of machine-readable diagnostic fixes.
 ///
 /// Diagnostics are the parser's error value, so keeping the empty case to one
@@ -226,9 +232,9 @@ pub struct Diagnostic {
     pub labels: Vec<DiagnosticLabel>,
     pub notes: Vec<String>,
     pub fixes: DiagnosticFixes,
-    /// Stable compiler-owned migration concept identity. Frontends decide how
-    /// to present or open it.
-    pub migration_topic: Option<Box<str>>,
+    /// Compiler-owned documentation identity stored behind one pointer so the
+    /// parser's frequently returned error value remains compact.
+    documentation: Option<Box<DiagnosticDocumentation>>,
 }
 
 impl Diagnostic {
@@ -269,7 +275,7 @@ impl Diagnostic {
             }],
             notes: Vec::new(),
             fixes: DiagnosticFixes::default(),
-            migration_topic: None,
+            documentation: None,
         }
     }
 
@@ -298,8 +304,29 @@ impl Diagnostic {
     }
 
     pub fn with_migration_topic(mut self, topic: impl Into<String>) -> Self {
-        self.migration_topic = Some(topic.into().into_boxed_str());
+        self.documentation = Some(Box::new(DiagnosticDocumentation::MigrationTopic(
+            topic.into(),
+        )));
         self
+    }
+
+    pub fn with_documentation_uri(mut self, uri: impl Into<String>) -> Self {
+        self.documentation = Some(Box::new(DiagnosticDocumentation::Page(uri.into())));
+        self
+    }
+
+    pub fn migration_topic(&self) -> Option<&str> {
+        match self.documentation.as_deref() {
+            Some(DiagnosticDocumentation::MigrationTopic(topic)) => Some(topic),
+            Some(DiagnosticDocumentation::Page(_)) | None => None,
+        }
+    }
+
+    pub fn documentation_uri(&self) -> Option<&str> {
+        match self.documentation.as_deref() {
+            Some(DiagnosticDocumentation::Page(uri)) => Some(uri),
+            Some(DiagnosticDocumentation::MigrationTopic(_)) | None => None,
+        }
     }
 
     pub fn with_machine_applicable_fix(

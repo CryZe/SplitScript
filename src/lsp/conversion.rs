@@ -91,7 +91,12 @@ pub(super) fn diagnostic_json(uri: &str, source: &str, diagnostic: &Diagnostic) 
         "relatedInformation": related_information,
         "data": { "fixes": fixes }
     });
-    if let Some(topic) = &diagnostic.migration_topic {
+    if let Some(uri) = diagnostic.documentation_uri() {
+        value["codeDescription"] = json!({
+            "href": format!("splitscript-docs:{uri}")
+        });
+        value["data"]["documentationUri"] = json!(uri);
+    } else if let Some(topic) = diagnostic.migration_topic() {
         value["codeDescription"] = json!({
             "href": format!(
                 "splitscript-docs:{}",

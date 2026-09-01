@@ -49,7 +49,10 @@ fn convert(file_id: usize, source: &str, diagnostic: &Diagnostic) -> CodespanDia
         .collect();
 
     let mut notes = diagnostic.notes.clone();
-    if let Some(topic) = &diagnostic.migration_topic {
+    if let Some(uri) = diagnostic.documentation_uri() {
+        notes.push(format!("help: SplitScript documentation `{uri}`"));
+    }
+    if let Some(topic) = diagnostic.migration_topic() {
         notes.push(format!("help: SplitScript documentation topic `{topic}`"));
     }
     notes.extend(diagnostic.fixes.iter().map(|fix| match fix.applicability {
@@ -158,6 +161,15 @@ mod tests {
         let output = render("legacy.split", "update", &[diagnostic]);
 
         assert!(output.contains("SplitScript documentation topic `asl.lifecycle.update`"));
+    }
+
+    #[test]
+    fn renders_direct_compiler_documentation_links() {
+        let diagnostic = Diagnostic::new("unknown provider", Span { start: 0, end: 5 })
+            .with_documentation_uri("/stdlib/state-providers/index.md");
+        let output = render("game.split", "Untiy", &[diagnostic]);
+
+        assert!(output.contains("SplitScript documentation `/stdlib/state-providers/index.md`"));
     }
 
     fn render(source_name: &str, source: &str, diagnostics: &[Diagnostic]) -> String {

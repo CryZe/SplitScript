@@ -13,6 +13,7 @@ use crate::{
         TypeApplicationId, TypeNameId, TypeRef, ValueId,
     },
     migration::{legacy_type_diagnostic, migration_diagnostic},
+    name_matching::closest_single_typo,
     stdlib::{StandardLibrary, StateProviderProcesses, StdlibStateProviderId, StdlibTypeKind},
     types::{EnumTypeId, ResolvedTypeRef},
     visit::{self, Visitor},
@@ -275,10 +276,39 @@ pub(crate) fn resolve_program(
                     StateProviderProcesses::SourceState | StateProviderProcesses::Declared(_) => {}
                 }
             } else {
-                provider_diagnostics.push(Diagnostic::type_error(
-                    format!("unknown state provider `{}`", reference.name),
-                    reference.span,
-                ));
+                let mut provider_names = standard_library
+                    .state_providers()
+                    .iter()
+                    .map(|provider| provider.name)
+                    .collect::<Vec<_>>();
+                provider_names.sort_unstable_by_key(|name| name.to_ascii_lowercase());
+                let suggestion =
+                    closest_single_typo(&reference.name, provider_names.iter().copied());
+                let message = suggestion.as_ref().map_or_else(
+                    || format!("unknown state provider `{}`", reference.name),
+                    |suggestion| {
+                        format!(
+                            "unknown state provider `{}`; did you mean `{suggestion}`?",
+                            reference.name
+                        )
+                    },
+                );
+                let valid = provider_names
+                    .iter()
+                    .map(|name| format!("`{name}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let mut diagnostic = Diagnostic::type_error(message, reference.span)
+                    .with_note(format!("valid state providers are {valid}"))
+                    .with_documentation_uri(crate::documentation::STATE_PROVIDER_INDEX_URI);
+                if let Some(suggestion) = suggestion {
+                    diagnostic = diagnostic.with_machine_applicable_fix(
+                        format!("replace with `{suggestion}`"),
+                        reference.span,
+                        suggestion,
+                    );
+                }
+                provider_diagnostics.push(diagnostic);
             }
         } else {
             resolutions.state_provider = standard_library

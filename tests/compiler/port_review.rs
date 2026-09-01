@@ -144,7 +144,7 @@ fn unity_review_fixture_uses_the_schema_provider_and_rejects_manual_traversal() 
     )
     .expect_err("manual Unity traversal must guide users to the schema provider");
     assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.migration_topic.as_deref() == Some("asl.unity.managed-schema")
+        diagnostic.migration_topic() == Some("asl.unity.managed-schema")
             && diagnostic.message.contains("`image` schema")
     }));
 

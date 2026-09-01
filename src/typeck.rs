@@ -759,65 +759,6 @@ fn resolved_type_ref(ty: ResolvedTypeRef, types: &TypeStore) -> Type {
     }
 }
 
-fn closest_name<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<String> {
-    let normalized_name = normalize_name(name);
-    let maximum_distance = match normalized_name.chars().count() {
-        0..=3 => 1,
-        4..=7 => 2,
-        _ => 3,
-    };
-    let mut seen = HashSet::new();
-    let mut best: Option<(usize, String)> = None;
-    let mut tied = false;
-    for candidate in candidates {
-        if candidate == name || !seen.insert(candidate) {
-            continue;
-        }
-        let distance = edit_distance(&normalized_name, &normalize_name(candidate));
-        if distance > maximum_distance {
-            continue;
-        }
-        match &best {
-            None => {
-                best = Some((distance, candidate.to_owned()));
-                tied = false;
-            }
-            Some((best_distance, _)) if distance < *best_distance => {
-                best = Some((distance, candidate.to_owned()));
-                tied = false;
-            }
-            Some((best_distance, _)) if distance == *best_distance => tied = true,
-            Some(_) => {}
-        }
-    }
-    (!tied)
-        .then(|| best.map(|(_, candidate)| candidate))
-        .flatten()
-}
-
-fn normalize_name(name: &str) -> String {
-    name.chars()
-        .filter(|character| *character != '_')
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-fn edit_distance(left: &str, right: &str) -> usize {
-    let right = right.chars().collect::<Vec<_>>();
-    let mut previous = (0..=right.len()).collect::<Vec<_>>();
-    let mut current = vec![0; right.len() + 1];
-    for (left_index, left_character) in left.chars().enumerate() {
-        current[0] = left_index + 1;
-        for (right_index, right_character) in right.iter().enumerate() {
-            current[right_index + 1] = (previous[right_index + 1] + 1)
-                .min(current[right_index] + 1)
-                .min(previous[right_index] + usize::from(left_character != *right_character));
-        }
-        std::mem::swap(&mut previous, &mut current);
-    }
-    previous[right.len()]
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{lexer, parser};

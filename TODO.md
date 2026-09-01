@@ -58,9 +58,11 @@ offer a complete rewrite instead of blaming an existing comma. Bare-global
 lifetime errors now spell out the one direct `onAttach`/`onStart` assignment
 rule and the helper-call boundary. ASL primitive state types now have a
 physical-width mapping and qualified exact search aliases that do not
-masquerade as compiler rewrite spellings. Continue with the focused
-documentation/diagnostic defects as one small verified guidance sequence. Do
-not begin managed collection support itself until ASR has a tested
+masquerade as compiler rewrite spellings. Literal provider-memory reads are
+now checked against the same catalog-owned ranges used by runtime translation
+and reference documentation. The confirmed campaign-defect sequence is
+complete; continue with the next highest-priority item below. Do not begin
+managed collection support itself until ASR has a tested
 representation, and bring every language, standard-library, provider, or
 host-surface decision below back to the user.
 
@@ -474,7 +476,7 @@ corpus.
   for queries such as `ASL bool byte int`. Show physical-width mappings and the
   cases that require inspecting source/runtime representation rather than
   blindly choosing a similarly named SplitScript type.
-- [ ] Reject statically impossible literal guest-memory reads at provider
+- [x] Reject statically impossible literal guest-memory reads at provider
   checking time. A constant PS2 address outside the provider's declared readable
   domain must produce a focused diagnostic before code generation; dynamic
   addresses retain their runtime failure. Keep this diagnostic synchronized

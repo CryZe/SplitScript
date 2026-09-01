@@ -506,7 +506,19 @@ pub(super) fn build_wii_read_memory(inputs: &RuntimeHelperInputs<'_>) -> Functio
 }
 
 pub(super) fn build_ps2_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
-    ps2::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
+    let provider = inputs
+        .gc
+        .standard_library
+        .state_provider(crate::stdlib::StdlibStateProviderId::Ps2);
+    let [range] = provider.readable_ranges else {
+        panic!("PS2 runtime translation requires exactly one readable guest-memory range")
+    };
+    ps2::compile_translate_address(
+        inputs.abi,
+        inputs.gc,
+        inputs.memory.scratch().abi_read,
+        *range,
+    )
 }
 
 pub(super) fn build_ps2_read_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {

@@ -286,7 +286,9 @@ pub(crate) fn validate(
     }
 
     diagnostics.extend(validate_remote_memory_layouts(
+        &standard_library,
         syntax,
+        hir,
         semantics,
         &capabilities,
     ));
@@ -308,7 +310,9 @@ pub(crate) fn validate(
 /// Managed references and bounded managed strings have dedicated decoders and
 /// therefore do not participate in the ordinary `MemoryReadable` contract.
 fn validate_remote_memory_layouts(
+    standard_library: &StandardLibrary,
     syntax: &Program,
+    hir: &TypedProgram,
     semantics: &SemanticModel,
     capabilities: &CapabilityAnalysis,
 ) -> Vec<Diagnostic> {
@@ -336,6 +340,14 @@ fn validate_remote_memory_layouts(
             }
         }
     }
+
+    diagnostics.extend(validate_provider_guest_memory_ranges(
+        standard_library,
+        syntax,
+        hir,
+        semantics,
+        capabilities,
+    ));
 
     for class in syntax.managed_class_declarations() {
         for field in class.all_fields() {
@@ -372,6 +384,166 @@ fn validate_remote_memory_layouts(
     }
 
     diagnostics
+}
+
+fn validate_provider_guest_memory_ranges(
+    standard_library: &StandardLibrary,
+    syntax: &Program,
+    hir: &TypedProgram,
+    semantics: &SemanticModel,
+    capabilities: &CapabilityAnalysis,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    if let Some(provider_id) = semantics.state_provider()
+        && let Some(state) = &syntax.state
+    {
+        let provider = standard_library.state_provider(provider_id);
+        if !provider.readable_ranges.is_empty() {
+            for field in state.all_fields() {
+                let StateSource::Pointer(path) = &field.source else {
+                    continue;
+                };
+                let crate::ast::PointerPathBase::Absolute(address) = path.base else {
+                    continue;
+                };
+                let size = if path.offsets.is_empty() {
+                    state_field_read_size(field, semantics, capabilities)
+                } else {
+                    // Provider pointer paths read a 32-bit guest pointer at
+                    // every intermediate hop.
+                    Some(4)
+                };
+                let Some(size) = size else {
+                    continue;
+                };
+                if !provider
+                    .readable_ranges
+                    .iter()
+                    .any(|range| range.contains(address, size))
+                {
+                    diagnostics.push(invalid_guest_read_diagnostic(
+                        provider,
+                        address,
+                        size,
+                        path.base_span,
+                        format!("state field `{}`", field.name),
+                    ));
+                }
+            }
+        }
+    }
+
+    for expression in hir.expressions() {
+        let Some(ResolvedCall::StandardLibrary {
+            item,
+            type_arguments,
+            ..
+        }) = hir.call(expression.id)
+        else {
+            continue;
+        };
+        let Some(provider) = standard_library
+            .state_providers()
+            .iter()
+            .find(|provider| provider.direct_read == *item && !provider.readable_ranges.is_empty())
+        else {
+            continue;
+        };
+        let TypedExpressionKind::Call { arguments, .. } = &expression.kind else {
+            continue;
+        };
+        let Some(address) = arguments
+            .first()
+            .and_then(|argument| hir.expression(*argument))
+        else {
+            continue;
+        };
+        let TypedExpressionKind::Int { value, .. } = address.kind else {
+            continue;
+        };
+        let Some(memory_ty) = type_arguments.first().copied() else {
+            continue;
+        };
+        let Ok(layout) = capabilities.memory().layout(memory_ty, semantics) else {
+            continue;
+        };
+        let size = layout.size();
+        if !provider
+            .readable_ranges
+            .iter()
+            .any(|range| range.contains(value, size))
+        {
+            diagnostics.push(invalid_guest_read_diagnostic(
+                provider,
+                value,
+                size,
+                address.span,
+                format!("call to `{}`", standard_library.item(*item).qualified_name),
+            ));
+        }
+    }
+
+    diagnostics
+}
+
+fn state_field_read_size(
+    field: &crate::ast::StateField,
+    semantics: &SemanticModel,
+    capabilities: &CapabilityAnalysis,
+) -> Option<u32> {
+    let StateSource::Pointer(path) = &field.source else {
+        return None;
+    };
+    match path.decoder {
+        Some(crate::ast::StateMemoryDecoder::Utf8 { max_bytes, .. }) => Some(max_bytes),
+        Some(crate::ast::StateMemoryDecoder::Utf16Le { max_units, .. }) => max_units.checked_mul(2),
+        None => {
+            let ty = semantics.value_type(field.id)?;
+            let memory_ty = match semantics.types().kind(ty) {
+                TypeKind::Option { value, .. } => *value,
+                _ => ty,
+            };
+            capabilities
+                .memory()
+                .layout(memory_ty, semantics)
+                .ok()
+                .map(crate::memory::MemoryTypeLayout::size)
+        }
+    }
+}
+
+fn invalid_guest_read_diagnostic(
+    provider: &crate::stdlib::StdlibStateProvider,
+    address: u64,
+    size: u32,
+    span: crate::ast::Span,
+    source: String,
+) -> Diagnostic {
+    let ranges = provider
+        .readable_ranges
+        .iter()
+        .map(|range| format!("0x{:08x}..<0x{:08x}", range.start, range.end))
+        .collect::<Vec<_>>()
+        .join(" or ");
+    Diagnostic::semantic(
+        format!(
+            "literal guest-memory read is outside `state {}`'s readable domain",
+            provider.name
+        ),
+        span,
+    )
+    .with_primary_label(format!(
+        "{source} reads {size} byte{} from 0x{address:08x}",
+        if size == 1 { "" } else { "s" }
+    ))
+    .with_note(format!(
+        "`{}` reads must lie entirely within {ranges}",
+        provider.name
+    ))
+    .with_note(
+        "computed guest addresses remain fallible and are checked by the provider at runtime",
+    )
 }
 
 fn managed_field_has_dedicated_decoder(

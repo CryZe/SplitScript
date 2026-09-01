@@ -75,6 +75,22 @@ impl<'a> CatalogGenerator<'a> {
                     .attributes
                     .iter()
                     .any(|attribute| attribute.name == "default");
+                let readable_ranges = provider
+                    .attributes
+                    .iter()
+                    .filter(|attribute| attribute.name == "readableRange")
+                    .map(|attribute| {
+                        let [
+                            AttributeArgument::Integer(start),
+                            AttributeArgument::Integer(end),
+                        ] = attribute.arguments.as_slice()
+                        else {
+                            unreachable!("readable ranges are validated before generation")
+                        };
+                        format!("StateProviderMemoryRange {{ start: {start}, end: {end} }}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
                 let processes = if source_processes {
                     "StateProviderProcesses::SourceState".to_owned()
                 } else {
@@ -151,7 +167,7 @@ impl<'a> CatalogGenerator<'a> {
                     .collect::<Vec<_>>()
                     .join(",");
                 output.push_str(&format!(
-                    "StdlibStateProvider {{ id: StdlibStateProviderId::{}, name: {}, value_name: {}, processes: {}, default: {default}, process_type: StdlibTypeId::{}, attachment: {}, preparation: {preparation}, direct_read: StdlibItemId::{}, contexts: &[{contexts}], selectors: &[{selectors}], documentation: {} }},\n",
+                    "StdlibStateProvider {{ id: StdlibStateProviderId::{}, name: {}, value_name: {}, processes: {}, default: {default}, process_type: StdlibTypeId::{}, attachment: {}, preparation: {preparation}, direct_read: StdlibItemId::{}, readable_ranges: &[{readable_ranges}], contexts: &[{contexts}], selectors: &[{selectors}], documentation: {} }},\n",
                     ident(&provider.name),
                     quote(&provider.name),
                     quote(&provider.value_name),
@@ -1056,6 +1072,9 @@ fn attribute_names(attributes: &[Attribute], name: &str) -> Vec<String> {
                     AttributeArgument::Name(value) | AttributeArgument::String(value) => {
                         value.clone()
                     }
+                    AttributeArgument::Integer(_) => {
+                        panic!("generated `@{name}` expects names, not integers")
+                    }
                 })
                 .collect()
         })
@@ -1793,6 +1812,7 @@ capability Integer<T: Numeric + Display> {}
         }
         assert!(generated.contains("StateProviderProcesses::SourceState"));
         assert!(generated.contains("StateProviderAttachment::Identity"));
+        assert!(generated.contains("StateProviderMemoryRange { start: 1048576, end: 33554432 }"));
         assert!(generated.contains("ItemKind::Method"));
         assert!(generated.contains(
             "TypeRef::FixedArray { element: &TypeRef::Core(CoreTypeId::U16), length: 3 }"

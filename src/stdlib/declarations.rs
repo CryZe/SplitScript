@@ -52,9 +52,29 @@ pub struct StdlibStateProvider {
     /// available and before the user's `onAttach` action runs.
     pub preparation: Option<StdlibItemId>,
     pub direct_read: StdlibItemId,
+    /// Statically known guest-memory domains accepted by this provider's
+    /// direct read. An empty slice means the catalog cannot prove a bounded
+    /// domain and runtime validation remains authoritative.
+    pub readable_ranges: &'static [StateProviderMemoryRange],
     pub contexts: &'static [StateProviderContext],
     pub selectors: &'static [StateProviderSelector],
     pub documentation: Documentation<StdlibSymbolId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StateProviderMemoryRange {
+    pub start: u64,
+    pub end: u64,
+}
+
+impl StateProviderMemoryRange {
+    pub const fn contains(self, address: u64, size: u32) -> bool {
+        address >= self.start
+            && match address.checked_add(size as u64) {
+                Some(end) => end <= self.end,
+                None => false,
+            }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

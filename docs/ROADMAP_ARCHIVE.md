@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-09-01: impossible literal provider reads stop during checking
+
+- Added provider-owned readable guest-memory ranges to the generated standard
+  library catalog, with validation for malformed and overlapping declarations.
+- Literal PS2 state paths and direct reads now produce a focused source
+  diagnostic when the complete value cannot fit in the supported guest-memory
+  domain; computed addresses retain their existing runtime failure behavior.
+- Runtime address translation and generated provider/reference documentation
+  consume the same catalog metadata, preventing their boundaries from drifting.
+
 ## 2026-09-01: ASL primitive state widths are explicit
 
 - Added a compiler-owned ASL primitive-state migration concept and a

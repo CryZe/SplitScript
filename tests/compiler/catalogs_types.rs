@@ -1300,6 +1300,13 @@ fn ps2_provider_is_source_defined_and_supports_direct_and_pointer_path_reads() {
     assert_eq!(ps2.process_type, StdlibTypeId::PS2Emulator);
     assert_eq!(ps2.direct_read, StdlibItemId::PS2EmulatorRead);
     assert_eq!(
+        ps2.readable_ranges,
+        &[splitscript::compiler::stdlib::StateProviderMemoryRange {
+            start: 0x0010_0000,
+            end: 0x0200_0000,
+        }]
+    );
+    assert_eq!(
         ps2.attachment,
         splitscript::compiler::stdlib::StateProviderAttachment::Callable(
             StdlibItemId::PS2EmulatorDiscover,
@@ -1338,6 +1345,67 @@ fn ps2_provider_is_source_defined_and_supports_direct_and_pointer_path_reads() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
         .expect("PS2 direct reads and provider-relative pointer paths should emit valid Wasm");
+}
+
+#[test]
+fn ps2_literal_guest_reads_are_checked_against_the_catalogued_domain() {
+    for (source, literal, expected_size) in [
+        (r#"state PS2 { value: u8 at 0x000fffff; }"#, "0x000fffff", 1),
+        (r#"state PS2 { value: u8 at 0x02000000; }"#, "0x02000000", 1),
+        (
+            r#"state PS2 { value: u32 at 0x01fffffe; }"#,
+            "0x01fffffe",
+            4,
+        ),
+        (
+            r#"
+                state PS2 {}
+                whileAttached {
+                    let value: u16 = ps2.read(0x02000000) else 0
+                    print(value)
+                }
+            "#,
+            "0x02000000",
+            2,
+        ),
+    ] {
+        let diagnostics = splitscript::compile(source)
+            .expect_err("a literal PS2 read outside main RAM must fail before code generation");
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains("literal guest-memory read is outside `state PS2`")
+            })
+            .unwrap_or_else(|| panic!("missing focused guest-memory diagnostic: {diagnostics:#?}"));
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], literal);
+        assert!(diagnostic.labels.iter().any(|label| {
+            label
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains(&format!("reads {expected_size} byte")))
+        }));
+        assert!(diagnostic.notes.iter().any(|note| {
+            note.contains("0x00100000..<0x02000000") && note.contains("must lie entirely within")
+        }));
+    }
+
+    let dynamic = r#"
+        state PS2 {
+            address: u32 = 0;
+            value: u8 at address;
+        }
+
+        fn readAt(address: u32) -> u8! {
+            return ps2.read(address)
+        }
+
+        whileAttached {
+            print(readAt(current.address) else 0)
+        }
+    "#;
+    splitscript::compile(dynamic).expect("computed guest addresses remain fallible runtime reads");
 }
 
 #[test]

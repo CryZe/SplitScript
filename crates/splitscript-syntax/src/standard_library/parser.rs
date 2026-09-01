@@ -887,6 +887,17 @@ impl Parser<'_> {
                             self.bump();
                             AttributeArgument::String(value)
                         }
+                        TokenKind::Int(text) => {
+                            let (value, suffix) =
+                                parse_integer(&text).map_err(|message| self.error(message))?;
+                            if suffix.is_some() {
+                                return Err(self.error(
+                                    "standard-library integer attributes cannot have a type suffix",
+                                ));
+                            }
+                            self.bump();
+                            AttributeArgument::Integer(value)
+                        }
                         _ => return Err(self.error("expected an attribute argument")),
                     };
                     arguments.push(argument);
@@ -1589,6 +1600,7 @@ extend address {}
 @processType(GbaEmulator)
 @attachment(identity)
 @directRead(GbaEmulatorRead)
+@readableRange(0x02000000, 0x04000000)
 stateProvider GBA as gba { "mGBA.exe", "mGBA" }
 /// Unity engines.
 @processType(Process)
@@ -1636,6 +1648,20 @@ stateProvider Unity as process {
         };
         assert_eq!(provider.value_name, "gba");
         assert_eq!(provider.processes, ["mGBA.exe", "mGBA"]);
+        assert_eq!(
+            provider
+                .attributes
+                .iter()
+                .find(|attribute| attribute.name == "readableRange")
+                .map(|attribute| attribute.arguments.as_slice()),
+            Some(
+                [
+                    AttributeArgument::Integer(0x0200_0000),
+                    AttributeArgument::Integer(0x0400_0000),
+                ]
+                .as_slice()
+            )
+        );
         let Declaration::StateProvider(provider) = &library.declarations[6] else {
             panic!("expected the Unity state provider")
         };

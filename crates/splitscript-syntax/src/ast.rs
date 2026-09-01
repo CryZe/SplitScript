@@ -1054,6 +1054,8 @@ pub struct PointerPath {
     /// Exact `at` keyword for the ordinary state-field DSL. Legacy recovered
     /// forms that did not write the keyword retain `None`.
     pub at_span: Option<Span>,
+    /// Source extent of the absolute address, module root, or dynamic base.
+    pub base_span: Span,
     /// The unsigned absolute address or signed module-relative root.
     pub base: PointerPathBase,
     /// Signed offsets applied after each intermediate pointer read.

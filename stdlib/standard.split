@@ -195,6 +195,7 @@ stateProvider GBA as gba {
 @processType(PS2Emulator)
 @attachment(PS2EmulatorDiscover)
 @directRead(PS2EmulatorRead)
+@readableRange(0x00100000, 0x02000000)
 stateProvider PS2 as ps2 {
     "pcsx2x64.exe",
     "pcsx2-qt.exe",
@@ -8252,8 +8253,9 @@ struct PS2Emulator {
 
     /// Reads a typed value from emulated PlayStation 2 memory.
     ///
-    /// Valid reads lie entirely within `0x00100000..=0x01ffffff`. The expected
-    /// [`MemoryReadable`] type determines the byte layout.
+    /// The provider's catalogued readable guest-memory range applies to the
+    /// complete value. The expected [`MemoryReadable`] type determines its
+    /// byte layout.
     ///
     /// # Example
     ///

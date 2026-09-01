@@ -250,6 +250,7 @@ pub struct Attribute {
 pub enum AttributeArgument {
     Name(String),
     String(String),
+    Integer(u64),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -951,9 +951,53 @@ impl<'a> Validator<'a> {
                 "attachment",
                 "prepare",
                 "directRead",
+                "readableRange",
                 "default",
             ],
         );
+        let mut readable_ranges = Vec::new();
+        for attribute in value
+            .attributes
+            .iter()
+            .filter(|attribute| attribute.name == "readableRange")
+        {
+            let [
+                AttributeArgument::Integer(start),
+                AttributeArgument::Integer(end),
+            ] = attribute.arguments.as_slice()
+            else {
+                self.error(format!(
+                    "`{}` attribute `@readableRange` expects integer start and exclusive end arguments",
+                    value.name
+                ));
+                continue;
+            };
+            if start >= end {
+                self.error(format!(
+                    "`{}` attribute `@readableRange` must have a start below its exclusive end",
+                    value.name
+                ));
+                continue;
+            }
+            if *end > u64::from(u32::MAX) + 1 {
+                self.error(format!(
+                    "`{}` attribute `@readableRange` must fit the provider's `u32` guest-address space",
+                    value.name
+                ));
+                continue;
+            }
+            if readable_ranges
+                .iter()
+                .any(|(previous_start, previous_end)| start < previous_end && previous_start < end)
+            {
+                self.error(format!(
+                    "`{}` has overlapping `@readableRange` declarations",
+                    value.name
+                ));
+                continue;
+            }
+            readable_ranges.push((*start, *end));
+        }
         if let Some(name) =
             self.optional_name_attribute(&value.name, &value.attributes, "processType")
         {
@@ -1364,9 +1408,9 @@ impl<'a> Validator<'a> {
         for argument in &attribute.arguments {
             match argument {
                 AttributeArgument::Name(value) => values.push(value.clone()),
-                AttributeArgument::String(_) => self.error(format!(
-                    "`{owner}` attribute `@{name}` expects name arguments"
-                )),
+                AttributeArgument::String(_) | AttributeArgument::Integer(_) => self.error(
+                    format!("`{owner}` attribute `@{name}` expects name arguments"),
+                ),
             }
         }
         values

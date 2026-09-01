@@ -1063,6 +1063,7 @@ impl Parser<'_> {
             } else {
                 None
             };
+            let base_start = self.current().span.start;
             let base = if let Some(name) = module {
                 PointerPathBase::Module {
                     name,
@@ -1072,6 +1073,10 @@ impl Parser<'_> {
                 PointerPathBase::Absolute(self.expect_u64("expected an unsigned absolute address")?)
             } else {
                 PointerPathBase::Expression(self.required_expression(12)?)
+            };
+            let base_span = Span {
+                start: base_start,
+                end: self.previous().span.end,
             };
             let mut offsets = Vec::new();
             while self.at(&TokenKind::Comma)
@@ -1199,6 +1204,7 @@ impl Parser<'_> {
             }
             StateSource::Pointer(PointerPath {
                 at_span,
+                base_span,
                 base,
                 offsets,
                 decoder,
@@ -1889,6 +1895,7 @@ impl Parser<'_> {
                 } else {
                     None
                 };
+                let base_start = self.current().span.start;
                 let base = if let Some(name) = module {
                     PointerPathBase::Module {
                         name,
@@ -1898,6 +1905,10 @@ impl Parser<'_> {
                     PointerPathBase::Absolute(
                         self.expect_u64("expected an unsigned absolute address")?,
                     )
+                };
+                let base_span = Span {
+                    start: base_start,
+                    end: self.previous().span.end,
                 };
                 let mut offsets = Vec::new();
                 loop {
@@ -1919,6 +1930,7 @@ impl Parser<'_> {
                     annotation: Some(ty),
                     source: StateSource::Pointer(PointerPath {
                         at_span: None,
+                        base_span,
                         base,
                         offsets,
                         decoder: None,

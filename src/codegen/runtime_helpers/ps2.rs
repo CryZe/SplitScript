@@ -2,7 +2,10 @@
 
 use wasm_encoder::{BlockType, Function, Instruction, ValType};
 
-use crate::{abi::AbiImportId, stdlib::StdlibTypeId};
+use crate::{
+    abi::AbiImportId,
+    stdlib::{StateProviderMemoryRange, StdlibTypeId},
+};
 
 use super::super::GcLayout;
 use super::super::imports::Abi;
@@ -16,6 +19,7 @@ pub(super) fn compile_translate_address(
     abi: &Abi,
     gc: &GcLayout,
     abi_read: AbiReadScratch,
+    readable: StateProviderMemoryRange,
 ) -> Function {
     let mut function = Function::new([(1, ValType::I64), (1, ValType::I32)]);
     let emulator = 1;
@@ -33,24 +37,28 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(address))
-        .instruction(&Instruction::I32Const(0x0010_0000))
-        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::I64Const(readable.start as i64))
+        .instruction(&Instruction::I64LtU)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(address))
-        .instruction(&Instruction::I32Const(0x0200_0000))
-        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::I64Const(readable.end as i64))
+        .instruction(&Instruction::I64GeU)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::I64ExtendI32U)
         .instruction(&Instruction::LocalGet(size))
-        .instruction(&Instruction::I32Const(0x0200_0000))
-        .instruction(&Instruction::LocalGet(address))
-        .instruction(&Instruction::I32Sub)
-        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::I64Const(readable.end as i64))
+        .instruction(&Instruction::I64GtU)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)

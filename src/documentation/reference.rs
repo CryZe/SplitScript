@@ -766,6 +766,7 @@ impl DocumentationReference {
                                 [StdlibSymbolId::Type(value.process_type)],
                             )],
                         );
+                        self.append_state_provider_ranges(&mut page.markdown, value);
                         self.append_state_provider_contexts(&mut page.markdown, &page.uri, value);
                         page
                     })
@@ -813,6 +814,14 @@ impl DocumentationReference {
                             documentation.examples,
                             self.semantic_examples,
                         );
+                        if let Some(provider) = self
+                            .library
+                            .state_providers()
+                            .iter()
+                            .find(|provider| provider.direct_read == value.id)
+                        {
+                            self.append_state_provider_ranges(&mut markdown, provider);
+                        }
                         append_related(
                             &mut markdown,
                             uri,
@@ -1034,6 +1043,26 @@ impl DocumentationReference {
                 table_prose(context.documentation.summary, uri, &self.library),
             ));
         }
+    }
+
+    fn append_state_provider_ranges(
+        &self,
+        markdown: &mut String,
+        provider: &crate::stdlib::StdlibStateProvider,
+    ) {
+        if provider.readable_ranges.is_empty() {
+            return;
+        }
+        markdown.push_str("\n\n## Readable guest memory\n");
+        for range in provider.readable_ranges {
+            markdown.push_str(&format!(
+                "\n- `0x{:08x}..<0x{:08x}` (exclusive upper bound)",
+                range.start, range.end
+            ));
+        }
+        markdown.push_str(
+            "\n\nA read must fit entirely inside one range. Literal addresses are checked during compilation; computed addresses remain fallible and are checked at runtime.",
+        );
     }
 
     fn language_index_page(&self) -> DocumentationPage {
@@ -2753,6 +2782,20 @@ mod tests {
         );
         assert!(!unity.markdown.contains("`MonoModule`"));
         assert!(!unity.markdown.contains("`UnityClass`"));
+    }
+
+    #[test]
+    fn provider_readable_ranges_are_rendered_from_catalog_metadata() {
+        let reference = DocumentationReference::default();
+        for uri in [
+            "/stdlib/state-providers/PS2.md",
+            "/stdlib/types/PS2Emulator/methods/read.md",
+        ] {
+            let page = reference.page(uri).expect("PS2 read page should exist");
+            assert!(page.markdown.contains("## Readable guest memory"), "{uri}");
+            assert!(page.markdown.contains("`0x00100000..<0x02000000`"), "{uri}");
+            assert!(page.markdown.contains("computed addresses remain fallible"));
+        }
     }
 
     #[test]

@@ -951,6 +951,51 @@ intrinsic type Process {
         signature: Signature,
     ) -> async address;
 
+    /// Scans one complete pass over a process-memory range.
+    ///
+    /// Unlike [`Process.scan`], this operation does not begin another pass when
+    /// the signature is absent. It returns [`Some`] with the first matching
+    /// address, or [`None`] after the entire requested range has been exhausted.
+    /// The pass remains cooperative across ticks, skips windows that cannot be
+    /// read, and is cancelled automatically when the process closes.
+    ///
+    /// Use this when absence is meaningful, such as rejecting an unsupported
+    /// executable. Use [`Process.scan`] when the signature may appear later and
+    /// the operation should keep waiting.
+    ///
+    /// # Example
+    ///
+    /// Reject an executable without the expected marker
+    ///
+    /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let module = await process.mainModule()
+    /// let marker = await process.scanOnce(
+    ///     module.address,
+    ///     module.size,
+    ///     sig"48 8B ?? 89",
+    /// )
+    /// match marker {
+    ///     Some(address) => print(`marker at {address}`),
+    ///     None => print("unsupported executable"),
+    /// }
+    /// # }
+    /// ```
+    @mustUse("The finite scan result is otherwise discarded.")
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
+    @intrinsic(ProcessScanOnce)
+    fn scanOnce(
+        /// The beginning of the range.
+        address: address,
+        /// The number of bytes to scan.
+        size: u64,
+        /// The compiled signature pattern.
+        signature: Signature,
+    ) -> async address?;
+
     /// Scans every readable mapped memory range in the process.
     ///
     /// Ranges are visited from the highest address to the lowest address and

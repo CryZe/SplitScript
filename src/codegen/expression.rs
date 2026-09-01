@@ -4533,6 +4533,7 @@ fn compile_expr_unconverted(
                 );
             }
             IntrinsicId::ProcessScan
+            | IntrinsicId::ProcessScanOnce
             | IntrinsicId::ModuleScanRelative32Target
             | IntrinsicId::ProcessScanMemory
             | IntrinsicId::ProcessScanMemoryAny => {

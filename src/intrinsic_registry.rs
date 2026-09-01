@@ -427,7 +427,7 @@ const fn async_scratch(id: IntrinsicId) -> &'static [ScratchPolicy] {
             ty: ScratchType::Core(CoreTypeId::U64),
             slots: 5,
         }],
-        IntrinsicId::ProcessScan => &[ScratchPolicy {
+        IntrinsicId::ProcessScan | IntrinsicId::ProcessScanOnce => &[ScratchPolicy {
             ty: ScratchType::Core(CoreTypeId::U64),
             slots: 5,
         }],
@@ -486,6 +486,10 @@ const fn async_state(id: IntrinsicId) -> &'static [ScratchPolicy] {
         | IntrinsicId::ModuleScan => &[ScratchPolicy {
             ty: ScratchType::Core(CoreTypeId::U64),
             slots: 2,
+        }],
+        IntrinsicId::ProcessScanOnce => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::U64),
+            slots: 3,
         }],
         IntrinsicId::ProcessScanMemory => &[ScratchPolicy {
             ty: ScratchType::Core(CoreTypeId::U64),
@@ -596,9 +600,10 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         ],
         IntrinsicId::ProcessRead => &[HostImport(Host::ProcessRead)],
         IntrinsicId::ProcessFollow => &[Helper(Runtime::FollowAddress)],
-        IntrinsicId::ProcessScan | IntrinsicId::ModuleScan | IntrinsicId::ModuleScanAny => {
-            &[Helper(Runtime::ScanProcessRange)]
-        }
+        IntrinsicId::ProcessScan
+        | IntrinsicId::ProcessScanOnce
+        | IntrinsicId::ModuleScan
+        | IntrinsicId::ModuleScanAny => &[Helper(Runtime::ScanProcessRange)],
         IntrinsicId::ModuleScanRelative32Target => &[Helper(Runtime::ScanRelative32TargetRange)],
         IntrinsicId::ProcessScanMemory | IntrinsicId::ProcessScanMemoryAny => &[
             Helper(Runtime::ScanProcessRange),
@@ -748,6 +753,10 @@ const MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Module);
 const MODULE_OPTION: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Option,
     arguments: &[MODULE],
+};
+const ADDRESS_OPTION: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Option,
+    arguments: &[ADDRESS],
 };
 const MEMORY_RANGE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::MemoryRange);
 const MEMORY_RANGE_ACCESS: ContractTypeRef =
@@ -1606,6 +1615,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 ADDRESS,
             ),
             PROCESS_SUSPEND,
+            OnAttach,
+            Suspension
+        ),
+        IntrinsicId::ProcessScanOnce => contract!(
+            ProcessScanOnce,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(PROCESS_TYPE),
+                params![value(ADDRESS), value(U64), value(SIGNATURE),],
+                ADDRESS_OPTION,
+            ),
+            PROCESS_SUSPEND.with(Effect::Allocates),
             OnAttach,
             Suspension
         ),

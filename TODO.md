@@ -61,8 +61,10 @@ physical-width mapping and qualified exact search aliases that do not
 masquerade as compiler rewrite spellings. Literal provider-memory reads are
 now checked against the same catalog-owned ranges used by runtime translation
 and reference documentation. The confirmed campaign-defect sequence is
-complete; continue with the next highest-priority item below. Do not begin
-managed collection support itself until ASR has a tested
+complete, and the approved finite `process.scanOnce` primitive now reports
+bounded-range exhaustion without changing waiting scans. Continue with the
+recoverable post-attachment discovery design below. Do not begin managed
+collection support itself until ASR has a tested
 representation, and bring every language, standard-library, provider, or
 host-surface decision below back to the user.
 
@@ -659,13 +661,12 @@ concepts rather than maintaining a parallel inventory.
   fallback signatures, range/page selection, capture transforms, relative
   address decoding, and concise pointer-follow composition. Existing `sig`,
   scan, follow, and `readRelative32` APIs should be documented before new APIs
-  are introduced. The OpenGOAL and Abe's Oddysee ports now provide concrete
-  evidence for a finite bounded scan that distinguishes an exhausted range from
-  a signature that has not appeared yet. Before adding `scanOnce`, compare one
-  operation-level exhaustion result with composition through the implemented
-  `future.timeout` / `future.race` APIs, and bring the proposed source contract
-  back for approval. Do not multiply one-shot variants across unrelated waiting
-  discovery APIs.
+  are introduced. The OpenGOAL and Abe's Oddysee evidence now has one approved
+  finite primitive: `process.scanOnce(address, size, signature)` cooperatively
+  completes with `Some(address)` or `None` after one full bounded-range pass.
+  Waiting scans retain their repeat-until-found behavior, and no unrelated
+  discovery API gains a `Once` variant. Keep the remaining extensions gated on
+  representative ports rather than broadening signatures speculatively.
 - [ ] Design recoverable post-attachment signature discovery from the Metal
   Slug 3 framebuffer case. The allocation can move while the same process stays
   attached, but scanning is currently confined to suspending `onAttach` code.
@@ -1338,10 +1339,10 @@ remaining work is product hardening and distribution.
    semantics, fix and compile-check the `choice` example, document fixed-array
    limits and primitive mappings, and improve provider, match-arm, lifecycle,
    and constant guest-address diagnostics.
-2. Bring the finite-scan design back for a decision using OpenGOAL and Abe's
-   Oddysee as evidence, then separately decide how a Metal Slug framebuffer can
-   be rediscovered after attachment. Reuse future cancellation/composition
-   rather than multiplying unrelated `Once` APIs.
+2. Separately decide how a Metal Slug framebuffer can be rediscovered after
+   attachment now that the approved finite `process.scanOnce` operation covers
+   OpenGOAL and Abe's Oddysee. Reuse future cancellation/composition rather than
+   multiplying unrelated `Once` APIs.
 3. Resolve the PS2 provider's low-memory product-code gap against ASR, then
    decide one provider-independent bounded guest-string facility. Keep SNES and
    Unity managed arrays/lists deferred until ASR has tested implementations.

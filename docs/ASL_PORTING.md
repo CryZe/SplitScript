@@ -1342,6 +1342,31 @@ outside known modules. [`scanAny`] and [`scanMemoryAny`] accept an array of
 signatures and return both the address and selected index, which keeps fallback
 layout selection in one cooperative pass.
 
+Those operations deliberately keep starting new passes until a signature
+appears. When a legacy script uses exhaustion as build or version evidence,
+scan the exact bounded range once instead:
+
+```splitscript
+# state "game.exe" {}
+# onAttach {
+let executable = await process.mainModule()
+let marker = await process.scanOnce(
+    executable.address,
+    executable.size,
+    sig"55 4E 53 55 50 50 4F 52 54 45 44",
+) else {
+    print("unsupported executable")
+    throw "required marker is absent"
+}
+# print(marker)
+# }
+```
+
+[`Process.scanOnce`] still spreads one complete pass across bounded per-tick
+windows, but returns [`None`] instead of silently beginning another pass.
+`future.timeout(process.scan(...), duration)` answers a different question: it
+bounds elapsed time and cannot prove that the range was exhausted.
+
 When Windows-native discovery starts from an exported runtime entry point,
 resolve that exact symbol through the module instead of scanning the entire
 process:

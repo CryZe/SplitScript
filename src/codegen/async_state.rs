@@ -597,6 +597,24 @@ fn emit_intrinsic_state_set_zero(function: &mut Function, context: &ExprContext<
         });
 }
 
+fn emit_intrinsic_state_set_one(function: &mut Function, context: &ExprContext<'_>, slot: usize) {
+    let (frame, field, _) = intrinsic_state(context, slot);
+    frame.emit(function);
+    function
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::StructSet {
+            struct_type_index: frame.struct_type,
+            field_index: field,
+        });
+}
+
+fn emit_range_scan_exhausted(function: &mut Function, context: &ExprContext<'_>, finite: bool) {
+    emit_intrinsic_state_set_zero(function, context, 0);
+    if finite {
+        emit_intrinsic_state_set_one(function, context, 2);
+    }
+}
+
 fn emit_signature_length_i64(function: &mut Function, signature: u32) {
     function
         .instruction(&Instruction::LocalGet(signature))
@@ -641,6 +659,7 @@ fn emit_cooperative_range_scan(
     scratch: &[u32],
     process_from_runtime: bool,
     relative_target: Option<(u32, u32)>,
+    finite: bool,
     context: &ExprContext<'_>,
 ) {
     let cursor = scratch[0];
@@ -653,8 +672,13 @@ fn emit_cooperative_range_scan(
     // work. A scan that inspects memory always yields once, so several awaited
     // scans chained by the caller cannot all run during a single host update.
     emit_intrinsic_state_get(function, context, 1);
+    function.instruction(&Instruction::LocalSet(matched));
+    if finite {
+        emit_intrinsic_state_get(function, context, 2);
+    } else {
+        function.instruction(&Instruction::LocalGet(matched));
+    }
     function
-        .instruction(&Instruction::LocalTee(matched))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty));
 
@@ -666,7 +690,7 @@ fn emit_cooperative_range_scan(
         .instruction(&Instruction::LocalGet(remaining))
         .instruction(&Instruction::I64GeU)
         .instruction(&Instruction::If(BlockType::Empty));
-    emit_intrinsic_state_set_zero(function, context, 0);
+    emit_range_scan_exhausted(function, context, finite);
     function
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::Return)
@@ -679,7 +703,7 @@ fn emit_cooperative_range_scan(
     function
         .instruction(&Instruction::I64LtU)
         .instruction(&Instruction::If(BlockType::Empty));
-    emit_intrinsic_state_set_zero(function, context, 0);
+    emit_range_scan_exhausted(function, context, finite);
     function
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::Return)
@@ -725,7 +749,7 @@ fn emit_cooperative_range_scan(
     function
         .instruction(&Instruction::I64LeU)
         .instruction(&Instruction::If(BlockType::Empty));
-    emit_intrinsic_state_set_zero(function, context, 0);
+    emit_range_scan_exhausted(function, context, finite);
     function.instruction(&Instruction::Else);
     let (frame, field, _) = intrinsic_state(context, 0);
     frame.emit(function);
@@ -743,12 +767,18 @@ fn emit_cooperative_range_scan(
         .instruction(&Instruction::End);
 
     emit_intrinsic_state_set_local(function, context, 1, matched);
+    if finite {
+        emit_intrinsic_state_set_one(function, context, 2);
+    }
     function
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
     emit_intrinsic_state_set_zero(function, context, 0);
     emit_intrinsic_state_set_zero(function, context, 1);
+    if finite {
+        emit_intrinsic_state_set_zero(function, context, 2);
+    }
 }
 
 fn emit_process_scan_advance_range(
@@ -2024,11 +2054,42 @@ fn compile_suspension_poll(
             function.instruction(&Instruction::LocalSet(scratch[2]));
             compile_expr(function, args[2], context);
             function.instruction(&Instruction::LocalSet(scratch[4]));
-            emit_cooperative_range_scan(function, target, scratch, false, None, context);
+            emit_cooperative_range_scan(function, target, scratch, false, None, false, context);
             if let Some((field, _)) = layout.field(destination) {
                 context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(scratch[3]))
+                    .instruction(&Instruction::StructSet {
+                        struct_type_index: context.locals.frame().struct_type,
+                        field_index: field,
+                    });
+            }
+        }
+        Some(IntrinsicId::ProcessScanOnce) => {
+            compile_expr(function, args[0], context);
+            function.instruction(&Instruction::LocalSet(scratch[1]));
+            compile_expr(function, args[1], context);
+            function.instruction(&Instruction::LocalSet(scratch[2]));
+            compile_expr(function, args[2], context);
+            function.instruction(&Instruction::LocalSet(scratch[4]));
+            emit_cooperative_range_scan(function, target, scratch, false, None, true, context);
+            if let Some((field, Type::Option(option))) = layout.field(destination) {
+                context.locals.frame().emit(function);
+                function
+                    .instruction(&Instruction::LocalGet(scratch[3]))
+                    .instruction(&Instruction::I64Eqz)
+                    .instruction(&Instruction::If(BlockType::Result(
+                        context.gc.val_type(Type::Option(option)),
+                    )))
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(
+                        context.gc.index(Type::Option(option)),
+                    )))
+                    .instruction(&Instruction::Else)
+                    .instruction(&Instruction::LocalGet(scratch[3]))
+                    .instruction(&Instruction::StructNew(
+                        context.gc.index(Type::Option(option)),
+                    ))
+                    .instruction(&Instruction::End)
                     .instruction(&Instruction::StructSet {
                         struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
@@ -2066,6 +2127,7 @@ fn compile_suspension_poll(
                 scratch,
                 true,
                 Some((scratch[5], scratch[6])),
+                false,
                 context,
             );
             if let Some((field, _)) = layout.field(destination) {
@@ -2421,7 +2483,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::LocalSet(scratch[2]));
             compile_expr(function, args[0], context);
             function.instruction(&Instruction::LocalSet(scratch[4]));
-            emit_cooperative_range_scan(function, target, scratch, true, None, context);
+            emit_cooperative_range_scan(function, target, scratch, true, None, false, context);
             if let Some((field, _)) = layout.field(destination) {
                 context.locals.frame().emit(function);
                 function

@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-09-01: bounded signature scans can report exhaustion
+
+- Added `process.scanOnce(address, size, signature) -> async address?` as the
+  single finite scanning primitive: it returns the first match or `None` after
+  one complete cooperative pass instead of silently restarting.
+- Reused the existing bounded range-scanning state machine and process-close
+  cancellation. Waiting process, module, fallback, and process-wide scans keep
+  their repeat-until-found behavior, without acquiring parallel `Once` APIs.
+- Documented why range exhaustion differs from elapsed-time cancellation and
+  covered matches beyond the first cooperative window, completed absence, and
+  the prohibition on rescanning after completion in a real Wasm runtime test.
+
 ## 2026-09-01: impossible literal provider reads stop during checking
 
 - Added provider-owned readable guest-memory ranges to the generated standard

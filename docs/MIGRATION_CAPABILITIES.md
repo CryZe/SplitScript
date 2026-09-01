@@ -33,7 +33,7 @@ Start with the [complete ASL porting guide](ASL_PORTING.md) for lifecycle and se
 
 - **DeepPointer and native state roots** (*Supported directly*): A bare numeric root in an ASL native state field or `DeepPointer` is normally main-module-relative. Preserve it as `at "game.exe", offset`; SplitScript's `at offset` form is an absolute virtual address. Use typed state paths for polled fields or `process.follow` for dynamically discovered paths. Canonical: `state`, `Process.follow`. [Porting recipe](ASL_PORTING.md#asl-numeric-roots-are-module-relative).
 
-- **Background signature scans** (*Use a typed pattern*): Remove legacy worker threads and await a module, explicit-range, or process-wide scan. Scans inspect a bounded window per tick and process closure cancels pending discovery. Canonical: `Module.scan`, `Module.scanAny`, `Process.scan`, `Process.scanMemory`, `Process.scanMemoryAny`. [Porting recipe](ASL_PORTING.md#background-signature-scans).
+- **Background signature scans** (*Use a typed pattern*): Remove legacy worker threads and await a module, explicit-range, or process-wide scan. Waiting scans repeat cooperative passes until a match appears; `process.scanOnce` completes with `None` after one bounded-range pass when absence is meaningful. Process closure cancels either form. Canonical: `Module.scan`, `Module.scanAny`, `Process.scan`, `Process.scanOnce`, `Process.scanMemory`, `Process.scanMemoryAny`. [Porting recipe](ASL_PORTING.md#background-signature-scans).
 
 - **Task.Run** (*Use a typed pattern*): Replace worker threads with cooperative `await` discovery or a bounded `retry` transaction so timer updates keep yielding predictably. Canonical: `await`, `retry`. [Porting recipe](ASL_PORTING.md#background-signature-scans).
 

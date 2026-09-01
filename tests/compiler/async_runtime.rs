@@ -3151,6 +3151,54 @@ fn signature_literals_are_typed_validated_and_scannable() {
 }
 
 #[test]
+fn finite_range_scans_find_late_matches_and_complete_with_none_after_exhaustion() {
+    let source = r#"
+        state "game.exe" {}
+
+        onAttach {
+            match await process.scanOnce(0x2000, 600_000u64, sig"AA BB") {
+                Some(_) => print("found"),
+                None => print("unexpected absence"),
+            }
+            match await process.scanOnce(0x2000, 600_000u64, sig"CC DD") {
+                Some(_) => print("unexpected match"),
+                None => print("missing"),
+            }
+            await process.closed()
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let mut bytes = vec![0; 600_000];
+    bytes[550_000..550_002].copy_from_slice(&[0xaa, 0xbb]);
+    store.data_mut().memory_regions = vec![(0x2000, bytes)];
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    for _ in 0..10 {
+        update.call(&mut store, ()).unwrap();
+        if store.data().messages.len() == 2 {
+            break;
+        }
+    }
+
+    assert_eq!(store.data().messages, ["found", "missing"]);
+    assert!(
+        store
+            .data()
+            .process_reads
+            .iter()
+            .any(|address| *address > 0x2000 + 512 * 1024),
+        "the finite scan must continue beyond its first cooperative window"
+    );
+    let reads_after_completion = store.data().process_reads.len();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().process_reads.len(), reads_after_completion);
+}
+
+#[test]
 fn file_version_literals_are_typed_and_checked_at_parse_time() {
     let source = r#"
         state "game.exe" {}

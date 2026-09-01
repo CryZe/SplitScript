@@ -2003,11 +2003,12 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "Background signature scans",
         sources: ASL,
         support: MigrationSupport::TypedPattern,
-        summary: "Remove legacy worker threads and await a module, explicit-range, or process-wide scan. Scans inspect a bounded window per tick and process closure cancels pending discovery.",
+        summary: "Remove legacy worker threads and await a module, explicit-range, or process-wide scan. Waiting scans repeat cooperative passes until a match appears; `process.scanOnce` completes with [`None`] after one bounded-range pass when absence is meaningful. Process closure cancels either form.",
         targets: &[
             MigrationTarget::StandardLibraryItem("Module.scan"),
             MigrationTarget::StandardLibraryItem("Module.scanAny"),
             MigrationTarget::StandardLibraryItem("Process.scan"),
+            MigrationTarget::StandardLibraryItem("Process.scanOnce"),
             MigrationTarget::StandardLibraryItem("Process.scanMemory"),
             MigrationTarget::StandardLibraryItem("Process.scanMemoryAny"),
         ],

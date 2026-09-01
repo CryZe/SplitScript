@@ -4416,3 +4416,15 @@ language catalog document the refinement rule.
   documentation target shared by the LSP, CLI, and embedded compiler service.
   Migration topics and direct reference pages remain distinct while occupying
   one optional pointer in parser diagnostics.
+
+# 2026-09-01: statement-shaped match-arm guidance
+
+- Recognized assignments and side-effecting `if` chains written directly after
+  a match arm's `=>` at the parser's existing expression/statement boundary.
+  Valid value expressions, including `if` expressions with a final `else`,
+  retain their ordinary grammar.
+- Replaced the misleading missing-comma or missing-`else` cascade with one
+  diagnostic explaining that statement bodies need braces.
+- Added a machine-applicable whole-body rewrite to `pattern => { ... }` that
+  preserves nested delimiters and multiline source, plus recovery coverage
+  proving neighboring arms survive and the fixed program compiles.

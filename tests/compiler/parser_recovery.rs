@@ -644,6 +644,60 @@ fn recovering_parse_keeps_valid_match_arms_and_enclosing_function() {
 }
 
 #[test]
+fn statement_shaped_match_arms_request_braces_and_offer_complete_fixes() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        state "game.exe" {}
+        enum Mode {
+            Assign,
+            Conditional,
+            Valid,
+        }
+        fn observe(mode: Mode) {
+            let selected = false
+            match mode {
+                Mode.Assign => selected = true,
+                Mode.Conditional => if selected {
+                    print("selected")
+                },
+                Mode.Valid => print("valid"),
+            }
+        }
+    "#;
+    let recovered = splitscript::parse_recovering(source).unwrap();
+    let diagnostics = recovered
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.message.contains("match arm"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(diagnostics.len(), 2);
+    assert!(
+        recovered.diagnostics().iter().all(|diagnostic| {
+            diagnostic.message == "a statement-shaped match arm needs braces"
+        })
+    );
+    assert!(diagnostics.iter().all(|diagnostic| {
+        diagnostic.fixes.len() == 1
+            && diagnostic.fixes[0].applicability == FixApplicability::MachineApplicable
+    }));
+
+    let mut edits = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.fixes[0].edits[0].clone())
+        .collect::<Vec<_>>();
+    edits.sort_unstable_by_key(|edit| std::cmp::Reverse(edit.span.start));
+    let mut fixed = source.to_owned();
+    for edit in edits {
+        fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    }
+    assert!(fixed.contains("Mode.Assign => { selected = true }"));
+    assert!(fixed.contains("Mode.Conditional => { if selected"));
+    splitscript::compile(&fixed).expect("the suggested braces should produce valid source");
+}
+
+#[test]
 fn recovering_parse_keeps_valid_parameters_and_function_bodies() {
     use splitscript::compiler::syntax::RecoveryNodeKind;
 

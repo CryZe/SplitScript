@@ -53,10 +53,12 @@ type-checks every complete fixture while classifying focused fragments
 explicitly. The fixed-array reference now exposes its process-read bounds and
 the transactional sparse-read alternative. Unknown state providers now list
 the catalog-owned choices, repair only clear typos, and link a dedicated
-provider index. Continue with the focused documentation/diagnostic defects as
-one small verified guidance sequence. Do not begin managed collection support
-itself until ASR has a tested representation, and bring every language,
-standard-library, provider, or host-surface decision below back to the user.
+provider index. Statement-shaped match arms now point at the missing braces and
+offer a complete rewrite instead of blaming an existing comma. Continue with
+the focused documentation/diagnostic defects as one small verified guidance
+sequence. Do not begin managed collection support itself until ASR has a
+tested representation, and bring every language, standard-library, provider,
+or host-surface decision below back to the user.
 
 ## Unity schema foundation and deferred follow-ups
 
@@ -455,7 +457,7 @@ corpus.
   providers, suggest the nearest spelling when applicable, and link the state
   provider index. Do not imply that a correctly spelled unsupported provider
   such as `SNES` exists; the separate ASR-dependent SNES task remains deferred.
-- [ ] Diagnose statement-shaped `match` arms at the statement/expression
+- [x] Diagnose statement-shaped `match` arms at the statement/expression
   boundary. When assignment or a side-effecting `if` appears directly after
   `=>`, explain that the arm needs braces and offer a machine-applicable braced
   rewrite instead of claiming that the already-present comma is missing.

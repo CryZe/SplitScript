@@ -10,6 +10,8 @@ use super::{
 use crate::ast::StructLiteralField;
 use crate::diagnostic::{DiagnosticCode, DiagnosticFix, FixApplicability, TextEdit};
 
+const IF_EXPRESSION_MISSING_ELSE: &str = "an `if` expression needs an `else` branch";
+
 impl Parser<'_> {
     pub(super) fn expression(&mut self, min_precedence: u8) -> Result<Expr, Diagnostic> {
         let mut left = self.prefix(min_precedence)?;
@@ -1271,7 +1273,24 @@ impl Parser<'_> {
             None
         };
         self.expect(TokenKind::FatArrow, "expected `=>` after the pattern")?;
+        let value_start = self.current().span.start;
+        let starts_with_if = self.at_ident("if");
+        let diagnostics_before = self.diagnostics.len();
+        let recovery_nodes_before = self.recovery_nodes.len();
         let value = self.expression(0)?;
+        let statement_if = starts_with_if
+            && matches!(
+                self.diagnostics.get(diagnostics_before..),
+                Some([diagnostic]) if diagnostic.message == IF_EXPRESSION_MISSING_ELSE
+            );
+        if statement_if {
+            self.diagnostics.truncate(diagnostics_before);
+            self.recovery_nodes.truncate(recovery_nodes_before);
+            return Err(self.statement_match_arm_diagnostic(value_start, value.span.end));
+        }
+        if assignment_operator(&self.current().kind).is_some() {
+            return Err(self.statement_match_arm_diagnostic(value_start, value.span.end));
+        }
         let span = pattern_start.join(value.span);
         let arm = MatchArm {
             pattern_id: self.new_pattern_id(),
@@ -1284,6 +1303,49 @@ impl Parser<'_> {
             return Err(self.error("expected `,` between match arms"));
         }
         Ok(arm)
+    }
+
+    fn statement_match_arm_diagnostic(&self, start: usize, parsed_end: usize) -> Diagnostic {
+        let (body_end, diagnostic_end) = self.match_arm_body_end(parsed_end);
+        let body_span = Span {
+            start,
+            end: body_end,
+        };
+        let diagnostic_span = Span {
+            start,
+            end: diagnostic_end,
+        };
+        let body = self
+            .source
+            .get(body_span.start..body_span.end)
+            .unwrap_or_default();
+        Diagnostic::new("a statement-shaped match arm needs braces", diagnostic_span)
+            .with_primary_label("this arm body is a statement, not a single expression")
+            .with_note(
+                "write `pattern => { ... }` around assignments and side-effecting control flow",
+            )
+            .with_fix(DiagnosticFix {
+                title: "wrap the match arm body in braces".to_owned(),
+                applicability: FixApplicability::MachineApplicable,
+                edits: vec![TextEdit {
+                    span: body_span,
+                    replacement: format!("{{ {body} }}"),
+                }],
+            })
+    }
+
+    fn match_arm_body_end(&self, parsed_end: usize) -> (usize, usize) {
+        let target = self.delimiter_depth_before(self.cursor.position());
+        let mut depth = target;
+        let mut diagnostic_end = parsed_end;
+        for token in &self.cursor.tokens()[self.cursor.position()..] {
+            if depth == target && matches!(token.kind, TokenKind::Comma | TokenKind::RBrace) {
+                return (token.span.start, diagnostic_end);
+            }
+            diagnostic_end = token.span.end;
+            depth.update(&token.kind);
+        }
+        (self.source.len(), diagnostic_end)
     }
 
     pub(super) fn expression_list(
@@ -1430,10 +1492,7 @@ impl Parser<'_> {
         let condition = self.required_expression_before_block()?;
         let then_expr = self.value_block_expression("expected `{` after the `if` condition")?;
         let else_expr = if self.eat_ident("else").is_none() {
-            let error = Diagnostic::new(
-                "an `if` expression needs an `else` branch",
-                self.current().span,
-            );
+            let error = Diagnostic::new(IF_EXPRESSION_MISSING_ELSE, self.current().span);
             let span = Span {
                 start: error.span.start,
                 end: error.span.start,

@@ -39,7 +39,21 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — make Unity schemas a first-class language facility
+## Now — eliminate confirmed porting-campaign correctness failures
+
+Start with the unchecked tasks in
+[Fix the confirmed 2026-08-30 campaign defects](#fix-the-confirmed-2026-08-30-campaign-defects),
+in their written order. The managed collection schema panic is first because
+normal source must never reach a compiler assertion even while collection
+support is deliberately deferred. The inconsistent `None` conversion for state
+fields is second because it forces a compile-clean but semantically false
+`Some("")` substitution. Then address the silent address-base migration trap,
+broken compiler-owned example, and focused documentation/diagnostic defects as
+one small verified guidance sequence. Do not begin managed collection support
+itself until ASR has a tested representation, and bring every language,
+standard-library, provider, or host-surface decision below back to the user.
+
+## Unity schema foundation and deferred follow-ups
 
 Use the Rust Lunistice autosplitter and `examples/lunistice.split` as the first
 acceptance pair. The current SplitScript Unity API is not a compatibility
@@ -291,18 +305,27 @@ to inference or code generation.
   representative ports.
 ## P0 — make docs-first ASL porting semantically reliable
 
-The latest clean-folder exercise had only the current compiler and legacy ASL
-inputs. It produced 52 compiler-valid ports or partial ports across 53 reviewed
-scripts and learned the language exclusively through `splitc docs`. Exact
-Windows executable names and named layouts were found this time, demonstrating
-that the earlier documentation work helped. Compilation still hid substantial
-semantic drift: every Unity port combined `state Unity` with manual runtime and
-metadata discovery, and emulator ports manually rediscovered mappings and byte
-order despite matching typed providers. Treat these silent canonical-API misses
-as higher-risk evidence than an explicit compile error. The external exercise
-directory is disposable evidence, not a durable roadmap dependency; retain the
-actionable conclusions and minimized in-tree regression cases instead of paths
-or assumptions tied to one generated corpus.
+The first clean-folder exercise had only the compiler and legacy ASL inputs. It
+produced 52 compiler-valid ports or partial ports across 53 reviewed scripts and
+learned the language exclusively through `splitc docs`. Exact Windows
+executable names and named layouts were found, demonstrating that the earlier
+documentation work helped. Compilation still hid substantial semantic drift:
+every Unity port combined `state Unity` with manual runtime and metadata
+discovery, and emulator ports manually rediscovered mappings and byte order
+despite matching typed providers.
+
+The 2026-08-30 follow-up independently produced 16 warning-free ports or partial
+ports and two deliberately unported architecture cases. It confirmed that the
+schema-first Unity and typed emulator journeys now work when available, while
+finding a managed-schema compiler panic, inconsistent optional state typing,
+several diagnostics and compiler-owned examples that mislead authors, and
+faithful-port gaps around finite scanning, PS2 discovery, persistent files,
+timer metadata, and runtime-varying memory shapes. Treat silent canonical-API
+misses and compile-clean semantic substitutions as higher-risk evidence than an
+explicit compile error. The external exercise directory is disposable evidence,
+not a durable roadmap dependency; retain actionable conclusions and minimized
+in-tree regression cases instead of paths or assumptions tied to one generated
+corpus.
 
 ### Turn every reported blocker into an actionable product outcome
 
@@ -390,6 +413,61 @@ or assumptions tied to one generated corpus.
   integer width, failure behavior, and deliberately omitted source branches.
   The fixture should assert documentation journeys and diagnostics, not bundle
   disposable full-script outputs.
+
+### Fix the confirmed 2026-08-30 campaign defects
+
+- [ ] Stop unsupported managed collection fields during schema checking rather
+  than letting `[String]` reach the code-generation assertion that every
+  managed value field is [`MemoryReadable`]. Emit a normal source diagnostic on
+  the field type in every profile and retain a minimized no-panic regression.
+  This is independent of the deferred product design for managed arrays/lists:
+  unsupported source must never panic while SplitScript waits for ASR's tested
+  representation.
+- [ ] Make contextual [`None`] conversion consistent for expression-valued
+  state fields. `label: String? = None` must type-check by the same expected-type
+  conversion used for locals, returns, and other state expressions, without
+  special-casing `String` or weakening transactional field typing. Add positive
+  coverage for multiple optional value types and preserve a useful mismatch
+  diagnostic when no optional target is expected.
+- [ ] Explain the legacy ASL address-base semantic explicitly. The ASL porting
+  journey and exact `DeepPointer` / native-state migration searches must show
+  that a bare numeric ASL root is normally main-module-relative and therefore
+  becomes `at "game.exe", offset`; copying it as an integer SplitScript root is
+  an absolute address and can compile while reading the wrong memory. Cover the
+  distinction with a focused compiler-query regression rather than attempting
+  an unreliable cross-platform source warning.
+- [ ] Fix the compiler-owned `choice` setting example by emitting required
+  commas, and make every complete source snippet owned by the language catalog
+  parse, format, and type-check in an automated documentation test. Keep
+  intentionally partial syntax fragments explicitly classified so catalog
+  prose cannot silently publish uncompilable examples again.
+- [ ] Document the 4,096-element fixed-array limit on the exact [`[T; N]`]
+  reference and memory-state paths before authors design large native blobs
+  around an impossible schema. Link to growable state value blocks as the
+  current selective-read alternative while keeping the existing precise
+  declaration diagnostic.
+- [ ] Improve unknown-provider diagnostics. List the currently valid state
+  providers, suggest the nearest spelling when applicable, and link the state
+  provider index. Do not imply that a correctly spelled unsupported provider
+  such as `SNES` exists; the separate ASR-dependent SNES task remains deferred.
+- [ ] Diagnose statement-shaped `match` arms at the statement/expression
+  boundary. When assignment or a side-effecting `if` appears directly after
+  `=>`, explain that the arm needs braces and offer a machine-applicable braced
+  rewrite instead of claiming that the already-present comma is missing.
+- [ ] Make the missing bare-global lifecycle-initializer diagnostic say that
+  initialization must be a direct assignment in exactly one `onAttach` or
+  `onStart` boundary and that assignments hidden in called helpers do not
+  establish lifetime. Preserve the existing excellent dual-boundary labels and
+  avoid promising interprocedural definite-initialization analysis.
+- [ ] Add a concise ASL primitive-type migration topic and exact search aliases
+  for queries such as `ASL bool byte int`. Show physical-width mappings and the
+  cases that require inspecting source/runtime representation rather than
+  blindly choosing a similarly named SplitScript type.
+- [ ] Reject statically impossible literal guest-memory reads at provider
+  checking time. A constant PS2 address outside the provider's declared readable
+  domain must produce a focused diagnostic before code generation; dynamic
+  addresses retain their runtime failure. Keep this diagnostic synchronized
+  with the provider's actual supported domain as that domain evolves.
 
 ## P0 — fix editor correctness and the first-use path
 
@@ -525,13 +603,22 @@ concepts rather than maintaining a parallel inventory.
 - [ ] Add layout sharing or overrides only if a maintained port proves that
   repeated pointer paths across many versions are materially unmaintainable.
   Keep the selected physical layout auditable.
-- [ ] Complete the remaining safe process/module identity probes as ports
-  require them: full module enumeration and a deterministic executable
-  fingerprint. Waiting `process.module(name)` and synchronous optional
-  `process.loadedModule(name)` now cover known-name discovery. Numeric PE file
-  and product versions are available through one shared source-defined
-  `VS_FIXEDFILEINFO` traversal. Prefer host metadata over unrestricted
-  filesystem access or hashing an entire module inside Wasm.
+- [ ] Add safe full-module enumeration for ports that cannot know every module
+  name in advance. Waiting `process.module(name)` and synchronous optional
+  `process.loadedModule(name)` cover known-name discovery, but the SEGA Master
+  Splitter must select or report whichever libretro core is loaded. Define a
+  bounded immutable module snapshot with typed metadata rather than exposing
+  host handles or manual `free` calls, and coordinate missing host support
+  through the runtime-evolution contract.
+- [ ] Design a deterministic executable fingerprint for build selection.
+  Numeric PE file and product versions are available through one shared
+  source-defined `VS_FIXEDFILEINFO` traversal, but the Bloodstained and Ender
+  Lilies ports use exact MD5 identities that are not proven equivalent to
+  version resources.
+  Bring the fingerprint source, cross-platform meaning, cost, and result type
+  back for approval before choosing between host metadata, a host hash, or
+  reading an executable through the bounded file API. Do not silently replace a
+  source hash with a weaker version check.
 - [x] Add compiler-owned same-name process selection without exposing PIDs or
   handles. `selectProcess` now evaluates each candidate through the ordinary
   native `process` value before provider setup and `onAttach`; `true` promotes
@@ -559,11 +646,21 @@ concepts rather than maintaining a parallel inventory.
   fallback signatures, range/page selection, capture transforms, relative
   address decoding, and concise pointer-follow composition. Existing `sig`,
   scan, follow, and `readRelative32` APIs should be documented before new APIs
-  are introduced. Defer finite `scanOnce`-style variants: do not multiply
-  one-shot forms across waiting discovery APIs while general future
-  composition is unsettled. Reconsider operation-level exhaustion only when
-  further porting evidence shows that timeout, race/select, and cancellation
-  cannot express the required behavior cleanly.
+  are introduced. The OpenGOAL and Abe's Oddysee ports now provide concrete
+  evidence for a finite bounded scan that distinguishes an exhausted range from
+  a signature that has not appeared yet. Before adding `scanOnce`, compare one
+  operation-level exhaustion result with composition through the implemented
+  `future.timeout` / `future.race` APIs, and bring the proposed source contract
+  back for approval. Do not multiply one-shot variants across unrelated waiting
+  discovery APIs.
+- [ ] Design recoverable post-attachment signature discovery from the Metal
+  Slug 3 framebuffer case. The allocation can move while the same process stays
+  attached, but scanning is currently confined to suspending `onAttach` code.
+  Compare an ordinary cancellable scan future usable from a suspending polling
+  task, a relocatable signature-backed address abstraction, and a provider
+  refresh lifecycle. Define work budgets, replacement timing, state retention,
+  and cancellation before implementation; do not add a synchronous rescan loop
+  or special-case framebuffer code.
 - [ ] Design typed byte-order reads for every [`MemoryReadable`] value once a
   representative port needs more than scalar conversion. The design must
   recursively decode structs and fixed arrays, compose with ordinary reads and
@@ -588,6 +685,14 @@ concepts rather than maintaining a parallel inventory.
 
 ### Polling, mutable watcher patterns, and settings
 
+- [ ] Design the canonical representation for runtime-varying watched value
+  types using the FNaF Security Breach interactible rules as the acceptance
+  case. Compare a source-authored enum/tag plus typed optional payloads with a
+  first-class tagged state value; preserve static exhaustiveness, per-variant
+  read failure, old/current transitions, and efficient polling. If ordinary
+  source already expresses the behavior cleanly after focused guidance, prefer
+  documenting that pattern over adding a dynamic watcher type. Bring the
+  language and state-model choice back for approval before implementation.
 - [ ] Add conditional settings visibility or enablement only with explicit host
   semantics for persisted hidden values and parent changes. Until then,
   document that headings are visual and parent boolean settings must gate child
@@ -698,6 +803,28 @@ concepts rather than maintaining a parallel inventory.
   object-header arithmetic, and backend-specific target-family traversal
   private implementation tools. Bring any schema shape that still cannot
   represent a real port back as a design question before adding public syntax.
+- [ ] Verify and extend PS2 guest-memory coverage against ASR before changing
+  the provider boundary. Resident Evil Code: Veronica X reads its disc product
+  code at `0x00015B90`, below SplitScript's documented
+  `0x00100000..=0x01ffffff` domain, so the canonical provider cannot auto-select
+  a region even though the legacy script can. Determine whether ASR deliberately
+  excludes the low region, whether PCSX2 mappings expose it consistently, and
+  how RetroArch cores differ. Then propose the correct provider domain and
+  runtime validation; do not paper over the gap with a game-specific exception.
+- [ ] Design decoded guest-string reads once the PS2 domain decision is known.
+  The Code: Veronica X product code demonstrates a bounded UTF-8/ASCII field in
+  guest memory, while emulator providers currently expose only typed reads and
+  reject native-state `as utf8(...)` sugar. Prefer one provider-independent
+  bounded decoding facility with explicit encoding and failure semantics over a
+  PS2-only spelling, and bring the source API back for approval.
+- [ ] Decide whether one SplitScript file may select among fundamentally
+  different state providers. The SEGA Master Splitter dynamically spans SMS and
+  Genesis, while the Spider-Man and Code: Veronica X sources span several
+  consoles. Compare a typed multi-provider attachment model with the simpler
+  canonical rule that each provider/edition is a separate script, including
+  settings sharing, discovery, host packaging, simultaneous candidate
+  processes, and state-shape typing. Document the chosen migration even if no
+  language feature is added.
 - [ ] Assess an Unreal provider only after representative `GWorld`, object, and
   name traversal ports establish the required surface.
 ## P1 — expand migration guidance and automated fixes
@@ -879,6 +1006,13 @@ remaining work is product hardening and distribution.
 
 ## P1 — remaining language and runtime breadth
 
+- [ ] Make fixed-array comparison and matching coherent with their value
+  semantics. The Code: Veronica X port can read `[u8; 11]` but cannot compare it
+  with a literal or use that literal as a pattern, forcing an element loop.
+  Propose structural `Equatable` derivation when `T: Equatable` and exact-length
+  fixed-array patterns, sharing the existing aggregate capability and pattern
+  architecture rather than adding byte-array intrinsics. Bring the language
+  decision back for approval before implementation.
 - [x] Add shorthand struct field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename
@@ -903,12 +1037,33 @@ remaining work is product hardening and distribution.
   pause/resume are available now and first need better porting discovery. The
   residual host surface is timing method, category/game/attempt metadata,
   current segment name and run count, timer real/game-time snapshots, and run
-  offset. Separate read-only snapshots from mutations, distinguish the
-  monotonic `Instant` clock from timer real time, and add ABI support only where
-  the host can expose stable semantics. Use the repeated `timer.CurrentTime`,
-  `timer.CurrentSplit.Name`, `timer.Run.Offset`, category, and timing-method
-  ports as the evidence ledger; coordinate the host side through R5 in
+  offset. The SEGA Master Splitter needs game/category identity, while Abe's
+  Oddysee needs exact current real/game time for correctness and persistent
+  feedback rather than display alone. Separate read-only snapshots from
+  mutations, distinguish the monotonic `Instant` clock from timer real time,
+  and add ABI support only where the host can expose stable semantics. Use the
+  repeated `timer.CurrentTime`, `timer.CurrentSplit.Name`, `timer.Run.Offset`,
+  category, and timing-method ports as the evidence ledger; coordinate the host
+  side through R5 in
   [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
+- [ ] Decide the remaining imperative timer-control boundary separately from
+  read-only timer snapshots. Ato pauses the full timer phase and Spider-Man
+  resets when its emulator closes; SplitScript currently exposes declarative
+  `start` / `split` / `reset` decisions plus game-time pause/resume, which do not
+  express either behavior. Determine which operations the runtime can support
+  safely, whether lifecycle-triggered control is desirable, and how feedback
+  loops are prevented. Bring the language/stdlib contract back for approval and
+  document intentional non-goals rather than silently omitting source behavior.
+- [ ] Design the writable/persistent half of the file API from the Abe's
+  Oddysee acceptance case. `File.readAllBytes` and `File.readAllText` now cover
+  whole-file input without handles, but a faithful split database also needs
+  directory creation, atomic replacement or whole-file write, and deliberate
+  deletion; Bloodstained and the SEGA Master Splitter add diagnostic-log use
+  cases. Specify autosplitter-relative versus absolute paths, WASI preopen and
+  host-consent policy, encoding, overwrite/atomicity, interruption, size limits,
+  and release behavior before exposing mutations. Prefer handle-free whole-file
+  operations unless a real port proves streaming is necessary, and bring this
+  standard-library and sandbox decision back for approval.
 - [ ] Complete structured future composition with explicit cancellation
   semantics. `future.race([async T])` and
   `future.timeout(async T, Duration) -> async T!` are implemented with lazy
@@ -978,6 +1133,12 @@ remaining work is product hardening and distribution.
 
 ## P2 — documentation and editor evolution
 
+- [ ] Improve navigation for very long terminal guide results without changing
+  their content model. Put stable exact subsection identities near the top of
+  monolithic guides and make focused `splitc docs` queries obvious before a
+  terminal or calling tool truncates later sections. Treat this as mitigated and
+  lower priority because exact-topic searches already work; do not split the
+  canonical guide into duplicated prose.
 - [ ] After renderer-produced static Markdown proves the published-output
   pipeline, add machine-readable export and rustdoc-like standalone HTML as
   additional renderers. Publishing HTML must not introduce a second hierarchy,
@@ -1108,12 +1269,15 @@ remaining work is product hardening and distribution.
 - [ ] Extend `debug` to more declaration kinds only when a concrete use case
   defines checking, reachability, and release erasure.
 - [ ] Write an explicit sandbox policy before adding process writes/injection,
-  arbitrary file access, network/process launching, modal UI, audio, or broad
-  host control. Use stats-file game time, install-file discovery, injected load
-  removers, and timing-method prompts from the ASL corpus as concrete policy
-  cases. Prefer file settings and typed host metadata where they suffice.
-  Dangerous capabilities require visible consent and cleanup semantics; some
-  may remain intentional non-goals.
+  file mutation or access outside the runtime's approved WASI preopens,
+  network/process launching, modal UI, audio, or broad host control. The
+  handle-free read-only `File` API remains inside those preopens; its proposed
+  writable/persistent counterpart must settle overwrite, deletion, and consent
+  here before implementation. Use stats-file game time, install-file discovery,
+  injected load removers, and timing-method prompts from the ASL corpus as
+  concrete policy cases. Prefer file settings and typed host metadata where
+  they suffice. Dangerous capabilities require visible consent and cleanup
+  semantics; some may remain intentional non-goals.
 
 ## Ongoing — evidence, correctness, and maintainability
 
@@ -1157,42 +1321,36 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Establish the first-use product path: a compiler-checked, self-contained
-   Getting Started guide, an extension-user Marketplace README, and a routed
-   repository README. Keep full example scripts out of the authoring path.
-2. Remove stale language/standard-library claims and make compiler catalogs the
-   canonical exact reference. Then publish renderer-produced static Markdown
-   and reorganize lifecycle, state-form, failure/async, string-unit, and
-   migration navigation around user tasks.
-3. Use the recorded editor latency/heap baselines to remove repeated completion
-   lexing and linear cursor scans, then share immutable query-stage products
-   only where measurements identify meaningful remaining costs. Do not add
-   diagnostic scheduling machinery without a reproduced diagnostic bottleneck.
-4. Add profile-aware unused analysis for declarations whose only consumers are
-   erased `debug` code, with a safe quick fix to mark erasable declarations
-   `debug` before release emission retains them unnecessarily.
-5. Complete the remaining official host ABI as typed facilities and keep exact
-   `shutdown` / `onSplit` delivery in the runtime-evolution contract until the
-   host exposes the required events.
-6. Extend Unity managed collections only after strings and scalar snapshots are
-   complete, using the maintained Alba and A Short Hike requirements to shape
-   lists, dictionaries, and dynamic values.
-7. Harden and publish the bundled VSIX and native releases, including pinned
-   toolchains/actions and license packaging, then evaluate the
-   hosted Code OSS workbench. Resume source debugging only after choosing among
-   the JavaScript debugger, native Wasmtime/DWARF, and typed-IR interpreter.
-8. Reduce verification and architecture duplication incrementally: compile
-   runtime artifacts once, share minimal harness/worker controllers, improve
-   documentation snapshots, and split broad compiler coordinators only at
-   tested semantic boundaries.
-9. Decide whether known emulator executable sets merit a non-noisy contextual
-   provider suggestion. Unicode blank strings now use the Unicode `White_Space`
-   property, while bounded managed-string lengths are already untyped
-   compile-time literals in schema syntax and require no integer suffix or
-   generic conversion API.
-10. Revisit `unity.time` only after ASR has a tested implementation whose
-   discovery, lifetime, fallibility, and allocation behavior can define the
-   cross-language contract.
-11. Keep physical `None` aggregate specialization and sandbox-sensitive host
-   capabilities deferred until measurements or explicit product requirements
-   justify them.
+1. Replace the managed `[String]` schema panic with a checked source diagnostic
+   and a no-panic regression. This does not unblock collection fields; it makes
+   unsupported source safe while the ASR-dependent representation remains
+   deferred.
+2. Fix contextual `None` conversion for expression-valued state fields and
+   verify optional state values across more than `String?`.
+3. Close the small but high-impact docs-first defects: explain ASL numeric-root
+   semantics, fix and compile-check the `choice` example, document fixed-array
+   limits and primitive mappings, and improve provider, match-arm, lifecycle,
+   and constant guest-address diagnostics.
+4. Bring the finite-scan design back for a decision using OpenGOAL and Abe's
+   Oddysee as evidence, then separately decide how a Metal Slug framebuffer can
+   be rediscovered after attachment. Reuse future cancellation/composition
+   rather than multiplying unrelated `Once` APIs.
+5. Resolve the PS2 provider's low-memory product-code gap against ASR, then
+   decide one provider-independent bounded guest-string facility. Keep SNES and
+   Unity managed arrays/lists deferred until ASR has tested implementations.
+6. Decide whether multi-console legacy scripts become separate provider-specific
+   SplitScript packages or justify a typed multi-provider source model.
+7. Design the read-only timer metadata/time surface, imperative timer-control
+   boundary, and writable persistent file API as separate decisions. Abe's
+   Oddysee is the acceptance case for current timer time and persistence; Ato,
+   Spider-Man, and the SEGA Master Splitter supply the remaining evidence.
+8. Add safe module enumeration and decide deterministic executable identity
+   without weakening exact source hashes to version metadata.
+9. Decide fixed-array equality/patterns and runtime-varying watched types using
+   the Code: Veronica X and FNaF ports. Prefer reusable static typing and
+   ordinary aggregate architecture over compatibility-shaped intrinsics.
+10. Resume measured editor/compiler performance, release hardening, hosted IDE,
+    and debugging work after the porting correctness and design sequence above.
+11. Keep `unity.time`, SNES, and managed collections gated on ASR evidence, and
+    keep writes/injection, physical `None` specialization, and other broad host
+    powers deferred until their explicit dependencies and policies are ready.

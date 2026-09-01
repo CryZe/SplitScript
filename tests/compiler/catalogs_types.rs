@@ -2294,7 +2294,20 @@ fn language_catalog_is_valid_documented_and_compilable() {
     for item in language.items() {
         assert!(!item.documentation.summary.is_empty());
         for example in item.documentation.examples {
-            splitscript::compile(&example.validation_program()).unwrap_or_else(|errors| {
+            let validation = example.validation_program();
+            if example.is_complete_program() {
+                assert_eq!(
+                    validation, example.source,
+                    "complete language examples must validate the visible source itself"
+                );
+            }
+            let formatted = splitscript::format_source(&validation).unwrap_or_else(|errors| {
+                panic!(
+                    "language example `{}: {}` did not parse and format: {errors:#?}",
+                    item.name, example.title
+                )
+            });
+            splitscript::compile(&formatted).unwrap_or_else(|errors| {
                 panic!(
                     "language example `{}: {}` failed: {errors:#?}",
                     item.name, example.title

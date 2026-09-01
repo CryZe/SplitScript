@@ -1062,7 +1062,7 @@ const DOCUMENTATION_COMMENT_EXAMPLES: &[Example] = &[
 focused_example!(
     CHOICE_EXAMPLE,
     "Choose an enum value",
-    "\"Character\" => character: choice {\n    \"Hana\" => Character.Hana default\n    \"Toree\" => Character.Toree\n}",
+    "\"Character\" => character: choice {\n    \"Hana\" => Character.Hana default,\n    \"Toree\" => Character.Toree,\n}",
     SETTINGS_SOURCE
 );
 focused_example!(

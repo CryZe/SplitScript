@@ -47,8 +47,10 @@ in their written order. The managed collection schema panic is now stopped at
 the shared remote-memory validation boundary, and expression-valued optional
 state fields now apply the same contextual `None` conversion as other typed
 positions, and the ASL numeric-root migration now distinguishes main-module
-offsets from SplitScript absolute addresses. Fix the broken compiler-owned
-`choice` example next, followed by the focused
+offsets from SplitScript absolute addresses. The compiler-owned `choice`
+example is corrected and language-catalog validation now parses, formats, and
+type-checks every complete fixture while classifying focused fragments
+explicitly. Continue with the focused
 documentation/diagnostic defects as one small verified guidance sequence. Do
 not begin managed collection support itself until ASR has a tested
 representation, and bring every language, standard-library, provider, or
@@ -437,7 +439,7 @@ corpus.
   an absolute address and can compile while reading the wrong memory. Cover the
   distinction with a focused compiler-query regression rather than attempting
   an unreliable cross-platform source warning.
-- [ ] Fix the compiler-owned `choice` setting example by emitting required
+- [x] Fix the compiler-owned `choice` setting example by emitting required
   commas, and make every complete source snippet owned by the language catalog
   parse, format, and type-check in an automated documentation test. Keep
   intentionally partial syntax fragments explicitly classified so catalog

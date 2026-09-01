@@ -27,6 +27,9 @@ pub struct Example {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExampleValidation {
     CompleteProgram(&'static str),
+    /// A focused, intentionally partial snippet checked by a separate complete
+    /// program that supplies the grammar and declaration context.
+    CheckedFragment(&'static str),
     OnAttachBody,
     ProviderOnAttachBody(&'static str),
 }
@@ -40,7 +43,7 @@ impl Example {
         Self {
             title,
             source,
-            validation: ExampleValidation::CompleteProgram(validation_source),
+            validation: ExampleValidation::CheckedFragment(validation_source),
         }
     }
 
@@ -82,7 +85,8 @@ impl Example {
 
     pub fn validation_program(self) -> String {
         match self.validation {
-            ExampleValidation::CompleteProgram(source) => source.to_owned(),
+            ExampleValidation::CompleteProgram(source)
+            | ExampleValidation::CheckedFragment(source) => source.to_owned(),
             ExampleValidation::OnAttachBody | ExampleValidation::ProviderOnAttachBody(_) => {
                 let mut program = match self.validation {
                     ExampleValidation::ProviderOnAttachBody(provider) => {
@@ -91,7 +95,8 @@ impl Example {
                     ExampleValidation::OnAttachBody => {
                         String::from("state \"example.exe\" {}\nonAttach {\n")
                     }
-                    ExampleValidation::CompleteProgram(_) => unreachable!(),
+                    ExampleValidation::CompleteProgram(_)
+                    | ExampleValidation::CheckedFragment(_) => unreachable!(),
                 };
                 // Keep the displayed snippet byte-for-byte contiguous inside
                 // the generated program. SplitScript blocks do not require
@@ -107,9 +112,16 @@ impl Example {
 
     pub const fn has_validation_source(self) -> bool {
         match self.validation {
-            ExampleValidation::CompleteProgram(source) => !source.is_empty(),
+            ExampleValidation::CompleteProgram(source)
+            | ExampleValidation::CheckedFragment(source) => !source.is_empty(),
             ExampleValidation::OnAttachBody | ExampleValidation::ProviderOnAttachBody(_) => true,
         }
+    }
+
+    /// Whether the visible source is itself a complete program rather than an
+    /// explicitly contextualized fragment.
+    pub const fn is_complete_program(self) -> bool {
+        matches!(self.validation, ExampleValidation::CompleteProgram(_))
     }
 
     /// Reports whether validation checks the exact snippet shown to readers.

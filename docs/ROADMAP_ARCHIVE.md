@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-09-01: language examples validate their complete source
+
+- Fixed the rendered `choice` setting example by adding the required commas to
+  both enum-backed options.
+- Split catalog example validation into explicitly complete programs and
+  intentionally contextualized fragments. The language-catalog regression now
+  parses and formats every complete validation fixture before type-checking the
+  formatted result, while complete visible examples must validate their own
+  source rather than a substitute program.
+
 ## 2026-09-01: ASL numeric roots retain their module base
 
 - Added a self-contained ASL porting recipe showing that a bare numeric native

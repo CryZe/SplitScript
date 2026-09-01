@@ -247,14 +247,20 @@ pub(crate) fn analyze(
                 };
                 diagnostics.push(
                     Diagnostic::semantic(
-                        format!("bare global `{}` has no lifecycle initializer", global.name),
+                        format!(
+                            "bare global `{}` has no direct lifecycle initializer",
+                            global.name
+                        ),
                         global.name_span,
                     )
                     .with_primary_label(
-                        "assign this value in either `onAttach` or `onStart`",
+                        "assign this global directly in exactly one `onAttach` or `onStart` block",
                     )
                     .with_note(
                         "`onAttach` creates attachment-scoped state; `onStart` creates attempt-scoped state",
+                    )
+                    .with_note(
+                        "assignments performed by called helpers do not establish a bare global's lifetime",
                     ),
                 );
             }

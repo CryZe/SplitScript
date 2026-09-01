@@ -54,11 +54,13 @@ explicitly. The fixed-array reference now exposes its process-read bounds and
 the transactional sparse-read alternative. Unknown state providers now list
 the catalog-owned choices, repair only clear typos, and link a dedicated
 provider index. Statement-shaped match arms now point at the missing braces and
-offer a complete rewrite instead of blaming an existing comma. Continue with
-the focused documentation/diagnostic defects as one small verified guidance
-sequence. Do not begin managed collection support itself until ASR has a
-tested representation, and bring every language, standard-library, provider,
-or host-surface decision below back to the user.
+offer a complete rewrite instead of blaming an existing comma. Bare-global
+lifetime errors now spell out the one direct `onAttach`/`onStart` assignment
+rule and the helper-call boundary. Continue with the focused
+documentation/diagnostic defects as one small verified guidance sequence. Do
+not begin managed collection support itself until ASR has a tested
+representation, and bring every language, standard-library, provider, or
+host-surface decision below back to the user.
 
 ## Unity schema foundation and deferred follow-ups
 
@@ -461,7 +463,7 @@ corpus.
   boundary. When assignment or a side-effecting `if` appears directly after
   `=>`, explain that the arm needs braces and offer a machine-applicable braced
   rewrite instead of claiming that the already-present comma is missing.
-- [ ] Make the missing bare-global lifecycle-initializer diagnostic say that
+- [x] Make the missing bare-global lifecycle-initializer diagnostic say that
   initialization must be a direct assignment in exactly one `onAttach` or
   `onStart` boundary and that assignments hidden in called helpers do not
   establish lifetime. Preserve the existing excellent dual-boundary labels and

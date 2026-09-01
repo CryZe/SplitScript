@@ -4428,3 +4428,16 @@ language catalog document the refinement rule.
 - Added a machine-applicable whole-body rewrite to `pattern => { ... }` that
   preserves nested delimiters and multiline source, plus recovery coverage
   proving neighboring arms survive and the fixed program compiles.
+
+# 2026-09-01: explicit bare-global lifetime boundaries
+
+- Changed the missing lifecycle-initializer diagnostic to require a direct
+  assignment in exactly one `onAttach` or `onStart` block, matching the
+  compiler's existing lifetime classification.
+- Explained that assignments performed inside a called helper do not establish
+  a bare global's lifetime. Helpers can still use already classified scoped
+  globals; this guidance does not promise interprocedural definite
+  initialization.
+- Kept the existing attachment-versus-attempt conflict labels and subsequent
+  per-path initialization analysis unchanged, with a regression for the
+  formerly confusing helper-assignment case.

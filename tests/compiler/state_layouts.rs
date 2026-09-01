@@ -1102,6 +1102,38 @@ fn attachment_globals_require_definite_initialization_and_layout_refinement() {
 }
 
 #[test]
+fn bare_global_lifetimes_require_one_direct_lifecycle_assignment() {
+    let source = r#"
+        let value: u32
+        state "game.exe" {}
+        fn initialize() { value = 1 }
+        onAttach { initialize() }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("a helper assignment must not silently establish attachment lifetime");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("bare global `value`"))
+        .expect("the bare global should own the lifetime diagnostic");
+
+    assert_eq!(
+        diagnostic.message,
+        "bare global `value` has no direct lifecycle initializer"
+    );
+    assert!(
+        diagnostic.labels[0]
+            .message
+            .as_deref()
+            .is_some_and(|label| {
+                label.contains("directly in exactly one `onAttach` or `onStart` block")
+            })
+    );
+    assert!(diagnostic.notes.iter().any(|note| {
+        note == "assignments performed by called helpers do not establish a bare global's lifetime"
+    }));
+}
+
+#[test]
 fn on_attach_rejects_attachment_global_reads_before_assignment() {
     let source = r#"
         let module: Module

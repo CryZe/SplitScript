@@ -627,15 +627,15 @@ concepts rather than maintaining a parallel inventory.
   bounded immutable module snapshot with typed metadata rather than exposing
   host handles or manual `free` calls, and coordinate missing host support
   through the runtime-evolution contract.
-- [ ] Design a deterministic executable fingerprint for build selection.
-  Numeric PE file and product versions are available through one shared
-  source-defined `VS_FIXEDFILEINFO` traversal, but the Bloodstained and Ender
-  Lilies ports use exact MD5 identities that are not proven equivalent to
-  version resources.
-  Bring the fingerprint source, cross-platform meaning, cost, and result type
-  back for approval before choosing between host metadata, a host hash, or
-  reading an executable through the bounded file API. Do not silently replace a
-  source hash with a weaker version check.
+- [x] Add a deterministic executable fingerprint for build selection.
+  `Module.md5() -> async String!` hashes the module's exact complete on-disk
+  bytes and returns canonical uppercase hexadecimal, preserving the evidence
+  used by the Bloodstained, Ender Lilies, COTM, and COTM2 sources. The compiler
+  reads at most 512 KiB per poll through the portable read-only WASI path,
+  closes its descriptor before yielding, restarts when size or modification
+  time changes between polls, and is cancelled with the process lifetime. This
+  deliberately does not weaken an exact source hash to PE version metadata or
+  mapped module size.
 - [x] Add compiler-owned same-name process selection without exposing PIDs or
   handles. `selectProcess` now evaluates each candidate through the ordinary
   native `process` value before provider setup and `onAttach`; `true` promotes
@@ -1338,8 +1338,9 @@ remaining work is product hardening and distribution.
    boundary, and writable persistent file API as separate decisions. Abe's
    Oddysee is the acceptance case for current timer time and persistence; Ato,
    Spider-Man, and the SEGA Master Splitter supply the remaining evidence.
-4. Add safe module enumeration and decide deterministic executable identity
-   without weakening exact source hashes to version metadata.
+4. Add safe module enumeration. Deterministic executable identity is now
+   available through bounded exact-file `Module.md5()` without weakening
+   source hashes to version metadata.
 5. Decide fixed-array equality/patterns and runtime-varying watched types using
    the Code: Veronica X and FNaF ports. Prefer reusable static typing and
    ordinary aggregate architecture over compatibility-shaped intrinsics.

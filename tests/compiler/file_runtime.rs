@@ -10,6 +10,9 @@ struct FileTestHost {
     closed_descriptors: usize,
     messages: Vec<String>,
     next_descriptor: i32,
+    module_mtime: u64,
+    module_replacement: Option<Vec<u8>>,
+    module_filestat_calls: usize,
 }
 
 fn write_memory(caller: &mut wasmtime::Caller<'_, FileTestHost>, pointer: i32, bytes: &[u8]) {
@@ -39,6 +42,19 @@ fn read_memory(
 }
 
 fn execute(source: &str) -> FileTestHost {
+    execute_with_updates(source, Vec::new(), 0)
+}
+
+fn execute_with_updates(source: &str, module_file: Vec<u8>, updates: usize) -> FileTestHost {
+    execute_with_module_change(source, module_file, None, updates)
+}
+
+fn execute_with_module_change(
+    source: &str,
+    module_file: Vec<u8>,
+    module_replacement: Option<Vec<u8>>,
+    updates: usize,
+) -> FileTestHost {
     use wasmtime::{Config, Engine, ExternType, Linker, Module, Store, Val, ValType};
 
     let wasm = splitscript::compile(source).expect("file API fixture should compile");
@@ -95,7 +111,7 @@ fn execute(source: &str) -> FileTestHost {
                             assert_eq!(parameters[0].unwrap_i32(), 3);
                             assert_eq!(parameters[1].unwrap_i32(), 1);
                             assert_eq!(parameters[4].unwrap_i32(), 0);
-                            assert_eq!(parameters[5].unwrap_i64(), 2);
+                            assert!(matches!(parameters[5].unwrap_i64(), 2 | 0x20_0006));
                             assert_eq!(parameters[6].unwrap_i64(), 0);
                             assert_eq!(parameters[7].unwrap_i32(), 0);
                             let path = String::from_utf8(read_memory(
@@ -148,6 +164,51 @@ fn execute(source: &str) -> FileTestHost {
                                 &(length as u32).to_le_bytes(),
                             );
                         }
+                        "fd_seek" => {
+                            let descriptor = parameters[0].unwrap_i32();
+                            let offset = parameters[1].unwrap_i64();
+                            assert_eq!(parameters[2].unwrap_i32(), 0);
+                            assert!(offset >= 0);
+                            caller
+                                .data_mut()
+                                .open_files
+                                .get_mut(&descriptor)
+                                .expect("seeks use an open descriptor")
+                                .1 = offset as usize;
+                            write_memory(
+                                &mut caller,
+                                parameters[3].unwrap_i32(),
+                                &(offset as u64).to_le_bytes(),
+                            );
+                        }
+                        "fd_filestat_get" => {
+                            let descriptor = parameters[0].unwrap_i32();
+                            let (path, _) = caller
+                                .data()
+                                .open_files
+                                .get(&descriptor)
+                                .cloned()
+                                .expect("filestat uses an open descriptor");
+                            if path == "autosplitter/module.bin" {
+                                caller.data_mut().module_filestat_calls += 1;
+                                if caller.data().module_filestat_calls == 2
+                                    && let Some(replacement) =
+                                        caller.data_mut().module_replacement.take()
+                                {
+                                    caller.data_mut().files.insert(path.clone(), replacement);
+                                    caller.data_mut().module_mtime += 1;
+                                }
+                            }
+                            let size = caller.data().files[&path].len() as u64;
+                            let mtime = if path == "autosplitter/module.bin" {
+                                caller.data().module_mtime
+                            } else {
+                                1
+                            };
+                            let pointer = parameters[1].unwrap_i32();
+                            write_memory(&mut caller, pointer + 32, &size.to_le_bytes());
+                            write_memory(&mut caller, pointer + 48, &mtime.to_le_bytes());
+                        }
                         "fd_close" => {
                             let descriptor = parameters[0].unwrap_i32();
                             assert!(caller.data_mut().open_files.remove(&descriptor).is_some());
@@ -163,6 +224,23 @@ fn execute(source: &str) -> FileTestHost {
                                 .data_mut()
                                 .messages
                                 .push(String::from_utf8(bytes).expect("printed text is UTF-8"));
+                        }
+                        "process_attach" => results[0] = Val::I64(1),
+                        "process_is_open" => results[0] = Val::I32(1),
+                        "process_get_module_address" => results[0] = Val::I64(0x1000),
+                        "process_get_module_size" => results[0] = Val::I64(0x1000),
+                        "process_get_module_path" => {
+                            let path = b"/mnt/c/autosplitter/module.bin";
+                            let output = parameters[3].unwrap_i32();
+                            if output != 0 {
+                                write_memory(&mut caller, output, path);
+                            }
+                            write_memory(
+                                &mut caller,
+                                parameters[4].unwrap_i32(),
+                                &(path.len() as u32).to_le_bytes(),
+                            );
+                            results[0] = Val::I32(1);
                         }
                         _ => {}
                     }
@@ -188,8 +266,11 @@ fn execute(source: &str) -> FileTestHost {
                 ),
                 ("autosplitter/read-error.bin".to_owned(), vec![42; 9_000]),
                 ("autosplitter/empty.txt".to_owned(), Vec::new()),
+                ("autosplitter/module.bin".to_owned(), module_file.clone()),
             ]),
             next_descriptor: 4,
+            module_mtime: 1,
+            module_replacement,
             ..FileTestHost::default()
         },
     );
@@ -201,11 +282,67 @@ fn execute(source: &str) -> FileTestHost {
         .unwrap()
         .call(&mut store, ())
         .unwrap();
+    if updates != 0 {
+        let update = instance
+            .get_typed_func::<(), ()>(&mut store, "update")
+            .expect("stateful fixtures export update");
+        for _ in 0..updates {
+            update.call(&mut store, ()).unwrap();
+        }
+    }
     assert!(
         store.data().open_files.is_empty(),
         "every opened file is closed"
     );
     store.into_data()
+}
+
+#[test]
+fn module_md5_restarts_when_the_file_changes_between_polls() {
+    let host = execute_with_module_change(
+        r#"
+            state "game.exe" {}
+
+            onAttach {
+                let executable = await process.mainModule()
+                let fingerprint = (await executable.md5()) else "hash-error"
+                print(fingerprint)
+            }
+        "#,
+        b"abc".to_vec(),
+        Some(b"def".to_vec()),
+        8,
+    );
+
+    assert_eq!(host.messages, ["4ED9407630EB1000C0F6B63842DEFA7D"]);
+    assert_eq!(host.closed_descriptors, 2);
+    assert!(host.open_files.is_empty());
+}
+
+#[test]
+fn module_md5_hashes_exact_file_bytes_as_a_cooperative_future() {
+    let source = r#"
+            state "game.exe" {}
+
+            onAttach {
+                let executable = await process.mainModule()
+                let fingerprint = (await executable.md5()) else "hash-error"
+                print(fingerprint)
+            }
+        "#;
+    let cases = [
+        (Vec::new(), "D41D8CD98F00B204E9800998ECF8427E", 1),
+        (b"abc".to_vec(), "900150983CD24FB0D6963F7D28E17F72", 1),
+        (vec![b'a'; 56], "3B0C8AC703F828B04C6C197006D17218", 1),
+        (vec![b'a'; 600_000], "09F901B937EDAF5A12718C4753F563F4", 2),
+    ];
+
+    for (bytes, expected, expected_polls) in cases {
+        let host = execute_with_updates(source, bytes, 8);
+        assert_eq!(host.messages, [expected]);
+        assert_eq!(host.closed_descriptors, expected_polls);
+        assert!(host.open_files.is_empty());
+    }
 }
 
 #[test]
@@ -298,6 +435,32 @@ fn filesystem_imports_are_demand_driven() {
             used.iter()
                 .any(|(module, import)| { module == "wasi_snapshot_preview1" && import == name }),
             "missing demand-driven WASI import `{name}`: {used:?}"
+        );
+    }
+
+    let fingerprint = imports(
+        r#"
+            state "game.exe" {}
+            onAttach {
+                let executable = await process.mainModule()
+                print((await executable.md5()) else "")
+            }
+        "#,
+    );
+    for name in [
+        "fd_prestat_get",
+        "fd_prestat_dir_name",
+        "path_open",
+        "fd_read",
+        "fd_seek",
+        "fd_filestat_get",
+        "fd_close",
+    ] {
+        assert!(
+            fingerprint
+                .iter()
+                .any(|(module, import)| { module == "wasi_snapshot_preview1" && import == name }),
+            "missing fingerprint WASI import `{name}`: {fingerprint:?}"
         );
     }
 }

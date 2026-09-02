@@ -361,12 +361,13 @@ language and standard library.
   validation is still required for the bounded level-name encoding, pointer
   paths, and route transitions; successful compilation is not runtime proof.
 
-### Fingerprint-limited layouts: COTM and COTM2
+### Formerly fingerprint-limited layouts: COTM and COTM2
 
-Campaign status: both `BLOCKED`
+Campaign status: exact build selection is now expressible; complete ports remain
+to be implemented and validated.
 
-Audit result: the timer and layout claims are false aggregate blockers, but
-exact build selection retains one narrow host requirement.
+Audit result: the timer and layout claims were false aggregate blockers, and
+the one exact-build-selection requirement now has a direct language API.
 
 - Both sources declare two named physical layouts for one Windows executable.
   SplitScript can represent those layouts directly, expose their common state
@@ -382,17 +383,18 @@ exact build selection retains one narrow host requirement.
   `process.follow`, typed globals for the one-tick-old derived values, and
   process reads in `whileAttached` preserve that update shape. Its settings are
   statically known and fit the existing settings DSL.
-- The residual gap is exact layout evidence. Both ASL sources hash the complete
-  executable and compare known MD5 values; COTM explicitly notes that module
-  size is identical between its builds. The corpus provides no equivalent PE
-  file-version or stable signature evidence, so silently choosing by size,
-  always selecting the newest layout, or inventing an address-validity probe
-  would change the source's build policy.
-- R3 therefore retains a deterministic host-owned executable fingerprint as
-  the faithful remaining requirement. This does not justify filesystem access
-  or hashing the entire module synchronously inside one guest tick. A
-  behavior-limited port can explicitly support only one verified build today;
-  a complete two-build port remains fingerprint-limited.
+- The formerly residual gap was exact layout evidence. Both ASL sources hash
+  the complete executable and compare known MD5 values; COTM explicitly notes
+  that module size is identical between its builds. The corpus provides no
+  equivalent PE file-version or stable signature evidence, so silently
+  choosing by size, always selecting the newest layout, or inventing an
+  address-validity probe would change the source's build policy.
+- `Module.md5()` now preserves that evidence directly: it hashes the exact
+  complete on-disk file through bounded cooperative reads, restarts on an
+  observed file change, and returns the uppercase spelling used by both
+  sources. This removes the fingerprint blocker without unrestricted
+  filesystem access or a whole-module synchronous tick. The remaining work is
+  to implement and live-validate both ports and their pointer layouts.
 
 ### Existing managed-instance paths: Circuit Superstars
 

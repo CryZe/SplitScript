@@ -154,7 +154,8 @@ not call.
 
 **Priority:** P1, promoted by port evidence
 
-**Status:** Same-name PID selection is implemented; other identity probes remain.
+**Status:** Same-name PID selection and deterministic module fingerprints are
+implemented; unknown-name module enumeration remains.
 
 Ports need more stable process identity than an executable name in several
 cases. Candidate host-owned facilities are:
@@ -170,10 +171,13 @@ cases. Candidate host-owned facilities are:
   optional names now use synchronous `process.loadedModule(name)` over the
   existing address/size imports;
 - product/file version metadata;
-- a deterministic executable or module fingerprint that does not require
-  hashing an entire image inside one guest update. COTM 1.1.0/1.1.2 and COTM2
-  1.2.2/1.3.1 are concrete evidence: their ASL sources select same-name layouts
-  by known whole-file MD5 values, and COTM documents identical module sizes;
+- deterministic executable/module fingerprints use `Module.md5()`. The
+  compiler hashes exact whole-file bytes through bounded 512 KiB WASI reads,
+  closes its descriptor before every yield, restarts on observed file changes,
+  and completes as canonical uppercase hexadecimal. COTM 1.1.0/1.1.2 and COTM2
+  1.2.2/1.3.1 are the concrete evidence: their ASL sources select same-name
+  layouts by known whole-file MD5 values, and COTM documents identical module
+  sizes;
 - path/name metadata for mapped memory ranges. SplitScript now snapshots the
   existing count/index ABI synchronously into GC-owned `MemoryRange` values
   with readable, writable, and executable flags; enumerating this cheap host

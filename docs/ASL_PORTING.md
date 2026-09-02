@@ -971,6 +971,8 @@ to named layouts. Keep the wildcard arm because strings are an open-ended
 domain. When several builds share a name, discriminate with reliable evidence
 such as `process.mainModule().size`, `process.path()`,
 [`Module.fileVersion()`], [`Module.productVersion()`], or a signature instead.
+When the source distinguishes byte-exact builds by hashing the executable, use
+[`Module.md5()`] rather than substituting one of those weaker identities.
 
 Legacy `modules.Any(...)` checks often test for one optional module rather than
 requiring full enumeration. Use the synchronous optional probe in that case:
@@ -1025,6 +1027,32 @@ onAttach {
 
 [`FileVersion`] literals are also first-class [`match`] patterns. Always add a
 wildcard arm because executable versions are an open set.
+
+Preserve an ASL `MD5.Create().ComputeHash(File.OpenRead(module.FileName))`
+probe with the module's cooperative fingerprint method. It hashes the complete
+on-disk file, not the mapped image, and produces the same uppercase 32-character
+spelling commonly created with `BitConverter.ToString(...).Replace("-", "")`:
+
+```splitscript
+# state "game.exe" {
+#     layout Original { value: u32 at 0x1000; },
+#     layout Updated { value: u32 at 0x2000; },
+# }
+onAttach {
+    let executable = await process.mainModule()
+    let fingerprint = (await executable.md5())?
+    return match fingerprint {
+        "951389C953020FC7B5DEF32E7BED129A" => StateLayout.Original,
+        "E1E439BD3FE89DE97BE08B15505837E2" => StateLayout.Updated,
+        _ => await process.closed(),
+    }
+}
+```
+
+Hashing yields between bounded file windows and restarts if the file changes,
+so it belongs in [`onAttach`] rather than a per-tick decision block. Filesystem
+or metadata failures flow through `String!`; postfix [`?`] is appropriate when a
+failed identity probe should reject the current attachment path.
 
 Only preserve full enumeration when the source genuinely needs to inspect
 unknown module names. SplitScript does not currently expose that host operation.

@@ -39,7 +39,7 @@ Start with the [complete ASL porting guide](ASL_PORTING.md) for lifecycle and se
 
 - **Attached process identity** (*Supported directly*): Use `process.name()` to read the exact process candidate that matched during attachment; use module metadata when the executable name alone does not identify a build. Canonical: `Process.name`. [Porting recipe](ASL_PORTING.md#attached-process-identity).
 
-- **Loaded module discovery** (*Use a typed pattern*): Replace the enumerable ASL module bag with the narrow typed probe that matches the source intent: main executable discovery, a known optional module, a required module, or typed build identity. Preserve genuine unknown-name enumeration as an explicit host-runtime gap. Canonical: `Process.mainModule`, `Process.loadedModule`, `Process.module`, `Module.fileVersion`, `Module.productVersion`, `Module.versionInfo`. [Porting recipe](ASL_PORTING.md#attached-process-identity).
+- **Loaded module discovery** (*Use a typed pattern*): Replace the enumerable ASL module bag with the narrow typed probe that matches the source intent: main executable discovery, a known optional module, a required module, or typed build identity. Preserve genuine unknown-name enumeration as an explicit host-runtime gap. Canonical: `Process.mainModule`, `Process.loadedModule`, `Process.module`, `Module.fileVersion`, `Module.productVersion`, `Module.versionInfo`, `Module.md5`. [Porting recipe](ASL_PORTING.md#attached-process-identity).
 
 ### Lifecycle and timer
 

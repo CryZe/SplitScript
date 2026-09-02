@@ -5817,6 +5817,34 @@ struct Module {
     @intrinsic(ModulePath)
     fn path() -> String!;
 
+    /// Computes the MD5 fingerprint of the module's complete on-disk file.
+    ///
+    /// The result is the canonical 32-character uppercase hexadecimal form.
+    /// This is intentionally based on file bytes rather than the mapped image,
+    /// [`Module.size`], or version metadata, so builds with otherwise identical
+    /// metadata can still be selected exactly. Hashing is cooperative: only a
+    /// bounded file window is read per host update. If the file changes while
+    /// it is being read, hashing restarts and only completes after observing
+    /// one stable version. Filesystem and metadata failures are returned as an
+    /// error.
+    ///
+    /// # Example
+    ///
+    /// Select a known executable build
+    ///
+    /// ```splitscript
+    /// let executable = await process.mainModule()
+    /// let fingerprint = (await executable.md5())?
+    /// if fingerprint == "951389C953020FC7B5DEF32E7BED129A" {
+    ///     print("recognized build")
+    /// }
+    /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
+    @intrinsic(ModuleMd5)
+    fn md5() -> async String!;
+
     /// Reads both fixed numeric versions from a Windows PE version resource.
     ///
     /// The parser validates the DOS and PE headers, follows the bounded

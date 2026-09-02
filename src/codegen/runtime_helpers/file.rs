@@ -30,21 +30,24 @@ pub(super) fn compile_open_read_only(
     let opened_descriptor_pointer = scratch.abi_read.start();
     let string_type = gc.standard_index(StdlibTypeId::String);
 
-    // Parameter: path. All remaining locals are i32 bookkeeping values.
+    // Parameters: path and the exact rights required by the caller. Keeping
+    // path resolution shared lets whole-file reads request only `fd_read`,
+    // while bounded fingerprints can additionally request seek and filestat.
     let mut function = Function::new([(12, ValType::I32)]);
     let path = 0;
-    let path_length = 1;
-    let index = 2;
-    let resolved_length = 3;
-    let descriptor = 4;
-    let preopen_length = 5;
-    let best_descriptor = 6;
-    let best_prefix_length = 7;
-    let compare_index = 8;
-    let matches = 9;
-    let required_pages = 10;
-    let relative_pointer = 11;
-    let relative_length = 12;
+    let rights = 1;
+    let path_length = 2;
+    let index = 3;
+    let resolved_length = 4;
+    let descriptor = 5;
+    let preopen_length = 6;
+    let best_descriptor = 7;
+    let best_prefix_length = 8;
+    let compare_index = 9;
+    let matches = 10;
+    let required_pages = 11;
+    let relative_pointer = 12;
+    let relative_length = 13;
 
     emit_ensure_linear_capacity_for_open(&mut function, staging_end, required_pages);
     function
@@ -250,7 +253,7 @@ pub(super) fn compile_open_read_only(
         .instruction(&Instruction::LocalGet(relative_pointer))
         .instruction(&Instruction::LocalGet(relative_length))
         .instruction(&Instruction::I32Const(0))
-        .instruction(&Instruction::I64Const(WASI_RIGHT_FD_READ))
+        .instruction(&Instruction::LocalGet(rights))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::I32Const(opened_descriptor_pointer))
@@ -320,6 +323,7 @@ pub(super) fn compile_read_all_storage(
         .instruction(&Instruction::End);
     function
         .instruction(&Instruction::LocalGet(path))
+        .instruction(&Instruction::I64Const(WASI_RIGHT_FD_READ))
         .instruction(&Instruction::Call(open_read_only))
         .instruction(&Instruction::LocalTee(descriptor))
         .instruction(&Instruction::I32Const(0))

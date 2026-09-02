@@ -118,6 +118,7 @@ macro_rules! trusted_intrinsics {
             ModuleScan,
             ModuleScanAny,
             ModulePath,
+            ModuleMd5,
             UnityModuleImage,
             UnityImageClass,
             UnityImageClassAny,

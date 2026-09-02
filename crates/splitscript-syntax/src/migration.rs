@@ -2051,6 +2051,7 @@ pub const CONCEPTS: &[MigrationConcept] = &[
             MigrationTarget::StandardLibraryItem("Module.fileVersion"),
             MigrationTarget::StandardLibraryItem("Module.productVersion"),
             MigrationTarget::StandardLibraryItem("Module.versionInfo"),
+            MigrationTarget::StandardLibraryItem("Module.md5"),
         ],
         cookbook_anchor: Some("attached-process-identity"),
         spellings: &[],

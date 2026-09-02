@@ -5,6 +5,8 @@ and the LiveSplit sandboxed Auto Splitting Runtime. Features that need a
 standardized host facility use narrowly scoped WASI Preview 1 imports. The
 monotonic `Instant` clock uses `clock_time_get`; whole-file reads use the
 environment, preopen, path-open, descriptor-read, and descriptor-close APIs.
+Cooperative module fingerprints additionally use descriptor seek and filestat
+so each bounded poll can reopen and verify one stable file version.
 
 This is an internal compiler/runtime contract, not part of the source-language
 standard library or its editor documentation. `src/abi.rs` is the source of
@@ -46,6 +48,8 @@ describes only the contract that generated modules implement today.
 | `fd_prestat_dir_name` | `(i32, i32, i32) -> i32` |
 | `path_open` | `(i32, i32, i32, i32, i32, i64, i64, i32, i32) -> i32` |
 | `fd_read` | `(i32, i32, i32, i32) -> i32` |
+| `fd_seek` | `(i32, i64, i32, i32) -> i32` |
+| `fd_filestat_get` | `(i32, i32) -> i32` |
 | `fd_close` | `(i32) -> i32` |
 | `process_attach` | `(i32, i32) -> i64` |
 | `process_attach_by_pid` | `(i64) -> i64` |

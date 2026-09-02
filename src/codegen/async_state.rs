@@ -2529,6 +2529,115 @@ fn compile_suspension_poll(
                     });
             }
         }
+        Some(IntrinsicId::ModuleMd5) => {
+            let [
+                status,
+                initialized,
+                offset,
+                size,
+                mtime,
+                packed_ab,
+                packed_cd,
+                path,
+                hash,
+                ..,
+            ] = scratch
+            else {
+                unreachable!("Module.md5 reserves poll state and string scratch locals")
+            };
+            let Some((field, Type::Result(result))) = layout.field(destination) else {
+                unreachable!("Module.md5 completes through String!")
+            };
+
+            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+            compile_receiver(function, target, context);
+            function
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
+                    field_index: context.gc.standard_field_index(StdlibFieldId::ModuleName),
+                })
+                .instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::ModulePath),
+                ))
+                .instruction(&Instruction::LocalTee(*path))
+                .instruction(&Instruction::RefIsNull)
+                .instruction(&Instruction::If(BlockType::Empty));
+            context.locals.frame().emit(function);
+            emit_result_error(
+                function,
+                result,
+                Type::Standard(StdlibTypeId::String),
+                "module path could not be read",
+                context.gc,
+                context.failure_payloads,
+            );
+            function
+                .instruction(&Instruction::StructSet {
+                    struct_type_index: context.locals.frame().struct_type,
+                    field_index: field,
+                })
+                .instruction(&Instruction::Else)
+                .instruction(&Instruction::LocalGet(*path));
+            for slot in 0..6 {
+                emit_intrinsic_state_get(function, context, slot);
+            }
+            function
+                .instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::ModuleMd5Poll),
+                ))
+                .instruction(&Instruction::LocalSet(*hash))
+                .instruction(&Instruction::LocalSet(*packed_cd))
+                .instruction(&Instruction::LocalSet(*packed_ab))
+                .instruction(&Instruction::LocalSet(*mtime))
+                .instruction(&Instruction::LocalSet(*size))
+                .instruction(&Instruction::LocalSet(*offset))
+                .instruction(&Instruction::LocalSet(*initialized))
+                .instruction(&Instruction::LocalSet(*status));
+            for (slot, local) in [*initialized, *offset, *size, *mtime, *packed_ab, *packed_cd]
+                .into_iter()
+                .enumerate()
+            {
+                emit_intrinsic_state_set_local(function, context, slot, local);
+            }
+            function
+                .instruction(&Instruction::LocalGet(*status))
+                .instruction(&Instruction::I32Eqz)
+                .instruction(&Instruction::If(BlockType::Empty))
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::Return)
+                .instruction(&Instruction::End);
+            context.locals.frame().emit(function);
+            function
+                .instruction(&Instruction::LocalGet(*status))
+                .instruction(&Instruction::I32Const(2))
+                .instruction(&Instruction::I32Eq)
+                .instruction(&Instruction::If(BlockType::Result(
+                    context.gc.val_type(Type::Result(result)),
+                )))
+                .instruction(&Instruction::LocalGet(*hash));
+            emit_result_success(function, result, context.gc);
+            function.instruction(&Instruction::Else);
+            emit_result_error(
+                function,
+                result,
+                Type::Standard(StdlibTypeId::String),
+                "module file could not be hashed",
+                context.gc,
+                context.failure_payloads,
+            );
+            function
+                .instruction(&Instruction::End)
+                .instruction(&Instruction::StructSet {
+                    struct_type_index: context.locals.frame().struct_type,
+                    field_index: field,
+                })
+                .instruction(&Instruction::End);
+        }
         Some(IntrinsicId::ModuleScanAny) => {
             emit_cooperative_module_scan_any(
                 function,

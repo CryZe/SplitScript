@@ -44,12 +44,12 @@ The runtime fixture validates:
 
 ## Deliberate host limitations
 
-Two startup-only behaviors cannot yet be expressed by the sandboxed host API:
+One startup-only behavior cannot yet be expressed by the sandboxed host API:
 
-- The original hashes the executable to display a friendly patch label. The
-  selected memory layout does not depend on that label, so discovery remains
-  functional. A stable executable fingerprint belongs in the process/module
-  metadata API rather than unrestricted Wasm filesystem access.
+- The original executable patch label can now be reproduced with the bounded
+  cooperative [`Module.md5()`](ASL_PORTING.md#attached-process-identity)
+  fingerprint. It remains optional because the selected memory layout does not
+  depend on that label.
 - The original optionally opens a modal prompt that changes LiveSplit's timing
   method. The setting remains registered for migration fidelity, but changing
   timing method needs a typed timer/run API and an explicit host contract.

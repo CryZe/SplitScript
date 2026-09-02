@@ -4875,6 +4875,7 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::ModuleScan
             | IntrinsicId::ModuleScanAny
+            | IntrinsicId::ModuleMd5
             | IntrinsicId::UnityModuleImage
             | IntrinsicId::UnityImageClass
             | IntrinsicId::UnityImageClassAny

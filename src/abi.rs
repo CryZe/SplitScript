@@ -386,6 +386,31 @@ abi_catalog! {
         "Reads bytes from an open WASI file descriptor."
     ),
     import!(
+        WasiFdSeek,
+        in "wasi_snapshot_preview1",
+        "fd_seek",
+        &[
+            value("descriptor", AbiType::I32),
+            value("offset", AbiType::I64),
+            value("whence", AbiType::I32),
+            output("new_offset_pointer")
+        ],
+        &[value("errno", AbiType::I32)],
+        FILESYSTEM_READ,
+        "The descriptor is borrowed and its cursor is updated; the resulting offset is written to guest memory.",
+        "Moves an open WASI file descriptor's cursor."
+    ),
+    import!(
+        WasiFdFilestatGet,
+        in "wasi_snapshot_preview1",
+        "fd_filestat_get",
+        &[value("descriptor", AbiType::I32), output("filestat_pointer")],
+        &[value("errno", AbiType::I32)],
+        FILESYSTEM_READ,
+        "The descriptor is borrowed and one WASI filestat record is written to guest memory.",
+        "Reads metadata for an open WASI file descriptor."
+    ),
+    import!(
         WasiFdClose,
         in "wasi_snapshot_preview1",
         "fd_close",

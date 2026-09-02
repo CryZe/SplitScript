@@ -72,6 +72,9 @@ pub(crate) enum RuntimeHelperId {
     FileReadAllBytes,
     Utf8StringFromStorage,
     FileReadAllText,
+    Md5UpdateBlocks,
+    Md5Format,
+    ModuleMd5Poll,
     FormatF32,
     FormatF64,
     Utf16StringFromMemory,
@@ -447,6 +450,20 @@ const fn async_scratch(id: IntrinsicId) -> &'static [ScratchPolicy] {
             ty: ScratchType::Core(CoreTypeId::U64),
             slots: 5,
         }],
+        IntrinsicId::ModuleMd5 => &[
+            ScratchPolicy {
+                ty: ScratchType::Core(CoreTypeId::I32),
+                slots: 1,
+            },
+            ScratchPolicy {
+                ty: ScratchType::Core(CoreTypeId::I64),
+                slots: 6,
+            },
+            ScratchPolicy {
+                ty: ScratchType::Standard(StdlibTypeId::String),
+                slots: 2,
+            },
+        ],
         IntrinsicId::ModuleScanAny => &[ScratchPolicy {
             ty: ScratchType::Core(CoreTypeId::U64),
             slots: 5,
@@ -510,6 +527,10 @@ const fn async_state(id: IntrinsicId) -> &'static [ScratchPolicy] {
         IntrinsicId::FutureTimeout => &[ScratchPolicy {
             ty: ScratchType::Core(CoreTypeId::I64),
             slots: 2,
+        }],
+        IntrinsicId::ModuleMd5 => &[ScratchPolicy {
+            ty: ScratchType::Core(CoreTypeId::I64),
+            slots: 6,
         }],
         _ => &[],
     }
@@ -616,6 +637,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::ProcessReadUtf8 => &[Helper(Runtime::ReadUtf8String)],
         IntrinsicId::ProcessReadUtf16Le => &[Helper(Runtime::ReadUtf16LeString)],
         IntrinsicId::ModulePath => &[Helper(Runtime::ModulePath)],
+        IntrinsicId::ModuleMd5 => &[Helper(Runtime::ModulePath), Helper(Runtime::ModuleMd5Poll)],
         IntrinsicId::ProcessPath => &[Helper(Runtime::ProcessPath)],
         IntrinsicId::RuntimeOperatingSystem => &[Helper(Runtime::RuntimeOperatingSystem)],
         IntrinsicId::RuntimeArchitecture => &[Helper(Runtime::RuntimeArchitecture)],
@@ -2041,6 +2063,16 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             PROCESS,
             Everywhere,
             Retryable
+        ),
+        IntrinsicId::ModuleMd5 => contract!(
+            ModuleMd5,
+            Method,
+            signature(NO_TYPE_PARAMETERS, Some(MODULE), params![], STRING_RESULT,),
+            PROCESS_SUSPEND
+                .with(Effect::ReadsFileSystem)
+                .with(Effect::Allocates),
+            OnAttach,
+            Suspension
         ),
         IntrinsicId::RuntimeOperatingSystem => contract!(
             RuntimeOperatingSystem,

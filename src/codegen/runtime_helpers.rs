@@ -26,6 +26,7 @@ mod float_parse;
 mod gba;
 mod gcn;
 mod genesis;
+mod md5;
 mod process;
 mod provider;
 mod ps1;
@@ -596,6 +597,25 @@ pub(super) fn build_file_read_all_text(inputs: &RuntimeHelperInputs<'_>) -> Func
         inputs.plan.function(RuntimeHelperId::FileReadAllStorage),
         inputs.plan.function(RuntimeHelperId::Utf8StringFromStorage),
         inputs.gc,
+    )
+}
+
+pub(super) fn build_md5_update_blocks(_inputs: &RuntimeHelperInputs<'_>) -> Function {
+    md5::compile_update_blocks()
+}
+
+pub(super) fn build_md5_format(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    md5::compile_format(inputs.gc)
+}
+
+pub(super) fn build_module_md5_poll(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    md5::compile_module_poll(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::FileOpenReadOnly),
+        inputs.plan.function(RuntimeHelperId::Md5UpdateBlocks),
+        inputs.plan.function(RuntimeHelperId::Md5Format),
+        inputs.gc,
+        inputs.memory.scratch(),
     )
 }
 

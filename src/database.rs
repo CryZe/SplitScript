@@ -1430,6 +1430,12 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                     },
                 );
             }
+            ExprKind::Is { pattern, .. } => {
+                pattern.kind.visit_bindings(&mut |binding| {
+                    self.insert_value(binding.id, &binding.name, binding.name_span);
+                });
+                self.add_pattern_references(&pattern.kind, pattern.id, pattern.span);
+            }
             ExprKind::Path(_) | ExprKind::Call { .. } => {
                 let segments = syntax_expression_segments(self.document, expression);
                 if let Some(resolution) = syntax_expression_resolution(self.semantics, expression) {

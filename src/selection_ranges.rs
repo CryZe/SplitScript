@@ -6,9 +6,9 @@
 
 use crate::{
     ast::{
-        Action, Block, EnumDecl, Expr, ExprKind, FunctionDecl, MatchArm, Program, SettingDecl,
-        SettingFamilyDecl, SettingKind, Span, StateDecl, StateField, Stmt, StructDecl,
-        VariableDecl,
+        Action, Block, EnumDecl, Expr, ExprKind, FunctionDecl, MatchArm, MatchPattern, PatternNode,
+        Program, SettingDecl, SettingFamilyDecl, SettingKind, Span, StateDecl, StateField, Stmt,
+        StructDecl, VariableDecl,
     },
     lexer::{Lexeme, TokenKind, TriviaKind},
     syntax::SourceDocument,
@@ -261,6 +261,9 @@ impl<'ast> Visitor<'ast> for SpanCollector {
 
     fn visit_expr(&mut self, expression: &'ast Expr) {
         self.push(expression.span);
+        if let ExprKind::Is { pattern, .. } = &expression.kind {
+            self.collect_pattern_node(pattern);
+        }
         if let ExprKind::Closure {
             return_annotation_span: Some(span),
             ..
@@ -274,6 +277,39 @@ impl<'ast> Visitor<'ast> for SpanCollector {
     fn visit_match_arm(&mut self, arm: &'ast MatchArm) {
         self.push(arm.span);
         visit::walk_match_arm(self, arm);
+    }
+}
+
+impl SpanCollector {
+    fn collect_pattern_node(&mut self, pattern: &PatternNode) {
+        self.push(pattern.span);
+        match &pattern.kind {
+            MatchPattern::Struct { fields, .. } => {
+                for field in fields {
+                    self.push(field.name_span);
+                    self.collect_pattern_node(&field.pattern);
+                }
+            }
+            MatchPattern::Enum {
+                payload: Some(payload),
+                ..
+            }
+            | MatchPattern::OptionSome(payload)
+            | MatchPattern::IteratorItem(payload)
+            | MatchPattern::ResultSuccess(payload)
+            | MatchPattern::ResultError(payload) => self.collect_pattern_node(payload),
+            MatchPattern::Array(array) => {
+                for element in array.elements() {
+                    self.collect_pattern_node(element);
+                }
+            }
+            MatchPattern::Alternation(alternatives) => {
+                for alternative in alternatives {
+                    self.collect_pattern_node(alternative);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -352,5 +388,28 @@ fn calculate(value: i32) -> i32 {
 
         assert!(text.contains(&"1"));
         assert_eq!(text.last(), Some(&source));
+    }
+
+    #[test]
+    fn is_patterns_expand_through_nested_pattern_and_condition_nodes() {
+        let source = r#"state "game.exe" {}
+fn inspect(value: u32?) {
+    if value is Some(number) && number > 0 {
+        print(number)
+    }
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let parsed = database.recovering_parse().unwrap();
+        let offset = source.find("number)").unwrap() + 1;
+        let ranges = selection_ranges(parsed.source_document(), parsed.syntax(), offset);
+        let text = selected_text(source, &ranges);
+        for expected in [
+            "number",
+            "Some(number)",
+            "value is Some(number)",
+            "value is Some(number) && number > 0",
+        ] {
+            assert!(text.contains(&expected), "missing `{expected}` in {text:?}");
+        }
     }
 }

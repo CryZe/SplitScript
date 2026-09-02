@@ -243,6 +243,11 @@ pub enum ExpressionKind {
         value: ExprId,
         arms: Vec<MatchArm>,
     },
+    Is {
+        value: ExprId,
+        pattern_id: PatternId,
+        pattern: LoweredPattern,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -1565,6 +1570,11 @@ fn lower_expression(
                 })
                 .collect(),
         },
+        TypedExpressionKind::Is { value, pattern } => ExpressionKind::Is {
+            value: *value,
+            pattern_id: pattern.resolution.id,
+            pattern: lower_pattern(&pattern.pattern, &pattern.resolution),
+        },
     };
     Expression {
         id: expression.id,
@@ -2101,6 +2111,9 @@ fn closure_captures(
         fn visit_expression(&mut self, expression: &hir::TypedExpression, program: &TypedProgram) {
             if let TypedExpressionKind::Closure { parameters, .. } = &expression.kind {
                 self.declared.extend(parameters.iter().copied());
+            }
+            if let TypedExpressionKind::Is { pattern, .. } = &expression.kind {
+                self.declare_pattern(&pattern.pattern);
             }
             match &expression.resolution {
                 Some(hir::ExpressionResolution::ValuePath {
@@ -3543,6 +3556,15 @@ fn map_expression_children(
                     value: map(arm.value),
                 })
                 .collect(),
+        },
+        ExpressionKind::Is {
+            value,
+            pattern_id,
+            pattern,
+        } => ExpressionKind::Is {
+            value: map(value),
+            pattern_id,
+            pattern,
         },
     }
 }
@@ -5107,6 +5129,17 @@ impl Visitor for LocalPlanner<'_> {
                 }
                 self.visit_expression_id(arm.value, program);
             }
+            return;
+        }
+
+        if let ExpressionKind::Is { value, pattern, .. } = &expression.kind {
+            self.visit_expression_id(*value, program);
+            let value_type = program
+                .expression(*value)
+                .expect("`is` input belongs to Wasm IR")
+                .ty;
+            self.push(value_type, LocalPurpose::MatchValue(expression.id));
+            pattern.visit_bindings(&mut |binding| self.value(binding));
             return;
         }
 

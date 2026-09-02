@@ -112,6 +112,7 @@ pub struct WarningPolicy {
     debug_only_use: WarningLevel,
     struct_field_shorthand: WarningLevel,
     empty_future_race: WarningLevel,
+    always_matches_pattern: WarningLevel,
 }
 
 impl WarningPolicy {
@@ -128,6 +129,7 @@ impl WarningPolicy {
             DiagnosticCode::DebugOnlyUse => Some(self.debug_only_use),
             DiagnosticCode::StructFieldShorthand => Some(self.struct_field_shorthand),
             DiagnosticCode::EmptyFutureRace => Some(self.empty_future_race),
+            DiagnosticCode::AlwaysMatchesPattern => Some(self.always_matches_pattern),
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
             | DiagnosticCode::Type
@@ -149,6 +151,7 @@ impl WarningPolicy {
             DiagnosticCode::DebugOnlyUse => &mut self.debug_only_use,
             DiagnosticCode::StructFieldShorthand => &mut self.struct_field_shorthand,
             DiagnosticCode::EmptyFutureRace => &mut self.empty_future_race,
+            DiagnosticCode::AlwaysMatchesPattern => &mut self.always_matches_pattern,
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
             | DiagnosticCode::Type

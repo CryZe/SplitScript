@@ -649,6 +649,9 @@ impl<'ast> Visitor<'ast> for EnumResolver<'_> {
     }
 
     fn visit_expr(&mut self, expression: &'ast crate::ast::Expr) {
+        if let ExprKind::Is { pattern, .. } = &expression.kind {
+            self.resolve_pattern(&pattern.kind, pattern.id);
+        }
         let enumeration = match &expression.kind {
             ExprKind::Path(path) => {
                 let Some((_, prefix)) = path.split_last() else {

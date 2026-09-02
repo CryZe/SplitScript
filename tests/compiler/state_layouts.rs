@@ -255,6 +255,44 @@ fn managed_metadata_can_select_multiple_attachment_dimensions_automatically() {
 }
 
 #[test]
+fn binding_free_is_patterns_refine_static_layout_predicates() {
+    let source = r#"
+        enum Edition { Base, Demo }
+
+        image "Assembly-CSharp" {
+            class GameManager {
+                if layout.edition is Edition.Base {
+                    u32 level;
+                } else {
+                    u32 scene;
+                }
+            }
+        }
+
+        state Unity ["game.exe"] {
+            layout { edition: Edition }
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("a binding-free enum `is` pattern should select a static layout");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("an `is`-selected managed layout should emit valid Wasm");
+
+    let invalid = source.replace(
+        "layout.edition is Edition.Base",
+        "(layout.edition is selectedEdition)",
+    );
+    let diagnostics = splitscript::compile(&invalid)
+        .expect_err("static layout predicates cannot introduce runtime bindings");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("layout predicates cannot introduce conditional binding")
+    }));
+}
+
+#[test]
 fn automatic_layout_failure_report_names_observations_and_source_candidates() {
     let source = r#"
         enum Edition { Base, Demo }

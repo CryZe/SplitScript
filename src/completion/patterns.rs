@@ -1,4 +1,4 @@
-//! Type-directed completion for match patterns.
+//! Type-directed completion for patterns.
 //!
 //! Pattern completion deliberately lives beside the other compiler-owned
 //! completion grammars. Editor frontends receive already-filtered candidates;
@@ -32,23 +32,36 @@ pub(super) fn complete_pattern(
     library: &StandardLibrary,
 ) -> SemanticQueryResult<Option<CompletionList>> {
     let snapshot = database.semantic_snapshot()?;
-    let Some((open, value)) = enclosing_match(
+    if let Some(completions) = complete_pattern_from_snapshot(request, library, &snapshot) {
+        return Ok(Some(completions));
+    }
+
+    let has_is = request.tokens.iter().any(|token| {
+        token.span.end <= request.replacement.start
+            && matches!(&token.kind, TokenKind::Ident(name) if name == "is")
+    });
+    if !has_is {
+        return Ok(None);
+    }
+    let mut probe_source = request.source.to_owned();
+    probe_source.replace_range(request.replacement.start..request.replacement.end, "_");
+    let mut probe = CompilerDatabase::with_context(database.context(), probe_source);
+    let snapshot = probe.semantic_snapshot()?;
+    Ok(complete_pattern_from_snapshot(request, library, &snapshot))
+}
+
+fn complete_pattern_from_snapshot(
+    request: &CompletionRequest<'_>,
+    library: &StandardLibrary,
+    snapshot: &SemanticSnapshot,
+) -> Option<CompletionList> {
+    let (segment, value) = pattern_context(
         snapshot.syntax(),
         &request.tokens,
         request.replacement.start,
-    ) else {
-        return Ok(None);
-    };
-    let Some(segment) = current_pattern_segment(&request.tokens, open, request.replacement.start)
-    else {
-        return Ok(None);
-    };
-    let Some(expected) = snapshot.semantics().expression_type(value.id) else {
-        return Ok(None);
-    };
-    let Some(site) = analyze_pattern_prefix(segment, expected, &snapshot) else {
-        return Ok(None);
-    };
+    )?;
+    let expected = snapshot.semantics().expression_type(value.id)?;
+    let site = analyze_pattern_prefix(&segment, expected, snapshot)?;
 
     let prefix = request.source[request.replacement.start..request.offset].to_owned();
     let mut builder = CompletionBuilder::new(prefix, request.replacement);
@@ -56,21 +69,96 @@ pub(super) fn complete_pattern(
         PatternSite::Value {
             expected,
             qualified_enum,
-        } => add_value_patterns(&mut builder, expected, qualified_enum, &snapshot, library),
+        } => add_value_patterns(&mut builder, expected, qualified_enum, snapshot, library),
         PatternSite::ArrayElement {
             expected,
             rest_available,
         } => {
-            add_value_patterns(&mut builder, expected, false, &snapshot, library);
+            add_value_patterns(&mut builder, expected, false, snapshot, library);
             if rest_available {
                 add_array_rest_pattern(&mut builder, "array rest", "..");
             }
         }
         PatternSite::StructFields { structure, used } => {
-            add_struct_fields(&mut builder, structure, &used, &snapshot)
+            add_struct_fields(&mut builder, structure, &used, snapshot)
         }
     }
-    Ok(Some(builder.finish()))
+    Some(builder.finish())
+}
+
+fn pattern_context<'ast, 'tokens>(
+    syntax: &'ast crate::ast::Program,
+    tokens: &'tokens [&'tokens Token],
+    offset: usize,
+) -> Option<(Vec<&'tokens Token>, &'ast Expr)> {
+    if let Some((open, value)) = enclosing_match(syntax, tokens, offset)
+        && let Some(segment) = current_pattern_segment(tokens, open, offset)
+    {
+        return Some((segment.to_vec(), value));
+    }
+    enclosing_is(syntax, tokens, offset)
+}
+
+fn enclosing_is<'ast, 'tokens>(
+    syntax: &'ast crate::ast::Program,
+    tokens: &'tokens [&'tokens Token],
+    offset: usize,
+) -> Option<(Vec<&'tokens Token>, &'ast Expr)> {
+    let cursor = tokens
+        .iter()
+        .position(|token| token.span.start >= offset)
+        .unwrap_or(tokens.len());
+    let (keyword_index, keyword) = tokens[..cursor]
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, token)| matches!(&token.kind, TokenKind::Ident(name) if name == "is"))?;
+    let segment = &tokens[keyword_index + 1..cursor];
+    if top_level_token(segment, TokenKind::AndAnd).is_some()
+        || top_level_token(segment, TokenKind::OrOr).is_some()
+        || top_level_token(segment, TokenKind::FatArrow).is_some()
+    {
+        return None;
+    }
+
+    struct Finder<'ast> {
+        keyword: crate::ast::Span,
+        preceding_end: usize,
+        parsed: Option<&'ast Expr>,
+        recovered: Option<&'ast Expr>,
+    }
+
+    impl<'ast> Visitor<'ast> for Finder<'ast> {
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if let ExprKind::Is {
+                value,
+                keyword_span,
+                ..
+            } = &expression.kind
+                && *keyword_span == self.keyword
+            {
+                self.parsed = Some(value);
+            }
+            if expression.span.end == self.preceding_end
+                && self
+                    .recovered
+                    .is_none_or(|candidate| expression.span.start < candidate.span.start)
+            {
+                self.recovered = Some(expression);
+            }
+            visit::walk_expr(self, expression);
+        }
+    }
+
+    let preceding_end = tokens.get(keyword_index.checked_sub(1)?)?.span.end;
+    let mut finder = Finder {
+        keyword: keyword.span,
+        preceding_end,
+        parsed: None,
+        recovered: None,
+    };
+    finder.visit_program(syntax);
+    Some((segment.to_vec(), finder.parsed.or(finder.recovered)?))
 }
 
 #[derive(Debug)]
@@ -706,6 +794,40 @@ fn inspect(value: bool) {
         for expression in ["print", "return", "String", "while"] {
             assert!(!labels.contains(&expression.to_owned()), "{labels:#?}");
         }
+    }
+
+    #[test]
+    fn is_pattern_completion_is_type_directed_even_while_recovering() {
+        let root = labels(
+            r#"
+state "game.exe" {}
+fn inspect(value: bool?) {
+    if value is <|> {
+        print("matched")
+    }
+}
+"#,
+        );
+        for expected in ["_", "None", "Some"] {
+            assert!(root.contains(&expected.to_owned()), "{root:#?}");
+        }
+        for expression in ["print", "return", "String", "while"] {
+            assert!(!root.contains(&expression.to_owned()), "{root:#?}");
+        }
+
+        let nested = labels(
+            r#"
+state "game.exe" {}
+fn inspect(value: bool?) {
+    if value is Some(<|>) {
+        print("matched")
+    }
+}
+"#,
+        );
+        assert!(nested.contains(&"true".to_owned()), "{nested:#?}");
+        assert!(nested.contains(&"false".to_owned()), "{nested:#?}");
+        assert!(!nested.contains(&"Some".to_owned()), "{nested:#?}");
     }
 
     #[test]

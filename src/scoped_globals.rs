@@ -1544,6 +1544,7 @@ fn expression_children(kind: &TypedExpressionKind) -> Vec<crate::ast::ExprId> {
             fields.iter().map(|(_, value)| *value).collect()
         }
         TypedExpressionKind::Enum { payload, .. } => payload.iter().copied().collect(),
+        TypedExpressionKind::Is { value, .. } => vec![*value],
         TypedExpressionKind::Break(value) | TypedExpressionKind::Return(value) => {
             value.iter().copied().collect()
         }

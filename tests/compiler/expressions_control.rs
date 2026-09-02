@@ -29,6 +29,100 @@ fn binary_integer_literals_type_check_and_report_boolean_misuse() {
 }
 
 #[test]
+fn is_patterns_flow_bindings_only_along_proven_boolean_edges() {
+    let source = r#"
+        state GBA {}
+
+        fn positive(value: u32?) -> u32 {
+            if value is Some(number) && number > 0 {
+                return number
+            }
+            return 0
+        }
+
+        fn negated(value: u32?) -> u32 {
+            if !(value is Some(number)) {
+                return 0
+            } else {
+                return number
+            }
+        }
+
+        fn falseEdge(value: u32?) -> bool {
+            return !(value is Some(number)) || number > 0
+        }
+
+        fn guarded(value: u32?, other: u32?) -> u32 {
+            return match value {
+                Some(left) if other is Some(right) => left + right,
+                _ => 0,
+            }
+        }
+
+        fn loopBinding(value: u32?) {
+            while value is Some(number) {
+                print(number)
+                break
+            }
+        }
+
+        setup {
+            print(positive(Some(1u32)))
+            print(negated(Some(2u32)))
+            print(falseEdge(Some(3u32)))
+            print(guarded(Some(4u32), Some(5u32)))
+            loopBinding(Some(6u32))
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("`is` bindings should follow short-circuit and branch control flow");
+    wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("`is` pattern bindings should lower to valid Wasm");
+
+    for invalid in [
+        r#"state GBA {} fn bad(value: u32?) { if value is Some(number) || number > 0 {} }"#,
+        r#"state GBA {} fn bad(value: u32?) { let matched = value is Some(number); print(number) }"#,
+        r#"state GBA {} fn bad(value: u32?) { if value is Some(number) {} else { print(number) } }"#,
+    ] {
+        let diagnostics = splitscript::compile(invalid)
+            .expect_err("a conditional binding must not escape onto an unproven path");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("not available on this control-flow path")),
+            "{diagnostics:#?}"
+        );
+    }
+}
+
+#[test]
+fn irrefutable_is_patterns_warn_without_rejecting_the_program() {
+    let source = r#"
+        state GBA {}
+        fn inspect(value: u32) {
+            if value is _ {
+                print(value)
+            }
+        }
+        setup { inspect(7) }
+    "#;
+    let (wasm, warnings) = splitscript::compile_with_context_and_options_diagnostics(
+        splitscript::CompilerContext::default(),
+        source,
+        splitscript::CompilerOptions::default(),
+    )
+    .expect("an irrefutable pattern test is legal");
+    assert!(warnings.iter().any(|diagnostic| {
+        diagnostic.code == splitscript::DiagnosticCode::AlwaysMatchesPattern
+            && diagnostic.message.contains("always matches")
+    }));
+    wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("an irrefutable `is` test should still lower validly");
+}
+
+#[test]
 fn negative_integer_literals_include_each_signed_minimum_and_reject_unsigned_types() {
     splitscript::compile(
         r#"

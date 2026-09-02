@@ -44,7 +44,35 @@ fn check_layout_conditions(checker: &mut Checker, program: &Program) {
                 .filter_map(|group| group.condition.as_ref()),
         )
     {
+        let mut conditional_bindings = ConditionalLayoutBindingCollector::default();
+        conditional_bindings.visit_expr(condition);
+        for (name, span) in conditional_bindings.bindings {
+            checker.error(
+                format!(
+                    "layout predicates cannot introduce conditional binding `{}`",
+                    name
+                ),
+                span,
+            );
+        }
         checker.expr(condition, Some(expected));
+    }
+}
+
+#[derive(Default)]
+struct ConditionalLayoutBindingCollector {
+    bindings: Vec<(String, Span)>,
+}
+
+impl<'ast> Visitor<'ast> for ConditionalLayoutBindingCollector {
+    fn visit_expr(&mut self, expression: &'ast crate::ast::Expr) {
+        if let ExprKind::Is { pattern, .. } = &expression.kind {
+            pattern.kind.visit_bindings(&mut |binding| {
+                self.bindings
+                    .push((binding.name.clone(), binding.name_span));
+            });
+        }
+        visit::walk_expr(self, expression);
     }
 }
 

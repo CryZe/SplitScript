@@ -21,10 +21,11 @@ pub enum DiagnosticCode {
     DebugOnlyUse,
     StructFieldShorthand,
     EmptyFutureRace,
+    AlwaysMatchesPattern,
 }
 
 impl DiagnosticCode {
-    pub const WARNINGS: [Self; 11] = [
+    pub const WARNINGS: [Self; 12] = [
         Self::MustUse,
         Self::UnusedBinding,
         Self::UnusedDeclaration,
@@ -36,6 +37,7 @@ impl DiagnosticCode {
         Self::DebugOnlyUse,
         Self::StructFieldShorthand,
         Self::EmptyFutureRace,
+        Self::AlwaysMatchesPattern,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -55,6 +57,7 @@ impl DiagnosticCode {
             Self::DebugOnlyUse => "SS1009",
             Self::StructFieldShorthand => "SS1010",
             Self::EmptyFutureRace => "SS1011",
+            Self::AlwaysMatchesPattern => "SS1012",
         }
     }
 
@@ -72,6 +75,7 @@ impl DiagnosticCode {
                 | Self::DebugOnlyUse
                 | Self::StructFieldShorthand
                 | Self::EmptyFutureRace
+                | Self::AlwaysMatchesPattern
         )
     }
 }
@@ -96,6 +100,7 @@ impl FromStr for DiagnosticCode {
             "SS1009" => Ok(Self::DebugOnlyUse),
             "SS1010" => Ok(Self::StructFieldShorthand),
             "SS1011" => Ok(Self::EmptyFutureRace),
+            "SS1012" => Ok(Self::AlwaysMatchesPattern),
             _ => Err(()),
         }
     }

@@ -113,7 +113,7 @@ impl Checker {
                             }
                         }
                     }
-                    None => self.error(format!("unknown variable `{name}`"), *span),
+                    None => self.unknown_variable(name, *span),
                 }
             }
             Stmt::StateAssign {
@@ -207,29 +207,32 @@ impl Checker {
                 else_block,
                 ..
             } => {
-                self.expr(
-                    condition,
-                    Some(self.core_type(crate::stdlib::CoreTypeId::Bool)),
-                );
+                let flow = self.check_condition(condition);
                 let constraints = self.layout_constraints(condition);
                 let inverse_constraints = self.inverse_layout_constraints(condition);
-                self.with_layout_constraints(constraints.as_deref(), |checker| {
-                    checker.block(then_block, true);
+                self.with_condition_path(flow.when_true.as_ref(), |checker| {
+                    checker.with_layout_constraints(constraints.as_deref(), |checker| {
+                        checker.block(then_block, true);
+                    });
                 });
                 if let Some(else_block) = else_block {
-                    self.with_layout_constraints(inverse_constraints.as_deref(), |checker| {
-                        checker.block(else_block, true);
+                    self.with_condition_path(flow.when_false.as_ref(), |checker| {
+                        checker.with_layout_constraints(
+                            inverse_constraints.as_deref(),
+                            |checker| {
+                                checker.block(else_block, true);
+                            },
+                        );
                     });
                 }
             }
             Stmt::While {
                 condition, body, ..
             } => {
-                self.expr(
-                    condition,
-                    Some(self.core_type(crate::stdlib::CoreTypeId::Bool)),
-                );
-                self.with_loop(|checker| checker.block(body, true));
+                let flow = self.check_condition(condition);
+                self.with_condition_path(flow.when_true.as_ref(), |checker| {
+                    checker.with_loop(|checker| checker.block(body, true));
+                });
             }
             Stmt::For {
                 binding,
@@ -712,6 +715,31 @@ impl Checker {
             );
         }
         Some(binding)
+    }
+
+    pub(super) fn unknown_variable(&mut self, name: &str, span: Span) {
+        if let Some((_, declaration)) = self
+            .conditional_binding_declarations
+            .iter()
+            .rev()
+            .find(|(candidate, _)| candidate == name)
+        {
+            self.errors.push(
+                crate::Diagnostic::type_error(
+                    format!(
+                        "conditional pattern binding `{name}` is not available on this control-flow path"
+                    ),
+                    span,
+                )
+                .with_primary_label("the pattern is not proven to match here")
+                .with_secondary_label(*declaration, "the binding is introduced by this pattern")
+                .with_note(
+                    "use the binding only on an `is` outcome that proves the pattern matched",
+                ),
+            );
+        } else {
+            self.error(format!("unknown variable `{name}`"), span);
+        }
     }
 
     pub(super) fn bind_pattern_value(

@@ -245,6 +245,30 @@ impl Parser<'_> {
                 );
                 continue;
             }
+            const IS_PRECEDENCE: u8 = 4;
+            if self.at_ident("is") {
+                if IS_PRECEDENCE < min_precedence {
+                    break;
+                }
+                if saw_comparison {
+                    return Err(self.error(
+                        "comparison and `is` operators cannot be chained; use parentheses to disambiguate",
+                    ));
+                }
+                let keyword_span = self.bump().span;
+                let pattern = self.match_pattern(true)?;
+                let span = left.span.join(pattern.span);
+                left = self.new_expr(
+                    ExprKind::Is {
+                        value: Box::new(left),
+                        pattern,
+                        keyword_span,
+                    },
+                    span,
+                );
+                saw_comparison = true;
+                continue;
+            }
             let Some((precedence, op)) = self.binary_operator() else {
                 break;
             };

@@ -471,6 +471,12 @@ fn snapshot_expression_kind(
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+        TypedExpressionKind::Is { value, pattern } => format!(
+            "is e{} p{} {:?}",
+            value.index(),
+            pattern.resolution.id.index(),
+            pattern.pattern
+        ),
         TypedExpressionKind::If {
             condition,
             then_expr,

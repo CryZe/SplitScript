@@ -1064,6 +1064,38 @@ remaining work is product hardening and distribution.
   general `value @ pattern` feature may add a typed rest binding once the
   language has an appropriate slice or view type, without making array rest a
   special binding form.
+- [x] Add `expression is pattern` as an ordinary boolean expression with
+  path-sensitive pattern bindings. Reuse the complete recursive match-pattern
+  grammar and evaluate the scrutinee exactly once; a mismatch produces `false`
+  rather than requiring exhaustiveness. Give `is` comparison precedence above
+  `&&` and `||`, and require `!(value is pattern)` when negating the complete
+  test.
+  - [x] Introduce one condition-flow analysis with explicit true and false
+    outcomes. Carry pattern bindings through parentheses, `!`, short-circuit
+    `&&`, and short-circuit `||` alongside the compiler's existing layout
+    refinements. The right operand of `&&` receives facts from the left true
+    edge; the right operand of `||` receives facts from the left false edge;
+    joined paths retain only bindings initialized with the same identity on
+    every incoming edge.
+  - [x] Make the resulting bindings available on the proven edge of executable
+    condition consumers: `if` then/else branches, `while` bodies, later
+    short-circuit operands, and match-arm bodies after a successful guard.
+    Never leak a binding merely because the boolean is stored or passed, never
+    carry it through eager boolean/bitwise operators or calls, and keep lexical
+    value blocks and callable boundaries as scope barriers. Reject a second
+    live conditional declaration with the same name rather than silently
+    shadowing it.
+  - [x] Lower `is` through the existing typed pattern representation and
+    pattern-test emitter. Allocate binding locals only on the successful path,
+    preserve them through ordinary short-circuit control flow and async
+    continuation frames, and keep failed partial matches unobservable.
+  - [x] Generalize compiler-owned pattern completion, hover, navigation,
+    references, rename, semantic highlighting, selection ranges, and
+    documentation from match arms to `is` patterns. Diagnose uses on an edge
+    where the declaration is not definitely initialized, allow irrefutable
+    binding patterns with an always-matches warning, and allow binding-free
+    `is` tests in static layout predicates while rejecting declarations that
+    have no executable lexical scope.
 - [x] Add shorthand struct field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename

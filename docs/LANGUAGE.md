@@ -1174,7 +1174,39 @@ endianness controls are intentionally deferred until a real target needs them.
 Enums model values that can have one of several shapes. Each variant may carry
 one typed payload; a struct can be used when a variant needs multiple values.
 `match` destructures payloads and is checked for duplicate, foreign, unknown,
-and missing variants.
+and missing variants. The same patterns can be tested inside a boolean
+condition with `is`:
+
+```text
+fn positive(value: i32?) -> bool {
+    if value is Some(number) && number > 0 {
+        return true
+    }
+    return false
+}
+```
+
+The left operand of `is` is evaluated once. A mismatch produces `false`, so an
+`is` expression does not need to be exhaustive. A pattern binding exists only
+where short-circuit control flow proves that the pattern matched. This includes
+the right operand of `&&`, the `then` branch of `if`, and the body of `while`.
+The false edge of `||` and the `else` branch of `!(value is pattern)` likewise
+carry a proof that makes the binding available. Storing the boolean in a local
+or passing it to a function deliberately does not preserve that proof.
+
+Negate the complete test with parentheses:
+
+```text
+if !(value is Some(number)) {
+    return 0
+} else {
+    return number
+}
+```
+
+`is` has comparison precedence: it binds more tightly than `&&` and `||`, and
+comparison chaining is rejected. The pattern syntax and binding rules below
+are shared by both `match` and `is`.
 
 ```text
 enum LevelOrScene {

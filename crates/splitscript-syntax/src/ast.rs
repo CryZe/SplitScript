@@ -1555,6 +1555,14 @@ pub enum ExprKind {
         value: Box<Expr>,
         arms: Vec<MatchArm>,
     },
+    /// Tests one value against an ordinary recursive pattern and produces a
+    /// boolean. Bindings are conditionally available on control-flow edges
+    /// where the match is proven to have succeeded.
+    Is {
+        value: Box<Expr>,
+        pattern: PatternNode,
+        keyword_span: Span,
+    },
     If {
         condition: Box<Expr>,
         then_expr: Box<Expr>,

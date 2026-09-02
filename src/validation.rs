@@ -76,6 +76,7 @@ pub(crate) fn validate(
     diagnostics.extend(validate_static_setting_lookups(syntax, hir));
     diagnostics.extend(validate_struct_field_shorthand(syntax));
     diagnostics.extend(validate_empty_future_races(hir));
+    diagnostics.extend(validate_irrefutable_is_patterns(syntax));
     diagnostics.extend(validate_async_function_results(
         &standard_library,
         syntax,
@@ -298,6 +299,49 @@ pub(crate) fn validate(
         capabilities,
         effects,
         diagnostics,
+    }
+}
+
+fn validate_irrefutable_is_patterns(syntax: &Program) -> Vec<Diagnostic> {
+    #[derive(Default)]
+    struct Collector {
+        diagnostics: Vec<Diagnostic>,
+    }
+
+    impl<'ast> SyntaxVisitor<'ast> for Collector {
+        fn visit_expr(&mut self, expression: &'ast ast::Expr) {
+            if let ast::ExprKind::Is { pattern, .. } = &expression.kind
+                && syntactically_irrefutable_pattern(&pattern.kind)
+            {
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        DiagnosticCode::AlwaysMatchesPattern,
+                        "this `is` pattern always matches",
+                        pattern.span,
+                    )
+                    .with_primary_label("this pattern cannot produce `false`")
+                    .with_note("use `let` when only binding the value is intended"),
+                );
+            }
+            visit::walk_expr(self, expression);
+        }
+    }
+
+    let mut collector = Collector::default();
+    collector.visit_program(syntax);
+    collector.diagnostics
+}
+
+fn syntactically_irrefutable_pattern(pattern: &ast::MatchPattern) -> bool {
+    match pattern {
+        ast::MatchPattern::Binding(_) | ast::MatchPattern::Wildcard => true,
+        ast::MatchPattern::Struct { fields, .. } => fields
+            .iter()
+            .all(|field| syntactically_irrefutable_pattern(&field.pattern.kind)),
+        ast::MatchPattern::Alternation(alternatives) => alternatives
+            .iter()
+            .any(|pattern| syntactically_irrefutable_pattern(&pattern.kind)),
+        _ => false,
     }
 }
 

@@ -1753,6 +1753,61 @@ state {
     }
 
     #[test]
+    fn is_patterns_bind_more_tightly_than_short_circuit_operators() {
+        let source = r#"
+            state "game.exe" {}
+            fn inspect(value) {
+                return value is Some(number) && number > 0
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let Stmt::Expression(Expr {
+            kind: ExprKind::Return(Some(value)),
+            ..
+        }) = &program.functions[0].body.statements[0]
+        else {
+            panic!("expected a returned condition")
+        };
+        assert!(matches!(
+            value.kind,
+            ExprKind::Binary {
+                op: BinaryOp::And,
+                ref left,
+                ..
+            } if matches!(left.kind, ExprKind::Is { .. })
+        ));
+
+        let source = "state \"game.exe\" {} fn inspect(value) { return !(value is Some(number)) }";
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let Stmt::Expression(Expr {
+            kind: ExprKind::Return(Some(value)),
+            ..
+        }) = &program.functions[0].body.statements[0]
+        else {
+            panic!("expected a returned negated condition")
+        };
+        assert!(matches!(
+            value.kind,
+            ExprKind::Unary {
+                op: UnaryOp::Not,
+                ref expr,
+            } if matches!(expr.kind, ExprKind::Is { .. })
+        ));
+    }
+
+    #[test]
+    fn is_and_comparison_chains_require_parentheses() {
+        for expression in ["value is Some(item) == true", "value == other is item"] {
+            let source = format!(
+                "state \"game.exe\" {{}} fn inspect(value, other) {{ return {expression} }}"
+            );
+            let error = parse(&source, lex(&source, SyntaxMode::Program).unwrap())
+                .expect_err("comparison-like operators must not chain implicitly");
+            assert!(error.message.contains("cannot be chained"), "{error:?}");
+        }
+    }
+
+    #[test]
     fn generic_cast_targets_end_before_equality_expressions() {
         for source in [
             "state \"game.exe\" {} fn compare(expr, foo) { return expr as List<u32> == foo }",

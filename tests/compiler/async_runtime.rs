@@ -54,6 +54,31 @@ fn never_completions_join_with_values_and_erase_from_wasm_storage() {
 }
 
 #[test]
+fn conditional_pattern_bindings_survive_async_continuations() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn inspect(value: u32?) -> async u32 {
+            if value is Some(number) && number > 0 {
+                await nextTick()
+                return number
+            }
+            return 0
+        }
+
+        onAttach {
+            print(await inspect(Some(7)))
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("a proven pattern binding should remain live across suspension");
+    wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("the continuation frame for a conditional binding should validate");
+}
+
+#[test]
 fn ordinary_values_do_not_flow_into_never() {
     let diagnostics = splitscript::compile(
         r#"

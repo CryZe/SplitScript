@@ -964,6 +964,18 @@ const MATCH_EXAMPLES: &[Example] = &[
         "struct Point {\n    x: i32,\n    label: String,\n}\nstate \"game.exe\" {}\nfn horizontal(point: Point) -> i32 {\n    return match point {\n        Point { label: \"start\", x } => x,\n        _ => 0,\n    }\n}",
     ),
 ];
+const IS_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Bind a value on the matching path",
+        "if value is Some(number) && number > 0 {\n    print(number)\n}",
+        "state \"game.exe\" {}\nfn inspect(value: u32?) {\n    if value is Some(number) && number > 0 {\n        print(number)\n    }\n}",
+    ),
+    Example::checked(
+        "Use the binding on a negated condition's else path",
+        "if !(value is Some(number)) {\n    return 0\n} else {\n    return number\n}",
+        "state \"game.exe\" {}\nfn unwrapOrZero(value: u32?) -> u32 {\n    if !(value is Some(number)) {\n        return 0\n    } else {\n        return number\n    }\n}",
+    ),
+];
 focused_example!(
     RETURN_EXAMPLE,
     "Return a value",
@@ -1652,6 +1664,15 @@ define_language_catalog! {
         "Exhaustively matches a value.",
         "[`match`] supports enum payloads, partial field-based [`struct`] patterns, optional [`None`]/[`Some`]`(value)` patterns, iterator [`End`]/[`Item`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, recursive exact and [`array rest pattern`]s, string, character, integer, boolean, and file-version literals, closed integer [`range`] patterns, guards, a wildcard, and recursive `left | right` alternatives. A struct pattern ignores omitted fields; `Name { field }` binds that field, while `Name { field: pattern }` recursively tests it. Alternatives are tried left to right and contribute their union to exhaustiveness. Every alternative in one arm must bind exactly the same names with compatible types; those occurrences form one logical binding for the guard and body. Array elements can bind values or contain any other pattern. A [`[T; N]`] exact pattern must have exactly `N` elements; `..` instead permits an omitted middle, including in growable [`[T]`] patterns. String patterns compare contents, not WebAssembly GC identities. Enum, wrapper, and array matches are checked recursively for exhaustiveness; guarded arms do not establish coverage.",
         MATCH_EXAMPLES
+    ),
+    language_item!(
+        Is,
+        "is",
+        LanguageItemKind::Keyword,
+        "expression is pattern",
+        "Tests a value against a pattern.",
+        "[`is`] evaluates its left operand exactly once and returns [`bool`]. It accepts the same recursive patterns as [`match`], but a mismatch simply produces `false` and therefore needs no exhaustive fallback. Bindings exist only on control-flow paths where the match is proven: the true edge of a direct test, the false edge after [`!`], the following operand of `&&` or `||` when short-circuiting proves it, and the corresponding [`if`] branch, [`while`] body, or guarded [`match`] arm. Storing or passing the boolean discards that proof. Write `!(value is pattern)` to negate the complete test.",
+        IS_EXAMPLES
     ),
     language_item!(
         Return,

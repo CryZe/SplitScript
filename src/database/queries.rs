@@ -1065,6 +1065,15 @@ fn pattern_alternation_at(program: &crate::ast::Program, offset: usize) -> bool 
                 visit::walk_match_arm(self, arm);
             }
         }
+
+        fn visit_expr(&mut self, expression: &'ast crate::ast::Expr) {
+            if let crate::ast::ExprKind::Is { pattern, .. } = &expression.kind {
+                self.found |= contains(&pattern.kind, self.offset);
+            }
+            if !self.found {
+                visit::walk_expr(self, expression);
+            }
+        }
     }
 
     let mut finder = Finder {

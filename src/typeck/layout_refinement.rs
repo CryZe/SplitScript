@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use crate::{
     Diagnostic,
-    ast::{BinaryOp, ConditionalFieldsDecl, Expr, ExprKind, UnaryOp},
+    ast::{BinaryOp, ConditionalFieldsDecl, Expr, ExprKind, MatchPattern, UnaryOp},
     types::ResolvedTypeRef,
 };
 
@@ -148,7 +148,7 @@ impl Checker {
                             condition.span,
                         )
                         .with_primary_label(
-                            "compare layout dimensions with enum variants using `==` or `!=` and combine them with `&&`, `||`, or `!`",
+                            "test layout dimensions with enum variants using `is`, `==`, or `!=` and combine them with `&&`, `||`, or `!`",
                         ),
                     );
                 }
@@ -230,6 +230,9 @@ impl Checker {
                 .layout_constraint_atom(left, right)
                 .or_else(|| self.layout_constraint_atom(right, left))
                 .map(|constraint| output.push(constraint)),
+            ExprKind::Is { value, pattern, .. } => self
+                .layout_is_constraint_atom(value, &pattern.kind)
+                .map(|constraint| output.push(constraint)),
             _ => None,
         }
     }
@@ -257,6 +260,11 @@ impl Checker {
                     .layout_constraint_atom(left, right)
                     .or_else(|| self.layout_constraint_atom(right, left))
                 {
+                    output.push(constraint);
+                }
+            }
+            ExprKind::Is { value, pattern, .. } => {
+                if let Some(constraint) = self.layout_is_constraint_atom(value, &pattern.kind) {
                     output.push(constraint);
                 }
             }
@@ -316,6 +324,53 @@ impl Checker {
             .variants
             .iter()
             .find(|variant| variant.name == *variant_name)?;
+        Some(LayoutConstraint {
+            dimension: field.id,
+            variant: variant.id,
+        })
+    }
+
+    fn layout_is_constraint_atom(
+        &self,
+        dimension: &Expr,
+        pattern: &MatchPattern,
+    ) -> Option<LayoutConstraint> {
+        let MatchPattern::Enum {
+            enumeration,
+            variant,
+            payload: None,
+        } = pattern
+        else {
+            return None;
+        };
+        let dimension_path = expression_path(dimension)?;
+        let [root, dimension_name] = dimension_path.as_slice() else {
+            return None;
+        };
+        if *root != "layout" {
+            return None;
+        }
+        let layout = self
+            .declarations
+            .structs
+            .iter()
+            .find(|structure| structure.name == "Layout")?;
+        let field = layout
+            .fields
+            .iter()
+            .find(|field| field.name == *dimension_name)?;
+        let ResolvedTypeRef::Enum(enum_id) = self.resolutions.type_ref(field.ty)? else {
+            return None;
+        };
+        let enumeration_decl = self
+            .declarations
+            .enums
+            .iter()
+            .find(|candidate| candidate.id == enum_id && candidate.name == enumeration.name)?;
+        let variant = enumeration_decl
+            .variants
+            .iter()
+            .find(|candidate| candidate.name == *variant)?;
         Some(LayoutConstraint {
             dimension: field.id,
             variant: variant.id,
@@ -406,6 +461,10 @@ impl Checker {
                 }
                 _ => None,
             },
+            ExprKind::Is { value, pattern, .. } => {
+                let constraint = self.layout_is_constraint_atom(value, &pattern.kind)?;
+                Some(assignment.contains(&constraint))
+            }
             _ => None,
         }
     }

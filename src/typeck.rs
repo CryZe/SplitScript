@@ -168,6 +168,9 @@ struct Checker {
     active_state_field: Option<ValueId>,
     active_layouts: Option<declarations::LayoutPredicate>,
     scopes: Vec<HashMap<String, Binding>>,
+    condition_flows: HashMap<ExprId, expressions::ConditionFlow>,
+    active_condition_bindings: Vec<HashSet<String>>,
+    conditional_binding_declarations: Vec<(String, Span)>,
     return_ty: Type,
     callable: CallableContext,
     expression_mode: ExpressionMode,
@@ -373,11 +376,14 @@ impl Checker {
         // its own loop stack, just as it already receives independent return
         // and failure boundaries.
         let previous_loops = std::mem::take(&mut self.loops);
+        let previous_conditional_bindings =
+            std::mem::take(&mut self.conditional_binding_declarations);
         let output = operation(self);
         self.callable = previous_callable;
         self.return_ty = previous_return;
         self.failure = previous_failure;
         self.loops = previous_loops;
+        self.conditional_binding_declarations = previous_conditional_bindings;
         output
     }
 

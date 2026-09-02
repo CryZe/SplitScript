@@ -426,32 +426,36 @@ struct StructShorthandCollector<'a> {
 
 impl<'ast> Visitor<'ast> for StructShorthandCollector<'_> {
     fn visit_expr(&mut self, expression: &'ast Expr) {
-        if let ExprKind::Struct { fields, .. } = &expression.kind {
-            let resolved = self
-                .semantics
-                .struct_literal_fields(expression.id)
-                .unwrap_or_default();
-            for (field, resolved_field) in fields.iter().zip(resolved) {
-                if !field.shorthand {
-                    continue;
-                }
-                let ResolvedStructFieldId::Source(struct_field) = resolved_field else {
-                    continue;
-                };
-                let Some(value) = self
+        match &expression.kind {
+            ExprKind::Struct { fields, .. } => {
+                let resolved = self
                     .semantics
-                    .value(field.value.id)
-                    .and_then(|root| root.source_value())
-                else {
-                    continue;
-                };
-                self.references.push(StructShorthandReference {
-                    span: field.name_span,
-                    name: field.name.clone(),
-                    field: SourceDefinitionId::StructField(*struct_field),
-                    value: SourceDefinitionId::Value(value),
-                });
+                    .struct_literal_fields(expression.id)
+                    .unwrap_or_default();
+                for (field, resolved_field) in fields.iter().zip(resolved) {
+                    if !field.shorthand {
+                        continue;
+                    }
+                    let ResolvedStructFieldId::Source(struct_field) = resolved_field else {
+                        continue;
+                    };
+                    let Some(value) = self
+                        .semantics
+                        .value(field.value.id)
+                        .and_then(|root| root.source_value())
+                    else {
+                        continue;
+                    };
+                    self.references.push(StructShorthandReference {
+                        span: field.name_span,
+                        name: field.name.clone(),
+                        field: SourceDefinitionId::StructField(*struct_field),
+                        value: SourceDefinitionId::Value(value),
+                    });
+                }
             }
+            ExprKind::Is { pattern, .. } => self.collect_pattern(&pattern.kind, pattern.id),
+            _ => {}
         }
         visit::walk_expr(self, expression);
     }

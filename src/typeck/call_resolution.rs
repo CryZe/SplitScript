@@ -2316,7 +2316,7 @@ impl Checker {
                         self.errors.push(diagnostic);
                         return None;
                     }
-                    self.error(format!("unknown variable `{name}`"), span);
+                    self.unknown_variable(name, span);
                     return None;
                 };
                 let (ty, members) =

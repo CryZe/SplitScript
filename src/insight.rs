@@ -2050,6 +2050,55 @@ whileAttached {
     }
 
     #[test]
+    fn is_patterns_share_hover_navigation_references_and_rename_identity() {
+        let source = r#"state "game.exe" {}
+fn inspect(value: u32?) {
+    if value is Some(number) && number > 0 {
+        print(number)
+    }
+}"#;
+        let declaration = source.find("number)").unwrap();
+        let condition_use = source.find("number >").unwrap();
+        let body_use = source.rfind("number)").unwrap();
+        let mut database = CompilerDatabase::new(source);
+
+        let keyword = database
+            .hover(source.find(" is ").unwrap() + 2)
+            .unwrap()
+            .expect("`is` should have language documentation");
+        assert!(keyword.markdown.contains("expression is pattern"));
+        assert!(keyword.markdown.contains("control-flow paths"));
+        assert_eq!(
+            keyword.documentation_uri.as_deref(),
+            Some("/language/is.md")
+        );
+
+        let binding = database
+            .hover(declaration + 1)
+            .unwrap()
+            .expect("the pattern declaration should expose its inferred type");
+        assert!(
+            binding.markdown.contains("number: u32"),
+            "{}",
+            binding.markdown
+        );
+
+        for usage in [condition_use, body_use] {
+            assert!(matches!(
+                database.definition_at(usage + 1).unwrap(),
+                Some(crate::database::DefinitionTarget::Source(definition))
+                    if definition.span.start == declaration
+            ));
+        }
+        let references = database.references_at(declaration + 1, true).unwrap();
+        assert_eq!(references.len(), 3, "{references:#?}");
+        let rename = database
+            .rename_at(declaration + 1, "present")
+            .expect("conditional bindings should be ordinary rename identities");
+        assert_eq!(rename.edits.len(), 3, "{rename:#?}");
+    }
+
+    #[test]
     fn tick_rate_policy_and_fields_share_lifecycle_documentation() {
         let source = "state \"game.exe\" {}\ntickRate { attached: 60, detached: 2, }";
         let mut database = CompilerDatabase::new(source);

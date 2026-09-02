@@ -3645,6 +3645,25 @@ fn compile_expr_unconverted(
                 );
             }
         }
+        wasm_ir::ExpressionKind::Is { value, pattern, .. } => {
+            let value_local = context.matches.values[&expression];
+            let value_type = context.expression_type(*value);
+            compile_expr(function, *value, context);
+            function.instruction(&Instruction::LocalSet(value_local));
+            let bindings =
+                compile_statement_pattern(function, pattern, value_local, value_type, context);
+            if !bindings.is_empty() {
+                function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                for binding in bindings {
+                    store_match_binding(function, binding, context);
+                }
+                function
+                    .instruction(&Instruction::I32Const(1))
+                    .instruction(&Instruction::Else)
+                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::End);
+            }
+        }
         wasm_ir::ExpressionKind::Match { value, arms } => {
             let value_local = context.matches.values[&expression];
             let value_type = context.expression_type(*value);

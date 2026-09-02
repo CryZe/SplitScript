@@ -334,6 +334,15 @@ impl<'ast> Visitor<'ast> for ValueKindCollector {
         visit::walk_match_arm(self, arm);
     }
 
+    fn visit_expr(&mut self, expression: &'ast Expr) {
+        if let ExprKind::Is { pattern, .. } = &expression.kind {
+            pattern.kind.visit_bindings(&mut |binding| {
+                self.kinds.insert(binding.id, SemanticTokenKind::Variable);
+            });
+        }
+        visit::walk_expr(self, expression);
+    }
+
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
         if let Stmt::Debug { span, .. } = statement {
             self.debug_ranges.push(*span);
@@ -1306,6 +1315,14 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
 
     fn visit_expr(&mut self, expression: &'ast Expr) {
         match &expression.kind {
+            ExprKind::Is {
+                pattern,
+                keyword_span,
+                ..
+            } => {
+                self.insert_language_token(*keyword_span, "is", 0);
+                self.mark_pattern(&pattern.kind, pattern.span);
+            }
             ExprKind::Path(names) => self.mark_path(expression, names, false),
             ExprKind::Member { name_span, .. } => {
                 self.insert(*name_span, SemanticTokenKind::Property, MODIFIER_READONLY)
@@ -1514,6 +1531,45 @@ setup {
             SemanticTokenKind::Constant,
             MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY
         ));
+    }
+
+    #[test]
+    fn is_keywords_and_pattern_bindings_have_canonical_semantic_roles() {
+        let source = r#"state "game.exe" {}
+fn inspect(value: u32?) {
+    if value is Some(number) && number > 0 {
+        print(number)
+    }
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let highlights = database.semantic_highlights().unwrap();
+        assert!(contains(
+            source,
+            &highlights,
+            "is",
+            SemanticTokenKind::Keyword,
+            0,
+        ));
+        let declaration = source.find("number)").unwrap();
+        let declaration_highlight = highlights
+            .highlights()
+            .iter()
+            .find(|highlight| highlight.span.start == declaration)
+            .expect("pattern declaration is highlighted");
+        assert_eq!(declaration_highlight.kind, SemanticTokenKind::Variable);
+        assert_eq!(
+            declaration_highlight.modifiers & MODIFIER_DECLARATION,
+            MODIFIER_DECLARATION
+        );
+        for usage in [
+            source.find("number >").unwrap(),
+            source.rfind("number)").unwrap(),
+        ] {
+            assert_eq!(
+                kind_at(&highlights, usage),
+                Some(SemanticTokenKind::Variable)
+            );
+        }
     }
 
     fn contains(

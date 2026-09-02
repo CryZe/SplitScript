@@ -451,6 +451,10 @@ impl<'a> Evaluator<'a> {
                     self.expression(arm.value)
                 }))
             }
+            TypedExpressionKind::Is { value, .. } => {
+                self.expression(*value);
+                SymbolicValue::Unknown
+            }
             TypedExpressionKind::If {
                 condition,
                 then_expr,

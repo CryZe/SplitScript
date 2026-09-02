@@ -37,7 +37,97 @@ impl CheckedPattern {
     }
 }
 
+/// Bindings that are definitely initialized for each outcome of a boolean
+/// expression. `None` denotes an unreachable outcome; a present map contains
+/// only declarations introduced by the expression itself and guaranteed on
+/// every path reaching that outcome.
+#[derive(Clone)]
+pub(super) struct ConditionFlow {
+    pub(super) when_true: Option<HashMap<String, Binding>>,
+    pub(super) when_false: Option<HashMap<String, Binding>>,
+}
+
+impl ConditionFlow {
+    fn unknown() -> Self {
+        Self {
+            when_true: Some(HashMap::new()),
+            when_false: Some(HashMap::new()),
+        }
+    }
+
+    fn literal(value: bool) -> Self {
+        Self {
+            when_true: value.then(HashMap::new),
+            when_false: (!value).then(HashMap::new),
+        }
+    }
+
+    fn negated(mut self) -> Self {
+        std::mem::swap(&mut self.when_true, &mut self.when_false);
+        self
+    }
+}
+
+fn sequence_condition_paths(
+    first: &Option<HashMap<String, Binding>>,
+    second: &Option<HashMap<String, Binding>>,
+) -> Option<HashMap<String, Binding>> {
+    let mut combined = first.as_ref()?.clone();
+    combined.extend(
+        second
+            .as_ref()?
+            .iter()
+            .map(|(name, binding)| (name.clone(), *binding)),
+    );
+    Some(combined)
+}
+
+fn join_condition_paths(
+    left: &Option<HashMap<String, Binding>>,
+    right: &Option<HashMap<String, Binding>>,
+) -> Option<HashMap<String, Binding>> {
+    match (left, right) {
+        (None, path) | (path, None) => path.clone(),
+        (Some(left), Some(right)) => Some(
+            left.iter()
+                .filter_map(|(name, binding)| {
+                    right
+                        .get(name)
+                        .filter(|other| other.id == binding.id)
+                        .map(|_| (name.clone(), *binding))
+                })
+                .collect(),
+        ),
+    }
+}
+
 impl Checker {
+    pub(super) fn check_condition(&mut self, expression: &Expr) -> ConditionFlow {
+        self.expr(
+            expression,
+            Some(self.core_type(crate::stdlib::CoreTypeId::Bool)),
+        );
+        self.condition_flows
+            .get(&expression.id)
+            .cloned()
+            .unwrap_or_else(ConditionFlow::unknown)
+    }
+
+    pub(super) fn with_condition_path<T>(
+        &mut self,
+        path: Option<&HashMap<String, Binding>>,
+        operation: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let bindings = path.cloned().unwrap_or_default();
+        let names = bindings.keys().cloned().collect();
+        self.scopes.push(bindings);
+        self.active_condition_bindings.push(names);
+        let output = operation(self);
+        self.active_condition_bindings.pop();
+        self.scopes.pop();
+        output
+    }
+
     pub(super) fn expr(&mut self, expr: &Expr, expected: Option<Type>) -> Option<Type> {
         let ty = match &expr.kind {
             ExprKind::Error => {
@@ -542,6 +632,48 @@ impl Checker {
                     return None;
                 }
             }
+            ExprKind::Is { value, pattern, .. } => {
+                let value_type = self.expr(value, None)?;
+                self.scopes.push(HashMap::new());
+                let checked =
+                    self.check_pattern(&pattern.kind, pattern.id, value_type, pattern.span);
+                let bindings = self.scopes.pop().expect("an `is` pattern owns a scope");
+                pattern.kind.visit_bindings(&mut |binding| {
+                    if !self
+                        .conditional_binding_declarations
+                        .iter()
+                        .any(|(_, span)| *span == binding.name_span)
+                    {
+                        self.conditional_binding_declarations
+                            .push((binding.name.clone(), binding.name_span));
+                    }
+                });
+                for name in bindings.keys() {
+                    if self
+                        .active_condition_bindings
+                        .iter()
+                        .any(|active| active.contains(name))
+                    {
+                        self.error(
+                            format!("conditional pattern binding `{name}` is already in scope"),
+                            pattern.span,
+                        );
+                    }
+                }
+                self.condition_flows.insert(
+                    expr.id,
+                    ConditionFlow {
+                        when_true: Some(bindings),
+                        when_false: (!checked.coverage.is_irrefutable()).then(HashMap::new),
+                    },
+                );
+                self.expect_expression(
+                    expr.id,
+                    self.core_type(crate::stdlib::CoreTypeId::Bool),
+                    expected,
+                    expr.span,
+                )?
+            }
             ExprKind::Match { value, arms } => {
                 let value_type = self.expr(value, None)?;
                 let refines_state_layout = matches!(
@@ -564,12 +696,13 @@ impl Checker {
                     };
                     let arm_type = self.with_state_layouts(state_layouts, |checker| {
                         if let Some(guard) = &arm.guard {
-                            checker.expr(
-                                guard,
-                                Some(checker.core_type(crate::stdlib::CoreTypeId::Bool)),
-                            );
+                            let flow = checker.check_condition(guard);
+                            checker.with_condition_path(flow.when_true.as_ref(), |checker| {
+                                checker.expr(&arm.value, result_type)
+                            })
+                        } else {
+                            checker.expr(&arm.value, result_type)
                         }
-                        checker.expr(&arm.value, result_type)
                     });
                     self.scopes.pop();
                     if expected.is_none()
@@ -672,10 +805,7 @@ impl Checker {
                 then_expr,
                 else_expr,
             } => {
-                self.expr(
-                    condition,
-                    Some(self.core_type(crate::stdlib::CoreTypeId::Bool)),
-                );
+                let flow = self.check_condition(condition);
                 let layout_constraints = self.layout_constraints(condition);
                 let inverse_layout_constraints = self.inverse_layout_constraints(condition);
                 let result_type =
@@ -689,24 +819,30 @@ impl Checker {
                     && expression_is_bare_none(then_expr)
                     && !expression_is_bare_none(else_expr)
                 {
-                    let else_type = self.with_layout_constraints(
-                        inverse_layout_constraints.as_deref(),
-                        |checker| checker.expr(else_expr, Some(result_type)),
-                    );
-                    let then_type = self
-                        .with_layout_constraints(layout_constraints.as_deref(), |checker| {
+                    let else_type = self.with_condition_path(flow.when_false.as_ref(), |checker| {
+                        checker.with_layout_constraints(
+                            inverse_layout_constraints.as_deref(),
+                            |checker| checker.expr(else_expr, Some(result_type)),
+                        )
+                    });
+                    let then_type = self.with_condition_path(flow.when_true.as_ref(), |checker| {
+                        checker.with_layout_constraints(layout_constraints.as_deref(), |checker| {
                             checker.expr(then_expr, Some(result_type))
-                        });
+                        })
+                    });
                     (then_type, else_type)
                 } else {
-                    let then_type = self
-                        .with_layout_constraints(layout_constraints.as_deref(), |checker| {
+                    let then_type = self.with_condition_path(flow.when_true.as_ref(), |checker| {
+                        checker.with_layout_constraints(layout_constraints.as_deref(), |checker| {
                             checker.expr(then_expr, Some(result_type))
-                        });
-                    let else_type = self.with_layout_constraints(
-                        inverse_layout_constraints.as_deref(),
-                        |checker| checker.expr(else_expr, Some(result_type)),
-                    );
+                        })
+                    });
+                    let else_type = self.with_condition_path(flow.when_false.as_ref(), |checker| {
+                        checker.with_layout_constraints(
+                            inverse_layout_constraints.as_deref(),
+                            |checker| checker.expr(else_expr, Some(result_type)),
+                        )
+                    });
                     (then_type, else_type)
                 };
                 if expected.is_none()
@@ -1296,6 +1432,25 @@ impl Checker {
                 self.expect_expression(expr.id, callable, expected, expr.span)?
             }
         };
+        match &expr.kind {
+            ExprKind::Bool(value) => {
+                self.condition_flows
+                    .insert(expr.id, ConditionFlow::literal(*value));
+            }
+            ExprKind::Unary {
+                op: UnaryOp::Not,
+                expr: inner,
+            } => {
+                let flow = self
+                    .condition_flows
+                    .get(&inner.id)
+                    .cloned()
+                    .unwrap_or_else(ConditionFlow::unknown)
+                    .negated();
+                self.condition_flows.insert(expr.id, flow);
+            }
+            _ => {}
+        }
         self.semantics.resolve_expression_type(expr.id, ty);
         Some(ty)
     }
@@ -2005,14 +2160,56 @@ impl Checker {
         if matches!(op, BinaryOp::Or | BinaryOp::And) {
             let bool_type = self.core_type(crate::stdlib::CoreTypeId::Bool);
             self.expr(left, Some(bool_type));
-            let constraints = match op {
-                BinaryOp::And => self.truthy_layout_constraints(left),
-                BinaryOp::Or => self.falsy_layout_constraints(left),
+            let left_flow = self
+                .condition_flows
+                .get(&left.id)
+                .cloned()
+                .unwrap_or_else(ConditionFlow::unknown);
+            let (bindings, constraints) = match op {
+                BinaryOp::And => (
+                    left_flow.when_true.as_ref(),
+                    self.truthy_layout_constraints(left),
+                ),
+                BinaryOp::Or => (
+                    left_flow.when_false.as_ref(),
+                    self.falsy_layout_constraints(left),
+                ),
                 _ => unreachable!("logical operators were matched above"),
             };
-            self.with_layout_constraints(Some(&constraints), |checker| {
-                checker.expr(right, Some(bool_type));
+            self.with_condition_path(bindings, |checker| {
+                checker.with_layout_constraints(Some(&constraints), |checker| {
+                    checker.expr(right, Some(bool_type));
+                });
             });
+            let right_flow = self
+                .condition_flows
+                .get(&right.id)
+                .cloned()
+                .unwrap_or_else(ConditionFlow::unknown);
+            let flow = match op {
+                BinaryOp::And => ConditionFlow {
+                    when_true: sequence_condition_paths(
+                        &left_flow.when_true,
+                        &right_flow.when_true,
+                    ),
+                    when_false: join_condition_paths(
+                        &left_flow.when_false,
+                        &sequence_condition_paths(&left_flow.when_true, &right_flow.when_false),
+                    ),
+                },
+                BinaryOp::Or => ConditionFlow {
+                    when_true: join_condition_paths(
+                        &left_flow.when_true,
+                        &sequence_condition_paths(&left_flow.when_false, &right_flow.when_true),
+                    ),
+                    when_false: sequence_condition_paths(
+                        &left_flow.when_false,
+                        &right_flow.when_false,
+                    ),
+                },
+                _ => unreachable!("logical operators were matched above"),
+            };
+            self.condition_flows.insert(expression, flow);
             return self.expect_expression(expression, bool_type, expected, span);
         }
 

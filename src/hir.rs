@@ -370,6 +370,10 @@ pub enum TypedExpressionKind {
         value: ExprId,
         arms: Vec<TypedMatchArm>,
     },
+    Is {
+        value: ExprId,
+        pattern: TypedPatternNode,
+    },
     If {
         condition: ExprId,
         then_expr: ExprId,
@@ -1016,6 +1020,9 @@ impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
     }
 
     fn visit_expr(&mut self, expression: &'ast Expr) {
+        if let ExprKind::Is { pattern, .. } = &expression.kind {
+            self.insert_pattern(&pattern.kind, pattern.id, pattern.span);
+        }
         let resolution = if let Some(variant) = self.semantics.enum_variant(expression.id) {
             Some(ExpressionResolution::EnumConstructor { variant })
         } else if let Some(call) = self.semantics.call(expression.id) {
@@ -1256,6 +1263,7 @@ pub fn walk_typed_expression<V: TypedVisitor>(
                 visitor.visit_match_arm(arm, program);
             }
         }
+        TypedExpressionKind::Is { value, .. } => visit_expression(*value),
         TypedExpressionKind::If {
             condition,
             then_expr,
@@ -1685,6 +1693,10 @@ fn lower_expression_kind(
                     span: arm.span,
                 })
                 .collect(),
+        },
+        ExprKind::Is { value, pattern, .. } => TypedExpressionKind::Is {
+            value: value.id,
+            pattern: lower_pattern_node(pattern, semantics, syntax, standard_library),
         },
         ExprKind::If {
             condition,

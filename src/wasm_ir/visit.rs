@@ -330,6 +330,7 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
                 visit(arm.value);
             }
         }
+        ExpressionKind::Is { value, .. } => visit(*value),
     }
 }
 

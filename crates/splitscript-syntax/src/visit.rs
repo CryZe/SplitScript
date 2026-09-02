@@ -399,6 +399,10 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
                 visitor.visit_match_arm(arm);
             }
         }
+        ExprKind::Is { value, pattern, .. } => {
+            visitor.visit_expr(value);
+            visitor.visit_pattern(&pattern.kind);
+        }
         ExprKind::If {
             condition,
             then_expr,
@@ -894,6 +898,10 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
             for arm in arms {
                 folder.fold_match_arm(arm);
             }
+        }
+        ExprKind::Is { value, pattern, .. } => {
+            folder.fold_expr(value);
+            folder.fold_pattern(&mut pattern.kind);
         }
         ExprKind::If {
             condition,

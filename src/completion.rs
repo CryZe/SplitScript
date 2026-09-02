@@ -1,6 +1,6 @@
 //! Compiler-owned completion candidates shared by editor frontends.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 mod patterns;
 mod settings;
@@ -1522,10 +1522,12 @@ fn add_statement_inner_bindings(builder: &mut CompletionBuilder, statement: &Stm
             if contains_offset(condition.span, offset) {
                 add_expression_bindings(builder, condition, offset);
             } else if contains_offset(then_block.span, offset) {
+                add_condition_binding_names(builder, condition, true);
                 add_block_bindings(builder, then_block, offset);
             } else if let Some(else_block) = else_block
                 && contains_offset(else_block.span, offset)
             {
+                add_condition_binding_names(builder, condition, false);
                 add_block_bindings(builder, else_block, offset);
             }
         }
@@ -1535,6 +1537,7 @@ fn add_statement_inner_bindings(builder: &mut CompletionBuilder, statement: &Stm
             if contains_offset(condition.span, offset) {
                 add_expression_bindings(builder, condition, offset);
             } else if contains_offset(body.span, offset) {
+                add_condition_binding_names(builder, condition, true);
                 add_block_bindings(builder, body, offset);
             }
         }
@@ -1565,18 +1568,26 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
                 return;
             }
             for arm in arms {
-                let target = arm
+                if let Some(guard) = arm
                     .guard
                     .as_ref()
                     .filter(|guard| contains_offset(guard.span, offset))
-                    .or_else(|| contains_offset(arm.value.span, offset).then_some(&arm.value));
-                if let Some(target) = target {
+                {
                     add_pattern_binding(builder, &arm.pattern);
-                    add_expression_bindings(builder, target, offset);
+                    add_expression_bindings(builder, guard, offset);
+                    return;
+                }
+                if contains_offset(arm.value.span, offset) {
+                    add_pattern_binding(builder, &arm.pattern);
+                    if let Some(guard) = &arm.guard {
+                        add_condition_binding_names(builder, guard, true);
+                    }
+                    add_expression_bindings(builder, &arm.value, offset);
                     return;
                 }
             }
         }
+        ExprKind::Is { value, .. } => add_expression_bindings(builder, value, offset),
         ExprKind::InterpolatedString(parts) => {
             for part in parts {
                 if let crate::ast::InterpolatedPart::Expr(part) = part {
@@ -1602,8 +1613,14 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
             then_expr,
             else_expr,
         } => {
-            for child in [condition.as_ref(), then_expr.as_ref(), else_expr.as_ref()] {
-                add_expression_bindings(builder, child, offset);
+            if contains_offset(condition.span, offset) {
+                add_expression_bindings(builder, condition, offset);
+            } else if contains_offset(then_expr.span, offset) {
+                add_condition_binding_names(builder, condition, true);
+                add_expression_bindings(builder, then_expr, offset);
+            } else if contains_offset(else_expr.span, offset) {
+                add_condition_binding_names(builder, condition, false);
+                add_expression_bindings(builder, else_expr, offset);
             }
         }
         ExprKind::Fallback { value, fallback } => {
@@ -1628,9 +1645,17 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
             add_expression_bindings(builder, index, offset);
         }
         ExprKind::Cast { expr, .. } => add_expression_bindings(builder, expr, offset),
-        ExprKind::Binary { left, right, .. } => {
-            add_expression_bindings(builder, left, offset);
-            add_expression_bindings(builder, right, offset);
+        ExprKind::Binary { op, left, right } => {
+            if contains_offset(left.span, offset) {
+                add_expression_bindings(builder, left, offset);
+            } else if contains_offset(right.span, offset) {
+                match op {
+                    crate::ast::BinaryOp::And => add_condition_binding_names(builder, left, true),
+                    crate::ast::BinaryOp::Or => add_condition_binding_names(builder, left, false),
+                    _ => {}
+                }
+                add_expression_bindings(builder, right, offset);
+            }
         }
         ExprKind::Call { args, .. } => add_child_expression_bindings(builder, args, offset),
         ExprKind::Invoke { callee, args } => {
@@ -1673,6 +1698,110 @@ fn add_pattern_binding(builder: &mut CompletionBuilder, pattern: &MatchPattern) 
     pattern.visit_bindings(&mut |binding| {
         add_scoped_variable(builder, &binding.name, "pattern binding");
     });
+}
+
+#[derive(Clone)]
+struct CompletionConditionFlow {
+    when_true: Option<BTreeSet<String>>,
+    when_false: Option<BTreeSet<String>>,
+}
+
+fn add_condition_binding_names(builder: &mut CompletionBuilder, condition: &Expr, outcome: bool) {
+    let flow = completion_condition_flow(condition);
+    let bindings = if outcome {
+        flow.when_true
+    } else {
+        flow.when_false
+    };
+    for name in bindings.into_iter().flatten() {
+        add_scoped_variable(builder, &name, "conditional pattern binding");
+    }
+}
+
+/// Mirrors the type checker's path proof algebra using only recovered syntax.
+/// Completion cannot require a fully valid condition, while the type checker
+/// remains the authority that validates types and binding identity.
+fn completion_condition_flow(condition: &Expr) -> CompletionConditionFlow {
+    let unknown = || CompletionConditionFlow {
+        when_true: Some(BTreeSet::new()),
+        when_false: Some(BTreeSet::new()),
+    };
+    match &condition.kind {
+        ExprKind::Bool(value) => CompletionConditionFlow {
+            when_true: value.then(BTreeSet::new),
+            when_false: (!value).then(BTreeSet::new),
+        },
+        ExprKind::Is { pattern, .. } => {
+            let mut bindings = BTreeSet::new();
+            pattern
+                .kind
+                .visit_bindings(&mut |binding| _ = bindings.insert(binding.name.clone()));
+            CompletionConditionFlow {
+                when_true: Some(bindings),
+                when_false: Some(BTreeSet::new()),
+            }
+        }
+        ExprKind::Unary {
+            op: crate::ast::UnaryOp::Not,
+            expr,
+        } => {
+            let flow = completion_condition_flow(expr);
+            CompletionConditionFlow {
+                when_true: flow.when_false,
+                when_false: flow.when_true,
+            }
+        }
+        ExprKind::Binary {
+            op: crate::ast::BinaryOp::And,
+            left,
+            right,
+        } => {
+            let left = completion_condition_flow(left);
+            let right = completion_condition_flow(right);
+            CompletionConditionFlow {
+                when_true: sequence_completion_paths(&left.when_true, &right.when_true),
+                when_false: join_completion_paths(
+                    &left.when_false,
+                    &sequence_completion_paths(&left.when_true, &right.when_false),
+                ),
+            }
+        }
+        ExprKind::Binary {
+            op: crate::ast::BinaryOp::Or,
+            left,
+            right,
+        } => {
+            let left = completion_condition_flow(left);
+            let right = completion_condition_flow(right);
+            CompletionConditionFlow {
+                when_true: join_completion_paths(
+                    &left.when_true,
+                    &sequence_completion_paths(&left.when_false, &right.when_true),
+                ),
+                when_false: sequence_completion_paths(&left.when_false, &right.when_false),
+            }
+        }
+        _ => unknown(),
+    }
+}
+
+fn sequence_completion_paths(
+    first: &Option<BTreeSet<String>>,
+    second: &Option<BTreeSet<String>>,
+) -> Option<BTreeSet<String>> {
+    let mut combined = first.clone()?;
+    combined.extend(second.clone()?);
+    Some(combined)
+}
+
+fn join_completion_paths(
+    first: &Option<BTreeSet<String>>,
+    second: &Option<BTreeSet<String>>,
+) -> Option<BTreeSet<String>> {
+    match (first, second) {
+        (None, path) | (path, None) => path.clone(),
+        (Some(first), Some(second)) => Some(first.intersection(second).cloned().collect()),
+    }
 }
 
 fn add_scoped_variable(builder: &mut CompletionBuilder, name: &str, detail: &str) {
@@ -3979,6 +4108,38 @@ whileAttached {
         let mut database = CompilerDatabase::new(source);
         assert!(labels(&mut database, "        ele").contains(&"element".to_owned()));
         assert!(!labels(&mut database, "    ele\n}").contains(&"element".to_owned()));
+    }
+
+    #[test]
+    fn conditional_pattern_bindings_complete_only_on_proven_paths() {
+        let source = r#"
+state "game.exe" {}
+fn inspect(value: u32?) {
+    if value is Some(number) && num {
+        number
+    } else {
+        missing
+    }
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        assert!(labels(&mut database, "&& num").contains(&"number".to_owned()));
+        assert!(labels(&mut database, "        number").contains(&"number".to_owned()));
+        assert!(!labels(&mut database, "        missing").contains(&"number".to_owned()));
+
+        let source = r#"
+state "game.exe" {}
+fn inspect(value: u32?) {
+    if !(value is Some(number)) {
+        missing
+    } else {
+        num
+    }
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        assert!(!labels(&mut database, "        missing").contains(&"number".to_owned()));
+        assert!(labels(&mut database, "        num").contains(&"number".to_owned()));
     }
 
     #[test]

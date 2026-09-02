@@ -416,7 +416,11 @@ Annotations and integer suffixes are constraints, not a routine requirement.
 Integer literals may be decimal (`42`), hexadecimal (`0xff`), or binary
 (`0b1111_0000`); `_` separators are ignored. Suffixes such as `1u8`, `10i64`,
 `0xffu32`, and `0b1000u16` remain available when a literal is genuinely
-unconstrained or when an exact type should be documented. An
+unconstrained or when an exact type should be documented. A leading minus is
+part of an integer literal, so signed minima such as `-128i8` and
+`-9223372036854775808i64` are representable directly and may also appear in
+patterns. Parenthesized and other computed operands still use ordinary unary
+negation, as in `-(value + 1)`. An
 unresolved inference component defaults when it contains an unsuffixed literal
 or has a specific numeric-kind constraint: integer literals and `Integer`
 values default to `i32`, while floating-point literals and `Float` values
@@ -1247,7 +1251,8 @@ fn classify(value: String?) -> String {
 ```
 
 Because `Some("Inf")` matches only that payload, it does not make the `Some`
-case exhaustive. Use `Some(_)` or a payload binding to cover every present
+case exhaustive by itself. Use `Some(_)`, a payload binding, or a complete
+finite partition such as `Some(true)` and `Some(false)` to cover every present
 value.
 
 Struct patterns name only the fields that matter. Omitted fields are ignored;
@@ -1273,8 +1278,10 @@ fn horizontal(point: Point) -> i32 {
 
 A struct pattern containing only bindings and wildcards is irrefutable even if
 it omits fields, so `Point { x } => x` can be the sole arm. A literal or other
-condition needs a later fallback arm. Unknown and duplicate fields are errors,
-and every nested pattern is checked against the declared field type.
+condition normally needs later coverage, but several arms may jointly cover a
+finite field: `Point { flag: true }` and `Point { flag: false }` cover every
+`Point`. Unknown and duplicate fields are errors, and every nested pattern is
+checked against the declared field type.
 
 String matches are useful for selecting exact host identities while keeping
 the dispatch exhaustive:
@@ -1299,10 +1306,13 @@ its pattern. Alternatives contribute the union of their patterns. Enum matches
 must cover every variant, boolean matches must cover
 `true` and `false`. String, character, integer, and file-version domains are
 open-ended and require an unguarded `_` arm. A wildcard can also make an enum
-or boolean match exhaustive. A fixed `[T; N]` array pattern with `N` elements
-and only irrefutable element patterns is exhaustive. A different number of
-elements is a compile-time error. A growable `[T]` may have any runtime length,
-so exact array arms always need a fallback.
+or boolean match exhaustive. Exhaustiveness and unreachable-arm analysis are
+recursive: separate arms can jointly partition wrapper or enum payloads,
+struct fields, and fixed-array elements, while correlations between several
+fields or elements remain intact. For example, the four combinations of two
+booleans exhaust `[bool; 2]`; only the two equal pairs do not. A different
+fixed-array element count is a compile-time error. A growable `[T]` may have
+any runtime length, so exact array arms always need a fallback.
 
 ```text
 fn decodeHeader(bytes: [u8]) -> u8? {

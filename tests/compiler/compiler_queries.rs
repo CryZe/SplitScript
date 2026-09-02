@@ -676,7 +676,7 @@ fn alternative_pattern_bindings_have_one_editor_identity() {
     use splitscript::tooling::highlight::SemanticTokenKind;
 
     let source = r#"
-        enum Side { Left(u32), Right(u32) }
+        enum Side { Left(u32), Right(u32), Idle }
         state "game.exe" {}
 
         fn unwrap(side: Side?) -> u32 {

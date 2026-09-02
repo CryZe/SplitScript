@@ -1029,6 +1029,26 @@ remaining work is product hardening and distribution.
   for hover, navigation, highlighting, references, and safe rename expansion;
   constrained patterns require a fallback while binding-only partial patterns
   are irrefutable.
+- [x] Make exhaustiveness and reachability recursive across finite nested
+  constructors. Multiple arms can jointly cover wrapper and enum payloads,
+  struct fields, and fixed-array elements while preserving correlations;
+  missing nested cases produce a concrete witness when one is useful.
+- [ ] Add type-directed completion inside patterns. Offer only constructors
+  legal for the matched type: enum variants, `Some` / `None`, `Ok` / `Err`,
+  `Item` / `End`, booleans, remaining struct fields, fixed-array shapes, and
+  recursive subpattern snippets. Suppress expression-only keywords and generic
+  declarations in pattern position. Keep the candidate model compiler-owned
+  so terminal/editor clients do not duplicate pattern grammar or type logic.
+- [ ] Design and implement explicit range patterns using the language's
+  unambiguous `..<` and `..=` bounds. Decide open-ended forms, binding and
+  alternation precedence, integer/character applicability, unreachable-range
+  diagnostics, and how the usefulness analysis represents intervals without
+  enumerating them before choosing syntax or semantics.
+- [ ] Design and implement array rest patterns for fixed and growable arrays.
+  Cover prefix/suffix forms such as `[first, ..]`, whether a rest value can be
+  bound and with what type, exact-length interactions, code generation, and
+  usefulness/exhaustiveness without making `..` silently mean two different
+  things in one pattern.
 - [x] Add shorthand struct field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename
@@ -1177,10 +1197,11 @@ remaining work is product hardening and distribution.
   debugger inline values together with the eventual debugging strategy. Do
   not prioritize implementation hierarchy, linked editing, document colors,
   or inline completion without a concrete SplitScript use case.
-- [ ] Add completion snippets for lifecycle blocks, match, structs, and common
-  standard-library patterns. Module scope plus state, settings, and tick-rate
-  declarations are grammar-aware already. Keep candidates compiler-owned and
-  the VS Code client thin.
+- [ ] Add completion snippets for lifecycle blocks, struct construction, and
+  common standard-library calls. Module scope plus state, settings, and
+  tick-rate declarations are grammar-aware already; contextual match-pattern
+  completion is tracked at P1 with the rest of pattern matching. Keep
+  candidates compiler-owned and the VS Code client thin.
 - [ ] Continue adding focused labels, notes, and machine-applicable fixes for
   real confusing cases rather than growing a speculative diagnostic catalog.
 - [ ] Introduce file identities, modules, and imports only together with a real

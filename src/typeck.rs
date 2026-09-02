@@ -11,6 +11,7 @@ mod expressions;
 mod finalization;
 mod function_graph;
 mod layout_refinement;
+mod pattern_usefulness;
 mod statements;
 
 use context::{

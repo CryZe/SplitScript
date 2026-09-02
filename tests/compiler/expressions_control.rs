@@ -2213,6 +2213,121 @@ fn wrapper_payload_patterns_are_recursive_and_preserve_exhaustiveness() {
 }
 
 #[test]
+fn recursive_exhaustiveness_combines_arms_without_losing_field_correlations() {
+    splitscript::compile(
+        r#"
+            enum Signal {
+                Flag(bool),
+                Empty,
+            }
+
+            struct Pair {
+                left: bool,
+                right: bool,
+            }
+
+            state "game.exe" {}
+
+            fn optional(value: bool?) -> u8 {
+                return match value {
+                    Some(true) => 1,
+                    Some(false) => 2,
+                    None => 3,
+                }
+            }
+
+            fn enumeration(value: Signal) -> u8 {
+                return match value {
+                    Signal.Flag(true) => 1,
+                    Signal.Flag(false) => 2,
+                    Signal.Empty => 3,
+                }
+            }
+
+            fn structure(value: Pair) -> bool {
+                return match value {
+                    Pair { left: true } => true,
+                    Pair { left: false } => false,
+                }
+            }
+
+            fn array(value: [bool; 2]) -> u8 {
+                return match value {
+                    [false, false] => 0,
+                    [false, true] => 1,
+                    [true, false] => 2,
+                    [true, true] => 3,
+                }
+            }
+        "#,
+    )
+    .expect("nested finite constructors should jointly cover their complete value space");
+
+    let correlated = splitscript::compile(
+        r#"
+            struct Pair { left: bool, right: bool }
+            state "game.exe" {}
+            fn diagonal(value: Pair) -> bool {
+                return match value {
+                    Pair { left: true, right: true } => true,
+                    Pair { left: false, right: false } => false,
+                }
+            }
+        "#,
+    )
+    .expect_err("two diagonal points do not cover a pair of booleans");
+    assert!(
+        correlated
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("non-exhaustive struct match")),
+        "{correlated:#?}"
+    );
+
+    let unreachable = splitscript::compile(
+        r#"
+            struct Pair { left: bool, right: bool }
+            state "game.exe" {}
+            fn covered(value: Pair) -> bool {
+                return match value {
+                    Pair { left: true } => true,
+                    Pair { left: false } => false,
+                    _ => true,
+                }
+            }
+        "#,
+    )
+    .expect_err("several earlier arms can jointly make a later arm unreachable");
+    assert!(
+        unreachable
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("unreachable match arm `_`")),
+        "{unreachable:#?}"
+    );
+}
+
+#[test]
+fn recursive_exhaustiveness_reports_a_nested_missing_witness() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn classify(value: bool?) -> u8 {
+                return match value {
+                    Some(true) => 1,
+                    None => 2,
+                }
+            }
+        "#,
+    )
+    .expect_err("the false optional payload is not covered");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("non-exhaustive match: missing `Some(false)`")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn struct_patterns_validate_fields_types_and_exhaustiveness() {
     let source = r#"
         struct Point {

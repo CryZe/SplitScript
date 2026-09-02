@@ -19,151 +19,9 @@ use crate::{
     types::{EnumTypeId, TypeKind},
 };
 
-use super::{Checker, context::NonePolicy, declarations::Binding};
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum PatternCoverage {
-    Irrefutable,
-    Enum {
-        variant: ResolvedEnumVariantId,
-        name: String,
-        payload: Box<Self>,
-    },
-    Struct {
-        structure: crate::ast::StructId,
-        name: String,
-        fields: Vec<(crate::ast::StructFieldId, String, Self)>,
-    },
-    Bool(bool),
-    Char(char),
-    String(String),
-    Int {
-        value: u64,
-        negative: bool,
-    },
-    FileVersion([u16; 4]),
-    OptionNone,
-    OptionSome(Box<Self>),
-    IteratorEnd,
-    IteratorItem(Box<Self>),
-    ResultSuccess(Box<Self>),
-    ResultError(Box<Self>),
-    Array(Vec<Self>),
-    Alternation(Vec<Self>),
-    Invalid(crate::ast::PatternId),
-}
-
-impl PatternCoverage {
-    fn is_irrefutable(&self) -> bool {
-        matches!(self, Self::Irrefutable)
-    }
-
-    fn covers(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Irrefutable, _) => true,
-            (Self::Alternation(alternatives), _) => {
-                alternatives.iter().any(|pattern| pattern.covers(other))
-            }
-            (_, Self::Alternation(alternatives)) => {
-                alternatives.iter().all(|pattern| self.covers(pattern))
-            }
-            (Self::Array(left), Self::Array(right)) if left.len() == right.len() => left
-                .iter()
-                .zip(right)
-                .all(|(left, right)| left.covers(right)),
-            (
-                Self::Enum {
-                    variant: left_variant,
-                    payload: left_payload,
-                    ..
-                },
-                Self::Enum {
-                    variant: right_variant,
-                    payload: right_payload,
-                    ..
-                },
-            ) if left_variant == right_variant => left_payload.covers(right_payload),
-            (
-                Self::Struct {
-                    structure: left_structure,
-                    fields: left_fields,
-                    ..
-                },
-                Self::Struct {
-                    structure: right_structure,
-                    fields: right_fields,
-                    ..
-                },
-            ) if left_structure == right_structure => {
-                left_fields.iter().all(|(left_field, _, left_pattern)| {
-                    right_fields
-                        .iter()
-                        .find(|(right_field, _, _)| right_field == left_field)
-                        .is_some_and(|(_, _, right_pattern)| left_pattern.covers(right_pattern))
-                })
-            }
-            (Self::OptionSome(left), Self::OptionSome(right))
-            | (Self::IteratorItem(left), Self::IteratorItem(right))
-            | (Self::ResultSuccess(left), Self::ResultSuccess(right))
-            | (Self::ResultError(left), Self::ResultError(right)) => left.covers(right),
-            _ => self == other,
-        }
-    }
-
-    fn display(&self) -> String {
-        match self {
-            Self::Irrefutable => "_".to_owned(),
-            Self::Enum { name, payload, .. } if payload.is_irrefutable() => name.clone(),
-            Self::Enum { name, payload, .. } => format!("{name}({})", payload.display()),
-            Self::Struct { name, fields, .. } => format!(
-                "{name} {{ {} }}",
-                fields
-                    .iter()
-                    .map(|(_, field, pattern)| format!("{field}: {}", pattern.display()))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::Bool(value) => value.to_string(),
-            Self::Char(value) => format!("{value:?}"),
-            Self::String(value) => format!("{value:?}"),
-            Self::Int { value, negative } => {
-                format!("{}{value}", if *negative { "-" } else { "" })
-            }
-            Self::FileVersion(parts) => {
-                format!("v\"{}.{}.{}.{}\"", parts[0], parts[1], parts[2], parts[3])
-            }
-            Self::OptionNone => "None".to_owned(),
-            Self::OptionSome(payload) => format!("Some({})", payload.display()),
-            Self::IteratorEnd => "End".to_owned(),
-            Self::IteratorItem(payload) => format!("Item({})", payload.display()),
-            Self::ResultSuccess(payload) => format!("Ok({})", payload.display()),
-            Self::ResultError(payload) => format!("Err({})", payload.display()),
-            Self::Array(elements) => format!(
-                "[{}]",
-                elements
-                    .iter()
-                    .map(Self::display)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::Alternation(alternatives) => alternatives
-                .iter()
-                .map(Self::display)
-                .collect::<Vec<_>>()
-                .join(" | "),
-            Self::Invalid(_) => "<invalid pattern>".to_owned(),
-        }
-    }
-}
-
-fn patterns_cover(patterns: &[PatternCoverage], target: &PatternCoverage) -> bool {
-    match target {
-        PatternCoverage::Alternation(alternatives) => alternatives
-            .iter()
-            .all(|alternative| patterns_cover(patterns, alternative)),
-        _ => patterns.iter().any(|pattern| pattern.covers(target)),
-    }
-}
+use super::{
+    Checker, context::NonePolicy, declarations::Binding, pattern_usefulness::PatternCoverage,
+};
 
 struct CheckedPattern {
     coverage: PatternCoverage,
@@ -693,16 +551,9 @@ impl Checker {
                             && self.layout_value.is_some()
                 );
                 let mut unguarded_patterns = Vec::<PatternCoverage>::new();
-                let mut has_unguarded_irrefutable = false;
                 let mut result_type = expected;
                 let mut never_arm_type = None;
                 for arm in arms {
-                    if has_unguarded_irrefutable {
-                        self.error(
-                            "unreachable match arm after an irrefutable pattern",
-                            arm.span,
-                        );
-                    }
                     self.scopes.push(HashMap::new());
                     let checked =
                         self.check_pattern(&arm.pattern, arm.pattern_id, value_type, arm.span);
@@ -734,7 +585,11 @@ impl Checker {
                     }
 
                     if arm.guard.is_none() {
-                        if patterns_cover(&unguarded_patterns, &checked.coverage) {
+                        if !self.pattern_is_useful(
+                            &unguarded_patterns,
+                            &checked.coverage,
+                            value_type,
+                        ) {
                             let message = if unguarded_patterns.contains(&checked.coverage) {
                                 format!("duplicate match arm `{}`", checked.coverage.display())
                             } else {
@@ -742,142 +597,65 @@ impl Checker {
                             };
                             self.error(message, arm.span);
                         }
-                        if checked.coverage.is_irrefutable() {
-                            has_unguarded_irrefutable = true;
-                        }
                         unguarded_patterns.push(checked.coverage);
-                    } else if patterns_cover(&unguarded_patterns, &checked.coverage) {
+                    } else if !self.pattern_is_useful(
+                        &unguarded_patterns,
+                        &checked.coverage,
+                        value_type,
+                    ) {
                         self.error("unreachable guarded match arm", arm.span);
                     }
                 }
 
-                if !has_unguarded_irrefutable {
-                    match self.shallow_type(value_type) {
-                        ty if ty == self.core_type(crate::stdlib::CoreTypeId::Bool) => {
-                            for value in [false, true] {
-                                if !patterns_cover(
-                                    &unguarded_patterns,
-                                    &PatternCoverage::Bool(value),
-                                ) {
-                                    self.error(
-                                        format!("non-exhaustive match: missing `{value}`"),
-                                        expr.span,
-                                    );
-                                }
-                            }
-                        }
-                        Type::Option(_) => {
-                            for (pattern, display) in [
-                                (PatternCoverage::OptionNone, "None"),
-                                (
-                                    PatternCoverage::OptionSome(Box::new(
-                                        PatternCoverage::Irrefutable,
-                                    )),
-                                    "Some(value)",
-                                ),
-                            ] {
-                                if !patterns_cover(&unguarded_patterns, &pattern) {
-                                    self.error(
-                                        format!("non-exhaustive match: missing `{display}`"),
-                                        expr.span,
-                                    );
-                                }
-                            }
-                        }
-                        Type::Result(_) => {
-                            for (pattern, display) in [
-                                (
-                                    PatternCoverage::ResultSuccess(Box::new(
-                                        PatternCoverage::Irrefutable,
-                                    )),
-                                    "Ok(value)",
-                                ),
-                                (
-                                    PatternCoverage::ResultError(Box::new(
-                                        PatternCoverage::Irrefutable,
-                                    )),
-                                    "Err(error)",
-                                ),
-                            ] {
-                                if !patterns_cover(&unguarded_patterns, &pattern) {
-                                    self.error(
-                                        format!("non-exhaustive match: missing `{display}`"),
-                                        expr.span,
-                                    );
-                                }
-                            }
-                        }
-                        Type::Application(step)
-                            if self.inference.application_constructor(step)
-                                == crate::stdlib::StdlibTypeConstructorId::IteratorStep =>
-                        {
-                            for (pattern, display) in [
-                                (
-                                    PatternCoverage::IteratorItem(Box::new(
-                                        PatternCoverage::Irrefutable,
-                                    )),
-                                    "Item(value)",
-                                ),
-                                (PatternCoverage::IteratorEnd, "End"),
-                            ] {
-                                if !patterns_cover(&unguarded_patterns, &pattern) {
-                                    self.error(
-                                        format!("non-exhaustive match: missing `{display}`"),
-                                        expr.span,
-                                    );
-                                }
-                            }
-                        }
-                        ty if self.inference.is_integer(ty) => {
-                            self.error("non-exhaustive integer match: add a `_` arm", expr.span)
-                        }
-                        ty if ty == self.core_type(crate::stdlib::CoreTypeId::Char) => {
-                            self.error("non-exhaustive character match: add a `_` arm", expr.span)
-                        }
-                        ty if ty == self.standard_type(StdlibTypeId::String) => {
-                            self.error("non-exhaustive string match: add a `_` arm", expr.span)
-                        }
-                        ty if ty == self.standard_type(StdlibTypeId::FileVersion) => self.error(
-                            "non-exhaustive file-version match: add a `_` arm",
-                            expr.span,
-                        ),
-                        Type::Array(_) => {
-                            self.error("non-exhaustive array match: add a `_` arm", expr.span)
-                        }
-                        ty @ Type::Known(_) if self.source_struct_id(ty).is_some() => {
-                            self.error("non-exhaustive struct match: add a `_` arm", expr.span)
-                        }
-                        ty @ Type::Known(_) => {
-                            if let Some((_, declaration)) = self.enum_info_for_type(ty) {
-                                for variant in &declaration.variants {
-                                    let coverage = PatternCoverage::Enum {
-                                        variant: variant.id,
-                                        name: variant.name.clone(),
-                                        payload: Box::new(PatternCoverage::Irrefutable),
-                                    };
-                                    if !patterns_cover(&unguarded_patterns, &coverage) {
-                                        self.error(
-                                            format!(
-                                                "non-exhaustive match: missing `{}`",
-                                                variant.name
-                                            ),
-                                            expr.span,
-                                        );
-                                    }
-                                }
-                            } else {
-                                let ty = self.type_name(ty);
-                                self.error(format!("type `{ty}` cannot be matched"), value.span);
-                            }
-                        }
-                        Type::Variable(_) => self.error(
-                            "match patterns do not determine the matched value's type",
-                            value.span,
-                        ),
-                        ty => {
-                            let ty = self.type_name(ty);
-                            self.error(format!("type `{ty}` cannot be matched"), value.span);
-                        }
+                let matched_type = self.shallow_type(value_type);
+                let is_iterator_step = matches!(matched_type, Type::Application(step)
+                    if self.inference.application_constructor(step)
+                        == crate::stdlib::StdlibTypeConstructorId::IteratorStep);
+                let is_source_struct = self.source_struct_id(matched_type).is_some();
+                let is_enum = self.enum_info_for_type(matched_type).is_some();
+                let missing_patterns = self.missing_patterns(&unguarded_patterns, matched_type);
+                let is_matchable = matched_type == self.core_type(crate::stdlib::CoreTypeId::Bool)
+                    || matched_type == self.core_type(crate::stdlib::CoreTypeId::Char)
+                    || matched_type == self.standard_type(StdlibTypeId::String)
+                    || matched_type == self.standard_type(StdlibTypeId::FileVersion)
+                    || self.inference.is_integer(matched_type)
+                    || matches!(
+                        matched_type,
+                        Type::Option(_) | Type::Result(_) | Type::Array(_)
+                    )
+                    || is_iterator_step
+                    || is_source_struct
+                    || is_enum
+                    || self.is_never_type(matched_type);
+                if missing_patterns.is_empty() {
+                    // A catch-all pattern is valid even when matching itself
+                    // imposes no concrete type constraint on the value.
+                } else if matches!(matched_type, Type::Variable(_)) {
+                    self.error(
+                        "match patterns do not determine the matched value's type",
+                        value.span,
+                    );
+                } else if !is_matchable {
+                    let ty = self.type_name(matched_type);
+                    self.error(format!("type `{ty}` cannot be matched"), value.span);
+                } else {
+                    for missing in missing_patterns {
+                        let message = if self.inference.is_integer(matched_type) {
+                            "non-exhaustive integer match: add a `_` arm".to_owned()
+                        } else if matched_type == self.core_type(crate::stdlib::CoreTypeId::Char) {
+                            "non-exhaustive character match: add a `_` arm".to_owned()
+                        } else if matched_type == self.standard_type(StdlibTypeId::String) {
+                            "non-exhaustive string match: add a `_` arm".to_owned()
+                        } else if matched_type == self.standard_type(StdlibTypeId::FileVersion) {
+                            "non-exhaustive file-version match: add a `_` arm".to_owned()
+                        } else if matches!(matched_type, Type::Array(_)) {
+                            "non-exhaustive array match: add a `_` arm".to_owned()
+                        } else if is_source_struct {
+                            "non-exhaustive struct match: add a `_` arm".to_owned()
+                        } else {
+                            format!("non-exhaustive match: missing `{}`", missing.display())
+                        };
+                        self.error(message, expr.span);
                     }
                 }
                 let Some(result_type) = result_type.or(never_arm_type) else {
@@ -1755,19 +1533,11 @@ impl Checker {
             );
         }
         let mut coverage = Vec::with_capacity(elements.len());
-        let mut all_irrefutable = true;
         for element in elements {
             let checked = self.check_pattern(&element.kind, element.id, element_type, element.span);
-            all_irrefutable &= checked.coverage.is_irrefutable();
             coverage.push(checked.coverage);
         }
-        CheckedPattern::new(
-            if fixed_length == Some(elements.len() as u32) && all_irrefutable {
-                PatternCoverage::Irrefutable
-            } else {
-                PatternCoverage::Array(coverage)
-            },
-        )
+        CheckedPattern::new(PatternCoverage::Array(coverage))
     }
 
     fn check_alternation_pattern(
@@ -1793,10 +1563,7 @@ impl Checker {
                 value_type,
                 alternative.span,
             );
-            if coverage
-                .iter()
-                .any(|previous: &PatternCoverage| previous.covers(&checked.coverage))
-            {
+            if !self.pattern_is_useful(&coverage, &checked.coverage, value_type) {
                 self.error(
                     format!("unreachable alternative `{}`", checked.coverage.display()),
                     alternative.span,
@@ -1878,7 +1645,6 @@ impl Checker {
                 let mut seen = HashSet::new();
                 let mut resolved_fields = Vec::with_capacity(fields.len());
                 let mut coverage = Vec::with_capacity(fields.len());
-                let mut all_irrefutable = true;
                 for pattern_field in fields {
                     if !seen.insert(pattern_field.name.clone()) {
                         self.error(
@@ -1907,7 +1673,6 @@ impl Checker {
                         self.syntax_type(field.ty),
                         pattern_field.pattern.span,
                     );
-                    all_irrefutable &= checked.coverage.is_irrefutable();
                     resolved_fields.push(field.id);
                     coverage.push((field.id, field.name.clone(), checked.coverage));
                 }
@@ -1917,14 +1682,10 @@ impl Checker {
                 // coverage so duplicate and unreachable-arm diagnostics do
                 // not depend on the order chosen in source.
                 coverage.sort_by_key(|(field, _, _)| *field);
-                CheckedPattern::new(if all_irrefutable {
-                    PatternCoverage::Irrefutable
-                } else {
-                    PatternCoverage::Struct {
-                        structure: declaration.id,
-                        name: declaration.name,
-                        fields: coverage,
-                    }
+                CheckedPattern::new(PatternCoverage::Struct {
+                    structure: declaration.id,
+                    name: declaration.name,
+                    fields: coverage,
                 })
             }
             MatchPattern::Enum {

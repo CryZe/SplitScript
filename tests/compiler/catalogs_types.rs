@@ -701,7 +701,7 @@ fn unary_syntax_resolves_through_catalog_declared_methods() {
             .iter()
             .filter(|item| **item == StdlibItemId::SignedNegate)
             .count(),
-        2
+        1
     );
     assert_eq!(
         resolved_items

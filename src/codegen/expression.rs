@@ -840,6 +840,34 @@ fn compile_projected_pattern(
 ) -> Vec<MatchPatternBinding> {
     let mut bindings = Vec::new();
     match pattern {
+        wasm_ir::LoweredPattern::Struct { structure, fields } => {
+            let declaration = context
+                .structs
+                .iter()
+                .find(|declaration| declaration.id == *structure)
+                .expect("checked struct patterns have declarations");
+            function.instruction(&Instruction::I32Const(1));
+            for (field, pattern) in fields {
+                let (index, declared) = declaration
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, declared)| declared.id == *field)
+                    .expect("checked struct pattern fields belong to their struct");
+                let field_value = value.field(
+                    value.ty,
+                    index as u32,
+                    struct_field_type(declared.id, context.semantics),
+                );
+                bindings.extend(compile_projected_pattern(
+                    function,
+                    pattern,
+                    &field_value,
+                    context,
+                ));
+                function.instruction(&Instruction::I32And);
+            }
+        }
         wasm_ir::LoweredPattern::Enum {
             enumeration,
             variant,

@@ -690,6 +690,11 @@ impl<'ast> Visitor<'ast> for EnumResolver<'_> {
 impl EnumResolver<'_> {
     fn resolve_pattern(&mut self, pattern: &MatchPattern, id: crate::ast::PatternId) {
         match pattern {
+            MatchPattern::Struct { fields, .. } => {
+                for field in fields {
+                    self.resolve_pattern(&field.pattern.kind, field.pattern.id);
+                }
+            }
             MatchPattern::Enum { enumeration, .. } => {
                 if let Some(enumeration) = self.resolve_reference(enumeration, false) {
                     self.resolutions.pattern_enums.insert(id, enumeration);

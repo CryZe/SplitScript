@@ -1519,7 +1519,7 @@ fn struct_shorthand_tooling_uses_operation_specific_identity() {
     assert!(
         hover
             .markdown
-            .contains("**Supplied by the shorthand value**"),
+            .contains("**Value represented by the shorthand**"),
         "{}",
         hover.markdown
     );
@@ -1545,6 +1545,84 @@ fn struct_shorthand_tooling_uses_operation_specific_identity() {
             .edits
             .iter()
             .any(|edit| { edit.span.start == shorthand && edit.replacement == "coordinate: x" })
+    );
+}
+
+#[test]
+fn struct_pattern_tooling_preserves_field_and_binding_identities() {
+    use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
+
+    let source = r#"
+        struct Point { x: u32, y: u32 }
+        state "game.exe" {}
+        fn inspect(point: Point) -> u32 {
+            return match point {
+                Point { x, y: 4 } => x,
+                _ => 0,
+            }
+        }
+    "#;
+    let pattern = source.rfind("Point { x, y: 4 }").unwrap();
+    let shorthand = pattern + "Point { ".len();
+    let explicit_field = pattern + "Point { x, ".len();
+    let field_declaration = source.find("x: u32").unwrap();
+
+    let mut database = CompilerDatabase::new(source);
+    assert!(matches!(
+        database.definition_at(pattern).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if matches!(definition.id, SourceDefinitionId::Struct(_))
+    ));
+    assert!(matches!(
+        database.definition_at(shorthand).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if matches!(definition.id, SourceDefinitionId::StructField(_))
+    ));
+    assert!(matches!(
+        database.definition_at(explicit_field).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if matches!(definition.id, SourceDefinitionId::StructField(_))
+    ));
+
+    let hover = database
+        .hover(shorthand)
+        .unwrap()
+        .expect("a shorthand pattern field should expose both identities");
+    assert!(
+        hover.markdown.contains("Point.x: u32"),
+        "{}",
+        hover.markdown
+    );
+    assert!(
+        hover
+            .markdown
+            .contains("**Value represented by the shorthand**"),
+        "{}",
+        hover.markdown
+    );
+    assert!(hover.markdown.contains("x: u32"), "{}", hover.markdown);
+
+    let rename_binding = database
+        .rename_at(shorthand, "coordinate")
+        .expect("renaming at a pattern shorthand should select its binding");
+    assert!(
+        rename_binding
+            .edits
+            .iter()
+            .any(|edit| { edit.span.start == shorthand && edit.replacement == "x: coordinate" }),
+        "{rename_binding:#?}"
+    );
+
+    let mut database = CompilerDatabase::new(source);
+    let rename_field = database
+        .rename_at(field_declaration, "horizontal")
+        .expect("renaming a field should expand pattern shorthand safely");
+    assert!(
+        rename_field
+            .edits
+            .iter()
+            .any(|edit| { edit.span.start == shorthand && edit.replacement == "horizontal: x" }),
+        "{rename_field:#?}"
     );
 }
 

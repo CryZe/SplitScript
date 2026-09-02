@@ -1144,6 +1144,13 @@ safe quick fix. The two names still have independent identities: renaming the
 struct field expands the shorthand to `horizontal: x`, while renaming the
 local expands it to `x: horizontal`.
 
+The same field syntax destructures structs in [`match`](#pattern-matching).
+`Position { x, y: 0 }` binds `x`, requires `y` to equal zero, and ignores every
+field not named by the pattern. An explicit field accepts any recursive
+pattern. A shorthand field represents both the declared struct field and the
+new arm binding; hover shows both identities, navigation prefers the struct
+field, and rename expands the shorthand when the two names diverge.
+
 Structs may contain other structs and strings, pass through functions, and
 remain live across `await`. Immutability keeps
 shared metadata bindings predictable; a new value is constructed when a
@@ -1242,6 +1249,32 @@ fn classify(value: String?) -> String {
 Because `Some("Inf")` matches only that payload, it does not make the `Some`
 case exhaustive. Use `Some(_)` or a payload binding to cover every present
 value.
+
+Struct patterns name only the fields that matter. Omitted fields are ignored;
+there is no separate `..` marker. A bare field is a binding shorthand, while an
+explicit `field: pattern` can contain a literal, wildcard, nested struct,
+wrapper, array, enum, or alternative:
+
+```text
+struct Point {
+    x: i32,
+    y: i32,
+    label: String,
+}
+
+fn horizontal(point: Point) -> i32 {
+    return match point {
+        Point { label: "start", x } => x,
+        Point { x: 0 | 1 } => 0,
+        _ => -1,
+    }
+}
+```
+
+A struct pattern containing only bindings and wildcards is irrefutable even if
+it omits fields, so `Point { x } => x` can be the sole arm. A literal or other
+condition needs a later fallback arm. Unknown and duplicate fields are errors,
+and every nested pattern is checked against the declared field type.
 
 String matches are useful for selecting exact host identities while keeping
 the dispatch exhaustive:

@@ -848,6 +848,37 @@ fn pattern_alternatives_share_bindings_and_work_recursively() {
 }
 
 #[test]
+fn struct_patterns_match_selected_fields_and_bind_recursively() {
+    let source = r#"
+        struct Point {
+            x: u32,
+            y: u32,
+            label: String,
+        }
+
+        state "game.exe" {}
+
+        setup {
+            let point = Point { x: 3, y: 7, label: "ready" }
+            print(match point {
+                Point { x: 3, y } => y,
+                _ => 0,
+            })
+            print(match Some(point) {
+                Some(Point { label: "ready", x }) => x,
+                _ => 0,
+            })
+            print(match point {
+                Point { x, y } => x + y,
+            })
+        }
+    "#;
+
+    let (store, _) = execute_with_mock_host(source);
+    assert_eq!(store.data().messages, ["7", "3", "10"]);
+}
+
+#[test]
 fn closed_pure_global_initializers_execute_before_setup() {
     let source = r#"
         fn increment(value: u32) -> u32 {

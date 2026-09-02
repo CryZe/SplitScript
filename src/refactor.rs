@@ -828,6 +828,7 @@ impl<'ast> Visitor<'ast> for ExpressionFacts<'_> {
             | MatchPattern::None
             | MatchPattern::IteratorEnd
             | MatchPattern::Wildcard
+            | MatchPattern::Struct { .. }
             | MatchPattern::Enum { .. }
             | MatchPattern::OptionSome(_)
             | MatchPattern::IteratorItem(_)

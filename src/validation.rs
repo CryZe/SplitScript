@@ -1447,6 +1447,7 @@ impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
             | ast::MatchPattern::IteratorItem(_)
             | ast::MatchPattern::ResultSuccess(_)
             | ast::MatchPattern::ResultError(_)
+            | ast::MatchPattern::Struct { .. }
             | ast::MatchPattern::Enum { .. }
             | ast::MatchPattern::Wildcard
             | ast::MatchPattern::Array(_)

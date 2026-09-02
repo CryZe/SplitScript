@@ -947,6 +947,11 @@ const MATCH_EXAMPLES: &[Example] = &[
         "return match bytes {\n    [0x53, value, 0] => value,\n    _ => 0,\n}",
         "state \"game.exe\" {}\nfn decode(bytes: [u8]) -> u8 {\n    return match bytes {\n        [0x53, value, 0] => value,\n        _ => 0,\n    }\n}",
     ),
+    Example::checked(
+        "Match selected struct fields",
+        "return match point {\n    Point { label: \"start\", x } => x,\n    _ => 0,\n}",
+        "struct Point {\n    x: i32,\n    label: String,\n}\nstate \"game.exe\" {}\nfn horizontal(point: Point) -> i32 {\n    return match point {\n        Point { label: \"start\", x } => x,\n        _ => 0,\n    }\n}",
+    ),
 ];
 focused_example!(
     RETURN_EXAMPLE,
@@ -1292,7 +1297,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "struct Name { field: Type }",
         "Declares an immutable nominal structure.",
-        "Structs provide named fields, structural equality when their fields support it, and fixed process-memory layouts when every field is readable. In a literal, `Name { field }` is shorthand for `Name { field: field }`; an explicit repeated initializer receives a safe shorthand fix, and renaming either identity expands the shorthand when needed.",
+        "Structs provide named fields, structural equality when their fields support it, and fixed process-memory layouts when every field is readable. In a literal, `Name { field }` is shorthand for `Name { field: field }`; an explicit repeated initializer receives a safe shorthand fix, and renaming either identity expands the shorthand when needed. In [`match`], `Name { field, other: pattern }` binds `field`, recursively tests `other`, and ignores omitted fields without requiring a `..` marker.",
         RECORD_EXAMPLE
     ),
     language_item!(
@@ -1625,7 +1630,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "match value { pattern => expression }",
         "Exhaustively matches a value.",
-        "[`match`] supports enum payloads, optional [`None`]/[`Some`]`(value)` patterns, iterator [`End`]/[`Item`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, exact recursive array patterns, string, character, integer, boolean, and file-version literals, guards, a wildcard, and recursive `left | right` alternatives. Alternatives are tried left to right and contribute their union to exhaustiveness. Every alternative in one arm must bind exactly the same names with compatible types; those occurrences form one logical binding for the guard and body. Array elements can bind values or contain any other pattern. A [`[T; N]`] pattern must have exactly `N` elements; a growable [`[T]`] pattern tests its length at runtime. String patterns compare contents, not WebAssembly GC identities. Enum and wrapper matches must cover every state; open-ended literal domains and growable arrays require `_`; guarded arms do not establish coverage.",
+        "[`match`] supports enum payloads, partial field-based [`struct`] patterns, optional [`None`]/[`Some`]`(value)` patterns, iterator [`End`]/[`Item`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, exact recursive array patterns, string, character, integer, boolean, and file-version literals, guards, a wildcard, and recursive `left | right` alternatives. A struct pattern ignores omitted fields; `Name { field }` binds that field, while `Name { field: pattern }` recursively tests it. Alternatives are tried left to right and contribute their union to exhaustiveness. Every alternative in one arm must bind exactly the same names with compatible types; those occurrences form one logical binding for the guard and body. Array elements can bind values or contain any other pattern. A [`[T; N]`] pattern must have exactly `N` elements; a growable [`[T]`] pattern tests its length at runtime. String patterns compare contents, not WebAssembly GC identities. Enum and wrapper matches must cover every state; constrained struct patterns, open-ended literal domains, and growable arrays require `_`; guarded arms do not establish coverage.",
         MATCH_EXAMPLES
     ),
     language_item!(

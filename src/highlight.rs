@@ -850,6 +850,19 @@ impl HighlightCollector<'_> {
 
     fn mark_pattern(&mut self, pattern: &MatchPattern, span: Span) {
         match pattern {
+            MatchPattern::Struct {
+                name_span, fields, ..
+            } => {
+                self.insert(*name_span, SemanticTokenKind::Struct, 0);
+                for field in fields {
+                    self.mark_pattern(&field.pattern.kind, field.pattern.span);
+                    self.insert(
+                        field.name_span,
+                        SemanticTokenKind::Property,
+                        MODIFIER_READONLY,
+                    );
+                }
+            }
             MatchPattern::Enum {
                 enumeration,
                 variant,
@@ -2258,6 +2271,25 @@ fn point(value: u32) -> Point {
             .iter()
             .find(|highlight| highlight.span.start == shorthand)
             .expect("the shorthand field should have a semantic token");
+        assert_eq!(highlight.kind, SemanticTokenKind::Property);
+        assert_eq!(highlight.modifiers, MODIFIER_READONLY);
+    }
+
+    #[test]
+    fn struct_pattern_shorthand_is_highlighted_as_the_matched_field() {
+        let source = r#"struct Point { x: u32 }
+state "game.exe" {}
+fn inspect(point: Point) -> u32 {
+    return match point { Point { x } => x }
+}"#;
+        let shorthand = source.rfind("{ x }").unwrap() + 2;
+        let mut database = CompilerDatabase::new(source);
+        let highlights = database.semantic_highlights().unwrap();
+        let highlight = highlights
+            .highlights()
+            .iter()
+            .find(|highlight| highlight.span.start == shorthand)
+            .expect("the shorthand pattern field should have a semantic token");
         assert_eq!(highlight.kind, SemanticTokenKind::Property);
         assert_eq!(highlight.modifiers, MODIFIER_READONLY);
     }

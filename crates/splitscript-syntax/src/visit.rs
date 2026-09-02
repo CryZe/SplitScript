@@ -498,6 +498,11 @@ pub fn walk_pattern<'ast, V: Visitor<'ast>>(visitor: &mut V, pattern: &'ast Matc
         visitor.visit_type_ref(suffix);
     }
     match pattern {
+        MatchPattern::Struct { fields, .. } => {
+            for field in fields {
+                visitor.visit_pattern(&field.pattern.kind);
+            }
+        }
         MatchPattern::Enum {
             payload: Some(payload),
             ..
@@ -975,6 +980,11 @@ pub fn walk_pattern_mut<F: Folder>(folder: &mut F, pattern: &mut MatchPattern) {
         folder.fold_type_ref(suffix);
     }
     match pattern {
+        MatchPattern::Struct { fields, .. } => {
+            for field in fields {
+                folder.fold_pattern(&mut field.pattern.kind);
+            }
+        }
         MatchPattern::Enum {
             payload: Some(payload),
             ..

@@ -1023,6 +1023,12 @@ remaining work is product hardening and distribution.
   binding-only slots. `Some("Inf") | Some("inf")`, `Ok([first, second])`, and
   nested enum payload patterns now share the same inference, exhaustiveness,
   tooling, and code-generation path as array patterns and bindings.
+- [x] Add partial field-based struct patterns. `Point { x, y: 0 }` binds `x`,
+  recursively tests `y`, and ignores omitted fields without a `..` marker.
+  Shorthand fields retain both the destination-field and arm-binding identities
+  for hover, navigation, highlighting, references, and safe rename expansion;
+  constrained patterns require a fallback while binding-only partial patterns
+  are irrefutable.
 - [x] Add shorthand struct field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename

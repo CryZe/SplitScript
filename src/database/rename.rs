@@ -4,7 +4,7 @@ use std::{collections::HashSet, fmt, sync::Arc};
 
 use crate::{
     Diagnostic,
-    ast::{Expr, ExprKind, Span},
+    ast::{Expr, ExprKind, MatchPattern, PatternId, Span},
     diagnostic::TextEdit,
     language::LanguageCatalog,
     lexer::TokenKind,
@@ -454,6 +454,53 @@ impl<'ast> Visitor<'ast> for StructShorthandCollector<'_> {
             }
         }
         visit::walk_expr(self, expression);
+    }
+
+    fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
+        self.collect_pattern(&arm.pattern, arm.pattern_id);
+        if let Some(guard) = &arm.guard {
+            self.visit_expr(guard);
+        }
+        self.visit_expr(&arm.value);
+    }
+}
+
+impl StructShorthandCollector<'_> {
+    fn collect_pattern(&mut self, pattern: &MatchPattern, id: PatternId) {
+        match pattern {
+            MatchPattern::Struct { fields, .. } => {
+                let resolved = self.semantics.struct_pattern_fields(id).unwrap_or_default();
+                for (field, resolved_field) in fields.iter().zip(resolved) {
+                    if field.shorthand
+                        && let MatchPattern::Binding(binding) = &field.pattern.kind
+                    {
+                        self.references.push(StructShorthandReference {
+                            span: field.name_span,
+                            name: field.name.clone(),
+                            field: SourceDefinitionId::StructField(*resolved_field),
+                            value: SourceDefinitionId::Value(binding.id),
+                        });
+                    }
+                    self.collect_pattern(&field.pattern.kind, field.pattern.id);
+                }
+            }
+            MatchPattern::Enum {
+                payload: Some(payload),
+                ..
+            }
+            | MatchPattern::OptionSome(payload)
+            | MatchPattern::IteratorItem(payload)
+            | MatchPattern::ResultSuccess(payload)
+            | MatchPattern::ResultError(payload) => {
+                self.collect_pattern(&payload.kind, payload.id);
+            }
+            MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
+                for element in elements {
+                    self.collect_pattern(&element.kind, element.id);
+                }
+            }
+            _ => {}
+        }
     }
 }
 

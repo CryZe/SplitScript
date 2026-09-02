@@ -373,7 +373,7 @@ pub(crate) fn hover(
             if let Some(value) = shorthand_value.as_ref()
                 && let Some(value_markdown) = render_source_hover(value, &context)
             {
-                markdown.push_str("\n\n**Supplied by the shorthand value**\n\n");
+                markdown.push_str("\n\n**Value represented by the shorthand**\n\n");
                 markdown.push_str(&value_markdown);
             }
             (markdown, None)

@@ -1684,8 +1684,27 @@ pub struct PatternNode {
     pub span: Span,
 }
 
+/// One named field inspected by a struct pattern.
+///
+/// A shorthand field such as `Point { x }` is represented by a binding
+/// pattern whose declaration span is the field name itself. Keeping the
+/// structural field and value binding distinct lets editor features expose
+/// both identities and expand shorthand safely during rename.
+#[derive(Debug, Clone)]
+pub struct StructPatternField {
+    pub name: String,
+    pub name_span: Span,
+    pub pattern: PatternNode,
+    pub shorthand: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum MatchPattern {
+    Struct {
+        name: String,
+        name_span: Span,
+        fields: Vec<StructPatternField>,
+    },
     Enum {
         enumeration: EnumReference,
         variant: String,
@@ -1715,6 +1734,11 @@ impl MatchPattern {
     pub fn visit_bindings(&self, visitor: &mut impl FnMut(&PatternBinding)) {
         match self {
             Self::Binding(binding) => visitor(binding),
+            Self::Struct { fields, .. } => {
+                for field in fields {
+                    field.pattern.kind.visit_bindings(visitor);
+                }
+            }
             Self::Enum {
                 payload: Some(payload),
                 ..
@@ -1735,6 +1759,11 @@ impl MatchPattern {
     pub fn visit_bindings_mut(&mut self, visitor: &mut impl FnMut(&mut PatternBinding)) {
         match self {
             Self::Binding(binding) => visitor(binding),
+            Self::Struct { fields, .. } => {
+                for field in fields {
+                    field.pattern.kind.visit_bindings_mut(visitor);
+                }
+            }
             Self::Enum {
                 payload: Some(payload),
                 ..

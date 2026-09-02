@@ -970,6 +970,25 @@ impl DefinitionCollector<'_> {
         span: Span,
     ) {
         match pattern {
+            MatchPattern::Struct {
+                name_span, fields, ..
+            } => {
+                if let Some(structure) = self.semantics.struct_pattern(pattern_id) {
+                    self.add_reference(SourceDefinitionId::Struct(structure), *name_span);
+                }
+                let resolved = self
+                    .semantics
+                    .struct_pattern_fields(pattern_id)
+                    .unwrap_or_default();
+                for (field, resolved) in fields.iter().zip(resolved) {
+                    self.add_reference(SourceDefinitionId::StructField(*resolved), field.name_span);
+                    self.add_pattern_references(
+                        &field.pattern.kind,
+                        field.pattern.id,
+                        field.pattern.span,
+                    );
+                }
+            }
             MatchPattern::Enum { .. } => {
                 if let Some(ResolvedEnumVariantId::Source(variant)) =
                     self.semantics.pattern_variant(pattern_id)

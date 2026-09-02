@@ -279,7 +279,17 @@ pub struct TypedPatternNode {
 }
 
 #[derive(Debug, Clone)]
+pub struct TypedStructPatternField {
+    pub field: crate::ast::StructFieldId,
+    pub pattern: TypedPatternNode,
+}
+
+#[derive(Debug, Clone)]
 pub enum TypedPattern {
+    Struct {
+        structure: crate::ast::StructId,
+        fields: Vec<TypedStructPatternField>,
+    },
     Enum {
         enumeration: EnumTypeId,
         variant: String,
@@ -940,10 +950,28 @@ impl TypedBodyBuilder<'_> {
                 span,
             },
         );
-        if let MatchPattern::Array(elements) | MatchPattern::Alternation(elements) = pattern {
-            for element in elements {
-                self.insert_pattern(&element.kind, element.id, element.span);
+        match pattern {
+            MatchPattern::Struct { fields, .. } => {
+                for field in fields {
+                    self.insert_pattern(&field.pattern.kind, field.pattern.id, field.pattern.span);
+                }
             }
+            MatchPattern::Enum {
+                payload: Some(payload),
+                ..
+            }
+            | MatchPattern::OptionSome(payload)
+            | MatchPattern::IteratorItem(payload)
+            | MatchPattern::ResultSuccess(payload)
+            | MatchPattern::ResultError(payload) => {
+                self.insert_pattern(&payload.kind, payload.id, payload.span);
+            }
+            MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
+                for element in elements {
+                    self.insert_pattern(&element.kind, element.id, element.span);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -1363,6 +1391,30 @@ fn lower_pattern(
     standard_library: &StandardLibrary,
 ) -> TypedPattern {
     match pattern {
+        MatchPattern::Struct { fields, .. } => {
+            let structure = semantics
+                .struct_pattern(id)
+                .expect("typed struct patterns have resolved structures");
+            let resolved_fields = semantics
+                .struct_pattern_fields(id)
+                .expect("typed struct patterns have resolved fields");
+            TypedPattern::Struct {
+                structure,
+                fields: fields
+                    .iter()
+                    .zip(resolved_fields)
+                    .map(|(field, resolved)| TypedStructPatternField {
+                        field: *resolved,
+                        pattern: lower_pattern_node(
+                            &field.pattern,
+                            semantics,
+                            syntax,
+                            standard_library,
+                        ),
+                    })
+                    .collect(),
+            }
+        }
         MatchPattern::Enum {
             variant, payload, ..
         } => TypedPattern::Enum {

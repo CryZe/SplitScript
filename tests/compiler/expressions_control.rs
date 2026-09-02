@@ -2178,6 +2178,101 @@ fn wrapper_payload_patterns_are_recursive_and_preserve_exhaustiveness() {
 }
 
 #[test]
+fn struct_patterns_validate_fields_types_and_exhaustiveness() {
+    let source = r#"
+        struct Point {
+            x: u32,
+            y: u32,
+        }
+
+        state "game.exe" {}
+
+        fn sum(point: Point) -> u32 {
+            return match point {
+                Point { x, y } => x + y,
+            }
+        }
+
+        fn classify(point: Point) -> bool {
+            return match point {
+                Point { x: 0 } => true,
+                _ => false,
+            }
+        }
+    "#;
+    splitscript::compile(source)
+        .expect("partial struct patterns and shorthand bindings should compile");
+
+    let unknown = splitscript::compile(
+        r#"
+            struct Point { x: u32 }
+            state "game.exe" {}
+            fn inspect(point: Point) -> bool {
+                return match point { Point { y: _ } => true, _ => false }
+            }
+        "#,
+    )
+    .expect_err("unknown struct pattern fields should be rejected");
+    assert!(
+        unknown
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("has no field `y`")),
+        "{unknown:#?}"
+    );
+
+    let duplicate = splitscript::compile(
+        r#"
+            struct Point { x: u32 }
+            state "game.exe" {}
+            fn inspect(point: Point) -> bool {
+                return match point { Point { x: _, x: _ } => true, _ => false }
+            }
+        "#,
+    )
+    .expect_err("duplicate struct pattern fields should be rejected");
+    assert!(
+        duplicate.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("duplicate struct pattern field `x`")),
+        "{duplicate:#?}"
+    );
+
+    let wrong_type = splitscript::compile(
+        r#"
+            struct Point { x: u32 }
+            state "game.exe" {}
+            fn inspect(point: Point) -> bool {
+                return match point { Point { x: "zero" } => true, _ => false }
+            }
+        "#,
+    )
+    .expect_err("field patterns should be checked against their field type");
+    assert!(
+        wrong_type.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("types do not match: `u32` and `String`")),
+        "{wrong_type:#?}"
+    );
+
+    let non_exhaustive = splitscript::compile(
+        r#"
+            struct Point { x: u32 }
+            state "game.exe" {}
+            fn inspect(point: Point) -> bool {
+                return match point { Point { x: 0 } => true }
+            }
+        "#,
+    )
+    .expect_err("a constrained struct pattern does not cover every value");
+    assert!(
+        non_exhaustive
+            .iter()
+            .any(|diagnostic| diagnostic.message == "non-exhaustive struct match: add a `_` arm"),
+        "{non_exhaustive:#?}"
+    );
+}
+
+#[test]
 fn break_and_continue_require_loops() {
     for (keyword, expected) in [
         ("break", "`break` is only available inside a loop"),

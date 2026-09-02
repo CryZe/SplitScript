@@ -330,6 +330,10 @@ pub struct MatchArm {
 
 #[derive(Debug, Clone)]
 pub enum LoweredPattern {
+    Struct {
+        structure: crate::ast::StructId,
+        fields: Vec<(crate::ast::StructFieldId, LoweredPattern)>,
+    },
     Enum {
         enumeration: EnumTypeId,
         variant: ResolvedEnumVariantId,
@@ -368,6 +372,11 @@ impl LoweredPattern {
     pub fn visit_bindings(&self, visitor: &mut impl FnMut(ValueId)) {
         match self {
             Self::Binding(binding) => visitor(*binding),
+            Self::Struct { fields, .. } => {
+                for (_, pattern) in fields {
+                    pattern.visit_bindings(visitor);
+                }
+            }
             Self::Enum {
                 payload: Some(payload),
                 ..
@@ -387,6 +396,7 @@ impl LoweredPattern {
 
     pub fn contains_string(&self) -> bool {
         matches!(self, Self::String(_))
+            || matches!(self, Self::Struct { fields, .. } if fields.iter().any(|(_, pattern)| pattern.contains_string()))
             || matches!(self, Self::Enum { payload: Some(payload), .. } if payload.contains_string())
             || matches!(self, Self::OptionSome { payload, .. } | Self::IteratorItem { payload, .. } | Self::ResultSuccess { payload, .. } | Self::ResultError { payload, .. } if payload.contains_string())
             || matches!(self, Self::Array(elements) | Self::Alternation(elements) if elements.iter().any(Self::contains_string))
@@ -394,6 +404,7 @@ impl LoweredPattern {
 
     pub fn binds_result_error(&self) -> bool {
         matches!(self, Self::ResultError { payload, .. } if payload.demands_value())
+            || matches!(self, Self::Struct { fields, .. } if fields.iter().any(|(_, pattern)| pattern.binds_result_error()))
             || matches!(self, Self::Enum { payload: Some(payload), .. } if payload.binds_result_error())
             || matches!(self, Self::OptionSome { payload, .. } | Self::IteratorItem { payload, .. } | Self::ResultSuccess { payload, .. } if payload.binds_result_error())
             || matches!(self, Self::Array(elements) | Self::Alternation(elements) if elements.iter().any(Self::binds_result_error))
@@ -1196,6 +1207,18 @@ impl Program {
 
 fn lower_pattern(pattern: &TypedPattern, resolution: &hir::ResolvedPattern) -> LoweredPattern {
     match pattern {
+        TypedPattern::Struct { structure, fields } => LoweredPattern::Struct {
+            structure: *structure,
+            fields: fields
+                .iter()
+                .map(|field| {
+                    (
+                        field.field,
+                        lower_pattern(&field.pattern.pattern, &field.pattern.resolution),
+                    )
+                })
+                .collect(),
+        },
         TypedPattern::Enum {
             enumeration,
             payload,
@@ -1958,6 +1981,11 @@ fn closure_captures(
             match pattern {
                 hir::TypedPattern::Binding(binding) => {
                     self.declared.insert(binding.id);
+                }
+                hir::TypedPattern::Struct { fields, .. } => {
+                    for field in fields {
+                        self.declare_pattern(&field.pattern.pattern);
+                    }
                 }
                 hir::TypedPattern::Enum {
                     payload: Some(payload),

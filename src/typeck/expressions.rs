@@ -29,6 +29,11 @@ enum PatternCoverage {
         name: String,
         payload: Box<Self>,
     },
+    Struct {
+        structure: crate::ast::StructId,
+        name: String,
+        fields: Vec<(crate::ast::StructFieldId, String, Self)>,
+    },
     Bool(bool),
     Char(char),
     String(String),
@@ -75,6 +80,25 @@ impl PatternCoverage {
                     ..
                 },
             ) if left_variant == right_variant => left_payload.covers(right_payload),
+            (
+                Self::Struct {
+                    structure: left_structure,
+                    fields: left_fields,
+                    ..
+                },
+                Self::Struct {
+                    structure: right_structure,
+                    fields: right_fields,
+                    ..
+                },
+            ) if left_structure == right_structure => {
+                left_fields.iter().all(|(left_field, _, left_pattern)| {
+                    right_fields
+                        .iter()
+                        .find(|(right_field, _, _)| right_field == left_field)
+                        .is_some_and(|(_, _, right_pattern)| left_pattern.covers(right_pattern))
+                })
+            }
             (Self::OptionSome(left), Self::OptionSome(right))
             | (Self::IteratorItem(left), Self::IteratorItem(right))
             | (Self::ResultSuccess(left), Self::ResultSuccess(right))
@@ -88,6 +112,14 @@ impl PatternCoverage {
             Self::Irrefutable => "_".to_owned(),
             Self::Enum { name, payload, .. } if payload.is_irrefutable() => name.clone(),
             Self::Enum { name, payload, .. } => format!("{name}({})", payload.display()),
+            Self::Struct { name, fields, .. } => format!(
+                "{name} {{ {} }}",
+                fields
+                    .iter()
+                    .map(|(_, field, pattern)| format!("{field}: {}", pattern.display()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Self::Bool(value) => value.to_string(),
             Self::Char(value) => format!("{value:?}"),
             Self::String(value) => format!("{value:?}"),
@@ -790,6 +822,9 @@ impl Checker {
                         ),
                         Type::Array(_) => {
                             self.error("non-exhaustive array match: add a `_` arm", expr.span)
+                        }
+                        ty @ Type::Known(_) if self.source_struct_id(ty).is_some() => {
+                            self.error("non-exhaustive struct match: add a `_` arm", expr.span)
                         }
                         ty @ Type::Known(_) => {
                             if let Some((_, declaration)) = self.enum_info_for_type(ty) {
@@ -1805,6 +1840,72 @@ impl Checker {
         span: Span,
     ) -> CheckedPattern {
         match pattern {
+            MatchPattern::Struct { name, fields, .. } => {
+                let Some(declaration) = self
+                    .declarations
+                    .structs
+                    .iter()
+                    .find(|declaration| declaration.name == *name)
+                    .cloned()
+                else {
+                    self.error(format!("unknown struct type `{name}`"), span);
+                    return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
+                };
+                self.unify(value_type, self.struct_type(declaration.id), span);
+                self.semantics
+                    .resolve_struct_pattern(pattern_id, declaration.id);
+                let mut seen = HashSet::new();
+                let mut resolved_fields = Vec::with_capacity(fields.len());
+                let mut coverage = Vec::with_capacity(fields.len());
+                let mut all_irrefutable = true;
+                for pattern_field in fields {
+                    if !seen.insert(pattern_field.name.clone()) {
+                        self.error(
+                            format!("duplicate struct pattern field `{}`", pattern_field.name),
+                            pattern_field.name_span,
+                        );
+                        continue;
+                    }
+                    let Some(field) = declaration
+                        .fields
+                        .iter()
+                        .find(|field| field.name == pattern_field.name)
+                    else {
+                        self.error(
+                            format!(
+                                "struct `{}` has no field `{}`",
+                                declaration.name, pattern_field.name
+                            ),
+                            pattern_field.name_span,
+                        );
+                        continue;
+                    };
+                    let checked = self.check_pattern(
+                        &pattern_field.pattern.kind,
+                        pattern_field.pattern.id,
+                        self.syntax_type(field.ty),
+                        pattern_field.pattern.span,
+                    );
+                    all_irrefutable &= checked.coverage.is_irrefutable();
+                    resolved_fields.push(field.id);
+                    coverage.push((field.id, field.name.clone(), checked.coverage));
+                }
+                self.semantics
+                    .resolve_struct_pattern_fields(pattern_id, resolved_fields);
+                // Field order is not semantically significant. Canonicalize
+                // coverage so duplicate and unreachable-arm diagnostics do
+                // not depend on the order chosen in source.
+                coverage.sort_by_key(|(field, _, _)| *field);
+                CheckedPattern::new(if all_irrefutable {
+                    PatternCoverage::Irrefutable
+                } else {
+                    PatternCoverage::Struct {
+                        structure: declaration.id,
+                        name: declaration.name,
+                        fields: coverage,
+                    }
+                })
+            }
             MatchPattern::Enum {
                 variant, payload, ..
             } => {

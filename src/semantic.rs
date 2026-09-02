@@ -418,6 +418,8 @@ pub struct SemanticModel {
     enum_variants: HashMap<ExprId, ResolvedEnumVariantId>,
     pattern_variants: HashMap<PatternId, ResolvedEnumVariantId>,
     wrapper_patterns: HashMap<PatternId, ResolvedWrapperPattern>,
+    struct_patterns: HashMap<PatternId, StructId>,
+    struct_pattern_fields: HashMap<PatternId, Vec<StructFieldId>>,
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
     assignments: HashMap<AssignmentId, ValueId>,
@@ -1241,6 +1243,14 @@ impl SemanticModel {
         self.struct_literals.get(&expression).copied()
     }
 
+    pub fn struct_pattern(&self, pattern: PatternId) -> Option<StructId> {
+        self.struct_patterns.get(&pattern).copied()
+    }
+
+    pub fn struct_pattern_fields(&self, pattern: PatternId) -> Option<&[StructFieldId]> {
+        self.struct_pattern_fields.get(&pattern).map(Vec::as_slice)
+    }
+
     pub fn enum_variant(&self, expression: ExprId) -> Option<ResolvedEnumVariantId> {
         self.enum_variants.get(&expression).copied()
     }
@@ -1393,6 +1403,8 @@ pub(crate) struct SemanticBuilder {
     enum_variants: HashMap<ExprId, ResolvedEnumVariantId>,
     pattern_variants: HashMap<PatternId, ResolvedEnumVariantId>,
     wrapper_patterns: HashMap<PatternId, ResolvedWrapperPattern>,
+    struct_patterns: HashMap<PatternId, StructId>,
+    struct_pattern_fields: HashMap<PatternId, Vec<StructFieldId>>,
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
     assignments: HashMap<AssignmentId, ValueId>,
@@ -1690,6 +1702,20 @@ impl SemanticBuilder {
         debug_assert!(previous.is_none(), "struct expression IDs must be unique");
     }
 
+    pub(crate) fn resolve_struct_pattern(&mut self, pattern: PatternId, structure: StructId) {
+        let previous = self.struct_patterns.insert(pattern, structure);
+        debug_assert!(previous.is_none(), "struct pattern IDs must be unique");
+    }
+
+    pub(crate) fn resolve_struct_pattern_fields(
+        &mut self,
+        pattern: PatternId,
+        fields: Vec<StructFieldId>,
+    ) {
+        let previous = self.struct_pattern_fields.insert(pattern, fields);
+        debug_assert!(previous.is_none(), "struct pattern IDs must be unique");
+    }
+
     pub(crate) fn resolve_enum_variant(
         &mut self,
         expression: ExprId,
@@ -1816,6 +1842,8 @@ impl SemanticBuilder {
             enum_variants,
             pattern_variants,
             wrapper_patterns,
+            struct_patterns,
+            struct_pattern_fields,
             setting_choice_defaults,
             setting_choice_options,
             assignments,
@@ -2123,6 +2151,8 @@ impl SemanticBuilder {
             enum_variants,
             pattern_variants,
             wrapper_patterns,
+            struct_patterns,
+            struct_pattern_fields,
             setting_choice_defaults,
             setting_choice_options,
             assignments,

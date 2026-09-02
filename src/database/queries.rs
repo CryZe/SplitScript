@@ -1038,6 +1038,17 @@ fn pattern_alternation_at(program: &crate::ast::Program, offset: usize) -> bool 
             MatchPattern::Array(elements) => elements
                 .iter()
                 .any(|element| contains(&element.kind, offset)),
+            MatchPattern::Struct { fields, .. } => fields
+                .iter()
+                .any(|field| contains(&field.pattern.kind, offset)),
+            MatchPattern::Enum {
+                payload: Some(payload),
+                ..
+            }
+            | MatchPattern::OptionSome(payload)
+            | MatchPattern::IteratorItem(payload)
+            | MatchPattern::ResultSuccess(payload)
+            | MatchPattern::ResultError(payload) => contains(&payload.kind, offset),
             _ => false,
         }
     }

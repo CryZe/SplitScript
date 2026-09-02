@@ -247,18 +247,24 @@ into one untyped `timer` escape hatch:
 
 - process-independent debounce and delay logic, which should use SplitScript's
   existing monotonic `Instant.now()` and requires no new timer ABI;
-- read-only snapshots of timer real time, game time, current segment identity,
+- read-only observations of timer real time, game time, current segment identity,
   run metadata, and timing method;
 - controlled mutations such as changing run offset or timing method, whose
   ordering and user-visible effects need an explicit host contract.
 
-A future versioned ABI should expose typed optional values when LiveSplit has
-no current attempt, split, or game time. Reads taken during one update must form
-a coherent snapshot. Mutations must specify whether they apply before or after
-timer-decision exports, how they interact with reset/start/split events, and
-whether user UI changes win. Run-offset units, sign, precision, persistence,
-and undo/reset behavior must be explicit. Source APIs should be
-least-privilege: reading metadata must not grant arbitrary run mutation.
+A future versioned ABI should first expose typed optional values when LiveSplit
+has no current attempt, split, or game time. The current autosplitting contract
+does not expose these observations at all, so their SplitScript spelling and
+representation remain deliberately undecided. LiveSplit Core's internal
+`Timer::snapshot()` freezes the clock while one calculation observes it; that
+does not by itself justify freezing all autosplitter-visible timer state for an
+entire update. Do not add a source-level or update-wide snapshot mechanism
+without a concrete runtime contract and use case. Mutations must specify
+whether subsequent reads observe them immediately, how they interact with
+reset/start/split events, and whether user UI changes win. Run-offset units,
+sign, precision, persistence, and undo/reset behavior must be explicit. Source
+APIs should be least-privilege: reading metadata must not grant arbitrary run
+mutation.
 
 Timing-method prompts and message boxes are frontend interactions, not timer
 state. They require a separate consent-aware UI design and may remain outside

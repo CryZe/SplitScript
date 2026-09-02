@@ -819,6 +819,10 @@ concepts rather than maintaining a parallel inventory.
   excludes the low region, whether PCSX2 mappings expose it consistently, and
   how RetroArch cores differ. Then propose the correct provider domain and
   runtime validation; do not paper over the gap with a game-specific exception.
+  A 2026-09-02 audit of the current local ASR source confirms that its public
+  PS2 address conversion still documents and enforces
+  `0x00100000..=0x01FFFFFF`. Wait for ASR to establish and test the broader
+  domain before changing SplitScript.
 - [ ] Design decoded guest-string reads once the PS2 domain decision is known.
   The Code: Veronica X product code demonstrates a bounded UTF-8/ASCII field in
   guest memory, while emulator providers currently expose only typed reads and
@@ -1036,18 +1040,24 @@ remaining work is product hardening and distribution.
   `currentSplitIndex()`, segment history, skip/undo, and explicit game-time
   pause/resume are available now and first need better porting discovery. The
   residual host surface is timing method, category/game/attempt metadata,
-  current segment name and run count, timer real/game-time snapshots, and run
+  current segment name and run count, timer real/game-time observations, and run
   offset. The SEGA Master Splitter needs game/category identity, while Abe's
   Oddysee needs exact current real/game time for correctness and persistent
-  feedback rather than display alone. Separate read-only snapshots from
+  feedback rather than display alone. Separate read-only observations from
   mutations, distinguish the monotonic `Instant` clock from timer real time,
   and add ABI support only where the host can expose stable semantics. Use the
   repeated `timer.CurrentTime`, `timer.CurrentSplit.Name`, `timer.Run.Offset`,
   category, and timing-method ports as the evidence ledger; coordinate the host
   side through R5 in
-  [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
+  [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md). The current runtime
+  does not expose those observations at all, so defer the SplitScript source
+  shape until a host contract exists. In particular, do not introduce an
+  update-wide snapshot abstraction speculatively. LiveSplit Core's internal
+  point-in-time snapshot only freezes clock calculations performed through one
+  observation; whether any analogous value belongs in the autosplitting ABI or
+  source language must follow the runtime design.
 - [ ] Decide the remaining imperative timer-control boundary separately from
-  read-only timer snapshots. Ato pauses the full timer phase and Spider-Man
+  read-only timer observations. Ato pauses the full timer phase and Spider-Man
   resets when its emulator closes; SplitScript currently exposes declarative
   `start` / `split` / `reset` decisions plus game-time pause/resume, which do not
   express either behavior. Determine which operations the runtime can support
@@ -1321,21 +1331,19 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Resolve the PS2 provider's low-memory product-code gap against ASR, then
-   decide one provider-independent bounded guest-string facility. Keep SNES and
-   Unity managed arrays/lists deferred until ASR has tested implementations.
-2. Design the read-only timer metadata/time surface, imperative timer-control
-   boundary, and writable persistent file API as separate decisions. Abe's
-   Oddysee is the acceptance case for current timer time and persistence; Ato,
-   Spider-Man, and the SEGA Master Splitter supply the remaining evidence.
-3. Add safe module enumeration. Deterministic executable identity is now
+1. Coordinate the read-only timer metadata/time surface, imperative
+   timer-control boundary, writable persistent file API, and safe module
+   enumeration with their host-runtime contracts before designing source APIs.
+   Abe's Oddysee, Ato, Spider-Man, and the SEGA Master Splitter remain the
+   acceptance evidence. Deterministic executable identity is already
    available through bounded exact-file `Module.md5()` without weakening
    source hashes to version metadata.
-4. Decide fixed-array equality/patterns and runtime-varying watched types using
+2. Decide fixed-array equality/patterns and runtime-varying watched types using
    the Code: Veronica X and FNaF ports. Prefer reusable static typing and
    ordinary aggregate architecture over compatibility-shaped intrinsics.
-5. Resume measured editor/compiler performance, release hardening, hosted IDE,
+3. Resume measured editor/compiler performance, release hardening, hosted IDE,
    and debugging work after the porting correctness and design sequence above.
-6. Keep `unity.time`, SNES, and managed collections gated on ASR evidence, and
-   keep writes/injection, physical `None` specialization, and other broad host
+4. Keep the PS2 low-memory domain, its dependent decoded guest strings,
+   `unity.time`, SNES, and managed collections gated on tested ASR evidence.
+   Keep writes/injection, physical `None` specialization, and other broad host
    powers deferred until their explicit dependencies and policies are ready.

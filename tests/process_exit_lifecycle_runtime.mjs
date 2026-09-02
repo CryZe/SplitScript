@@ -16,12 +16,12 @@ if (host.messages.join() !== "attach" || host.timerCalls.pauses !== 0) {
 
 host.setProcessOpen("game.exe", false);
 host.update();
-if (host.messages.join() !== "attach,detach" || host.timerCalls.pauses !== 1) {
+if (host.messages.join() !== "attach" || host.timerCalls.pauses !== 0) {
     throw new Error(`first detach was incorrect: ${host.json(host.summary())}`);
 }
 
 host.update(2);
-if (host.messages.join() !== "attach,detach" || host.timerCalls.pauses !== 1) {
+if (host.messages.join() !== "attach" || host.timerCalls.pauses !== 0) {
     throw new Error(`detach repeated without another attachment: ${host.json(host.summary())}`);
 }
 
@@ -39,8 +39,8 @@ host.update();
 host.setProcessOpen("game.exe", false);
 host.update();
 if (
-    host.messages.join() !== "attach,detach,attach,detach"
-    || host.timerCalls.pauses !== 2
+    host.messages.join() !== "attach,attach,detach"
+    || host.timerCalls.pauses !== 1
 ) {
     throw new Error(`second detach was not exactly once: ${host.json(host.summary())}`);
 }

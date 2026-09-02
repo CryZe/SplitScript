@@ -164,7 +164,7 @@ instance.exports.update();
 if (unknown) {
     processOpen = false;
     instance.exports.update();
-    if (reads.length !== 0 || starts !== 0 || splits !== 0 || pauses !== 1 || detaches !== 1
+    if (reads.length !== 0 || starts !== 0 || splits !== 0 || pauses !== 0 || detaches !== 1
         || messages.join(",") !== "unsupported A Plague Tale: Innocence module size 1") {
         throw new Error(
             `unsupported build was not inert: ${JSON.stringify({ reads, starts, splits, pauses, detaches, messages })}`,

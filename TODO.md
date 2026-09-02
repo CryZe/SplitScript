@@ -1054,11 +1054,16 @@ remaining work is product hardening and distribution.
   open-ended or character intervals and general `value @ pattern` binding.
   Keep these orthogonal to the closed integer interval semantics rather than
   overloading `..` or adding a range-specific binding special case.
-- [ ] Design and implement array rest patterns for fixed and growable arrays.
-  Cover prefix/suffix forms such as `[first, ..]`, whether a rest value can be
-  bound and with what type, exact-length interactions, code generation, and
-  usefulness/exhaustiveness without making `..` silently mean two different
-  things in one pattern.
+- [x] Add array rest patterns for fixed and growable arrays. One `..` inside an
+  array pattern matches a variable-length middle, so `[first, ..]`,
+  `[.., last]`, `[first, .., last]`, and `[..]` share one prefix/rest/suffix
+  representation through parsing, inference, usefulness, code generation,
+  completion, hover, and documentation. Fixed arrays validate their minimum
+  explicit length; growable arrays use symbolic length representatives for
+  exhaustiveness and reachability. The rest binds and copies nothing. A future
+  general `value @ pattern` feature may add a typed rest binding once the
+  language has an appropriate slice or view type, without making array rest a
+  special binding form.
 - [x] Add shorthand struct field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename

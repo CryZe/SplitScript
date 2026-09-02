@@ -142,6 +142,17 @@ pub(crate) fn hover(
             documentation_uri: None,
         }));
     }
+    if let Some(rest_span) =
+        array_rest_pattern_span_at(database.recovering_parse()?.syntax(), offset)
+    {
+        let catalog = LanguageCatalog::new();
+        let item = catalog.item(crate::language::LanguageItemId::ArrayRestPattern);
+        return Ok(Some(HoverInfo {
+            span: rest_span,
+            markdown: render_language_hover_with_form(item, None),
+            documentation_uri: Some(language_item_uri(item.id)),
+        }));
+    }
     if let Some(kind) = range_pattern_kind_at(database.recovering_parse()?.syntax(), offset) {
         let catalog = LanguageCatalog::new();
         let item = catalog.item(crate::language::LanguageItemId::Range);
@@ -457,6 +468,32 @@ fn range_pattern_kind_at(program: &Program, offset: usize) -> Option<RangeKind> 
     let mut finder = Finder { offset, kind: None };
     finder.visit_program(program);
     finder.kind
+}
+
+fn array_rest_pattern_span_at(program: &Program, offset: usize) -> Option<Span> {
+    struct Finder {
+        offset: usize,
+        span: Option<Span>,
+    }
+
+    impl<'ast> Visitor<'ast> for Finder {
+        fn visit_pattern(&mut self, pattern: &'ast MatchPattern) {
+            if let MatchPattern::Array(array) = pattern
+                && let Some(rest) = array.rest
+                && rest.start <= self.offset
+                && self.offset < rest.end
+            {
+                self.span = Some(rest);
+            }
+            if self.span.is_none() {
+                visit::walk_pattern(self, pattern);
+            }
+        }
+    }
+
+    let mut finder = Finder { offset, span: None };
+    finder.visit_program(program);
+    finder.span
 }
 
 fn provider_value_for_resolution(
@@ -2192,6 +2229,29 @@ fn classify(value: i16) -> bool {
                 Some("/language/range.md")
             );
         }
+    }
+
+    #[test]
+    fn array_rest_operator_hover_explains_prefix_and_suffix_semantics() {
+        let source = r#"state "game.exe" {}
+fn classify(value: [u8]) -> bool {
+    return match value {
+        [0x53, .., 0] => true,
+        _ => false,
+    }
+}"#;
+        let offset = source.find("..").unwrap() + 1;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(offset)
+            .unwrap()
+            .expect("array rest marker should have hover documentation");
+        assert!(hover.markdown.contains("[prefix, .., suffix]"));
+        assert!(hover.markdown.contains("zero or more elements"));
+        assert_eq!(
+            hover.documentation_uri.as_deref(),
+            Some("/language/array-rest-pattern.md")
+        );
     }
 
     #[test]

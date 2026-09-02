@@ -494,7 +494,12 @@ impl StructShorthandCollector<'_> {
             | MatchPattern::ResultError(payload) => {
                 self.collect_pattern(&payload.kind, payload.id);
             }
-            MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
+            MatchPattern::Array(array) => {
+                for element in array.elements() {
+                    self.collect_pattern(&element.kind, element.id);
+                }
+            }
+            MatchPattern::Alternation(elements) => {
                 for element in elements {
                     self.collect_pattern(&element.kind, element.id);
                 }

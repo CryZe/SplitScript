@@ -1543,13 +1543,15 @@ fn needs_space(
     if matches!(previous, TokenKind::Minus) && matches!(current, TokenKind::Gt) {
         return false;
     }
-    if matches!(
-        previous,
-        TokenKind::DotDot | TokenKind::DotDotLt | TokenKind::DotDotEq
-    ) || matches!(
-        current,
-        TokenKind::DotDot | TokenKind::DotDotLt | TokenKind::DotDotEq
-    ) {
+    if matches!(previous, TokenKind::DotDotLt | TokenKind::DotDotEq)
+        || matches!(current, TokenKind::DotDotLt | TokenKind::DotDotEq)
+    {
+        return false;
+    }
+    if matches!(current, TokenKind::DotDot) {
+        return matches!(previous, TokenKind::Comma);
+    }
+    if matches!(previous, TokenKind::DotDot) {
         return false;
     }
     if matches!(previous, TokenKind::Ident(name) if matches!(name.as_str(), "sig" | "v"))

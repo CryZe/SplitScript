@@ -1699,6 +1699,29 @@ pub struct StructPatternField {
     pub shorthand: bool,
 }
 
+/// An array pattern with an optional variable-length middle segment.
+///
+/// Exact patterns keep every element in `prefix` and leave `rest` and
+/// `suffix` empty. A rest pattern preserves the explicit elements on both
+/// sides so type checking, usefulness analysis, code generation, and editor
+/// tooling share one source representation.
+#[derive(Debug, Clone)]
+pub struct ArrayPattern {
+    pub prefix: Vec<PatternNode>,
+    pub rest: Option<Span>,
+    pub suffix: Vec<PatternNode>,
+}
+
+impl ArrayPattern {
+    pub fn elements(&self) -> impl Iterator<Item = &PatternNode> {
+        self.prefix.iter().chain(&self.suffix)
+    }
+
+    pub fn elements_mut(&mut self) -> impl Iterator<Item = &mut PatternNode> {
+        self.prefix.iter_mut().chain(&mut self.suffix)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MatchPattern {
     Struct {
@@ -1738,7 +1761,7 @@ pub enum MatchPattern {
     IteratorItem(Box<PatternNode>),
     ResultSuccess(Box<PatternNode>),
     ResultError(Box<PatternNode>),
-    Array(Vec<PatternNode>),
+    Array(ArrayPattern),
     Alternation(Vec<PatternNode>),
     Binding(PatternBinding),
     Wildcard,
@@ -1761,7 +1784,12 @@ impl MatchPattern {
             | Self::IteratorItem(payload)
             | Self::ResultSuccess(payload)
             | Self::ResultError(payload) => payload.kind.visit_bindings(visitor),
-            Self::Array(elements) | Self::Alternation(elements) => {
+            Self::Array(array) => {
+                for element in array.elements() {
+                    element.kind.visit_bindings(visitor);
+                }
+            }
+            Self::Alternation(elements) => {
                 for element in elements {
                     element.kind.visit_bindings(visitor);
                 }
@@ -1786,7 +1814,12 @@ impl MatchPattern {
             | Self::IteratorItem(payload)
             | Self::ResultSuccess(payload)
             | Self::ResultError(payload) => payload.kind.visit_bindings_mut(visitor),
-            Self::Array(elements) | Self::Alternation(elements) => {
+            Self::Array(array) => {
+                for element in array.elements_mut() {
+                    element.kind.visit_bindings_mut(visitor);
+                }
+            }
+            Self::Alternation(elements) => {
                 for element in elements {
                     element.kind.visit_bindings_mut(visitor);
                 }

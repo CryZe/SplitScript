@@ -2102,6 +2102,146 @@ fn growable_array_patterns_require_a_fallback_arm() {
 }
 
 #[test]
+fn array_rest_patterns_are_checked_for_fixed_and_growable_arrays() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn fixed(values: [bool; 3]) -> bool {
+            return match values {
+                [true, ..] => true,
+                [false, ..] => false,
+            }
+        }
+
+        fn growable(values: [u8]) -> u8 {
+            return match values {
+                [] => 0,
+                [first, ..] => first,
+            }
+        }
+
+        fn suffix(values: [u8]) -> u8 {
+            return match values {
+                [.., last] => last,
+                [] => 0,
+            }
+        }
+    "#;
+
+    splitscript::compile(source)
+        .expect("array rest patterns should participate in symbolic exhaustiveness checking");
+}
+
+#[test]
+fn array_rest_patterns_reject_too_many_fixed_elements() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn classify(values: [u8; 2]) -> bool {
+                return match values {
+                    [1, 2, .., 3] => true,
+                    _ => false,
+                }
+            }
+        "#,
+    )
+    .expect_err("a fixed array cannot satisfy a rest pattern with too many explicit elements");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("requires at least 3 elements")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn array_rest_patterns_reject_a_second_marker_and_format_canonically() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn classify(values: [u8]) -> bool {
+                return match values {
+                    [.., 1, ..] => true,
+                    _ => false,
+                }
+            }
+        "#,
+    )
+    .expect_err("one array pattern may contain only one rest marker");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("only one `..` rest marker")),
+        "{diagnostics:#?}"
+    );
+
+    let formatted = splitscript::format_source(
+        r#"state "game.exe" {} fn classify(values: [u8]) -> bool { return match values { [ 1 , .. , 2 ] => true, _ => false, } }"#,
+    )
+    .expect("array rest patterns should format");
+    assert!(formatted.contains("[1, .., 2]"), "{formatted}");
+    splitscript::compile(&formatted).expect("the formatted array rest pattern should compile");
+}
+
+#[test]
+fn array_rest_patterns_preserve_nested_usefulness_correlations() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn classify(values: [bool]) -> bool {
+                return match values {
+                    [true, .., false] => true,
+                    [true, false] => false,
+                    _ => false,
+                }
+            }
+        "#,
+    )
+    .expect_err("an exact pattern covered by a rest pattern should be unreachable");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("unreachable match arm")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn array_rest_exhaustiveness_tracks_when_prefix_and_suffix_stop_overlapping() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn classify(values: [bool]) -> bool {
+                return match values {
+                    [] => true,
+                    [_] => true,
+                    [_, _] => true,
+                    [_, _, _] => true,
+                    [_, _, _, _] => true,
+                    [_, _, _, _, _] => true,
+                    [_, _, _, _, _, _] => true,
+                    [_, _, _, true, ..] => true,
+                    [.., false, _, _, _] => true,
+                }
+            }
+        "#,
+    )
+    .expect_err("separated prefix and suffix constraints leave longer arrays uncovered");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("non-exhaustive array match")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn pattern_alternatives_require_the_same_binding_names_and_types() {
     let names = splitscript::compile(
         r#"

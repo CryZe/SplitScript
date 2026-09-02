@@ -524,7 +524,12 @@ pub fn walk_pattern<'ast, V: Visitor<'ast>>(visitor: &mut V, pattern: &'ast Matc
         | MatchPattern::IteratorItem(payload)
         | MatchPattern::ResultSuccess(payload)
         | MatchPattern::ResultError(payload) => visitor.visit_pattern(&payload.kind),
-        MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
+        MatchPattern::Array(array) => {
+            for element in array.elements() {
+                visitor.visit_pattern(&element.kind);
+            }
+        }
+        MatchPattern::Alternation(elements) => {
             for element in elements {
                 visitor.visit_pattern(&element.kind);
             }
@@ -1019,7 +1024,12 @@ pub fn walk_pattern_mut<F: Folder>(folder: &mut F, pattern: &mut MatchPattern) {
         | MatchPattern::IteratorItem(payload)
         | MatchPattern::ResultSuccess(payload)
         | MatchPattern::ResultError(payload) => folder.fold_pattern(&mut payload.kind),
-        MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
+        MatchPattern::Array(array) => {
+            for element in array.prefix.iter_mut().chain(&mut array.suffix) {
+                folder.fold_pattern(&mut element.kind);
+            }
+        }
+        MatchPattern::Alternation(elements) => {
             for element in elements {
                 folder.fold_pattern(&mut element.kind);
             }

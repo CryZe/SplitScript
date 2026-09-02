@@ -834,6 +834,41 @@ fn array_equality_and_patterns_execute_structurally() {
 }
 
 #[test]
+fn array_rest_patterns_match_prefixes_suffixes_and_empty_middles() {
+    let source = r#"
+        state "game.exe" {}
+
+        setup {
+            let empty: [u8] = []
+            print(match empty {
+                [first, ..] => first,
+                [] => 0,
+            })
+            print(match [7u8, 7u8] {
+                [first, .., last] => first + last,
+                _ => 0,
+            })
+            print(match [2u8, 3u8, 5u8, 11u8] {
+                [first, .., beforeLast, last] => first + beforeLast + last,
+                _ => 0,
+            })
+            print(match [1u8, 2u8, 9u8] {
+                [.., last] => last,
+                [] => 0,
+            })
+            let nested: [[u8]] = [[1, 2], [3, 4, 5]]
+            print(match nested {
+                [.., [.., last]] => last,
+                _ => 0,
+            })
+        }
+    "#;
+
+    let (store, _) = execute_with_mock_host(source);
+    assert_eq!(store.data().messages, ["0", "14", "18", "9", "5"]);
+}
+
+#[test]
 fn pattern_alternatives_share_bindings_and_work_recursively() {
     let source = r#"
         enum Side {

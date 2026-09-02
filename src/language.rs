@@ -912,6 +912,12 @@ const RANGE_EXAMPLES: &[Example] = &[
         "state \"game.exe\" {}\nfn classify(level: i32) -> String {\n    return match level {\n        0..<10 => \"early\",\n        10..=20 => \"late\",\n        _ => \"outside\",\n    }\n}",
     ),
 ];
+focused_example!(
+    ARRAY_REST_PATTERN_EXAMPLE,
+    "Match an array prefix and suffix",
+    "return match bytes {\n    [0x53, .., 0] => true,\n    _ => false,\n}",
+    "state \"game.exe\" {}\nfn framed(bytes: [u8]) -> bool {\n    return match bytes {\n        [0x53, .., 0] => true,\n        _ => false,\n    }\n}"
+);
 const BREAK_EXAMPLES: &[Example] = &[
     Example::checked(
         "Exit a conditional loop",
@@ -1599,8 +1605,17 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "start..<end | start..=end | T..<T | T..=T",
         "Describes an explicitly exclusive or inclusive integer interval.",
-        "[`..<`](syntax@range) excludes the upper endpoint and [`..=`](syntax@range) includes the upper endpoint. The operator is mandatory: bare `..` is rejected so endpoint inclusion never depends on remembered language convention. In an expression, the bounds create a first-class range value; the corresponding type repeats its bound type around the same operator. In a [`match`] pattern, integer literal bounds test that interval directly and may be combined with `|`. Both bounds and the matched value have one exact [`Integer`] type. Empty or reversed range patterns are errors, while reversed range values are empty. Direct [`for`] iteration does not allocate a range object; storing or passing the range preserves it as an immutable value.",
+        "[`..<`](syntax@range) excludes the upper endpoint and [`..=`](syntax@range) includes the upper endpoint. Bare `..` is rejected as a range so endpoint inclusion never depends on remembered language convention; inside an array pattern, it is the separate [`array rest pattern`] syntax. In an expression, the bounds create a first-class range value; the corresponding type repeats its bound type around the same operator. In a [`match`] pattern, integer literal bounds test that interval directly and may be combined with `|`. Both bounds and the matched value have one exact [`Integer`] type. Empty or reversed range patterns are errors, while reversed range values are empty. Direct [`for`] iteration does not allocate a range object; storing or passing the range preserves it as an immutable value.",
         RANGE_EXAMPLES
+    ),
+    language_item!(
+        ArrayRestPattern,
+        "array rest pattern",
+        LanguageItemKind::Syntax,
+        "[prefix, .., suffix]",
+        "Matches a variable-length middle of an array.",
+        "Inside an array [`match`] pattern, `..` matches zero or more elements between the explicit prefix and suffix. There may be at most one rest marker. It does not bind or copy the skipped elements. `[first, ..]` matches every nonempty array, `[.., last]` matches from the end, and `[..]` matches every length. Exact patterns without `..` still require exactly their written length. For [`[T; N]`], the compiler checks that the explicit prefix and suffix fit in `N`; for growable [`[T]`], the runtime checks the minimum length before reading either side.",
+        ARRAY_REST_PATTERN_EXAMPLE
     ),
     language_item!(
         Break,
@@ -1635,7 +1650,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "match value { pattern => expression }",
         "Exhaustively matches a value.",
-        "[`match`] supports enum payloads, partial field-based [`struct`] patterns, optional [`None`]/[`Some`]`(value)` patterns, iterator [`End`]/[`Item`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, exact recursive array patterns, string, character, integer, boolean, and file-version literals, closed integer [`range`] patterns, guards, a wildcard, and recursive `left | right` alternatives. A struct pattern ignores omitted fields; `Name { field }` binds that field, while `Name { field: pattern }` recursively tests it. Alternatives are tried left to right and contribute their union to exhaustiveness. Every alternative in one arm must bind exactly the same names with compatible types; those occurrences form one logical binding for the guard and body. Array elements can bind values or contain any other pattern. A [`[T; N]`] pattern must have exactly `N` elements; a growable [`[T]`] pattern tests its length at runtime. String patterns compare contents, not WebAssembly GC identities. Enum and wrapper matches must cover every state; constrained struct patterns, uncovered literal domains, and growable arrays require `_`; guarded arms do not establish coverage.",
+        "[`match`] supports enum payloads, partial field-based [`struct`] patterns, optional [`None`]/[`Some`]`(value)` patterns, iterator [`End`]/[`Item`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, recursive exact and [`array rest pattern`]s, string, character, integer, boolean, and file-version literals, closed integer [`range`] patterns, guards, a wildcard, and recursive `left | right` alternatives. A struct pattern ignores omitted fields; `Name { field }` binds that field, while `Name { field: pattern }` recursively tests it. Alternatives are tried left to right and contribute their union to exhaustiveness. Every alternative in one arm must bind exactly the same names with compatible types; those occurrences form one logical binding for the guard and body. Array elements can bind values or contain any other pattern. A [`[T; N]`] exact pattern must have exactly `N` elements; `..` instead permits an omitted middle, including in growable [`[T]`] patterns. String patterns compare contents, not WebAssembly GC identities. Enum, wrapper, and array matches are checked recursively for exhaustiveness; guarded arms do not establish coverage.",
         MATCH_EXAMPLES
     ),
     language_item!(

@@ -780,6 +780,11 @@ enum PatternProjection {
         index: u32,
         ty: Type,
     },
+    ArrayElementFromEnd {
+        array: crate::ast::ArrayTypeId,
+        distance: u32,
+        ty: Type,
+    },
 }
 
 impl PatternValue {
@@ -809,9 +814,38 @@ impl PatternValue {
         value
     }
 
+    fn array_element_from_end(
+        &self,
+        array: crate::ast::ArrayTypeId,
+        distance: u32,
+        ty: Type,
+    ) -> Self {
+        let mut value = self.clone();
+        value.ty = ty;
+        value
+            .projections
+            .push(PatternProjection::ArrayElementFromEnd {
+                array,
+                distance,
+                ty,
+            });
+        value
+    }
+
     fn emit(&self, function: &mut Function, context: &ExprContext<'_>) {
+        self.emit_through(function, context, self.projections.len());
+    }
+
+    fn emit_through(
+        &self,
+        function: &mut Function,
+        context: &ExprContext<'_>,
+        projection_count: usize,
+    ) {
         function.instruction(&Instruction::LocalGet(self.root_local));
-        for projection in &self.projections {
+        for (projection_index, projection) in
+            self.projections[..projection_count].iter().enumerate()
+        {
             match *projection {
                 PatternProjection::Field { owner, index, ty } => {
                     function.instruction(&Instruction::RefAsNonNull);
@@ -821,6 +855,25 @@ impl PatternValue {
                     let storage = array_value::storage_id(array, context.arrays, context.semantics);
                     array_value::emit_backing(function, context.gc, array);
                     function.instruction(&Instruction::I32Const(index as i32));
+                    emit_array_get(
+                        function,
+                        context.gc.index(Type::ArrayStorage(storage)),
+                        ty,
+                        context.gc,
+                    );
+                }
+                PatternProjection::ArrayElementFromEnd {
+                    array,
+                    distance,
+                    ty,
+                } => {
+                    let storage = array_value::storage_id(array, context.arrays, context.semantics);
+                    array_value::emit_backing(function, context.gc, array);
+                    self.emit_through(function, context, projection_index);
+                    array_value::emit_length(function, context.gc, array);
+                    function
+                        .instruction(&Instruction::I32Const(distance as i32))
+                        .instruction(&Instruction::I32Sub);
                     emit_array_get(
                         function,
                         context.gc.index(Type::ArrayStorage(storage)),
@@ -1048,21 +1101,41 @@ fn compile_projected_pattern(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::End);
         }
-        wasm_ir::LoweredPattern::Array(elements) => {
+        wasm_ir::LoweredPattern::Array {
+            prefix,
+            rest,
+            suffix,
+        } => {
             let Type::Array(array) = value.ty else {
                 unreachable!("checked array patterns match array values")
             };
             value.emit(function, context);
             array_value::emit_length(function, context.gc, array);
+            let explicit_length = prefix.len() + suffix.len();
             function
-                .instruction(&Instruction::I32Const(elements.len() as i32))
-                .instruction(&Instruction::I32Eq)
+                .instruction(&Instruction::I32Const(explicit_length as i32))
+                .instruction(&if *rest {
+                    Instruction::I32GeU
+                } else {
+                    Instruction::I32Eq
+                })
                 .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
                 .instruction(&Instruction::I32Const(1));
             let element_type = try_array_element_type(array, context.semantics)
                 .expect("checked array patterns have lowerable element types");
-            for (index, element) in elements.iter().enumerate() {
+            for (index, element) in prefix.iter().enumerate() {
                 let element_value = value.array_element(array, index as u32, element_type);
+                bindings.extend(compile_projected_pattern(
+                    function,
+                    element,
+                    &element_value,
+                    context,
+                ));
+                function.instruction(&Instruction::I32And);
+            }
+            for (index, element) in suffix.iter().enumerate() {
+                let distance = (suffix.len() - index) as u32;
+                let element_value = value.array_element_from_end(array, distance, element_type);
                 bindings.extend(compile_projected_pattern(
                     function,
                     element,

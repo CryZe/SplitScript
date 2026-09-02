@@ -319,7 +319,11 @@ pub enum TypedPattern {
     IteratorItem(Box<TypedPatternNode>),
     ResultSuccess(Box<TypedPatternNode>),
     ResultError(Box<TypedPatternNode>),
-    Array(Vec<TypedPatternNode>),
+    Array {
+        prefix: Vec<TypedPatternNode>,
+        rest: bool,
+        suffix: Vec<TypedPatternNode>,
+    },
     Alternation(Vec<TypedPatternNode>),
     Binding(PatternBinding),
     Wildcard,
@@ -977,7 +981,12 @@ impl TypedBodyBuilder<'_> {
             | MatchPattern::ResultError(payload) => {
                 self.insert_pattern(&payload.kind, payload.id, payload.span);
             }
-            MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
+            MatchPattern::Array(array) => {
+                for element in array.elements() {
+                    self.insert_pattern(&element.kind, element.id, element.span);
+                }
+            }
+            MatchPattern::Alternation(elements) => {
                 for element in elements {
                     self.insert_pattern(&element.kind, element.id, element.span);
                 }
@@ -1491,12 +1500,19 @@ fn lower_pattern(
         MatchPattern::ResultError(payload) => TypedPattern::ResultError(Box::new(
             lower_pattern_node(payload, semantics, syntax, standard_library),
         )),
-        MatchPattern::Array(elements) => TypedPattern::Array(
-            elements
+        MatchPattern::Array(array) => TypedPattern::Array {
+            prefix: array
+                .prefix
                 .iter()
                 .map(|element| lower_pattern_node(element, semantics, syntax, standard_library))
                 .collect(),
-        ),
+            rest: array.rest.is_some(),
+            suffix: array
+                .suffix
+                .iter()
+                .map(|element| lower_pattern_node(element, semantics, syntax, standard_library))
+                .collect(),
+        },
         MatchPattern::Alternation(alternatives) => TypedPattern::Alternation(
             alternatives
                 .iter()

@@ -1055,7 +1055,12 @@ impl DefinitionCollector<'_> {
             | MatchPattern::ResultError(payload) => {
                 self.add_pattern_references(&payload.kind, payload.id, payload.span);
             }
-            MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
+            MatchPattern::Array(array) => {
+                for element in array.elements() {
+                    self.add_pattern_references(&element.kind, element.id, element.span);
+                }
+            }
+            MatchPattern::Alternation(elements) => {
                 for element in elements {
                     self.add_pattern_references(&element.kind, element.id, element.span);
                 }

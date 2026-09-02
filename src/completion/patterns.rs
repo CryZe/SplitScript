@@ -9,7 +9,8 @@ use std::collections::BTreeSet;
 use crate::{
     ast::{Expr, ExprKind, StructId},
     database::{CompilerDatabase, SemanticQueryResult, SemanticSnapshot},
-    documentation::symbol_uri,
+    documentation::{language_item_uri, symbol_uri},
+    language::{LanguageCatalog, LanguageItemId},
     lexer::{Token, TokenKind},
     stdlib::{
         CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibSymbolId, StdlibTypeConstructorId,
@@ -56,6 +57,15 @@ pub(super) fn complete_pattern(
             expected,
             qualified_enum,
         } => add_value_patterns(&mut builder, expected, qualified_enum, &snapshot, library),
+        PatternSite::ArrayElement {
+            expected,
+            rest_available,
+        } => {
+            add_value_patterns(&mut builder, expected, false, &snapshot, library);
+            if rest_available {
+                add_array_rest_pattern(&mut builder, "array rest", "..");
+            }
+        }
         PatternSite::StructFields { structure, used } => {
             add_struct_fields(&mut builder, structure, &used, &snapshot)
         }
@@ -68,6 +78,10 @@ enum PatternSite {
     Value {
         expected: TypeId,
         qualified_enum: bool,
+    },
+    ArrayElement {
+        expected: TypeId,
+        rest_available: bool,
     },
     StructFields {
         structure: StructId,
@@ -205,8 +219,16 @@ fn analyze_pattern_prefix(
             else {
                 return None;
             };
-            let tail = after_last_top_level(&tokens[open + 1..], TokenKind::Comma);
-            analyze_pattern_prefix(tail, *element, snapshot)
+            let contents = &tokens[open + 1..];
+            let tail = after_last_top_level(contents, TokenKind::Comma);
+            if tail.is_empty() {
+                Some(PatternSite::ArrayElement {
+                    expected: *element,
+                    rest_available: top_level_token(contents, TokenKind::DotDot).is_none(),
+                })
+            } else {
+                analyze_pattern_prefix(tail, *element, snapshot)
+            }
         }
         TokenKind::LBrace => {
             let TypeKind::Struct(structure) = snapshot.semantics().types().kind(expected) else {
@@ -557,9 +579,26 @@ fn add_value_patterns(
                 Some(format!("Matches all {length} elements of the fixed array.")),
                 None,
             ));
+            add_array_rest_pattern(builder, "array rest pattern", "[..]");
+        }
+        TypeKind::Array { .. } => {
+            add_array_rest_pattern(builder, "array rest pattern", "[..]");
         }
         _ => {}
     }
+}
+
+fn add_array_rest_pattern(builder: &mut CompletionBuilder, label: &str, insert: &str) {
+    let item = LanguageCatalog::new().item(LanguageItemId::ArrayRestPattern);
+    builder.add(CompletionItem {
+        label: label.to_owned(),
+        kind: CompletionKind::Keyword,
+        detail: Some(item.form.to_owned()),
+        documentation: Some(render_documentation(&item.documentation)),
+        documentation_uri: Some(language_item_uri(item.id)),
+        insert_text: insert.to_owned(),
+        is_snippet: false,
+    });
 }
 
 fn add_struct_fields(
@@ -796,6 +835,32 @@ fn inspect(value: [bool; 2]) {
         assert!(labels.contains(&"true".to_owned()), "{labels:#?}");
         assert!(labels.contains(&"false".to_owned()), "{labels:#?}");
         assert!(!labels.contains(&"fixed-array pattern".to_owned()));
+        assert!(labels.contains(&"array rest".to_owned()), "{labels:#?}");
+    }
+
+    #[test]
+    fn array_rest_completion_is_offered_only_once_per_array_pattern() {
+        let source = r#"
+state "game.exe" {}
+fn inspect(value: [bool]) {
+    return match value {
+        [true, <|>_] => true,
+        _ => false,
+    }
+}
+"#;
+        let initial_labels = labels(source);
+        assert!(
+            initial_labels.contains(&"array rest".to_owned()),
+            "{initial_labels:#?}"
+        );
+
+        let after_rest = labels(&source.replace("[true, <|>_]", "[true, .., <|>_]"));
+        assert!(
+            !after_rest.contains(&"array rest".to_owned()),
+            "{after_rest:#?}"
+        );
+        assert!(after_rest.contains(&"true".to_owned()), "{after_rest:#?}");
     }
 
     #[test]

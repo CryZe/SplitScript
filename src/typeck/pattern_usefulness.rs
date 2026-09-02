@@ -1,5 +1,7 @@
 //! Recursive pattern usefulness, reachability, and exhaustiveness.
 
+use std::collections::BTreeSet;
+
 use crate::{inference::Type, semantic::ResolvedEnumVariantId, stdlib::StdlibTypeId};
 
 use super::Checker;
@@ -56,7 +58,11 @@ pub(super) enum PatternCoverage {
     IteratorItem(Box<Self>),
     ResultSuccess(Box<Self>),
     ResultError(Box<Self>),
-    Array(Vec<Self>),
+    Array {
+        prefix: Vec<Self>,
+        rest: bool,
+        suffix: Vec<Self>,
+    },
     Alternation(Vec<Self>),
     Invalid(crate::ast::PatternId),
 }
@@ -101,14 +107,18 @@ impl PatternCoverage {
             Self::ResultSuccess(payload) => format!("Ok({})", payload.display()),
             Self::ResultError(payload) if payload.is_irrefutable() => "Err(error)".to_owned(),
             Self::ResultError(payload) => format!("Err({})", payload.display()),
-            Self::Array(elements) => format!(
-                "[{}]",
-                elements
-                    .iter()
-                    .map(Self::display)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            Self::Array {
+                prefix,
+                rest,
+                suffix,
+            } => {
+                let mut elements = prefix.iter().map(Self::display).collect::<Vec<_>>();
+                if *rest {
+                    elements.push("..".to_owned());
+                }
+                elements.extend(suffix.iter().map(Self::display));
+                format!("[{}]", elements.join(", "))
+            }
             Self::Alternation(alternatives) => alternatives
                 .iter()
                 .map(Self::display)
@@ -143,7 +153,6 @@ enum PatternConstructor {
     IteratorItem,
     ResultSuccess,
     ResultError,
-    Array(usize),
 }
 
 impl PatternConstructor {
@@ -173,8 +182,8 @@ impl PatternConstructor {
             PatternCoverage::IteratorItem(_) => Some(Self::IteratorItem),
             PatternCoverage::ResultSuccess(_) => Some(Self::ResultSuccess),
             PatternCoverage::ResultError(_) => Some(Self::ResultError),
-            PatternCoverage::Array(elements) => Some(Self::Array(elements.len())),
             PatternCoverage::Irrefutable
+            | PatternCoverage::Array { .. }
             | PatternCoverage::IntRange { .. }
             | PatternCoverage::Alternation(_)
             | PatternCoverage::Invalid(_) => None,
@@ -212,10 +221,6 @@ impl Checker {
                     PatternConstructor::IteratorEnd,
                 ])
             }
-            Type::Array(array) => self
-                .inference
-                .array_length(array)
-                .map(|length| vec![PatternConstructor::Array(length as usize)]),
             Type::Known(_) if self.source_struct_id(ty).is_some() => {
                 let structure = self.source_struct_id(ty).unwrap();
                 let declaration = self
@@ -294,10 +299,6 @@ impl Checker {
             PatternConstructor::ResultError => {
                 vec![self.standard_type(StdlibTypeId::String)]
             }
-            PatternConstructor::Array(length) => match ty {
-                Type::Array(array) => vec![self.inference.array_element(array); *length],
-                _ => Vec::new(),
-            },
             PatternConstructor::Bool(_)
             | PatternConstructor::Char(_)
             | PatternConstructor::String(_)
@@ -349,7 +350,6 @@ impl Checker {
             | (PatternCoverage::ResultError(payload), PatternConstructor::ResultError) => {
                 vec![(**payload).clone()]
             }
-            (PatternCoverage::Array(elements), PatternConstructor::Array(_)) => elements.clone(),
             _ => Vec::new(),
         };
         arguments.resize(arity, PatternCoverage::Irrefutable);
@@ -484,8 +484,161 @@ impl Checker {
                     .next()
                     .unwrap_or(PatternCoverage::Irrefutable),
             )),
-            PatternConstructor::Array(_) => PatternCoverage::Array(arguments),
         }
+    }
+
+    fn array_pattern_dimensions(pattern: &PatternCoverage) -> Option<(usize, usize)> {
+        match pattern {
+            PatternCoverage::Array { prefix, suffix, .. } => Some((prefix.len(), suffix.len())),
+            _ => None,
+        }
+    }
+
+    fn array_pattern_at_length(
+        pattern: &PatternCoverage,
+        length: usize,
+    ) -> Option<Vec<PatternCoverage>> {
+        match pattern {
+            PatternCoverage::Irrefutable => Some(vec![PatternCoverage::Irrefutable; length]),
+            PatternCoverage::Array {
+                prefix,
+                rest,
+                suffix,
+            } => {
+                let explicit_length = prefix.len() + suffix.len();
+                if (*rest && explicit_length <= length) || (!*rest && explicit_length == length) {
+                    let mut elements = Vec::with_capacity(length);
+                    elements.extend(prefix.iter().cloned());
+                    elements.resize(length - suffix.len(), PatternCoverage::Irrefutable);
+                    elements.extend(suffix.iter().cloned());
+                    Some(elements)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn specialize_array_matrix(
+        &self,
+        matrix: &[Vec<PatternCoverage>],
+        length: usize,
+    ) -> Vec<Vec<PatternCoverage>> {
+        let mut specialized = Vec::new();
+        for row in matrix {
+            let Some((head, tail)) = row.split_first() else {
+                continue;
+            };
+            let mut alternatives = Vec::new();
+            Self::expand_pattern_alternatives(head, &mut alternatives);
+            for alternative in alternatives {
+                if let Some(mut elements) = Self::array_pattern_at_length(&alternative, length) {
+                    elements.extend_from_slice(tail);
+                    specialized.push(elements);
+                }
+            }
+        }
+        specialized
+    }
+
+    fn useful_array_witness(
+        &mut self,
+        matrix: &[Vec<PatternCoverage>],
+        candidate: &PatternCoverage,
+        tail: &[PatternCoverage],
+        remaining_types: &[Type],
+        array: crate::ast::ArrayTypeId,
+    ) -> Option<Vec<PatternCoverage>> {
+        let lengths = if let Some(length) = self.inference.array_length(array) {
+            vec![length as usize]
+        } else {
+            let mut prefix_lengths = vec![0];
+            let mut suffix_lengths = vec![0];
+            if let Some((prefix, suffix)) = Self::array_pattern_dimensions(candidate) {
+                prefix_lengths.push(prefix);
+                suffix_lengths.push(suffix);
+            }
+            for row in matrix {
+                let Some(head) = row.first() else {
+                    continue;
+                };
+                let mut alternatives = Vec::new();
+                Self::expand_pattern_alternatives(head, &mut alternatives);
+                for alternative in alternatives {
+                    if let Some((prefix, suffix)) = Self::array_pattern_dimensions(&alternative) {
+                        prefix_lengths.push(prefix);
+                        suffix_lengths.push(suffix);
+                    }
+                }
+            }
+            prefix_lengths.sort_unstable();
+            prefix_lengths.dedup();
+            suffix_lengths.sort_unstable();
+            suffix_lengths.dedup();
+
+            // Prefix positions are measured from the start and suffix positions
+            // from the end. Their relative geometry can change only when one of
+            // these lengths crosses a prefix-plus-suffix boundary. Test both
+            // sides of every such boundary, plus one stable longer length,
+            // instead of enumerating an unbounded growable-array domain.
+            let mut representative_lengths = BTreeSet::new();
+            for prefix in &prefix_lengths {
+                for suffix in &suffix_lengths {
+                    let boundary = prefix.saturating_add(*suffix);
+                    representative_lengths.insert(boundary);
+                    representative_lengths.insert(boundary.saturating_add(1));
+                }
+            }
+
+            match candidate {
+                PatternCoverage::Array {
+                    prefix,
+                    rest: false,
+                    suffix,
+                } => vec![prefix.len() + suffix.len()],
+                PatternCoverage::Array {
+                    prefix,
+                    rest: true,
+                    suffix,
+                } => {
+                    let minimum = prefix.len() + suffix.len();
+                    representative_lengths
+                        .into_iter()
+                        .filter(|length| *length >= minimum)
+                        .collect()
+                }
+                PatternCoverage::Irrefutable => representative_lengths.into_iter().collect(),
+                _ => return None,
+            }
+        };
+
+        let element_type = self.inference.array_element(array);
+        for length in lengths {
+            let Some(mut specialized_candidate) = Self::array_pattern_at_length(candidate, length)
+            else {
+                continue;
+            };
+            specialized_candidate.extend_from_slice(tail);
+            let specialized = self.specialize_array_matrix(matrix, length);
+            let mut specialized_types = vec![element_type; length];
+            specialized_types.extend_from_slice(remaining_types);
+            if let Some(mut witness) = self.useful_pattern_witness(
+                &specialized,
+                &specialized_candidate,
+                &specialized_types,
+            ) {
+                let tail = witness.split_off(length);
+                let mut result = vec![PatternCoverage::Array {
+                    prefix: witness,
+                    rest: false,
+                    suffix: Vec::new(),
+                }];
+                result.extend(tail);
+                return Some(result);
+            }
+        }
+        None
     }
 
     fn integer_pattern_domain(&mut self, ty: Type) -> Option<IntegerInterval> {
@@ -668,6 +821,10 @@ impl Checker {
         }
         if matches!(head, PatternCoverage::Invalid(_)) {
             return Some(candidate.to_vec());
+        }
+
+        if let Type::Array(array) = self.shallow_type(ty) {
+            return self.useful_array_witness(matrix, head, tail, remaining_types, array);
         }
 
         if let Some(domain) = self.integer_pattern_domain(ty)

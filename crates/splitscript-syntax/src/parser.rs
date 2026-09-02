@@ -9,8 +9,8 @@ mod types;
 use crate::{
     Token, TokenCursor, TokenKind,
     ast::{
-        Action, ActionKind, ArrayTypeDecl, ArrayTypeId, AssignmentId, AsyncTypeDecl, AsyncTypeId,
-        AttachmentLayoutDecl, BinaryOp, Block, CallableTypeDecl, CallableTypeId,
+        Action, ActionKind, ArrayPattern, ArrayTypeDecl, ArrayTypeId, AssignmentId, AsyncTypeDecl,
+        AsyncTypeId, AttachmentLayoutDecl, BinaryOp, Block, CallableTypeDecl, CallableTypeId,
         ConditionalFieldsDecl, ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference,
         EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, ForBinding, FunctionDecl, FunctionId,
         InterpolatedPart, ManagedClassDecl, ManagedClassId, ManagedFieldDecl, ManagedFieldId,

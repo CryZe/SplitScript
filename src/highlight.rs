@@ -898,7 +898,12 @@ impl HighlightCollector<'_> {
             | MatchPattern::ResultError(payload) => {
                 self.mark_pattern(&payload.kind, payload.span);
             }
-            MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
+            MatchPattern::Array(array) => {
+                for element in array.elements() {
+                    self.mark_pattern(&element.kind, element.span);
+                }
+            }
+            MatchPattern::Alternation(elements) => {
                 for element in elements {
                     self.mark_pattern(&element.kind, element.span);
                 }

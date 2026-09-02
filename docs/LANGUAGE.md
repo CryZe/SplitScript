@@ -1191,10 +1191,15 @@ fn isFirst(value: LevelOrScene) -> bool {
 ```
 
 Strings, characters, integers, booleans, file versions, and arrays can be
-matched with literals. String patterns compare decoded text contents. An array
-pattern is exact: `[first, second]` matches precisely two elements and binds
-their values. Element patterns are recursive, so literals, `_`, wrapper or enum
-patterns, nested arrays, bindings, and `left | right` alternatives can be mixed.
+matched with literals. String patterns compare decoded text contents. An exact
+array pattern such as `[first, second]` matches precisely two elements and binds
+their values. A single `..` rest marker permits any number of elements between
+an explicit prefix and suffix: `[first, ..]` matches every nonempty array,
+`[.., last]` reads from the end, `[first, .., last]` requires at least two
+elements, and `[..]` matches every length. The rest marker itself binds and
+copies nothing. Element patterns are recursive, so literals, `_`, wrapper or
+enum patterns, nested arrays, bindings, and `left | right` alternatives can be
+mixed.
 Alternatives are attempted from left to right. They remain one arm, so an `if`
 guard applies after any alternative succeeds. Every alternative must bind the
 same names with compatible types; repeated occurrences are one logical binding
@@ -1205,8 +1210,9 @@ below are inferred as an integer and `bool` from their uses.
 Closed integer intervals use the same explicit endpoint operators as range
 values: `start..<end` excludes `end`, while `start..=end` includes it. Both
 bounds are integer literals (including negative signed literals) of the matched
-integer type. A bare `..` is rejected, so a reader never needs to remember an
-implicit inclusion convention. Range patterns bind more tightly than
+integer type. A bare `..` is rejected as an integer interval, so a reader never
+needs to remember an implicit inclusion convention; inside an array pattern,
+it is the rest marker described above. Range patterns bind more tightly than
 alternation, making `0..<10 | 20..=30` the union of two intervals. Empty or
 reversed intervals are errors.
 
@@ -1335,17 +1341,19 @@ and require an unguarded `_` arm. Integer matches require `_` unless their
 literal and range patterns cover the complete finite domain. A wildcard can
 also make an enum or boolean match exhaustive. Exhaustiveness and
 unreachable-arm analysis are recursive: separate arms can jointly partition
-wrapper or enum payloads, struct fields, and fixed-array elements, while
+wrapper or enum payloads, struct fields, and array elements, while
 correlations between several fields or elements remain intact. For example,
 the four combinations of two booleans exhaust `[bool; 2]`; only the two equal
-pairs do not. A different fixed-array element count is a compile-time error. A
-growable `[T]` may have any runtime length, so exact array arms always need a
-fallback.
+pairs do not. A different exact fixed-array element count is a compile-time
+error; a rest pattern must instead fit its explicit prefix and suffix within
+the fixed length. A growable `[T]` may have any runtime length, so exact array
+arms need a fallback, while `[..]` is exhaustive and `[]` together with
+`[_, ..]` covers every length.
 
 ```text
 fn decodeHeader(bytes: [u8]) -> u8? {
     return match bytes {
-        [0x53, value, 0] => value,
+        [0x53, .., value, 0] => value,
         _ => None,
     }
 }

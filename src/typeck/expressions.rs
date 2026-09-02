@@ -1508,7 +1508,7 @@ impl Checker {
 
     fn check_array_pattern(
         &mut self,
-        elements: &[crate::ast::PatternNode],
+        pattern: &crate::ast::ArrayPattern,
         pattern_id: crate::ast::PatternId,
         value_type: Type,
         span: Span,
@@ -1523,24 +1523,41 @@ impl Checker {
         };
         let element_type = self.inference.array_element(array);
         let fixed_length = self.inference.array_length(array);
+        let explicit_length = pattern.prefix.len() + pattern.suffix.len();
         if let Some(length) = fixed_length
-            && elements.len() != length as usize
+            && if pattern.rest.is_some() {
+                explicit_length > length as usize
+            } else {
+                explicit_length != length as usize
+            }
         {
             let array_name = self.type_name(value_type);
-            self.error(
+            let message = if pattern.rest.is_some() {
                 format!(
-                    "array pattern has {} elements, but `{array_name}` requires exactly {length}",
-                    elements.len()
-                ),
-                span,
-            );
+                    "array rest pattern requires at least {explicit_length} elements, but `{array_name}` has exactly {length}"
+                )
+            } else {
+                format!(
+                    "array pattern has {explicit_length} elements, but `{array_name}` requires exactly {length}"
+                )
+            };
+            self.error(message, span);
         }
-        let mut coverage = Vec::with_capacity(elements.len());
-        for element in elements {
+        let mut prefix = Vec::with_capacity(pattern.prefix.len());
+        for element in &pattern.prefix {
             let checked = self.check_pattern(&element.kind, element.id, element_type, element.span);
-            coverage.push(checked.coverage);
+            prefix.push(checked.coverage);
         }
-        CheckedPattern::new(PatternCoverage::Array(coverage))
+        let mut suffix = Vec::with_capacity(pattern.suffix.len());
+        for element in &pattern.suffix {
+            let checked = self.check_pattern(&element.kind, element.id, element_type, element.span);
+            suffix.push(checked.coverage);
+        }
+        CheckedPattern::new(PatternCoverage::Array {
+            prefix,
+            rest: pattern.rest.is_some(),
+            suffix,
+        })
     }
 
     fn check_alternation_pattern(
@@ -1962,8 +1979,8 @@ impl Checker {
                 );
                 CheckedPattern::new(PatternCoverage::ResultError(Box::new(checked.coverage)))
             }
-            MatchPattern::Array(elements) => {
-                self.check_array_pattern(elements, pattern_id, value_type, span)
+            MatchPattern::Array(array) => {
+                self.check_array_pattern(array, pattern_id, value_type, span)
             }
             MatchPattern::Alternation(alternatives) => {
                 self.check_alternation_pattern(alternatives, value_type)

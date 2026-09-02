@@ -375,7 +375,11 @@ pub enum LoweredPattern {
         result: ResultTypeId,
         payload: Box<LoweredPattern>,
     },
-    Array(Vec<LoweredPattern>),
+    Array {
+        prefix: Vec<LoweredPattern>,
+        rest: bool,
+        suffix: Vec<LoweredPattern>,
+    },
     Alternation(Vec<LoweredPattern>),
     Binding(ValueId),
     Wildcard,
@@ -398,7 +402,12 @@ impl LoweredPattern {
             | Self::IteratorItem { payload, .. }
             | Self::ResultSuccess { payload, .. }
             | Self::ResultError { payload, .. } => payload.visit_bindings(visitor),
-            Self::Array(elements) | Self::Alternation(elements) => {
+            Self::Array { prefix, suffix, .. } => {
+                for element in prefix.iter().chain(suffix) {
+                    element.visit_bindings(visitor);
+                }
+            }
+            Self::Alternation(elements) => {
                 for element in elements {
                     element.visit_bindings(visitor);
                 }
@@ -412,7 +421,8 @@ impl LoweredPattern {
             || matches!(self, Self::Struct { fields, .. } if fields.iter().any(|(_, pattern)| pattern.contains_string()))
             || matches!(self, Self::Enum { payload: Some(payload), .. } if payload.contains_string())
             || matches!(self, Self::OptionSome { payload, .. } | Self::IteratorItem { payload, .. } | Self::ResultSuccess { payload, .. } | Self::ResultError { payload, .. } if payload.contains_string())
-            || matches!(self, Self::Array(elements) | Self::Alternation(elements) if elements.iter().any(Self::contains_string))
+            || matches!(self, Self::Array { prefix, suffix, .. } if prefix.iter().chain(suffix).any(Self::contains_string))
+            || matches!(self, Self::Alternation(elements) if elements.iter().any(Self::contains_string))
     }
 
     pub fn binds_result_error(&self) -> bool {
@@ -420,7 +430,8 @@ impl LoweredPattern {
             || matches!(self, Self::Struct { fields, .. } if fields.iter().any(|(_, pattern)| pattern.binds_result_error()))
             || matches!(self, Self::Enum { payload: Some(payload), .. } if payload.binds_result_error())
             || matches!(self, Self::OptionSome { payload, .. } | Self::IteratorItem { payload, .. } | Self::ResultSuccess { payload, .. } if payload.binds_result_error())
-            || matches!(self, Self::Array(elements) | Self::Alternation(elements) if elements.iter().any(Self::binds_result_error))
+            || matches!(self, Self::Array { prefix, suffix, .. } if prefix.iter().chain(suffix).any(Self::binds_result_error))
+            || matches!(self, Self::Alternation(elements) if elements.iter().any(Self::binds_result_error))
     }
 
     fn demands_value(&self) -> bool {
@@ -1317,12 +1328,21 @@ fn lower_pattern(pattern: &TypedPattern, resolution: &hir::ResolvedPattern) -> L
                 payload: Box::new(lower_pattern(&payload.pattern, &payload.resolution)),
             }
         }
-        TypedPattern::Array(elements) => LoweredPattern::Array(
-            elements
+        TypedPattern::Array {
+            prefix,
+            rest,
+            suffix,
+        } => LoweredPattern::Array {
+            prefix: prefix
                 .iter()
                 .map(|element| lower_pattern(&element.pattern, &element.resolution))
                 .collect(),
-        ),
+            rest: *rest,
+            suffix: suffix
+                .iter()
+                .map(|element| lower_pattern(&element.pattern, &element.resolution))
+                .collect(),
+        },
         TypedPattern::Alternation(alternatives) => LoweredPattern::Alternation(
             alternatives
                 .iter()
@@ -2034,7 +2054,12 @@ fn closure_captures(
                 | hir::TypedPattern::ResultError(payload) => {
                     self.declare_pattern(&payload.pattern);
                 }
-                hir::TypedPattern::Array(elements) | hir::TypedPattern::Alternation(elements) => {
+                hir::TypedPattern::Array { prefix, suffix, .. } => {
+                    for element in prefix.iter().chain(suffix) {
+                        self.declare_pattern(&element.pattern);
+                    }
+                }
+                hir::TypedPattern::Alternation(elements) => {
                     for element in elements {
                         self.declare_pattern(&element.pattern);
                     }

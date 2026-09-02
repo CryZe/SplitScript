@@ -1035,8 +1035,8 @@ fn pattern_alternation_at(program: &crate::ast::Program, offset: usize) -> bool 
                         .iter()
                         .any(|alternative| contains(&alternative.kind, offset))
             }
-            MatchPattern::Array(elements) => elements
-                .iter()
+            MatchPattern::Array(array) => array
+                .elements()
                 .any(|element| contains(&element.kind, offset)),
             MatchPattern::Struct { fields, .. } => fields
                 .iter()

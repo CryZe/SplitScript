@@ -3,9 +3,9 @@
 //! Expression grammar.
 
 use super::{
-    BinaryOp, DelimiterDepth, Diagnostic, EnumReference, Expr, ExprKind, InterpolatedPart,
-    MatchArm, MatchPattern, Parser, PatternBinding, RangeKind, Span, TokenKind, TypeRef, UnaryOp,
-    ambiguous_range_diagnostic, assignment_operator, parse_integer,
+    ArrayPattern, BinaryOp, DelimiterDepth, Diagnostic, EnumReference, Expr, ExprKind,
+    InterpolatedPart, MatchArm, MatchPattern, Parser, PatternBinding, RangeKind, Span, TokenKind,
+    TypeRef, UnaryOp, ambiguous_range_diagnostic, assignment_operator, parse_integer,
 };
 use crate::ast::{PatternNode, StructLiteralField, StructPatternField};
 use crate::diagnostic::{DiagnosticCode, DiagnosticFix, FixApplicability, TextEdit};
@@ -1500,9 +1500,26 @@ impl Parser<'_> {
             }
             TokenKind::LBracket => {
                 self.bump();
-                let mut elements = Vec::new();
+                let mut prefix = Vec::new();
+                let mut rest = None;
+                let mut suffix = Vec::new();
                 while !self.at(&TokenKind::RBracket) {
-                    elements.push(self.match_pattern(true)?);
+                    if self.at(&TokenKind::DotDot) {
+                        let rest_span = self.bump().span;
+                        if rest.replace(rest_span).is_some() {
+                            return Err(Diagnostic::new(
+                                "an array pattern can contain only one `..` rest marker",
+                                rest_span,
+                            ));
+                        }
+                    } else {
+                        let element = self.match_pattern(true)?;
+                        if rest.is_some() {
+                            suffix.push(element);
+                        } else {
+                            prefix.push(element);
+                        }
+                    }
                     if self.eat(&TokenKind::Comma).is_some() {
                         if self.at(&TokenKind::RBracket) {
                             break;
@@ -1512,7 +1529,11 @@ impl Parser<'_> {
                     }
                 }
                 self.expect(TokenKind::RBracket, "expected `]` after array pattern")?;
-                MatchPattern::Array(elements)
+                MatchPattern::Array(ArrayPattern {
+                    prefix,
+                    rest,
+                    suffix,
+                })
             }
             _ => {
                 return Err(Diagnostic::new(

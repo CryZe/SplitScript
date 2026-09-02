@@ -2305,6 +2305,21 @@ fn classify(name: String) -> u8 {
     }
 
     #[test]
+    fn formats_recursive_array_match_patterns() {
+        let source = r#"state "game.exe"{}
+fn decode(values:[u8?;2])->u8{return match values{[Some(first),Some(second)]=>first+second,_=>0}}"#;
+        let expected = r#"state "game.exe" {}
+fn decode(values: [u8?; 2]) -> u8 {
+    return match values {
+        [Some(first), Some(second)] => first + second,
+        _ => 0,
+    }
+}
+"#;
+        assert_eq!(format_source(source).unwrap(), expected);
+    }
+
+    #[test]
     fn preserves_binary_integer_literals_and_their_suffixes() {
         let source = r#"state GBA{flags:u8 at 0b0010_0000;mask:u16 at 0B1111u16}split{return current.flags&0b10!=0}"#;
         let expected = r#"state GBA {

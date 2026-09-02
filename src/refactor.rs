@@ -832,7 +832,9 @@ impl<'ast> Visitor<'ast> for ExpressionFacts<'_> {
             | MatchPattern::FileVersion(_)
             | MatchPattern::None
             | MatchPattern::IteratorEnd
-            | MatchPattern::Wildcard => None,
+            | MatchPattern::Wildcard
+            | MatchPattern::Array(_) => None,
+            MatchPattern::Binding(binding) => Some(binding),
         };
         if let Some(binding) = binding {
             self.internal_bindings.insert(binding.id);
@@ -926,6 +928,7 @@ fn value_names(program: &Program) -> HashMap<ValueId, String> {
                 | MatchPattern::IteratorItem(binding)
                 | MatchPattern::ResultSuccess(binding)
                 | MatchPattern::ResultError(binding) => binding.as_ref(),
+                MatchPattern::Binding(binding) => Some(binding),
                 _ => None,
             };
             if let Some(binding) = binding {

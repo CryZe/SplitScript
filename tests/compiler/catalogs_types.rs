@@ -911,7 +911,7 @@ fn array_search_methods_are_source_defined_and_preserve_element_constraints() {
             .unwrap_or_else(|error| panic!("`{expression}` generated invalid Wasm GC: {error}"));
     }
 
-    let errors = splitscript::compile(
+    let nested = splitscript::compile(
         r#"
             struct Marker { values: [i32] }
             state "game.exe" {}
@@ -921,13 +921,10 @@ fn array_search_methods_are_source_defined_and_preserve_element_constraints() {
             }
         "#,
     )
-    .expect_err("searching arrays whose elements are not equatable should fail");
-    assert!(
-        errors.iter().any(|error| {
-            error.message.contains("Equatable") && error.message.contains("Marker")
-        }),
-        "{errors:#?}"
-    );
+    .expect("array equality should let structs containing equatable arrays derive equality");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&nested)
+        .expect("nested structural array equality should produce valid Wasm GC");
 }
 
 #[test]
@@ -3595,9 +3592,10 @@ fn option_and_result_equality_is_structural_and_payload_checked() {
         .expect("Option and Result equality helpers should produce valid Wasm GC");
 
     let invalid = r#"
+        struct Callback { run: () -> i32 }
         state "game.exe" {}
 
-        fn same(left: [i32]?, right: [i32]?) -> bool {
+        fn same(left: Callback?, right: Callback?) -> bool {
             return left == right
         }
 

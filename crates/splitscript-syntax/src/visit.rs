@@ -497,6 +497,11 @@ pub fn walk_pattern<'ast, V: Visitor<'ast>>(visitor: &mut V, pattern: &'ast Matc
     {
         visitor.visit_type_ref(suffix);
     }
+    if let MatchPattern::Array(elements) = pattern {
+        for element in elements {
+            visitor.visit_pattern(&element.kind);
+        }
+    }
 }
 
 pub trait Folder: Sized {
@@ -957,6 +962,11 @@ pub fn walk_pattern_mut<F: Folder>(folder: &mut F, pattern: &mut MatchPattern) {
     } = pattern
     {
         folder.fold_type_ref(suffix);
+    }
+    if let MatchPattern::Array(elements) = pattern {
+        for element in elements {
+            folder.fold_pattern(&mut element.kind);
+        }
     }
 }
 

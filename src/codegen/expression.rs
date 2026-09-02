@@ -25,7 +25,7 @@ use crate::{
 
 use super::{
     DisplayFunctions, EqualityFunctions, GcLayout, MemoryByteOrder, RuntimeHelperPlan, STATE_TYPE,
-    SetFunctions, SettingStorage, Type, application_type_argument, array_element_type,
+    SetFunctions, SettingStorage, Type, application_type_argument, array_element_type, array_value,
     async_frame::{AsyncFrameRef, LeafFutureInstance, LeafFutureLayout},
     emit_array_get, emit_default, emit_failure_transfer, emit_frame_typed_struct_get, emit_int,
     emit_memory_value, emit_monotonic_nanoseconds, emit_result_error, emit_result_success,
@@ -754,46 +754,255 @@ fn compile_fallback_success(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct MatchPatternBinding {
     value: ValueId,
-    payload_type: Type,
-    struct_type: u32,
-    field_index: u32,
+    source: PatternValue,
 }
 
-fn compile_file_version_pattern(
-    function: &mut Function,
-    components: &[u16; 4],
-    value_local: u32,
-    value_type: Type,
-    context: &ExprContext<'_>,
-) {
-    // Keep the literal syntax coupled to the catalog's named components, not
-    // to the physical field order of FileVersion's GC representation.
-    let fields = [
-        StdlibFieldId::FileVersionMajor,
-        StdlibFieldId::FileVersionMinor,
-        StdlibFieldId::FileVersionBuild,
-        StdlibFieldId::FileVersionPrivatePart,
-    ];
-    for (component_index, (field, component)) in fields.iter().zip(components).enumerate() {
-        function
-            .instruction(&Instruction::LocalGet(value_local))
-            .instruction(&Instruction::RefAsNonNull);
-        emit_typed_struct_get(
-            function,
-            context.gc.index(value_type),
-            context.gc.standard_field_index(*field),
-            Type::U16,
-        );
-        function
-            .instruction(&Instruction::I32Const(i32::from(*component)))
-            .instruction(&Instruction::I32Eq);
-        if component_index != 0 {
-            function.instruction(&Instruction::I32And);
+#[derive(Clone)]
+struct PatternValue {
+    root_local: u32,
+    ty: Type,
+    projections: Vec<PatternProjection>,
+}
+
+#[derive(Clone)]
+enum PatternProjection {
+    Field {
+        owner: Type,
+        index: u32,
+        ty: Type,
+    },
+    ArrayElement {
+        array: crate::ast::ArrayTypeId,
+        index: u32,
+        ty: Type,
+    },
+}
+
+impl PatternValue {
+    fn root(local: u32, ty: Type) -> Self {
+        Self {
+            root_local: local,
+            ty,
+            projections: Vec::new(),
         }
     }
+
+    fn field(&self, owner: Type, index: u32, ty: Type) -> Self {
+        let mut value = self.clone();
+        value.ty = ty;
+        value
+            .projections
+            .push(PatternProjection::Field { owner, index, ty });
+        value
+    }
+
+    fn array_element(&self, array: crate::ast::ArrayTypeId, index: u32, ty: Type) -> Self {
+        let mut value = self.clone();
+        value.ty = ty;
+        value
+            .projections
+            .push(PatternProjection::ArrayElement { array, index, ty });
+        value
+    }
+
+    fn emit(&self, function: &mut Function, context: &ExprContext<'_>) {
+        function.instruction(&Instruction::LocalGet(self.root_local));
+        for projection in &self.projections {
+            match *projection {
+                PatternProjection::Field { owner, index, ty } => {
+                    function.instruction(&Instruction::RefAsNonNull);
+                    emit_typed_struct_get(function, context.gc.index(owner), index, ty);
+                }
+                PatternProjection::ArrayElement { array, index, ty } => {
+                    let storage = array_value::storage_id(array, context.arrays, context.semantics);
+                    array_value::emit_backing(function, context.gc, array);
+                    function.instruction(&Instruction::I32Const(index as i32));
+                    emit_array_get(
+                        function,
+                        context.gc.index(Type::ArrayStorage(storage)),
+                        ty,
+                        context.gc,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn compile_projected_pattern(
+    function: &mut Function,
+    pattern: &wasm_ir::LoweredPattern,
+    value: &PatternValue,
+    context: &ExprContext<'_>,
+) -> Vec<MatchPatternBinding> {
+    let mut bindings = Vec::new();
+    match pattern {
+        wasm_ir::LoweredPattern::Enum {
+            enumeration,
+            variant,
+            binding,
+        } => {
+            let variant_index =
+                context
+                    .gc
+                    .enum_variant_index(*enumeration, *variant, context.enums);
+            value.emit(function, context);
+            function.instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(function, context.gc.index(value.ty), 0, Type::I32);
+            function
+                .instruction(&Instruction::I32Const(variant_index as i32))
+                .instruction(&Instruction::I32Eq);
+            if let Some(binding) = binding {
+                let ty = context.ty(context
+                    .semantics
+                    .value_type(*binding)
+                    .expect("checked pattern bindings have types"));
+                bindings.push(MatchPatternBinding {
+                    value: *binding,
+                    source: value.field(value.ty, variant_index as u32 + 1, ty),
+                });
+            }
+        }
+        wasm_ir::LoweredPattern::Bool(expected) => {
+            value.emit(function, context);
+            function
+                .instruction(&Instruction::I32Const(*expected as i32))
+                .instruction(&Instruction::I32Eq);
+        }
+        wasm_ir::LoweredPattern::Char(expected) => {
+            value.emit(function, context);
+            function
+                .instruction(&Instruction::I32Const(*expected as i32))
+                .instruction(&Instruction::I32Eq);
+        }
+        wasm_ir::LoweredPattern::String(expected) => {
+            value.emit(function, context);
+            emit_string_literal(function, expected, context.gc);
+            function.instruction(&Instruction::Call(
+                context
+                    .runtime_helpers
+                    .function(RuntimeHelperId::StringEquality),
+            ));
+        }
+        wasm_ir::LoweredPattern::Int(expected) => {
+            value.emit(function, context);
+            emit_int(function, *expected, value.ty);
+            function.instruction(
+                &if matches!(value.ty, Type::I64 | Type::U64 | Type::Address) {
+                    Instruction::I64Eq
+                } else {
+                    Instruction::I32Eq
+                },
+            );
+        }
+        wasm_ir::LoweredPattern::FileVersion(components) => {
+            let fields = [
+                StdlibFieldId::FileVersionMajor,
+                StdlibFieldId::FileVersionMinor,
+                StdlibFieldId::FileVersionBuild,
+                StdlibFieldId::FileVersionPrivatePart,
+            ];
+            for (component_index, (field, component)) in fields.iter().zip(components).enumerate() {
+                value.emit(function, context);
+                function.instruction(&Instruction::RefAsNonNull);
+                emit_typed_struct_get(
+                    function,
+                    context.gc.index(value.ty),
+                    context.gc.standard_field_index(*field),
+                    Type::U16,
+                );
+                function
+                    .instruction(&Instruction::I32Const(i32::from(*component)))
+                    .instruction(&Instruction::I32Eq);
+                if component_index != 0 {
+                    function.instruction(&Instruction::I32And);
+                }
+            }
+        }
+        wasm_ir::LoweredPattern::OptionNone(_) | wasm_ir::LoweredPattern::IteratorEnd(_) => {
+            value.emit(function, context);
+            function.instruction(&Instruction::RefIsNull);
+        }
+        wasm_ir::LoweredPattern::OptionSome { binding, .. }
+        | wasm_ir::LoweredPattern::IteratorItem { binding, .. } => {
+            value.emit(function, context);
+            function
+                .instruction(&Instruction::RefIsNull)
+                .instruction(&Instruction::I32Eqz);
+            if let Some(binding) = binding {
+                let ty = context.ty(context
+                    .semantics
+                    .value_type(*binding)
+                    .expect("checked pattern bindings have types"));
+                bindings.push(MatchPatternBinding {
+                    value: *binding,
+                    source: value.field(value.ty, 0, ty),
+                });
+            }
+        }
+        wasm_ir::LoweredPattern::ResultSuccess { binding, .. }
+        | wasm_ir::LoweredPattern::ResultError { binding, .. } => {
+            value.emit(function, context);
+            function.instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(function, context.gc.index(value.ty), 1, Type::I32);
+            let is_error = matches!(pattern, wasm_ir::LoweredPattern::ResultError { .. });
+            function
+                .instruction(&Instruction::I32Const(is_error as i32))
+                .instruction(&Instruction::I32Eq);
+            if let Some(binding) = binding {
+                let ty = context.ty(context
+                    .semantics
+                    .value_type(*binding)
+                    .expect("checked pattern bindings have types"));
+                bindings.push(MatchPatternBinding {
+                    value: *binding,
+                    source: value.field(value.ty, if is_error { 2 } else { 0 }, ty),
+                });
+            }
+        }
+        wasm_ir::LoweredPattern::Array(elements) => {
+            let Type::Array(array) = value.ty else {
+                unreachable!("checked array patterns match array values")
+            };
+            value.emit(function, context);
+            array_value::emit_length(function, context.gc, array);
+            function
+                .instruction(&Instruction::I32Const(elements.len() as i32))
+                .instruction(&Instruction::I32Eq)
+                .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+                .instruction(&Instruction::I32Const(1));
+            let element_type = try_array_element_type(array, context.semantics)
+                .expect("checked array patterns have lowerable element types");
+            for (index, element) in elements.iter().enumerate() {
+                let element_value = value.array_element(array, index as u32, element_type);
+                bindings.extend(compile_projected_pattern(
+                    function,
+                    element,
+                    &element_value,
+                    context,
+                ));
+                function.instruction(&Instruction::I32And);
+            }
+            function
+                .instruction(&Instruction::Else)
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::End);
+        }
+        wasm_ir::LoweredPattern::Binding(binding) => {
+            function.instruction(&Instruction::I32Const(1));
+            bindings.push(MatchPatternBinding {
+                value: *binding,
+                source: value.clone(),
+            });
+        }
+        wasm_ir::LoweredPattern::Wildcard => {
+            function.instruction(&Instruction::I32Const(1));
+        }
+    }
+    bindings
 }
 
 pub(super) fn compile_statement_pattern(
@@ -802,176 +1011,22 @@ pub(super) fn compile_statement_pattern(
     value_local: u32,
     value_type: Type,
     context: &ExprContext<'_>,
-) -> Option<MatchPatternBinding> {
-    let enum_pattern = if let wasm_ir::LoweredPattern::Enum {
-        enumeration,
-        variant,
-        binding,
-    } = pattern
-    {
-        let variant_index = context
-            .gc
-            .enum_variant_index(*enumeration, *variant, context.enums);
-        Some((*enumeration, variant_index, *binding))
-    } else {
-        None
-    };
-    let binding = match pattern {
-        wasm_ir::LoweredPattern::Enum { .. } => {
-            let (_, variant_index, binding) = enum_pattern.unwrap();
-            binding.map(|binding| {
-                (
-                    binding,
-                    context.gc.index(value_type),
-                    variant_index as u32 + 1,
-                )
-            })
-        }
-        wasm_ir::LoweredPattern::OptionSome { binding, .. } => {
-            let Type::Option(option) = value_type else {
-                unreachable!("Some patterns match Option values")
-            };
-            binding.map(|binding| (binding, context.gc.index(Type::Option(option)), 0))
-        }
-        wasm_ir::LoweredPattern::IteratorItem { binding, .. } => {
-            let Type::Application(step) = value_type else {
-                unreachable!("Item patterns match IteratorStep values")
-            };
-            binding.map(|binding| (binding, context.gc.index(Type::Application(step)), 0))
-        }
-        wasm_ir::LoweredPattern::ResultSuccess { binding, .. } => {
-            let Type::Result(result) = value_type else {
-                unreachable!("Ok patterns match Result values")
-            };
-            binding.map(|binding| (binding, context.gc.index(Type::Result(result)), 0))
-        }
-        wasm_ir::LoweredPattern::ResultError { binding, .. } => {
-            let Type::Result(result) = value_type else {
-                unreachable!("Err patterns match Result values")
-            };
-            binding.map(|binding| (binding, context.gc.index(Type::Result(result)), 2))
-        }
-        _ => None,
-    };
-    match pattern {
-        wasm_ir::LoweredPattern::Enum { .. } => {
-            let (_, variant_index, _) = enum_pattern.unwrap();
-            function
-                .instruction(&Instruction::LocalGet(value_local))
-                .instruction(&Instruction::RefAsNonNull);
-            emit_typed_struct_get(function, context.gc.index(value_type), 0, Type::I32);
-            function
-                .instruction(&Instruction::I32Const(variant_index as i32))
-                .instruction(&Instruction::I32Eq);
-        }
-        wasm_ir::LoweredPattern::Bool(expected) => {
-            function
-                .instruction(&Instruction::LocalGet(value_local))
-                .instruction(&Instruction::I32Const(*expected as i32))
-                .instruction(&Instruction::I32Eq);
-        }
-        wasm_ir::LoweredPattern::Char(expected) => {
-            function
-                .instruction(&Instruction::LocalGet(value_local))
-                .instruction(&Instruction::I32Const(*expected as i32))
-                .instruction(&Instruction::I32Eq);
-        }
-        wasm_ir::LoweredPattern::String(expected) => {
-            function.instruction(&Instruction::LocalGet(value_local));
-            emit_string_literal(function, expected, context.gc);
-            function.instruction(&Instruction::Call(
-                context
-                    .runtime_helpers
-                    .function(RuntimeHelperId::StringEquality),
-            ));
-        }
-        wasm_ir::LoweredPattern::Int(value) => {
-            function.instruction(&Instruction::LocalGet(value_local));
-            emit_int(function, *value, value_type);
-            function.instruction(
-                &if matches!(value_type, Type::I64 | Type::U64 | Type::Address) {
-                    Instruction::I64Eq
-                } else {
-                    Instruction::I32Eq
-                },
-            );
-        }
-        wasm_ir::LoweredPattern::FileVersion(components) => {
-            compile_file_version_pattern(function, components, value_local, value_type, context);
-        }
-        wasm_ir::LoweredPattern::OptionNone(_) => {
-            function
-                .instruction(&Instruction::LocalGet(value_local))
-                .instruction(&Instruction::RefIsNull);
-        }
-        wasm_ir::LoweredPattern::OptionSome { .. } => {
-            function
-                .instruction(&Instruction::LocalGet(value_local))
-                .instruction(&Instruction::RefIsNull)
-                .instruction(&Instruction::I32Eqz);
-        }
-        wasm_ir::LoweredPattern::IteratorEnd(_) => {
-            function
-                .instruction(&Instruction::LocalGet(value_local))
-                .instruction(&Instruction::RefIsNull);
-        }
-        wasm_ir::LoweredPattern::IteratorItem { .. } => {
-            function
-                .instruction(&Instruction::LocalGet(value_local))
-                .instruction(&Instruction::RefIsNull)
-                .instruction(&Instruction::I32Eqz);
-        }
-        wasm_ir::LoweredPattern::ResultSuccess { .. }
-        | wasm_ir::LoweredPattern::ResultError { .. } => {
-            let Type::Result(result) = value_type else {
-                unreachable!("result patterns match Result values")
-            };
-            function
-                .instruction(&Instruction::LocalGet(value_local))
-                .instruction(&Instruction::RefAsNonNull);
-            emit_typed_struct_get(
-                function,
-                context.gc.index(Type::Result(result)),
-                1,
-                Type::I32,
-            );
-            function.instruction(&Instruction::I32Const(matches!(
-                pattern,
-                wasm_ir::LoweredPattern::ResultError { .. }
-            ) as i32));
-            function.instruction(&Instruction::I32Eq);
-        }
-        wasm_ir::LoweredPattern::Wildcard => {
-            function.instruction(&Instruction::I32Const(1));
-        }
-    }
-    binding.map(|(value, struct_type, field_index)| MatchPatternBinding {
-        value,
-        payload_type: context.ty(context
-            .semantics
-            .value_type(value)
-            .expect("checked pattern bindings have types")),
-        struct_type,
-        field_index,
-    })
+) -> Vec<MatchPatternBinding> {
+    compile_projected_pattern(
+        function,
+        pattern,
+        &PatternValue::root(value_local, value_type),
+        context,
+    )
 }
 
 pub(super) fn store_match_binding(
     function: &mut Function,
     binding: MatchPatternBinding,
-    value_local: u32,
     context: &ExprContext<'_>,
 ) {
     compile_value_set(function, binding.value, context, |function| {
-        function
-            .instruction(&Instruction::LocalGet(value_local))
-            .instruction(&Instruction::RefAsNonNull);
-        emit_typed_struct_get(
-            function,
-            binding.struct_type,
-            binding.field_index,
-            binding.payload_type,
-        );
+        binding.source.emit(function, context);
     });
 }
 
@@ -989,16 +1044,16 @@ fn compile_match_statement(
     compile_expr(function, value, context);
     function.instruction(&Instruction::LocalSet(value_local));
     for (arm_index, arm) in arms.iter().enumerate() {
-        let binding =
+        let bindings =
             compile_statement_pattern(function, &arm.pattern, value_local, value_type, context);
         let arm_context = ExprContext {
             loop_control: loop_control.map(|control| control.nested(arm_index as u32 + 1)),
             ..*context
         };
-        if binding.is_some() || arm.guard.is_some() {
+        if !bindings.is_empty() || arm.guard.is_some() {
             function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
-            if let Some(binding) = binding {
-                store_match_binding(function, binding, value_local, &arm_context);
+            for binding in bindings {
+                store_match_binding(function, binding, &arm_context);
             }
             if let Some(guard) = arm.guard {
                 compile_expr(function, guard, &arm_context);
@@ -3417,183 +3472,24 @@ fn compile_expr_unconverted(
                 BlockType::Result(context.gc.val_type(ty))
             };
             for (arm_index, arm) in arms.iter().enumerate() {
-                let enum_pattern = if let wasm_ir::LoweredPattern::Enum {
-                    enumeration,
-                    variant,
-                    binding,
-                } = &arm.pattern
-                {
-                    let variant_index =
-                        context
-                            .gc
-                            .enum_variant_index(*enumeration, *variant, context.enums);
-                    Some((*enumeration, variant_index, *binding))
-                } else {
-                    None
-                };
-                let binding = match &arm.pattern {
-                    wasm_ir::LoweredPattern::Enum { .. } => {
-                        let (_, variant_index, binding) = enum_pattern.unwrap();
-                        binding.map(|binding| {
-                            (
-                                binding,
-                                context.gc.index(value_type),
-                                variant_index as u32 + 1,
-                            )
-                        })
-                    }
-                    wasm_ir::LoweredPattern::OptionSome { binding, .. } => {
-                        let Type::Option(option) = value_type else {
-                            unreachable!("Some patterns match Option values")
-                        };
-                        binding.map(|binding| (binding, context.gc.index(Type::Option(option)), 0))
-                    }
-                    wasm_ir::LoweredPattern::IteratorItem { binding, .. } => {
-                        let Type::Application(step) = value_type else {
-                            unreachable!("Item patterns match IteratorStep values")
-                        };
-                        binding
-                            .map(|binding| (binding, context.gc.index(Type::Application(step)), 0))
-                    }
-                    wasm_ir::LoweredPattern::ResultSuccess { binding, .. } => {
-                        let Type::Result(result) = value_type else {
-                            unreachable!("Ok patterns match Result values")
-                        };
-                        binding.map(|binding| (binding, context.gc.index(Type::Result(result)), 0))
-                    }
-                    wasm_ir::LoweredPattern::ResultError { binding, .. } => {
-                        let Type::Result(result) = value_type else {
-                            unreachable!("Err patterns match Result values")
-                        };
-                        binding.map(|binding| (binding, context.gc.index(Type::Result(result)), 2))
-                    }
-                    _ => None,
-                };
-                let binding = binding.map(|(binding, struct_type, field_index)| {
-                    (
-                        binding,
-                        context.ty(context
-                            .semantics
-                            .value_type(binding)
-                            .expect("checked pattern bindings have types")),
-                        struct_type,
-                        field_index,
-                    )
-                });
-                match &arm.pattern {
-                    wasm_ir::LoweredPattern::Enum { .. } => {
-                        let (_, variant_index, _) = enum_pattern.unwrap();
-                        function
-                            .instruction(&Instruction::LocalGet(value_local))
-                            .instruction(&Instruction::RefAsNonNull);
-                        emit_typed_struct_get(function, context.gc.index(value_type), 0, Type::I32);
-                        function
-                            .instruction(&Instruction::I32Const(variant_index as i32))
-                            .instruction(&Instruction::I32Eq);
-                    }
-                    wasm_ir::LoweredPattern::Bool(expected) => {
-                        function
-                            .instruction(&Instruction::LocalGet(value_local))
-                            .instruction(&Instruction::I32Const(*expected as i32))
-                            .instruction(&Instruction::I32Eq);
-                    }
-                    wasm_ir::LoweredPattern::Char(expected) => {
-                        function
-                            .instruction(&Instruction::LocalGet(value_local))
-                            .instruction(&Instruction::I32Const(*expected as i32))
-                            .instruction(&Instruction::I32Eq);
-                    }
-                    wasm_ir::LoweredPattern::String(expected) => {
-                        function.instruction(&Instruction::LocalGet(value_local));
-                        emit_string_literal(function, expected, context.gc);
-                        function.instruction(&Instruction::Call(
-                            context
-                                .runtime_helpers
-                                .function(RuntimeHelperId::StringEquality),
-                        ));
-                    }
-                    wasm_ir::LoweredPattern::Int(value) => {
-                        function.instruction(&Instruction::LocalGet(value_local));
-                        emit_int(function, *value, value_type);
-                        function.instruction(&if matches!(
-                            value_type,
-                            Type::I64 | Type::U64 | Type::Address
-                        ) {
-                            Instruction::I64Eq
-                        } else {
-                            Instruction::I32Eq
-                        });
-                    }
-                    wasm_ir::LoweredPattern::FileVersion(components) => {
-                        compile_file_version_pattern(
-                            function,
-                            components,
-                            value_local,
-                            value_type,
-                            context,
-                        );
-                    }
-                    wasm_ir::LoweredPattern::OptionNone(_) => {
-                        function
-                            .instruction(&Instruction::LocalGet(value_local))
-                            .instruction(&Instruction::RefIsNull);
-                    }
-                    wasm_ir::LoweredPattern::OptionSome { .. } => {
-                        function
-                            .instruction(&Instruction::LocalGet(value_local))
-                            .instruction(&Instruction::RefIsNull)
-                            .instruction(&Instruction::I32Eqz);
-                    }
-                    wasm_ir::LoweredPattern::IteratorEnd(_) => {
-                        function
-                            .instruction(&Instruction::LocalGet(value_local))
-                            .instruction(&Instruction::RefIsNull);
-                    }
-                    wasm_ir::LoweredPattern::IteratorItem { .. } => {
-                        function
-                            .instruction(&Instruction::LocalGet(value_local))
-                            .instruction(&Instruction::RefIsNull)
-                            .instruction(&Instruction::I32Eqz);
-                    }
-                    wasm_ir::LoweredPattern::ResultSuccess { .. }
-                    | wasm_ir::LoweredPattern::ResultError { .. } => {
-                        let Type::Result(result) = value_type else {
-                            unreachable!("result patterns match Result values")
-                        };
-                        function
-                            .instruction(&Instruction::LocalGet(value_local))
-                            .instruction(&Instruction::RefAsNonNull);
-                        emit_typed_struct_get(
-                            function,
-                            context.gc.index(Type::Result(result)),
-                            1,
-                            Type::I32,
-                        );
-                        function.instruction(&Instruction::I32Const(matches!(
-                            &arm.pattern,
-                            wasm_ir::LoweredPattern::ResultError { .. }
-                        )
-                            as i32));
-                        function.instruction(&Instruction::I32Eq);
-                    }
-                    wasm_ir::LoweredPattern::Wildcard => {
-                        function.instruction(&Instruction::I32Const(1));
-                    }
-                }
+                let bindings = compile_statement_pattern(
+                    function,
+                    &arm.pattern,
+                    value_local,
+                    value_type,
+                    context,
+                );
                 let arm_context = ExprContext {
                     loop_control: context
                         .loop_control
                         .map(|control| control.nested(arm_index as u32 + 1)),
                     ..*context
                 };
-                if let Some((binding, payload_type, struct_type, field_index)) = binding {
+                if !bindings.is_empty() {
                     function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
-                    compile_value_set(function, binding, &arm_context, |function| {
-                        function
-                            .instruction(&Instruction::LocalGet(value_local))
-                            .instruction(&Instruction::RefAsNonNull);
-                        emit_typed_struct_get(function, struct_type, field_index, payload_type);
-                    });
+                    for binding in bindings {
+                        store_match_binding(function, binding, &arm_context);
+                    }
                     if let Some(guard) = arm.guard {
                         compile_expr(function, guard, &arm_context);
                     } else {
@@ -6084,7 +5980,12 @@ fn compile_intrinsic_equality(
         function.instruction(&Instruction::I32Eq);
     } else if matches!(
         operand_type,
-        Type::Standard(_) | Type::Struct(_) | Type::Enum(_) | Type::Option(_) | Type::Result(_)
+        Type::Standard(_)
+            | Type::Struct(_)
+            | Type::Enum(_)
+            | Type::Array(_)
+            | Type::Option(_)
+            | Type::Result(_)
     ) {
         compile_receiver(function, target, context);
         compile_expr(function, other, context);

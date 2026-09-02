@@ -774,6 +774,34 @@ fn computed_infinity_can_be_converted_to_a_string_explicitly() {
 }
 
 #[test]
+fn array_equality_and_patterns_execute_structurally() {
+    let source = r#"
+        state "game.exe" {}
+
+        setup {
+            let fixed: [u8; 3] = [1, 2, 3]
+            let growable: [u8] = [1, 2]
+            print(fixed == [1, 2, 3])
+            print(growable == [1, 2, 3])
+            print(match growable {
+                [first, second] => first + second,
+                _ => 0,
+            })
+            print(match growable {
+                [only] => only,
+                _ => 9,
+            })
+            let arrays = Set.new<[u8]>()
+            arrays.insert([4, 5])
+            print(arrays.contains([4, 5]))
+        }
+    "#;
+
+    let (store, _) = execute_with_mock_host(source);
+    assert_eq!(store.data().messages, ["true", "false", "3", "9", "true"]);
+}
+
+#[test]
 fn closed_pure_global_initializers_execute_before_setup() {
     let source = r#"
         fn increment(value: u32) -> u32 {

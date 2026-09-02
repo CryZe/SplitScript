@@ -2546,9 +2546,10 @@ capability Equatable<T> {
     ///
     /// This method is also the implementation of the
     /// [`==`](operator@Equatable.equals) operator. Structs,
-    /// enums, options, and results compare their complete structure; strings
-    /// compare UTF-8 contents. Floating-point equality follows IEEE 754, so
-    /// NaN is not equal to itself.
+    /// enums, arrays, options, and results compare their complete structure;
+    /// strings compare UTF-8 contents. Array equality compares lengths and then
+    /// elements in order. Floating-point equality follows IEEE 754, so NaN is
+    /// not equal to itself.
     ///
     /// # Example
     ///

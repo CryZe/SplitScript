@@ -606,6 +606,71 @@ fn unknown_pattern_enums_are_resolution_errors_not_syntax_errors() {
 }
 
 #[test]
+fn nested_array_patterns_expose_enum_and_binding_definitions() {
+    use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
+    use splitscript::tooling::highlight::SemanticTokenKind;
+
+    let source = r#"
+        enum Mode { Idle, Active }
+        state "game.exe" {}
+
+        fn classify(values: [Mode; 2]) -> Mode {
+            return match values {
+                [Mode.Idle, selected] => selected,
+                [_, selected] => selected,
+            }
+        }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    let checked = database.check().expect("nested patterns should type check");
+    let enumeration = checked.syntax().enums[0].id;
+    let idle = checked.syntax().enums[0].variants[0].id;
+
+    let pattern = source.find("Mode.Idle, selected").unwrap();
+    assert!(matches!(
+        database.definition_at(pattern + 1).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if definition.id == SourceDefinitionId::Enum(enumeration)
+    ));
+    assert!(matches!(
+        database.definition_at(pattern + "Mode.".len()).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if definition.id == SourceDefinitionId::EnumVariant(idle)
+    ));
+
+    let declaration = pattern + "Mode.Idle, ".len();
+    let use_offset = source.find("=> selected").unwrap() + "=> ".len();
+    assert_eq!(
+        database.definition_at(use_offset).unwrap(),
+        database.definition_at(declaration).unwrap()
+    );
+    assert!(
+        database
+            .hover(declaration)
+            .unwrap()
+            .expect("a nested pattern binding should have hover information")
+            .markdown
+            .contains("selected: Mode")
+    );
+    assert_eq!(
+        database
+            .rename_target_at(declaration)
+            .unwrap()
+            .expect("a nested pattern binding should be renameable")
+            .name,
+        "selected"
+    );
+    let highlights = database.semantic_highlights().unwrap();
+    assert!(highlights.highlights().iter().any(|highlight| {
+        highlight.span.start == pattern + "Mode.".len()
+            && highlight.kind == SemanticTokenKind::EnumMember
+    }));
+    assert!(highlights.highlights().iter().any(|highlight| {
+        highlight.span.start == declaration && highlight.kind == SemanticTokenKind::Variable
+    }));
+}
+
+#[test]
 fn compiler_database_exposes_types_resolutions_and_references() {
     use std::sync::Arc;
 

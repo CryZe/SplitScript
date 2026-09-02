@@ -492,6 +492,38 @@ fn structural_display_helpers_are_materialized_only_when_reachable() {
 }
 
 #[test]
+fn array_equality_helpers_are_materialized_only_when_compared() {
+    use splitscript::{BuildProfile, CompilerOptions};
+
+    let compile_debug = |body: &str| {
+        splitscript::compile_with_options(
+            &format!(r#"state "game.exe" {{}} setup {{ {body} }}"#),
+            CompilerOptions {
+                profile: BuildProfile::Debug,
+                ..CompilerOptions::default()
+            },
+        )
+        .expect("the array-equality reachability probe should compile")
+    };
+    let helper_names = |wasm: &[u8]| {
+        debug_function_names(wasm)
+            .expect("debug names should exist")
+            .1
+            .into_iter()
+            .map(|(_, name)| name)
+            .filter(|name| name.starts_with("__splitscript::equals::array#"))
+            .collect::<Vec<_>>()
+    };
+
+    assert!(helper_names(&compile_debug("let values = [1u8, 2u8]")).is_empty());
+    let compared = compile_debug("let values = [1u8, 2u8]; print(values == [1u8, 2u8])");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&compared)
+        .expect("the lazily generated equality helper should be valid WebAssembly GC");
+    assert_eq!(helper_names(&compared).len(), 1);
+}
+
+#[test]
 fn float_format_helpers_and_tables_are_materialized_by_reachable_width() {
     use splitscript::{BuildProfile, CompilerOptions};
 

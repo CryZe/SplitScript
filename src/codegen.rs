@@ -737,6 +737,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let equality_bodies = runtime_helpers::compile_equality(
         &runtime_helpers,
         capabilities.structural_types(),
+        array_types,
         option_types,
         result_types,
         semantics,

@@ -1678,6 +1678,13 @@ impl std::fmt::Debug for PatternBinding {
 }
 
 #[derive(Debug, Clone)]
+pub struct PatternNode {
+    pub id: PatternId,
+    pub kind: MatchPattern,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub enum MatchPattern {
     Enum {
         enumeration: EnumReference,
@@ -1698,7 +1705,31 @@ pub enum MatchPattern {
     IteratorItem(Option<PatternBinding>),
     ResultSuccess(Option<PatternBinding>),
     ResultError(Option<PatternBinding>),
+    Array(Vec<PatternNode>),
+    Binding(PatternBinding),
     Wildcard,
+}
+
+impl MatchPattern {
+    pub fn visit_bindings(&self, visitor: &mut impl FnMut(&PatternBinding)) {
+        match self {
+            Self::Enum {
+                binding: Some(binding),
+                ..
+            }
+            | Self::OptionSome(Some(binding))
+            | Self::IteratorItem(Some(binding))
+            | Self::ResultSuccess(Some(binding))
+            | Self::ResultError(Some(binding))
+            | Self::Binding(binding) => visitor(binding),
+            Self::Array(elements) => {
+                for element in elements {
+                    element.kind.visit_bindings(visitor);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

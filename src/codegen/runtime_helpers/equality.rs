@@ -3,23 +3,24 @@
 use wasm_encoder::{BlockType, Function, Instruction, ValType};
 
 use crate::{
-    ast::{OptionTypeId, ResultTypeId},
+    ast::{ArrayTypeId, OptionTypeId, ResultTypeId},
     intrinsic_registry::RuntimeHelperId,
     semantic::SemanticModel,
     stdlib::{DeclaredTypeRef, RuntimeRepresentation, StdlibTypeId},
     structural::{StructuralMemberId, StructuralType, StructuralTypeId, StructuralTypes},
-    types::{ResolvedOptionType, ResolvedResultType},
+    types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType},
 };
 
 use super::super::{
-    EqualityFunctions, GcLayout, RuntimeHelperPlan, Type, emit_typed_struct_get,
-    enum_variant_payload, option_value_type, result_value_type, standard_field_type,
-    struct_field_type,
+    EqualityFunctions, GcLayout, RuntimeHelperPlan, Type, array_value, emit_array_get,
+    emit_typed_struct_get, enum_variant_payload, option_value_type, result_value_type,
+    standard_field_type, struct_field_type, try_array_element_type,
 };
 #[allow(clippy::too_many_arguments)]
 pub(in crate::codegen) fn compile_equality(
     plan: &RuntimeHelperPlan,
     structural: &StructuralTypes,
+    arrays: &[ResolvedArrayType],
     options: &[ResolvedOptionType],
     results: &[ResolvedResultType],
     semantics: &SemanticModel,
@@ -76,6 +77,18 @@ pub(in crate::codegen) fn compile_equality(
             ));
         }
     }
+    for array in arrays {
+        if equality_functions.arrays.contains_key(&array.id) {
+            equality.push(compile_array_equality(
+                array.id,
+                arrays,
+                semantics,
+                equality_functions,
+                string_equality,
+                gc,
+            ));
+        }
+    }
     for option in options {
         if equality_functions.options.contains_key(&option.id) {
             equality.push(compile_option_equality(
@@ -100,6 +113,76 @@ pub(in crate::codegen) fn compile_equality(
     }
 
     equality
+}
+
+fn compile_array_equality(
+    array: ArrayTypeId,
+    arrays: &[ResolvedArrayType],
+    semantics: &SemanticModel,
+    equality_functions: &EqualityFunctions,
+    string_eq: u32,
+    gc: &GcLayout,
+) -> Function {
+    let mut function = Function::new([(2, ValType::I32)]);
+    let length = 2;
+    let index = 3;
+    let storage = array_value::storage_id(array, arrays, semantics);
+    let element = try_array_element_type(array, semantics)
+        .expect("reachable array equality has a lowerable element type");
+
+    function.instruction(&Instruction::LocalGet(0));
+    array_value::emit_length(&mut function, gc, array);
+    function
+        .instruction(&Instruction::LocalTee(length))
+        .instruction(&Instruction::LocalGet(1));
+    array_value::emit_length(&mut function, gc, array);
+    function
+        .instruction(&Instruction::I32Ne)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(0));
+    array_value::emit_backing(&mut function, gc, array);
+    function.instruction(&Instruction::LocalGet(index));
+    emit_array_get(
+        &mut function,
+        gc.index(Type::ArrayStorage(storage)),
+        element,
+        gc,
+    );
+    function.instruction(&Instruction::LocalGet(1));
+    array_value::emit_backing(&mut function, gc, array);
+    function.instruction(&Instruction::LocalGet(index));
+    emit_array_get(
+        &mut function,
+        gc.index(Type::ArrayStorage(storage)),
+        element,
+        gc,
+    );
+    emit_value_equality(&mut function, element, equality_functions, string_eq);
+    function
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::End);
+    function
 }
 
 pub(in crate::codegen::runtime_helpers) fn compile_string_eq(gc: &GcLayout) -> Function {
@@ -419,6 +502,7 @@ pub(in crate::codegen) fn emit_value_equality(
         },
         Type::Struct(structure) => Instruction::Call(equality_functions.structs[&structure]),
         Type::Enum(enumeration) => Instruction::Call(equality_functions.enums[&enumeration]),
+        Type::Array(array) => Instruction::Call(equality_functions.arrays[&array]),
         Type::Option(option) => Instruction::Call(equality_functions.options[&option]),
         Type::Result(result) => Instruction::Call(equality_functions.results[&result]),
         Type::None => Instruction::RefEq,

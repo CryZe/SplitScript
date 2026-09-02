@@ -726,6 +726,13 @@ impl Checker {
                 span,
             );
         }
+        if self.scopes.last().unwrap().contains_key(&binding.name) {
+            self.error(
+                format!("pattern binds `{}` more than once", binding.name),
+                binding.name_span,
+            );
+            return;
+        }
         self.semantics.resolve_value_type(binding.id, ty);
         self.scopes.last_mut().unwrap().insert(
             binding.name.clone(),

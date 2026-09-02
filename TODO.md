@@ -1010,13 +1010,15 @@ remaining work is product hardening and distribution.
 
 ## P1 — remaining language and runtime breadth
 
-- [ ] Make fixed-array comparison and matching coherent with their value
-  semantics. The Code: Veronica X port can read `[u8; 11]` but cannot compare it
-  with a literal or use that literal as a pattern, forcing an element loop.
-  Propose structural `Equatable` derivation when `T: Equatable` and exact-length
-  fixed-array patterns, sharing the existing aggregate capability and pattern
-  architecture rather than adding byte-array intrinsics. Bring the language
-  decision back for approval before implementation.
+- [x] Make array comparison and matching coherent with their value semantics.
+  Both `[T]` and `[T; N]` derive structural `Equatable` when `T: Equatable`, and
+  exact recursive array patterns support nested tests and bindings. Fixed-array
+  lengths are checked statically; growable lengths are tested safely at runtime.
+- [ ] Add pattern alternation with `patternA | patternB` after recursive
+  patterns are established. Define binding compatibility across alternatives,
+  exhaustiveness, reachability, formatting, and editor behavior before
+  implementation; do not encode alternation as duplicated match arms because
+  guards and bindings must retain one arm scope.
 - [x] Add shorthand struct field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename

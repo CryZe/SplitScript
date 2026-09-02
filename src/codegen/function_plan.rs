@@ -181,6 +181,17 @@ pub(super) fn encode<'a>(
             equality.enums.insert(enum_id, function);
         }
     }
+    for array in arrays {
+        if reachability.requires_array_equality(array.id) {
+            let array_type = gc.val_type(Type::Array(array.id));
+            let function = declare(
+                format!("__splitscript::equals::array#{}", array.id.index()),
+                vec![array_type, array_type],
+                vec![ValType::I32],
+            );
+            equality.arrays.insert(array.id, function);
+        }
+    }
     for option in options {
         if reachability.requires_option_equality(option.id) {
             let option_type = gc.val_type(Type::Option(option.id));

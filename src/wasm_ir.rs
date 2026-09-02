@@ -358,6 +358,8 @@ pub enum LoweredPattern {
         result: ResultTypeId,
         binding: Option<ValueId>,
     },
+    Array(Vec<LoweredPattern>),
+    Binding(ValueId),
     Wildcard,
 }
 
@@ -369,6 +371,7 @@ impl LoweredPattern {
             | Self::IteratorItem { binding, .. }
             | Self::ResultSuccess { binding, .. }
             | Self::ResultError { binding, .. } => *binding,
+            Self::Binding(binding) => Some(*binding),
             Self::Bool(_)
             | Self::Char(_)
             | Self::String(_)
@@ -376,8 +379,46 @@ impl LoweredPattern {
             | Self::FileVersion(_)
             | Self::OptionNone(_)
             | Self::IteratorEnd(_)
+            | Self::Array(_)
             | Self::Wildcard => None,
         }
+    }
+
+    pub fn visit_bindings(&self, visitor: &mut impl FnMut(ValueId)) {
+        match self {
+            Self::Enum {
+                binding: Some(binding),
+                ..
+            }
+            | Self::OptionSome {
+                binding: Some(binding),
+                ..
+            }
+            | Self::IteratorItem {
+                binding: Some(binding),
+                ..
+            }
+            | Self::ResultSuccess {
+                binding: Some(binding),
+                ..
+            }
+            | Self::ResultError {
+                binding: Some(binding),
+                ..
+            }
+            | Self::Binding(binding) => visitor(*binding),
+            Self::Array(elements) => {
+                for element in elements {
+                    element.visit_bindings(visitor);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn contains_string(&self) -> bool {
+        matches!(self, Self::String(_))
+            || matches!(self, Self::Array(elements) if elements.iter().any(Self::contains_string))
     }
 }
 
@@ -1167,6 +1208,83 @@ impl Program {
     }
 }
 
+fn lower_pattern(pattern: &TypedPattern, resolution: &hir::ResolvedPattern) -> LoweredPattern {
+    match pattern {
+        TypedPattern::Enum {
+            enumeration,
+            binding,
+            ..
+        } => LoweredPattern::Enum {
+            enumeration: *enumeration,
+            variant: resolution
+                .variant
+                .expect("checked enum patterns have resolved variants"),
+            binding: binding.as_ref().map(|binding| binding.id),
+        },
+        TypedPattern::Bool(value) => LoweredPattern::Bool(*value),
+        TypedPattern::Char(value) => LoweredPattern::Char(*value),
+        TypedPattern::String(value) => LoweredPattern::String(value.clone()),
+        TypedPattern::Int { value, .. } => LoweredPattern::Int(*value),
+        TypedPattern::FileVersion(components) => LoweredPattern::FileVersion(*components),
+        TypedPattern::None => {
+            let Some(ResolvedWrapperPattern::OptionNone(option)) = resolution.wrapper else {
+                unreachable!("checked None patterns resolve to Options")
+            };
+            LoweredPattern::OptionNone(option)
+        }
+        TypedPattern::OptionSome(binding) => {
+            let Some(ResolvedWrapperPattern::OptionSome(option)) = resolution.wrapper else {
+                unreachable!("checked Some patterns resolve to Options")
+            };
+            LoweredPattern::OptionSome {
+                option,
+                binding: binding.as_ref().map(|binding| binding.id),
+            }
+        }
+        TypedPattern::IteratorEnd => {
+            let Some(ResolvedWrapperPattern::IteratorEnd(step)) = resolution.wrapper else {
+                unreachable!("checked End patterns resolve to IteratorStep")
+            };
+            LoweredPattern::IteratorEnd(step)
+        }
+        TypedPattern::IteratorItem(binding) => {
+            let Some(ResolvedWrapperPattern::IteratorItem(step)) = resolution.wrapper else {
+                unreachable!("checked Item patterns resolve to IteratorStep")
+            };
+            LoweredPattern::IteratorItem {
+                step,
+                binding: binding.as_ref().map(|binding| binding.id),
+            }
+        }
+        TypedPattern::ResultSuccess(binding) => {
+            let Some(ResolvedWrapperPattern::ResultSuccess(result)) = resolution.wrapper else {
+                unreachable!("checked Ok patterns resolve to Results")
+            };
+            LoweredPattern::ResultSuccess {
+                result,
+                binding: binding.as_ref().map(|binding| binding.id),
+            }
+        }
+        TypedPattern::ResultError(binding) => {
+            let Some(ResolvedWrapperPattern::ResultError(result)) = resolution.wrapper else {
+                unreachable!("checked Err patterns resolve to Results")
+            };
+            LoweredPattern::ResultError {
+                result,
+                binding: binding.as_ref().map(|binding| binding.id),
+            }
+        }
+        TypedPattern::Array(elements) => LoweredPattern::Array(
+            elements
+                .iter()
+                .map(|element| lower_pattern(&element.pattern, &element.resolution))
+                .collect(),
+        ),
+        TypedPattern::Binding(binding) => LoweredPattern::Binding(binding.id),
+        TypedPattern::Wildcard => LoweredPattern::Wildcard,
+    }
+}
+
 fn lower_expression(
     expression: &TypedExpression,
     typed_hir: &TypedProgram,
@@ -1367,88 +1485,7 @@ fn lower_expression(
                 .iter()
                 .map(|arm| MatchArm {
                     pattern_id: arm.resolution.id,
-                    pattern: match &arm.pattern {
-                        TypedPattern::Enum {
-                            enumeration,
-                            binding,
-                            ..
-                        } => LoweredPattern::Enum {
-                            enumeration: *enumeration,
-                            variant: arm
-                                .resolution
-                                .variant
-                                .expect("checked enum patterns have resolved variants"),
-                            binding: binding.as_ref().map(|binding| binding.id),
-                        },
-                        TypedPattern::Bool(value) => LoweredPattern::Bool(*value),
-                        TypedPattern::Char(value) => LoweredPattern::Char(*value),
-                        TypedPattern::String(value) => LoweredPattern::String(value.clone()),
-                        TypedPattern::Int { value, .. } => LoweredPattern::Int(*value),
-                        TypedPattern::FileVersion(components) => {
-                            LoweredPattern::FileVersion(*components)
-                        }
-                        TypedPattern::None => {
-                            let Some(ResolvedWrapperPattern::OptionNone(option)) =
-                                arm.resolution.wrapper
-                            else {
-                                unreachable!("checked None patterns resolve to Options")
-                            };
-                            LoweredPattern::OptionNone(option)
-                        }
-                        TypedPattern::OptionSome(binding) => {
-                            let Some(ResolvedWrapperPattern::OptionSome(option)) =
-                                arm.resolution.wrapper
-                            else {
-                                unreachable!("checked Some patterns resolve to Options")
-                            };
-                            LoweredPattern::OptionSome {
-                                option,
-                                binding: binding.as_ref().map(|binding| binding.id),
-                            }
-                        }
-                        TypedPattern::IteratorEnd => {
-                            let Some(ResolvedWrapperPattern::IteratorEnd(step)) =
-                                arm.resolution.wrapper
-                            else {
-                                unreachable!("checked End patterns resolve to IteratorStep")
-                            };
-                            LoweredPattern::IteratorEnd(step)
-                        }
-                        TypedPattern::IteratorItem(binding) => {
-                            let Some(ResolvedWrapperPattern::IteratorItem(step)) =
-                                arm.resolution.wrapper
-                            else {
-                                unreachable!("checked Item patterns resolve to IteratorStep")
-                            };
-                            LoweredPattern::IteratorItem {
-                                step,
-                                binding: binding.as_ref().map(|binding| binding.id),
-                            }
-                        }
-                        TypedPattern::ResultSuccess(binding) => {
-                            let Some(ResolvedWrapperPattern::ResultSuccess(result)) =
-                                arm.resolution.wrapper
-                            else {
-                                unreachable!("checked Ok patterns resolve to Results")
-                            };
-                            LoweredPattern::ResultSuccess {
-                                result,
-                                binding: binding.as_ref().map(|binding| binding.id),
-                            }
-                        }
-                        TypedPattern::ResultError(binding) => {
-                            let Some(ResolvedWrapperPattern::ResultError(result)) =
-                                arm.resolution.wrapper
-                            else {
-                                unreachable!("checked Err patterns resolve to Results")
-                            };
-                            LoweredPattern::ResultError {
-                                result,
-                                binding: binding.as_ref().map(|binding| binding.id),
-                            }
-                        }
-                        TypedPattern::Wildcard => LoweredPattern::Wildcard,
-                    },
+                    pattern: lower_pattern(&arm.pattern, &arm.resolution),
                     guard: arm.guard,
                     value: arm.value,
                 })
@@ -1924,23 +1961,24 @@ fn closure_captures(
         }
 
         fn declare_pattern(&mut self, pattern: &hir::TypedPattern) {
-            let binding = match pattern {
-                hir::TypedPattern::Enum { binding, .. } => binding.as_ref(),
-                hir::TypedPattern::OptionSome(binding)
-                | hir::TypedPattern::IteratorItem(binding)
-                | hir::TypedPattern::ResultSuccess(binding)
-                | hir::TypedPattern::ResultError(binding) => binding.as_ref(),
-                hir::TypedPattern::Bool(_)
-                | hir::TypedPattern::Char(_)
-                | hir::TypedPattern::String(_)
-                | hir::TypedPattern::Int { .. }
-                | hir::TypedPattern::FileVersion(_)
-                | hir::TypedPattern::None
-                | hir::TypedPattern::IteratorEnd
-                | hir::TypedPattern::Wildcard => None,
-            };
-            if let Some(binding) = binding {
-                self.declared.insert(binding.id);
+            match pattern {
+                hir::TypedPattern::Enum {
+                    binding: Some(binding),
+                    ..
+                }
+                | hir::TypedPattern::OptionSome(Some(binding))
+                | hir::TypedPattern::IteratorItem(Some(binding))
+                | hir::TypedPattern::ResultSuccess(Some(binding))
+                | hir::TypedPattern::ResultError(Some(binding))
+                | hir::TypedPattern::Binding(binding) => {
+                    self.declared.insert(binding.id);
+                }
+                hir::TypedPattern::Array(elements) => {
+                    for element in elements {
+                        self.declare_pattern(&element.pattern);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -4977,32 +5015,8 @@ impl Visitor for LocalPlanner<'_> {
                 .ty;
             self.push(value_type, LocalPurpose::MatchValue(expression.id));
             for arm in arms {
-                let binding = match &arm.pattern {
-                    LoweredPattern::Enum {
-                        binding: Some(binding),
-                        ..
-                    }
-                    | LoweredPattern::OptionSome {
-                        binding: Some(binding),
-                        ..
-                    }
-                    | LoweredPattern::IteratorItem {
-                        binding: Some(binding),
-                        ..
-                    }
-                    | LoweredPattern::ResultSuccess {
-                        binding: Some(binding),
-                        ..
-                    }
-                    | LoweredPattern::ResultError {
-                        binding: Some(binding),
-                        ..
-                    } => Some(*binding),
-                    _ => None,
-                };
-                if let Some(binding) = binding {
-                    self.value(binding);
-                }
+                arm.pattern
+                    .visit_bindings(&mut |binding| self.value(binding));
                 if let Some(guard) = arm.guard {
                     self.visit_expression_id(guard, program);
                 }

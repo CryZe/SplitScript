@@ -1176,11 +1176,13 @@ fn isFirst(value: LevelOrScene) -> bool {
 }
 ```
 
-Strings, characters, integers, booleans, and file versions can be matched with
-literals. String patterns compare decoded text contents. Arms may have an `if`
-guard, and `_` is the catch-all
-pattern. Patterns participate in inference, so the parameter types below are
-inferred as an integer and `bool` from their uses.
+Strings, characters, integers, booleans, file versions, and arrays can be
+matched with literals. String patterns compare decoded text contents. An array
+pattern is exact: `[first, second]` matches precisely two elements and binds
+their values. Element patterns are recursive, so literals, `_`, wrapper or enum
+patterns, nested arrays, and bindings can be mixed. Arms may have an `if` guard,
+and `_` is the catch-all pattern. Patterns participate in inference, so the
+parameter types below are inferred as an integer and `bool` from their uses.
 
 ```text
 fn characterName(character, dlcDemo) {
@@ -1215,7 +1217,26 @@ An unguarded arm counts toward exhaustiveness; a guarded arm may still reject
 its pattern. Enum matches must cover every variant, boolean matches must cover
 `true` and `false`. String, character, integer, and file-version domains are
 open-ended and require an unguarded `_` arm. A wildcard can also make an enum
-or boolean match exhaustive.
+or boolean match exhaustive. A fixed `[T; N]` array pattern with `N` elements
+and only irrefutable element patterns is exhaustive. A different number of
+elements is a compile-time error. A growable `[T]` may have any runtime length,
+so exact array arms always need a fallback.
+
+```text
+fn decodeHeader(bytes: [u8]) -> u8? {
+    return match bytes {
+        [0x53, value, 0] => value,
+        _ => None,
+    }
+}
+
+fn addPair(values: [u32?; 2]) -> u32 {
+    return match values {
+        [Some(first), Some(second)] => first + second,
+        _ => 0,
+    }
+}
+```
 
 Enums are immutable values and can be nested in structs, passed through
 functions, and retained across `await`. This directly models the original
@@ -1224,10 +1245,10 @@ Lunistice autosplitter's base-game level number versus DLC-demo scene name.
 Enums support `==` and `!=`. Equality is structural: variants must match, and
 payload variants then compare their active payloads. Structs are structural as
 well, comparing fields in declaration order. The capability is derived
-recursively, so an enum carrying numbers, strings, other equatable enums, or
-equatable structs needs no declaration or implementation boilerplate. A
-comparison is rejected at compile time with the field or variant path when a
-contained type, such as an array, does not yet support equality.
+recursively, so an enum carrying numbers, strings, arrays, other equatable
+enums, or equatable structs needs no declaration or implementation boilerplate.
+A comparison is rejected at compile time with the field or variant path when a
+contained type does not support equality.
 
 ## Methods
 
@@ -1297,6 +1318,12 @@ methods are available when the element type supports `Equatable`; they are
 ordinary source-defined library loops rather than dedicated compiler
 operations. Arrays can contain structs, enums, strings, and other arrays, and
 can themselves be stored in structs or retained across suspension.
+
+Both `[T]` and `[T; N]` support `==` and `!=` when `T` implements
+[`Equatable`]. Equality is structural: lengths must match and elements are
+compared in order with their own equality implementation. Arrays may also be
+destructured by exact [`match`] patterns, as described in
+[Pattern matching](#pattern-matching).
 
 Only growable `[T]` arrays provide `push(value)`, `extend(values)`,
 `removeAt(index)`, `remove(value)`, `pop()`, and `clear()`. Extension appends a

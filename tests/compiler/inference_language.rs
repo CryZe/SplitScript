@@ -1343,21 +1343,21 @@ fn enums_and_their_payloads_use_structural_equality() {
 
     let unsupported = r#"
         enum Values {
-            Items([i32])
+            Callback(() -> i32)
         }
 
         state "game.exe" {}
 
         whileAttached {
-            let left = Values.Items([1, 2])
-            let right = Values.Items([1, 2])
+            let left = Values.Callback(() => 1)
+            let right = Values.Callback(() => 1)
             let same = left == right
         }
     "#;
     let errors = splitscript::compile(unsupported)
         .expect_err("enum payloads without equality must be rejected precisely");
     assert!(errors.iter().any(|error| {
-        error.message.contains("Values.Items")
+        error.message.contains("Values.Callback")
             && error.message.contains("does not support equality")
     }));
 }
@@ -1494,7 +1494,9 @@ fn literal_matches_support_guards_wildcards_and_bidirectional_inference() {
                 | splitscript::compiler::wasm_ir::LoweredPattern::IteratorEnd(_)
                 | splitscript::compiler::wasm_ir::LoweredPattern::IteratorItem { .. }
                 | splitscript::compiler::wasm_ir::LoweredPattern::ResultSuccess { .. }
-                | splitscript::compiler::wasm_ir::LoweredPattern::ResultError { .. } => {}
+                | splitscript::compiler::wasm_ir::LoweredPattern::ResultError { .. }
+                | splitscript::compiler::wasm_ir::LoweredPattern::Array(_)
+                | splitscript::compiler::wasm_ir::LoweredPattern::Binding(_) => {}
             }
             guarded |= arm.guard.is_some();
         }

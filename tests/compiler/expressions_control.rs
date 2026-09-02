@@ -1905,6 +1905,168 @@ fn for_loops_infer_array_and_element_types_from_the_body() {
 }
 
 #[test]
+fn arrays_compare_structurally_when_their_elements_are_equatable() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let fixed: [u8; 3] = [1, 2, 3]
+            let growable: [u8] = [1, 2, 3]
+            let nested: [[u8]] = [[1, 2], [3]]
+            print(fixed == [1, 2, 3])
+            print(growable != [1, 2])
+            print(nested == [[1, 2], [3]])
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("fixed, growable, and nested arrays should support structural equality");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("array equality helpers should produce valid Wasm");
+}
+
+#[test]
+fn array_patterns_are_exact_recursive_and_bind_values() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn fixed(values: [u32?; 2]) -> u32 {
+            return match values {
+                [Some(first), Some(second)] => first + second,
+                _ => 0,
+            }
+        }
+
+        fn growable(values: [u8]) -> u8 {
+            return match values {
+                [0x53, value, 0] => value,
+                _ => 0,
+            }
+        }
+
+        whileAttached {
+            print(fixed([Some(4), Some(5)]))
+            print(growable([0x53, 7, 0]))
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("array patterns should recursively test and bind their elements");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("recursive array patterns should produce valid Wasm");
+}
+
+#[test]
+fn irrefutable_fixed_array_patterns_are_exhaustive() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn add(values: [u32; 2]) -> u32 {
+            return match values {
+                [first, second] => first + second,
+            }
+        }
+    "#;
+
+    splitscript::compile(source)
+        .expect("an exact fixed array of bindings covers every value of its type");
+}
+
+#[test]
+fn one_array_pattern_cannot_bind_the_same_name_twice() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn add(values: [u32; 2]) -> u32 {
+                return match values {
+                    [value, value] => value,
+                }
+            }
+        "#,
+    )
+    .expect_err("duplicate bindings in one recursive pattern are ambiguous");
+
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("pattern binds `value` more than once")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn arrays_of_non_equatable_values_do_not_compare() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            whileAttached {
+                let callbacks = [() => 1]
+                print(callbacks == callbacks)
+            }
+        "#,
+    )
+    .expect_err("an array cannot derive equality when its element cannot compare");
+
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("array element does not support equality")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn fixed_array_patterns_require_the_declared_length() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn classify(values: [u8; 2]) -> bool {
+                return match values {
+                    [1] => true,
+                    _ => false,
+                }
+            }
+        "#,
+    )
+    .expect_err("a fixed array pattern with the wrong length should be rejected");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("requires exactly 2")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn growable_array_patterns_require_a_fallback_arm() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn first(values: [u8]) -> u8 {
+                return match values {
+                    [value] => value,
+                }
+            }
+        "#,
+    )
+    .expect_err("an exact growable array pattern cannot cover every length");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("non-exhaustive array match")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn break_and_continue_require_loops() {
     for (keyword, expected) in [
         ("break", "`break` is only available inside a loop"),

@@ -85,31 +85,21 @@ fn set_types_render_in_semantic_queries() {
 }
 
 #[test]
-fn set_elements_must_be_equatable() {
+fn equatable_arrays_can_be_set_elements() {
     let source = r#"
-        let invalid = Set.new<[u8]>()
+        let values = Set.new<[u8]>()
         state "game.exe" {}
     "#;
-    let diagnostics = splitscript::compile(source).expect_err("arrays are not equatable");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.message.contains("Equatable")
-            || diagnostic.message.contains("does not support")
-            || diagnostic.message.contains("constraints")
-    }));
+    splitscript::compile(source).expect("arrays are equatable when their elements are equatable");
 }
 
 #[test]
-fn explicit_set_types_enforce_source_declared_constructor_constraints() {
+fn explicit_sets_accept_equatable_array_keys() {
     let source = r#"
         state "game.exe" {}
-        fn invalid(values: Set<[u8]>) {}
+        fn accepts(values: Set<[u8]>) {}
     "#;
-    let diagnostics = splitscript::compile(source).expect_err("arrays are not equatable set keys");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.message.contains("does not support")
-            || diagnostic.message.contains("Equatable")
-            || diagnostic.message.contains("constraints")
-    }));
+    splitscript::compile(source).expect("array keys satisfy Set's Equatable constraint");
 }
 
 #[test]

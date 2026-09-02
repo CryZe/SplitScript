@@ -2269,7 +2269,8 @@ pub(crate) fn type_may_have_capability(
                 capability,
             ),
             TypeKind::Array { length, .. } => {
-                behavior == CapabilityBehavior::StructuralMemoryLayout && length.is_some()
+                behavior == CapabilityBehavior::StructuralEquality
+                    || behavior == CapabilityBehavior::StructuralMemoryLayout && length.is_some()
                     || library
                         .type_constructor_has_capability(StdlibTypeConstructorId::Array, capability)
             }
@@ -2299,7 +2300,8 @@ pub(crate) fn type_may_have_capability(
         .into_iter()
         .any(|constructor| library.type_constructor_has_capability(constructor, capability)),
         Type::Array(_) => {
-            behavior == CapabilityBehavior::StructuralMemoryLayout
+            behavior == CapabilityBehavior::StructuralEquality
+                || behavior == CapabilityBehavior::StructuralMemoryLayout
                 || library
                     .type_constructor_has_capability(StdlibTypeConstructorId::Array, capability)
         }

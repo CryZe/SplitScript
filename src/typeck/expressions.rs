@@ -527,247 +527,26 @@ impl Checker {
                         self.error("unreachable match arm after `_`", arm.span);
                     }
                     self.scopes.push(HashMap::new());
-                    let mut state_layout = None;
-                    let pattern_key = match &arm.pattern {
-                        MatchPattern::Enum {
-                            variant, binding, ..
-                        } => {
-                            let Some(enumeration) = self.resolutions.pattern_enum(arm.pattern_id)
-                            else {
-                                self.error("unresolved enum type", arm.span);
-                                self.scopes.pop();
-                                continue;
-                            };
-                            self.unify(value_type, self.enum_type(enumeration), arm.span);
-                            let declaration = self.enum_info(enumeration);
-                            if let Some(declaration) = declaration {
-                                if let Some(declared_variant) = declaration
+                    let (pattern_key, pattern_irrefutable) =
+                        self.check_pattern(&arm.pattern, arm.pattern_id, value_type, arm.span);
+                    let state_layout = if refines_state_layout
+                        && let MatchPattern::Enum { variant, .. } = &arm.pattern
+                    {
+                        self.resolutions
+                            .pattern_enum(arm.pattern_id)
+                            .and_then(|enumeration| self.enum_info(enumeration))
+                            .and_then(|declaration| {
+                                declaration
                                     .variants
                                     .iter()
                                     .find(|declared| declared.name == *variant)
-                                {
-                                    self.semantics.resolve_pattern_variant(
-                                        arm.pattern_id,
-                                        declared_variant.id,
-                                    );
-                                    if refines_state_layout
-                                        && matches!(
-                                            declared_variant.id,
-                                            ResolvedEnumVariantId::Source(_)
-                                        )
-                                    {
-                                        let ResolvedEnumVariantId::Source(variant) =
-                                            declared_variant.id
-                                        else {
-                                            unreachable!()
-                                        };
-                                        state_layout = Some(variant);
-                                    }
-                                    match (declared_variant.payload, binding) {
-                                        (Some(payload_type), Some(binding)) => {
-                                            self.semantics
-                                                .resolve_value_type(binding.id, payload_type);
-                                            self.scopes.last_mut().unwrap().insert(
-                                                binding.name.clone(),
-                                                Binding {
-                                                    id: Some(binding.id),
-                                                    ty: payload_type,
-                                                    mutable: false,
-                                                    debug_only: self.debug_context.is_debug(),
-                                                    declaration_span: Some(binding.name_span),
-                                                },
-                                            );
-                                        }
-                                        (None, Some(_)) => self.error(
-                                            format!("variant `{variant}` has no payload to bind"),
-                                            arm.span,
-                                        ),
-                                        _ => {}
-                                    }
-                                } else {
-                                    self.error(
-                                        format!(
-                                            "enum `{}` has no variant `{variant}`",
-                                            declaration.name
-                                        ),
-                                        arm.span,
-                                    );
-                                }
-                            } else {
-                                self.error("unknown enum type", arm.span);
-                            }
-                            format!("enum:{enumeration}:{variant}")
-                        }
-                        MatchPattern::Bool(value) => {
-                            self.unify(
-                                value_type,
-                                self.core_type(crate::stdlib::CoreTypeId::Bool),
-                                arm.span,
-                            );
-                            format!("bool:{value}")
-                        }
-                        MatchPattern::Char(value) => {
-                            self.unify(
-                                value_type,
-                                self.core_type(crate::stdlib::CoreTypeId::Char),
-                                arm.span,
-                            );
-                            format!("char:{value}")
-                        }
-                        MatchPattern::String(value) => {
-                            self.unify(
-                                value_type,
-                                self.standard_type(StdlibTypeId::String),
-                                arm.span,
-                            );
-                            format!("string:{value:?}")
-                        }
-                        MatchPattern::Int { value, suffix } => {
-                            let pattern_type = if let Some(suffix) = suffix {
-                                if !suffix.is_integer() {
-                                    self.error(
-                                        "integer match patterns require an integer type",
-                                        arm.span,
-                                    );
-                                } else if !self
-                                    .inference
-                                    .fits_unsigned_literal(*value, self.syntax_type(*suffix))
-                                {
-                                    self.error(
-                                        format!("integer literal does not fit in `{suffix}`"),
-                                        arm.span,
-                                    );
-                                }
-                                self.syntax_type(*suffix)
-                            } else {
-                                self.fresh_inference(
-                                    Requirements::capability(StdlibCapabilityId::Integer),
-                                    Some(*value),
-                                )
-                            };
-                            self.unify(value_type, pattern_type, arm.span);
-                            format!("int:{value}")
-                        }
-                        MatchPattern::FileVersion(components) => {
-                            self.unify(
-                                value_type,
-                                self.standard_type(StdlibTypeId::FileVersion),
-                                arm.span,
-                            );
-                            format!(
-                                "version:{}:{}:{}:{}",
-                                components[0], components[1], components[2], components[3]
-                            )
-                        }
-                        MatchPattern::None => {
-                            if let Some(option) = self.infer_option_pattern(
-                                value_type,
-                                arm.span,
-                                "a `None` pattern requires an optional value",
-                            ) {
-                                self.semantics.resolve_wrapper_pattern(
-                                    arm.pattern_id,
-                                    ResolvedWrapperPattern::OptionNone(option),
-                                );
-                                format!("option:{option}:none")
-                            } else {
-                                format!("invalid:{}", arm.pattern_id.index())
-                            }
-                        }
-                        MatchPattern::OptionSome(binding) => {
-                            if let Some(option) = self.infer_option_pattern(
-                                value_type,
-                                arm.span,
-                                "a `Some(value)` pattern requires an optional value",
-                            ) {
-                                self.semantics.resolve_wrapper_pattern(
-                                    arm.pattern_id,
-                                    ResolvedWrapperPattern::OptionSome(option),
-                                );
-                                let binding_type = self.inference.option_value(option);
-                                if let Some(binding) = binding {
-                                    self.bind_pattern_value(binding, binding_type, arm.span);
-                                }
-                                format!("option:{option}:some")
-                            } else {
-                                format!("invalid:{}", arm.pattern_id.index())
-                            }
-                        }
-                        MatchPattern::IteratorEnd => {
-                            if let Some((step, _)) = self.infer_iterator_step_pattern(
-                                value_type,
-                                arm.span,
-                                "an `End` pattern requires an iterator step",
-                            ) {
-                                self.semantics.resolve_wrapper_pattern(
-                                    arm.pattern_id,
-                                    ResolvedWrapperPattern::IteratorEnd(step),
-                                );
-                                format!("iterator-step:{step}:end")
-                            } else {
-                                format!("invalid:{}", arm.pattern_id.index())
-                            }
-                        }
-                        MatchPattern::IteratorItem(binding) => {
-                            if let Some((step, item)) = self.infer_iterator_step_pattern(
-                                value_type,
-                                arm.span,
-                                "an `Item(value)` pattern requires an iterator step",
-                            ) {
-                                self.semantics.resolve_wrapper_pattern(
-                                    arm.pattern_id,
-                                    ResolvedWrapperPattern::IteratorItem(step),
-                                );
-                                if let Some(binding) = binding {
-                                    self.bind_pattern_value(binding, item, arm.span);
-                                }
-                                format!("iterator-step:{step}:item")
-                            } else {
-                                format!("invalid:{}", arm.pattern_id.index())
-                            }
-                        }
-                        MatchPattern::ResultSuccess(binding) => {
-                            if let Some(result) = self.infer_result_pattern(
-                                value_type,
-                                arm.span,
-                                "an `Ok(value)` pattern requires a result value",
-                            ) {
-                                self.semantics.resolve_wrapper_pattern(
-                                    arm.pattern_id,
-                                    ResolvedWrapperPattern::ResultSuccess(result),
-                                );
-                                let binding_type = self.inference.result_value(result);
-                                if let Some(binding) = binding {
-                                    self.bind_pattern_value(binding, binding_type, arm.span);
-                                }
-                                format!("result:{result}:success")
-                            } else {
-                                format!("invalid:{}", arm.pattern_id.index())
-                            }
-                        }
-                        MatchPattern::ResultError(binding) => {
-                            if let Some(result) = self.infer_result_pattern(
-                                value_type,
-                                arm.span,
-                                "an `Err(error)` pattern requires a result value",
-                            ) {
-                                self.semantics.resolve_wrapper_pattern(
-                                    arm.pattern_id,
-                                    ResolvedWrapperPattern::ResultError(result),
-                                );
-                                if let Some(binding) = binding {
-                                    self.bind_pattern_value(
-                                        binding,
-                                        self.standard_type(StdlibTypeId::String),
-                                        arm.span,
-                                    );
-                                }
-                                format!("result:{result}:error")
-                            } else {
-                                format!("invalid:{}", arm.pattern_id.index())
-                            }
-                        }
-                        MatchPattern::Wildcard => "wildcard".to_owned(),
+                                    .and_then(|declared| match declared.id {
+                                        ResolvedEnumVariantId::Source(variant) => Some(variant),
+                                        ResolvedEnumVariantId::Standard(_) => None,
+                                    })
+                            })
+                    } else {
+                        None
                     };
                     let state_layout = state_layout.or(self.active_state_layout);
                     let arm_type = self.with_state_layout(state_layout, |checker| {
@@ -796,7 +575,7 @@ impl Checker {
                         if !unguarded_patterns.insert(pattern_key.clone()) {
                             self.error(format!("duplicate match arm `{pattern_key}`"), arm.span);
                         }
-                        if matches!(arm.pattern, MatchPattern::Wildcard) {
+                        if pattern_irrefutable {
                             has_unguarded_wildcard = true;
                         }
                     } else if unguarded_patterns.contains(&pattern_key) {
@@ -868,6 +647,9 @@ impl Checker {
                             "non-exhaustive file-version match: add a `_` arm",
                             expr.span,
                         ),
+                        Type::Array(_) => {
+                            self.error("non-exhaustive array match: add a `_` arm", expr.span)
+                        }
                         ty @ Type::Known(_) => {
                             if let Some((enum_key, declaration)) = self.enum_info_for_type(ty) {
                                 for variant in &declaration.variants {
@@ -1742,6 +1524,252 @@ impl Checker {
         }
     }
 
+    fn check_array_pattern(
+        &mut self,
+        elements: &[crate::ast::PatternNode],
+        value_type: Type,
+        span: Span,
+    ) -> (String, bool) {
+        let Type::Array(array) = self.shallow_type(value_type) else {
+            let ty = self.type_name(value_type);
+            self.error(
+                format!("an array pattern requires an array value, found `{ty}`"),
+                span,
+            );
+            return ("invalid-array".to_owned(), false);
+        };
+        let element_type = self.inference.array_element(array);
+        let fixed_length = self.inference.array_length(array);
+        if let Some(length) = fixed_length
+            && elements.len() != length as usize
+        {
+            let array_name = self.type_name(value_type);
+            self.error(
+                format!(
+                    "array pattern has {} elements, but `{array_name}` requires exactly {length}",
+                    elements.len()
+                ),
+                span,
+            );
+        }
+        let mut keys = Vec::with_capacity(elements.len());
+        let mut all_irrefutable = true;
+        for element in elements {
+            let (key, irrefutable) =
+                self.check_pattern(&element.kind, element.id, element_type, element.span);
+            keys.push(key);
+            all_irrefutable &= irrefutable;
+        }
+        (
+            format!("array:{array}:[{}]", keys.join(",")),
+            fixed_length == Some(elements.len() as u32) && all_irrefutable,
+        )
+    }
+
+    fn check_pattern(
+        &mut self,
+        pattern: &MatchPattern,
+        pattern_id: crate::ast::PatternId,
+        value_type: Type,
+        span: Span,
+    ) -> (String, bool) {
+        let key = match pattern {
+            MatchPattern::Enum {
+                variant, binding, ..
+            } => {
+                let Some(enumeration) = self.resolutions.pattern_enum(pattern_id) else {
+                    self.error("unresolved enum type", span);
+                    return (format!("invalid:{}", pattern_id.index()), false);
+                };
+                self.unify(value_type, self.enum_type(enumeration), span);
+                if let Some(declaration) = self.enum_info(enumeration) {
+                    if let Some(declared_variant) = declaration
+                        .variants
+                        .iter()
+                        .find(|declared| declared.name == *variant)
+                    {
+                        self.semantics
+                            .resolve_pattern_variant(pattern_id, declared_variant.id);
+                        match (declared_variant.payload, binding) {
+                            (Some(payload), Some(binding)) => {
+                                self.bind_pattern_value(binding, payload, span)
+                            }
+                            (None, Some(_)) => self
+                                .error(format!("variant `{variant}` has no payload to bind"), span),
+                            _ => {}
+                        }
+                    } else {
+                        self.error(
+                            format!("enum `{}` has no variant `{variant}`", declaration.name),
+                            span,
+                        );
+                    }
+                } else {
+                    self.error("unknown enum type", span);
+                }
+                format!("enum:{enumeration}:{variant}")
+            }
+            MatchPattern::Bool(value) => {
+                self.unify(
+                    value_type,
+                    self.core_type(crate::stdlib::CoreTypeId::Bool),
+                    span,
+                );
+                format!("bool:{value}")
+            }
+            MatchPattern::Char(value) => {
+                self.unify(
+                    value_type,
+                    self.core_type(crate::stdlib::CoreTypeId::Char),
+                    span,
+                );
+                format!("char:{value}")
+            }
+            MatchPattern::String(value) => {
+                self.unify(value_type, self.standard_type(StdlibTypeId::String), span);
+                format!("string:{value:?}")
+            }
+            MatchPattern::Int { value, suffix } => {
+                let pattern_type = if let Some(suffix) = suffix {
+                    if !suffix.is_integer() {
+                        self.error("integer match patterns require an integer type", span);
+                    } else if !self
+                        .inference
+                        .fits_unsigned_literal(*value, self.syntax_type(*suffix))
+                    {
+                        self.error(format!("integer literal does not fit in `{suffix}`"), span);
+                    }
+                    self.syntax_type(*suffix)
+                } else {
+                    self.fresh_inference(
+                        Requirements::capability(StdlibCapabilityId::Integer),
+                        Some(*value),
+                    )
+                };
+                self.unify(value_type, pattern_type, span);
+                format!("int:{value}")
+            }
+            MatchPattern::FileVersion(components) => {
+                self.unify(
+                    value_type,
+                    self.standard_type(StdlibTypeId::FileVersion),
+                    span,
+                );
+                format!(
+                    "version:{}:{}:{}:{}",
+                    components[0], components[1], components[2], components[3]
+                )
+            }
+            MatchPattern::None => {
+                let Some(option) = self.infer_option_pattern(
+                    value_type,
+                    span,
+                    "a `None` pattern requires an optional value",
+                ) else {
+                    return (format!("invalid:{}", pattern_id.index()), false);
+                };
+                self.semantics.resolve_wrapper_pattern(
+                    pattern_id,
+                    ResolvedWrapperPattern::OptionNone(option),
+                );
+                format!("option:{option}:none")
+            }
+            MatchPattern::OptionSome(binding) => {
+                let Some(option) = self.infer_option_pattern(
+                    value_type,
+                    span,
+                    "a `Some(value)` pattern requires an optional value",
+                ) else {
+                    return (format!("invalid:{}", pattern_id.index()), false);
+                };
+                self.semantics.resolve_wrapper_pattern(
+                    pattern_id,
+                    ResolvedWrapperPattern::OptionSome(option),
+                );
+                if let Some(binding) = binding {
+                    self.bind_pattern_value(binding, self.inference.option_value(option), span);
+                }
+                format!("option:{option}:some")
+            }
+            MatchPattern::IteratorEnd => {
+                let Some((step, _)) = self.infer_iterator_step_pattern(
+                    value_type,
+                    span,
+                    "an `End` pattern requires an iterator step",
+                ) else {
+                    return (format!("invalid:{}", pattern_id.index()), false);
+                };
+                self.semantics
+                    .resolve_wrapper_pattern(pattern_id, ResolvedWrapperPattern::IteratorEnd(step));
+                format!("iterator-step:{step}:end")
+            }
+            MatchPattern::IteratorItem(binding) => {
+                let Some((step, item)) = self.infer_iterator_step_pattern(
+                    value_type,
+                    span,
+                    "an `Item(value)` pattern requires an iterator step",
+                ) else {
+                    return (format!("invalid:{}", pattern_id.index()), false);
+                };
+                self.semantics.resolve_wrapper_pattern(
+                    pattern_id,
+                    ResolvedWrapperPattern::IteratorItem(step),
+                );
+                if let Some(binding) = binding {
+                    self.bind_pattern_value(binding, item, span);
+                }
+                format!("iterator-step:{step}:item")
+            }
+            MatchPattern::ResultSuccess(binding) => {
+                let Some(result) = self.infer_result_pattern(
+                    value_type,
+                    span,
+                    "an `Ok(value)` pattern requires a result value",
+                ) else {
+                    return (format!("invalid:{}", pattern_id.index()), false);
+                };
+                self.semantics.resolve_wrapper_pattern(
+                    pattern_id,
+                    ResolvedWrapperPattern::ResultSuccess(result),
+                );
+                if let Some(binding) = binding {
+                    self.bind_pattern_value(binding, self.inference.result_value(result), span);
+                }
+                format!("result:{result}:success")
+            }
+            MatchPattern::ResultError(binding) => {
+                let Some(result) = self.infer_result_pattern(
+                    value_type,
+                    span,
+                    "an `Err(error)` pattern requires a result value",
+                ) else {
+                    return (format!("invalid:{}", pattern_id.index()), false);
+                };
+                self.semantics.resolve_wrapper_pattern(
+                    pattern_id,
+                    ResolvedWrapperPattern::ResultError(result),
+                );
+                if let Some(binding) = binding {
+                    self.bind_pattern_value(
+                        binding,
+                        self.standard_type(StdlibTypeId::String),
+                        span,
+                    );
+                }
+                format!("result:{result}:error")
+            }
+            MatchPattern::Array(elements) => {
+                return self.check_array_pattern(elements, value_type, span);
+            }
+            MatchPattern::Binding(binding) => {
+                self.bind_pattern_value(binding, value_type, span);
+                return ("binding".to_owned(), true);
+            }
+            MatchPattern::Wildcard => return ("wildcard".to_owned(), true),
+        };
+        (key, false)
+    }
+
     pub(super) fn binary(
         &mut self,
         op: BinaryOp,
@@ -1790,6 +1818,16 @@ impl Checker {
                 (left_ty, right_ty)
             }
             (_, ExprKind::None) if matches!(op, BinaryOp::Eq | BinaryOp::Ne) => {
+                let left_ty = self.expr(left, operand_hint)?;
+                let right_ty = self.expr(right, Some(left_ty))?;
+                (left_ty, right_ty)
+            }
+            (ExprKind::Array(_), _) if matches!(op, BinaryOp::Eq | BinaryOp::Ne) => {
+                let right_ty = self.expr(right, operand_hint)?;
+                let left_ty = self.expr(left, Some(right_ty))?;
+                (left_ty, right_ty)
+            }
+            (_, ExprKind::Array(_)) if matches!(op, BinaryOp::Eq | BinaryOp::Ne) => {
                 let left_ty = self.expr(left, operand_hint)?;
                 let right_ty = self.expr(right, Some(left_ty))?;
                 (left_ty, right_ty)

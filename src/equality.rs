@@ -88,6 +88,9 @@ impl EqualityCapabilities {
             TypeKind::Result { value, .. } => self
                 .require(*value, semantics)
                 .map_err(|error| format!("result value does not support equality: {error}")),
+            TypeKind::Array { element, .. } => self
+                .require(*element, semantics)
+                .map_err(|error| format!("array element does not support equality: {error}")),
             _ => Err("this type does not support equality".to_owned()),
         }
     }
@@ -148,6 +151,7 @@ impl EqualityCapabilities {
             ),
             TypeKind::Option { value, .. } => self.check_type(*value, semantics, visiting),
             TypeKind::Result { value, .. } => self.check_type(*value, semantics, visiting),
+            TypeKind::Array { element, .. } => self.check_type(*element, semantics, visiting),
             _ => Err("the contained type does not support equality".to_owned()),
         };
         visiting.remove(&ty);

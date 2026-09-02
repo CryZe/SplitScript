@@ -273,6 +273,12 @@ pub struct TypedMatchArm {
 }
 
 #[derive(Debug, Clone)]
+pub struct TypedPatternNode {
+    pub pattern: TypedPattern,
+    pub resolution: ResolvedPattern,
+}
+
+#[derive(Debug, Clone)]
 pub enum TypedPattern {
     Enum {
         enumeration: EnumTypeId,
@@ -293,6 +299,8 @@ pub enum TypedPattern {
     IteratorItem(Option<PatternBinding>),
     ResultSuccess(Option<PatternBinding>),
     ResultError(Option<PatternBinding>),
+    Array(Vec<TypedPatternNode>),
+    Binding(PatternBinding),
     Wildcard,
 }
 
@@ -920,6 +928,25 @@ struct TypedBodyBuilder<'a> {
     patterns: HashMap<PatternId, ResolvedPattern>,
 }
 
+impl TypedBodyBuilder<'_> {
+    fn insert_pattern(&mut self, pattern: &MatchPattern, id: PatternId, span: Span) {
+        self.patterns.insert(
+            id,
+            ResolvedPattern {
+                id,
+                variant: self.semantics.pattern_variant(id),
+                wrapper: self.semantics.wrapper_pattern(id),
+                span,
+            },
+        );
+        if let MatchPattern::Array(elements) = pattern {
+            for element in elements {
+                self.insert_pattern(&element.kind, element.id, element.span);
+            }
+        }
+    }
+}
+
 impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
         if let Stmt::Assign { id, span, .. } | Stmt::StateAssign { id, span, .. } = statement {
@@ -1003,15 +1030,7 @@ impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
     }
 
     fn visit_match_arm(&mut self, arm: &'ast MatchArm) {
-        self.patterns.insert(
-            arm.pattern_id,
-            ResolvedPattern {
-                id: arm.pattern_id,
-                variant: self.semantics.pattern_variant(arm.pattern_id),
-                wrapper: self.semantics.wrapper_pattern(arm.pattern_id),
-                span: arm.span,
-            },
-        );
+        self.insert_pattern(&arm.pattern, arm.pattern_id, arm.span);
         visit::walk_match_arm(self, arm);
     }
 }
@@ -1335,6 +1354,66 @@ pub fn walk_typed_match_arm<V: TypedVisitor>(
     );
 }
 
+fn lower_pattern(
+    pattern: &MatchPattern,
+    id: crate::ast::PatternId,
+    semantics: &SemanticModel,
+    syntax: &SyntaxProgram,
+    standard_library: &StandardLibrary,
+) -> TypedPattern {
+    match pattern {
+        MatchPattern::Enum {
+            variant, binding, ..
+        } => TypedPattern::Enum {
+            enumeration: enum_type_for_variant(
+                semantics
+                    .pattern_variant(id)
+                    .expect("typed enum patterns have resolved variants"),
+                syntax,
+                standard_library,
+            ),
+            variant: variant.clone(),
+            binding: binding.clone(),
+        },
+        MatchPattern::Bool(value) => TypedPattern::Bool(*value),
+        MatchPattern::Char(value) => TypedPattern::Char(*value),
+        MatchPattern::String(value) => TypedPattern::String(value.clone()),
+        MatchPattern::Int { value, suffix } => TypedPattern::Int {
+            value: *value,
+            suffix: *suffix,
+        },
+        MatchPattern::FileVersion(components) => TypedPattern::FileVersion(*components),
+        MatchPattern::None => TypedPattern::None,
+        MatchPattern::OptionSome(binding) => TypedPattern::OptionSome(binding.clone()),
+        MatchPattern::IteratorEnd => TypedPattern::IteratorEnd,
+        MatchPattern::IteratorItem(binding) => TypedPattern::IteratorItem(binding.clone()),
+        MatchPattern::ResultSuccess(binding) => TypedPattern::ResultSuccess(binding.clone()),
+        MatchPattern::ResultError(binding) => TypedPattern::ResultError(binding.clone()),
+        MatchPattern::Array(elements) => TypedPattern::Array(
+            elements
+                .iter()
+                .map(|element| TypedPatternNode {
+                    pattern: lower_pattern(
+                        &element.kind,
+                        element.id,
+                        semantics,
+                        syntax,
+                        standard_library,
+                    ),
+                    resolution: ResolvedPattern {
+                        id: element.id,
+                        variant: semantics.pattern_variant(element.id),
+                        wrapper: semantics.wrapper_pattern(element.id),
+                        span: element.span,
+                    },
+                })
+                .collect(),
+        ),
+        MatchPattern::Binding(binding) => TypedPattern::Binding(binding.clone()),
+        MatchPattern::Wildcard => TypedPattern::Wildcard,
+    }
+}
+
 fn lower_expression_kind(
     expression: &Expr,
     semantics: &SemanticModel,
@@ -1454,46 +1533,13 @@ fn lower_expression_kind(
             arms: arms
                 .iter()
                 .map(|arm| TypedMatchArm {
-                    pattern: match &arm.pattern {
-                        MatchPattern::Enum {
-                            variant, binding, ..
-                        } => TypedPattern::Enum {
-                            enumeration: enum_type_for_variant(
-                                semantics
-                                    .pattern_variant(arm.pattern_id)
-                                    .expect("typed enum patterns have resolved variants"),
-                                syntax,
-                                standard_library,
-                            ),
-                            variant: variant.clone(),
-                            binding: binding.clone(),
-                        },
-                        MatchPattern::Bool(value) => TypedPattern::Bool(*value),
-                        MatchPattern::Char(value) => TypedPattern::Char(*value),
-                        MatchPattern::String(value) => TypedPattern::String(value.clone()),
-                        MatchPattern::Int { value, suffix } => TypedPattern::Int {
-                            value: *value,
-                            suffix: *suffix,
-                        },
-                        MatchPattern::FileVersion(components) => {
-                            TypedPattern::FileVersion(*components)
-                        }
-                        MatchPattern::None => TypedPattern::None,
-                        MatchPattern::OptionSome(binding) => {
-                            TypedPattern::OptionSome(binding.clone())
-                        }
-                        MatchPattern::IteratorEnd => TypedPattern::IteratorEnd,
-                        MatchPattern::IteratorItem(binding) => {
-                            TypedPattern::IteratorItem(binding.clone())
-                        }
-                        MatchPattern::ResultSuccess(binding) => {
-                            TypedPattern::ResultSuccess(binding.clone())
-                        }
-                        MatchPattern::ResultError(binding) => {
-                            TypedPattern::ResultError(binding.clone())
-                        }
-                        MatchPattern::Wildcard => TypedPattern::Wildcard,
-                    },
+                    pattern: lower_pattern(
+                        &arm.pattern,
+                        arm.pattern_id,
+                        semantics,
+                        syntax,
+                        standard_library,
+                    ),
                     resolution: ResolvedPattern {
                         id: arm.pattern_id,
                         variant: semantics.pattern_variant(arm.pattern_id),

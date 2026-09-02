@@ -937,6 +937,11 @@ const MATCH_EXAMPLES: &[Example] = &[
         "return match name {\n    \"game.exe\" => \"full game\",\n    \"game-demo.exe\" => \"demo\",\n    _ => \"unsupported\",\n}",
         CONTROL_FLOW_SOURCE,
     ),
+    Example::checked(
+        "Destructure an exact array shape",
+        "return match bytes {\n    [0x53, value, 0] => value,\n    _ => 0,\n}",
+        "state \"game.exe\" {}\nfn decode(bytes: [u8]) -> u8 {\n    return match bytes {\n        [0x53, value, 0] => value,\n        _ => 0,\n    }\n}",
+    ),
 ];
 focused_example!(
     RETURN_EXAMPLE,
@@ -1615,7 +1620,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "match value { pattern => expression }",
         "Exhaustively matches a value.",
-        "[`match`] supports enum payloads, optional [`None`]/[`Some`]`(value)` patterns, iterator [`End`]/[`Item`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, string, character, integer, boolean, and file-version literals, guards, and a wildcard. String patterns compare contents, not WebAssembly GC identities. Enum and wrapper matches must cover every state; open-ended literal domains require `_`; guarded arms do not establish coverage.",
+        "[`match`] supports enum payloads, optional [`None`]/[`Some`]`(value)` patterns, iterator [`End`]/[`Item`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, exact recursive array patterns, string, character, integer, boolean, and file-version literals, guards, and a wildcard. Array elements can bind values or contain any other pattern. A [`[T; N]`] pattern must have exactly `N` elements; a growable [`[T]`] pattern tests its length at runtime. String patterns compare contents, not WebAssembly GC identities. Enum and wrapper matches must cover every state; open-ended literal domains and growable arrays require `_`; guarded arms do not establish coverage.",
         MATCH_EXAMPLES
     ),
     language_item!(
@@ -1768,7 +1773,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "[Element] or [Element; Length]",
         "Names a garbage-collected array type.",
-        "[`[T]`] accepts any length. [`[T; N]`] carries an exact compile-time length, can be used wherever [`[T]`] is expected, and has a fixed process-memory layout when `T` satisfies [`MemoryReadable`]. Process-memory reads of a fixed array are limited to 4,096 elements and 65,536 bytes so generated code and host-memory traffic remain bounded. When a larger native region only needs sparse values, construct a growable [`[T]`] in an expression-valued [`state`] field from focused reads instead of declaring an oversized [`[T; N]`].",
+        "[`[T]`] accepts any length. [`[T; N]`] carries an exact compile-time length, can be used wherever [`[T]`] is expected, and has a fixed process-memory layout when `T` satisfies [`MemoryReadable`]. Both forms compare structurally when `T` satisfies [`Equatable`] and support exact recursive [`match`] patterns. Process-memory reads of a fixed array are limited to 4,096 elements and 65,536 bytes so generated code and host-memory traffic remain bounded. When a larger native region only needs sparse values, construct a growable [`[T]`] in an expression-valued [`state`] field from focused reads instead of declaring an oversized [`[T; N]`].",
         ARRAY_TYPE_EXAMPLE
     ),
     language_item!(

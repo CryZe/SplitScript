@@ -1666,24 +1666,9 @@ fn add_child_expression_bindings(
 }
 
 fn add_pattern_binding(builder: &mut CompletionBuilder, pattern: &MatchPattern) {
-    let binding = match pattern {
-        MatchPattern::Enum { binding, .. }
-        | MatchPattern::OptionSome(binding)
-        | MatchPattern::IteratorItem(binding)
-        | MatchPattern::ResultSuccess(binding)
-        | MatchPattern::ResultError(binding) => binding.as_ref(),
-        MatchPattern::Bool(_)
-        | MatchPattern::Char(_)
-        | MatchPattern::String(_)
-        | MatchPattern::Int { .. }
-        | MatchPattern::FileVersion(_)
-        | MatchPattern::None
-        | MatchPattern::IteratorEnd
-        | MatchPattern::Wildcard => None,
-    };
-    if let Some(binding) = binding {
+    pattern.visit_bindings(&mut |binding| {
         add_scoped_variable(builder, &binding.name, "pattern binding");
-    }
+    });
 }
 
 fn add_scoped_variable(builder: &mut CompletionBuilder, name: &str, detail: &str) {

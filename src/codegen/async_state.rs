@@ -3686,7 +3686,7 @@ fn compile_async_flow(
                 compile_expr(function, *value, context);
                 function.instruction(&Instruction::LocalSet(value_local));
                 for (arm_index, arm) in arms.iter().enumerate() {
-                    let binding = compile_statement_pattern(
+                    let bindings = compile_statement_pattern(
                         function,
                         &arm.pattern,
                         value_local,
@@ -3698,10 +3698,10 @@ fn compile_async_flow(
                             .map(|control| control.nested(arm_index as u32 + 1)),
                         ..*context
                     };
-                    if binding.is_some() || arm.guard.is_some() {
+                    if !bindings.is_empty() || arm.guard.is_some() {
                         function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
-                        if let Some(binding) = binding {
-                            store_match_binding(function, binding, value_local, &arm_context);
+                        for binding in bindings {
+                            store_match_binding(function, binding, &arm_context);
                         }
                         if let Some(guard) = arm.guard {
                             compile_expr(function, guard, &arm_context);

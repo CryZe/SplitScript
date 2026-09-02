@@ -1453,7 +1453,9 @@ impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
             | ast::MatchPattern::IteratorItem(None)
             | ast::MatchPattern::ResultSuccess(None)
             | ast::MatchPattern::ResultError(None)
-            | ast::MatchPattern::Wildcard => None,
+            | ast::MatchPattern::Wildcard
+            | ast::MatchPattern::Array(_) => None,
+            ast::MatchPattern::Binding(binding) => Some(binding),
         };
         if let Some(binding) = binding {
             self.push(

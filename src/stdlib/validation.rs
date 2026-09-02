@@ -542,11 +542,16 @@ fn validate_equality_type(
             validate_standard_equality(standard, visiting, capabilities, types, fields)
         }
         TypeRef::Application {
-            constructor: StdlibTypeConstructorId::Option | StdlibTypeConstructorId::Result,
+            constructor:
+                StdlibTypeConstructorId::Array
+                | StdlibTypeConstructorId::Option
+                | StdlibTypeConstructorId::Result,
             arguments: [value],
         } => validate_equality_type(*value, visiting, capabilities, types, fields),
         TypeRef::Application { .. } => Err("its constructed type is not Equatable".to_owned()),
-        TypeRef::FixedArray { .. } => Err("its fixed array type is not Equatable".to_owned()),
+        TypeRef::FixedArray { element, .. } => {
+            validate_equality_type(*element, visiting, capabilities, types, fields)
+        }
         TypeRef::Parameter(_) => Err("its generic type is not Equatable".to_owned()),
         TypeRef::Associated(_) => Err("its associated type is not Equatable".to_owned()),
         TypeRef::Async(_) => Err("its async type is not Equatable".to_owned()),

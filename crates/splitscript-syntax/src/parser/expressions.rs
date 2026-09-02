@@ -7,7 +7,7 @@ use super::{
     MatchArm, MatchPattern, Parser, PatternBinding, Span, TokenKind, TypeRef, UnaryOp,
     ambiguous_range_diagnostic, assignment_operator, parse_integer,
 };
-use crate::ast::StructLiteralField;
+use crate::ast::{PatternNode, StructLiteralField};
 use crate::diagnostic::{DiagnosticCode, DiagnosticFix, FixApplicability, TextEdit};
 
 const IF_EXPRESSION_MISSING_ELSE: &str = "an `if` expression needs an `else` branch";
@@ -1141,9 +1141,53 @@ impl Parser<'_> {
     }
 
     pub(super) fn match_arm(&mut self) -> Result<MatchArm, Diagnostic> {
+        let pattern = self.match_pattern(false)?;
+        let pattern_start = pattern.span;
+        let pattern_id = pattern.id;
+        let guard = if self.eat_ident("if").is_some() {
+            // `=>` terminates the guard rather than turning its final bare
+            // identifier into a closure parameter.
+            Some(self.expression(1)?)
+        } else {
+            None
+        };
+        self.expect(TokenKind::FatArrow, "expected `=>` after the pattern")?;
+        let value_start = self.current().span.start;
+        let starts_with_if = self.at_ident("if");
+        let diagnostics_before = self.diagnostics.len();
+        let recovery_nodes_before = self.recovery_nodes.len();
+        let value = self.expression(0)?;
+        let statement_if = starts_with_if
+            && matches!(
+                self.diagnostics.get(diagnostics_before..),
+                Some([diagnostic]) if diagnostic.message == IF_EXPRESSION_MISSING_ELSE
+            );
+        if statement_if {
+            self.diagnostics.truncate(diagnostics_before);
+            self.recovery_nodes.truncate(recovery_nodes_before);
+            return Err(self.statement_match_arm_diagnostic(value_start, value.span.end));
+        }
+        if assignment_operator(&self.current().kind).is_some() {
+            return Err(self.statement_match_arm_diagnostic(value_start, value.span.end));
+        }
+        let span = pattern_start.join(value.span);
+        let arm = MatchArm {
+            pattern_id,
+            pattern: pattern.kind,
+            guard,
+            value,
+            span,
+        };
+        if self.eat(&TokenKind::Comma).is_none() && !self.at(&TokenKind::RBrace) {
+            return Err(self.error("expected `,` between match arms"));
+        }
+        Ok(arm)
+    }
+
+    fn match_pattern(&mut self, allow_binding: bool) -> Result<PatternNode, Diagnostic> {
         let token = self.current().clone();
         let pattern_start = token.span;
-        let pattern = match token.kind {
+        let kind = match token.kind {
             TokenKind::Ident(name) if name == "_" => {
                 self.bump();
                 MatchPattern::Wildcard
@@ -1235,6 +1279,12 @@ impl Parser<'_> {
                         variant,
                         binding,
                     }
+                } else if allow_binding {
+                    MatchPattern::Binding(PatternBinding {
+                        id: self.new_value_id(),
+                        name: enum_name,
+                        name_span: pattern_start,
+                    })
                 } else {
                     return Err(Diagnostic::new(
                         format!(
@@ -1258,51 +1308,35 @@ impl Parser<'_> {
                 self.bump();
                 MatchPattern::String(value)
             }
+            TokenKind::LBracket => {
+                self.bump();
+                let mut elements = Vec::new();
+                while !self.at(&TokenKind::RBracket) {
+                    elements.push(self.match_pattern(true)?);
+                    if self.eat(&TokenKind::Comma).is_some() {
+                        if self.at(&TokenKind::RBracket) {
+                            break;
+                        }
+                    } else if !self.at(&TokenKind::RBracket) {
+                        return Err(self.error("expected `,` between array patterns"));
+                    }
+                }
+                self.expect(TokenKind::RBracket, "expected `]` after array pattern")?;
+                MatchPattern::Array(elements)
+            }
             _ => {
                 return Err(Diagnostic::new(
-                    "expected an enum variant, string, character, integer, file-version, boolean, `None`, `Some(value)`, `Ok(value)`, `Err(error)`, or `_` pattern",
+                    "expected an array, enum variant, string, character, integer, file-version, boolean, `None`, `Some(value)`, `Ok(value)`, `Err(error)`, or `_` pattern",
                     pattern_start,
                 ));
             }
         };
-        let guard = if self.eat_ident("if").is_some() {
-            // `=>` terminates the guard rather than turning its final bare
-            // identifier into a closure parameter.
-            Some(self.expression(1)?)
-        } else {
-            None
-        };
-        self.expect(TokenKind::FatArrow, "expected `=>` after the pattern")?;
-        let value_start = self.current().span.start;
-        let starts_with_if = self.at_ident("if");
-        let diagnostics_before = self.diagnostics.len();
-        let recovery_nodes_before = self.recovery_nodes.len();
-        let value = self.expression(0)?;
-        let statement_if = starts_with_if
-            && matches!(
-                self.diagnostics.get(diagnostics_before..),
-                Some([diagnostic]) if diagnostic.message == IF_EXPRESSION_MISSING_ELSE
-            );
-        if statement_if {
-            self.diagnostics.truncate(diagnostics_before);
-            self.recovery_nodes.truncate(recovery_nodes_before);
-            return Err(self.statement_match_arm_diagnostic(value_start, value.span.end));
-        }
-        if assignment_operator(&self.current().kind).is_some() {
-            return Err(self.statement_match_arm_diagnostic(value_start, value.span.end));
-        }
-        let span = pattern_start.join(value.span);
-        let arm = MatchArm {
-            pattern_id: self.new_pattern_id(),
-            pattern,
-            guard,
-            value,
+        let span = pattern_start.join(self.previous().span);
+        Ok(PatternNode {
+            id: self.new_pattern_id(),
+            kind,
             span,
-        };
-        if self.eat(&TokenKind::Comma).is_none() && !self.at(&TokenKind::RBrace) {
-            return Err(self.error("expected `,` between match arms"));
-        }
-        Ok(arm)
+        })
     }
 
     fn statement_match_arm_diagnostic(&self, start: usize, parsed_end: usize) -> Diagnostic {

@@ -962,6 +962,75 @@ impl DefinitionCollector<'_> {
             .filter(|token| span.start <= token.span.start && token.span.end <= span.end)
             .collect()
     }
+
+    fn add_pattern_references(
+        &mut self,
+        pattern: &MatchPattern,
+        pattern_id: crate::ast::PatternId,
+        span: Span,
+    ) {
+        match pattern {
+            MatchPattern::Enum { .. } => {
+                if let Some(ResolvedEnumVariantId::Source(variant)) =
+                    self.semantics.pattern_variant(pattern_id)
+                    && let Some(enumeration) = self.syntax.enum_declarations().find(|enumeration| {
+                        enumeration
+                            .variants
+                            .iter()
+                            .any(|candidate| candidate.id == variant)
+                    })
+                    && let Some(enumeration_definition) = self
+                        .index
+                        .get(SourceDefinitionId::Enum(enumeration.id))
+                        .cloned()
+                    && let Some(type_span) = self.tokens_in(span).iter().find_map(|token| {
+                        let leaf = enumeration_definition
+                            .name
+                            .rsplit('.')
+                            .next()
+                            .unwrap_or(&enumeration_definition.name);
+                        matches!(&token.kind, TokenKind::Ident(spelling) if spelling == leaf)
+                            .then_some(token.span)
+                    })
+                {
+                    self.add_reference(enumeration_definition.id, type_span);
+                    if let Some(owner) = enumeration_definition.name.split('.').next()
+                        && owner != enumeration_definition.name
+                        && let Some(class) = self
+                            .syntax
+                            .managed_class_declarations()
+                            .into_iter()
+                            .find(|class| class.name == owner)
+                        && let Some(owner_span) = self.tokens_in(span).iter().find_map(|token| {
+                            matches!(&token.kind, TokenKind::Ident(spelling) if spelling == owner)
+                                .then_some(token.span)
+                        })
+                    {
+                        self.add_reference(SourceDefinitionId::ManagedClass(class.id), owner_span);
+                    }
+                }
+                if let Some(ResolvedEnumVariantId::Source(variant)) =
+                    self.semantics.pattern_variant(pattern_id)
+                    && let Some(definition) = self
+                        .index
+                        .get(SourceDefinitionId::EnumVariant(variant))
+                        .cloned()
+                    && let Some(variant_span) = self.tokens_in(span).iter().find_map(|token| {
+                        matches!(&token.kind, TokenKind::Ident(spelling) if spelling == &definition.name)
+                            .then_some(token.span)
+                    })
+                {
+                    self.add_reference(definition.id, variant_span);
+                }
+            }
+            MatchPattern::Array(elements) => {
+                for element in elements {
+                    self.add_pattern_references(&element.kind, element.id, element.span);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
@@ -1245,97 +1314,21 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
     }
 
     fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
-        let binding = match &arm.pattern {
-            MatchPattern::Enum {
-                binding: Some(binding),
-                ..
-            }
-            | MatchPattern::OptionSome(Some(binding))
-            | MatchPattern::IteratorItem(Some(binding))
-            | MatchPattern::ResultSuccess(Some(binding))
-            | MatchPattern::ResultError(Some(binding)) => Some(binding),
-            MatchPattern::Enum { binding: None, .. }
-            | MatchPattern::Bool(_)
-            | MatchPattern::Char(_)
-            | MatchPattern::String(_)
-            | MatchPattern::Int { .. }
-            | MatchPattern::FileVersion(_)
-            | MatchPattern::None
-            | MatchPattern::IteratorEnd
-            | MatchPattern::OptionSome(None)
-            | MatchPattern::IteratorItem(None)
-            | MatchPattern::ResultSuccess(None)
-            | MatchPattern::ResultError(None)
-            | MatchPattern::Wildcard => None,
-        };
-        if let Some(binding) = binding {
+        arm.pattern.visit_bindings(&mut |binding| {
             self.insert_value(binding.id, &binding.name, arm.span);
-        }
-        if matches!(arm.pattern, MatchPattern::Enum { .. }) {
-            let pattern_end = arm
-                .guard
-                .as_ref()
-                .map_or(arm.value.span.start, |guard| guard.span.start);
-            let pattern_span = Span {
+        });
+        let pattern_end = arm
+            .guard
+            .as_ref()
+            .map_or(arm.value.span.start, |guard| guard.span.start);
+        self.add_pattern_references(
+            &arm.pattern,
+            arm.pattern_id,
+            Span {
                 start: arm.span.start,
                 end: pattern_end,
-            };
-            if let Some(ResolvedEnumVariantId::Source(variant)) =
-                self.semantics.pattern_variant(arm.pattern_id)
-                && let Some(enumeration) = self.syntax.enum_declarations().find(|enumeration| {
-                    enumeration
-                        .variants
-                        .iter()
-                        .any(|candidate| candidate.id == variant)
-                })
-                && let Some(enumeration_definition) = self
-                    .index
-                    .get(SourceDefinitionId::Enum(enumeration.id))
-                    .cloned()
-                && let Some(span) = self.tokens_in(pattern_span).iter().find_map(|token| {
-                    let leaf = enumeration_definition
-                        .name
-                        .rsplit('.')
-                        .next()
-                        .unwrap_or(&enumeration_definition.name);
-                    matches!(&token.kind, TokenKind::Ident(spelling) if spelling == leaf)
-                        .then_some(token.span)
-                })
-            {
-                self.add_reference(enumeration_definition.id, span);
-                if let Some(owner) = enumeration_definition.name.split('.').next()
-                    && owner != enumeration_definition.name
-                    && let Some(class) = self
-                        .syntax
-                        .managed_class_declarations()
-                        .into_iter()
-                        .find(|class| class.name == owner)
-                    && let Some(owner_span) =
-                        self.tokens_in(pattern_span).iter().find_map(|token| {
-                            matches!(&token.kind, TokenKind::Ident(spelling) if spelling == owner)
-                                .then_some(token.span)
-                        })
-                {
-                    self.add_reference(SourceDefinitionId::ManagedClass(class.id), owner_span);
-                }
-            }
-            let Some(variant_id) = self.semantics.pattern_variant(arm.pattern_id) else {
-                visit::walk_match_arm(self, arm);
-                return;
-            };
-            if let ResolvedEnumVariantId::Source(variant_id) = variant_id
-                && let Some(variant_definition) = self
-                    .index
-                    .get(SourceDefinitionId::EnumVariant(variant_id))
-                    .cloned()
-                && let Some(span) = self.tokens_in(pattern_span).iter().find_map(|token| {
-                    matches!(&token.kind, TokenKind::Ident(spelling) if spelling == &variant_definition.name)
-                        .then_some(token.span)
-                })
-            {
-                self.add_reference(variant_definition.id, span);
-            }
-        }
+            },
+        );
         visit::walk_match_arm(self, arm);
     }
 

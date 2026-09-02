@@ -17,8 +17,7 @@ use wasm_encoder::{Function, IndirectNameMap, NameMap, NameSection};
 use super::{Type, imports::Abi};
 use crate::{
     ast::{
-        EnumDecl, Expr, ExprKind, FunctionDecl, MatchArm, MatchPattern, Program, Span,
-        TypeApplicationId, ValueId,
+        EnumDecl, Expr, ExprKind, FunctionDecl, MatchArm, Program, Span, TypeApplicationId, ValueId,
     },
     semantic::{FunctionInstance, SemanticModel},
     stdlib::StandardLibrary,
@@ -400,22 +399,7 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
         }
 
         fn visit_match_arm(&mut self, arm: &'ast MatchArm) {
-            let binding = match &arm.pattern {
-                MatchPattern::Enum { binding, .. }
-                | MatchPattern::OptionSome(binding)
-                | MatchPattern::IteratorItem(binding)
-                | MatchPattern::ResultSuccess(binding)
-                | MatchPattern::ResultError(binding) => binding.as_ref(),
-                MatchPattern::Bool(_)
-                | MatchPattern::Char(_)
-                | MatchPattern::String(_)
-                | MatchPattern::Int { .. }
-                | MatchPattern::FileVersion(_)
-                | MatchPattern::None
-                | MatchPattern::IteratorEnd
-                | MatchPattern::Wildcard => None,
-            };
-            if let Some(binding) = binding {
+            arm.pattern.visit_bindings(&mut |binding| {
                 self.insert(
                     binding.id,
                     &binding.name,
@@ -423,7 +407,7 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
                     binding.name_span,
                     arm.span,
                 );
-            }
+            });
             visit::walk_match_arm(self, arm);
         }
 

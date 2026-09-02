@@ -23,6 +23,7 @@ pub(super) struct Reachability {
     equality_structs: BTreeSet<StructId>,
     equality_standard_structs: BTreeSet<StdlibTypeId>,
     equality_enums: BTreeSet<EnumId>,
+    equality_arrays: BTreeSet<ArrayTypeId>,
     equality_options: BTreeSet<OptionTypeId>,
     equality_results: BTreeSet<ResultTypeId>,
     string_equality: bool,
@@ -139,9 +140,7 @@ impl Reachability {
                 pending.push((owner.clone(), child))
             });
             if let wasm_ir::ExpressionKind::Match { arms, .. } = &expression.kind
-                && arms
-                    .iter()
-                    .any(|arm| matches!(arm.pattern, wasm_ir::LoweredPattern::String(_)))
+                && arms.iter().any(|arm| arm.pattern.contains_string())
             {
                 reachable.string_equality = true;
             }
@@ -708,6 +707,10 @@ impl Reachability {
         self.equality_enums.contains(&enumeration)
     }
 
+    pub fn requires_array_equality(&self, array: ArrayTypeId) -> bool {
+        self.equality_arrays.contains(&array)
+    }
+
     pub fn requires_option_equality(&self, option: OptionTypeId) -> bool {
         self.equality_options.contains(&option)
     }
@@ -979,6 +982,11 @@ impl Reachability {
                 TypeKind::Enum(enumeration) if self.equality_enums.insert(*enumeration) => {
                     pending.extend(capabilities.structural_dependency_types(ty));
                 }
+                TypeKind::Array {
+                    layout, element, ..
+                } if self.equality_arrays.insert(*layout) => {
+                    pending.push(*element);
+                }
                 TypeKind::Option { layout, value } if self.equality_options.insert(*layout) => {
                     pending.push(*value);
                 }
@@ -1112,9 +1120,7 @@ fn block_uses_string_match_pattern(block: &wasm_ir::Block, program: &wasm_ir::Pr
     impl Visitor for StringPatternFinder {
         fn visit_statement(&mut self, statement: &wasm_ir::Statement, program: &wasm_ir::Program) {
             if let wasm_ir::Statement::Match { arms, .. } = statement
-                && arms
-                    .iter()
-                    .any(|arm| matches!(arm.pattern, wasm_ir::LoweredPattern::String(_)))
+                && arms.iter().any(|arm| arm.pattern.contains_string())
             {
                 self.found = true;
             }

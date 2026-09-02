@@ -328,20 +328,9 @@ impl<'ast> Visitor<'ast> for ValueKindCollector {
     }
 
     fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
-        let binding = match &arm.pattern {
-            MatchPattern::Enum {
-                binding: Some(binding),
-                ..
-            }
-            | MatchPattern::OptionSome(Some(binding))
-            | MatchPattern::IteratorItem(Some(binding))
-            | MatchPattern::ResultSuccess(Some(binding))
-            | MatchPattern::ResultError(Some(binding)) => Some(binding),
-            _ => None,
-        };
-        if let Some(binding) = binding {
+        arm.pattern.visit_bindings(&mut |binding| {
             self.kinds.insert(binding.id, SemanticTokenKind::Variable);
-        }
+        });
         visit::walk_match_arm(self, arm);
     }
 
@@ -859,6 +848,55 @@ impl HighlightCollector<'_> {
             .unwrap_or(SemanticTokenKind::Variable)
     }
 
+    fn mark_pattern(&mut self, pattern: &MatchPattern, span: Span) {
+        match pattern {
+            MatchPattern::Enum {
+                enumeration,
+                variant,
+                binding,
+            } => {
+                let mut segments = enumeration.name.split('.').peekable();
+                while let Some(segment) = segments.next() {
+                    self.mark_ident(
+                        span,
+                        segment,
+                        if segments.peek().is_some() {
+                            SemanticTokenKind::Type
+                        } else {
+                            SemanticTokenKind::Enum
+                        },
+                        0,
+                    );
+                }
+                self.mark_ident(span, variant, SemanticTokenKind::EnumMember, 0);
+                if let Some(binding) = binding {
+                    self.mark_ident(
+                        span,
+                        &binding.name,
+                        SemanticTokenKind::Variable,
+                        MODIFIER_DECLARATION,
+                    );
+                }
+            }
+            MatchPattern::OptionSome(Some(binding))
+            | MatchPattern::IteratorItem(Some(binding))
+            | MatchPattern::ResultSuccess(Some(binding))
+            | MatchPattern::ResultError(Some(binding))
+            | MatchPattern::Binding(binding) => self.mark_ident(
+                span,
+                &binding.name,
+                SemanticTokenKind::Variable,
+                MODIFIER_DECLARATION,
+            ),
+            MatchPattern::Array(elements) => {
+                for element in elements {
+                    self.mark_pattern(&element.kind, element.span);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn apply_debug_modifiers(&mut self) {
         for highlight in self.entries.values_mut() {
             if self
@@ -1247,46 +1285,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 
     fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
-        match &arm.pattern {
-            MatchPattern::Enum {
-                enumeration,
-                variant,
-                binding,
-            } => {
-                let mut segments = enumeration.name.split('.').peekable();
-                while let Some(segment) = segments.next() {
-                    self.mark_ident(
-                        arm.span,
-                        segment,
-                        if segments.peek().is_some() {
-                            SemanticTokenKind::Type
-                        } else {
-                            SemanticTokenKind::Enum
-                        },
-                        0,
-                    );
-                }
-                self.mark_ident(arm.span, variant, SemanticTokenKind::EnumMember, 0);
-                if let Some(binding) = binding {
-                    self.mark_ident(
-                        arm.span,
-                        &binding.name,
-                        SemanticTokenKind::Variable,
-                        MODIFIER_DECLARATION,
-                    );
-                }
-            }
-            MatchPattern::OptionSome(Some(binding))
-            | MatchPattern::IteratorItem(Some(binding))
-            | MatchPattern::ResultSuccess(Some(binding))
-            | MatchPattern::ResultError(Some(binding)) => self.mark_ident(
-                arm.span,
-                &binding.name,
-                SemanticTokenKind::Variable,
-                MODIFIER_DECLARATION,
-            ),
-            _ => {}
-        }
+        self.mark_pattern(&arm.pattern, arm.span);
         visit::walk_match_arm(self, arm);
     }
 

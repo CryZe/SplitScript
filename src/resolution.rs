@@ -682,14 +682,26 @@ impl<'ast> Visitor<'ast> for EnumResolver<'_> {
     }
 
     fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
-        if let MatchPattern::Enum { enumeration, .. } = &arm.pattern
-            && let Some(enumeration) = self.resolve_reference(enumeration, false)
-        {
-            self.resolutions
-                .pattern_enums
-                .insert(arm.pattern_id, enumeration);
-        }
+        self.resolve_pattern(&arm.pattern, arm.pattern_id);
         visit::walk_match_arm(self, arm);
+    }
+}
+
+impl EnumResolver<'_> {
+    fn resolve_pattern(&mut self, pattern: &MatchPattern, id: crate::ast::PatternId) {
+        match pattern {
+            MatchPattern::Enum { enumeration, .. } => {
+                if let Some(enumeration) = self.resolve_reference(enumeration, false) {
+                    self.resolutions.pattern_enums.insert(id, enumeration);
+                }
+            }
+            MatchPattern::Array(elements) => {
+                for element in elements {
+                    self.resolve_pattern(&element.kind, element.id);
+                }
+            }
+            _ => {}
+        }
     }
 }
 

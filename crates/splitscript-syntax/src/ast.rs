@@ -1689,7 +1689,7 @@ pub enum MatchPattern {
     Enum {
         enumeration: EnumReference,
         variant: String,
-        binding: Option<PatternBinding>,
+        payload: Option<Box<PatternNode>>,
     },
     Bool(bool),
     Char(char),
@@ -1700,11 +1700,11 @@ pub enum MatchPattern {
     },
     FileVersion([u16; 4]),
     None,
-    OptionSome(Option<PatternBinding>),
+    OptionSome(Box<PatternNode>),
     IteratorEnd,
-    IteratorItem(Option<PatternBinding>),
-    ResultSuccess(Option<PatternBinding>),
-    ResultError(Option<PatternBinding>),
+    IteratorItem(Box<PatternNode>),
+    ResultSuccess(Box<PatternNode>),
+    ResultError(Box<PatternNode>),
     Array(Vec<PatternNode>),
     Alternation(Vec<PatternNode>),
     Binding(PatternBinding),
@@ -1714,15 +1714,15 @@ pub enum MatchPattern {
 impl MatchPattern {
     pub fn visit_bindings(&self, visitor: &mut impl FnMut(&PatternBinding)) {
         match self {
+            Self::Binding(binding) => visitor(binding),
             Self::Enum {
-                binding: Some(binding),
+                payload: Some(payload),
                 ..
             }
-            | Self::OptionSome(Some(binding))
-            | Self::IteratorItem(Some(binding))
-            | Self::ResultSuccess(Some(binding))
-            | Self::ResultError(Some(binding))
-            | Self::Binding(binding) => visitor(binding),
+            | Self::OptionSome(payload)
+            | Self::IteratorItem(payload)
+            | Self::ResultSuccess(payload)
+            | Self::ResultError(payload) => payload.kind.visit_bindings(visitor),
             Self::Array(elements) | Self::Alternation(elements) => {
                 for element in elements {
                     element.kind.visit_bindings(visitor);
@@ -1734,15 +1734,15 @@ impl MatchPattern {
 
     pub fn visit_bindings_mut(&mut self, visitor: &mut impl FnMut(&mut PatternBinding)) {
         match self {
+            Self::Binding(binding) => visitor(binding),
             Self::Enum {
-                binding: Some(binding),
+                payload: Some(payload),
                 ..
             }
-            | Self::OptionSome(Some(binding))
-            | Self::IteratorItem(Some(binding))
-            | Self::ResultSuccess(Some(binding))
-            | Self::ResultError(Some(binding))
-            | Self::Binding(binding) => visitor(binding),
+            | Self::OptionSome(payload)
+            | Self::IteratorItem(payload)
+            | Self::ResultSuccess(payload)
+            | Self::ResultError(payload) => payload.kind.visit_bindings_mut(visitor),
             Self::Array(elements) | Self::Alternation(elements) => {
                 for element in elements {
                     element.kind.visit_bindings_mut(visitor);

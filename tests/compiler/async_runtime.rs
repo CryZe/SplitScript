@@ -828,11 +828,23 @@ fn pattern_alternatives_share_bindings_and_work_recursively() {
             print(match false {
                 true | false => "covered",
             })
+            print(match Some("inf") {
+                Some("Inf") | Some("inf") => "infinity",
+                Some("ok") | Some("error") => "status",
+                _ => "other",
+            })
+            print(match Ok([1u8, 2u8]) {
+                Ok([1, value]) => value,
+                Ok(_) | Err(_) => 0,
+            })
         }
     "#;
 
     let (store, _) = execute_with_mock_host(source);
-    assert_eq!(store.data().messages, ["7", "9", "2", "covered"]);
+    assert_eq!(
+        store.data().messages,
+        ["7", "9", "2", "covered", "infinity", "2"]
+    );
 }
 
 #[test]

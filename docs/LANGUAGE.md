@@ -1224,6 +1224,25 @@ Writing `Side.Left(value) | Side.Right(other)` is an error because `value` and
 `other` would not both be initialized for the shared arm. The same rule applies
 recursively, such as `[Some(value), None] | [None, Some(value)]`.
 
+Wrapper and enum payloads are full patterns rather than binding-only slots.
+They may test literals, arrays, nested wrappers, enum variants, or alternatives
+while still retaining the familiar binding shorthand:
+
+```text
+fn classify(value: String?) -> String {
+    return match value {
+        Some("Inf") | Some("inf") => "infinity",
+        Some("ok") | Some("error") => "status",
+        Some(other) => other,
+        None => "missing",
+    }
+}
+```
+
+Because `Some("Inf")` matches only that payload, it does not make the `Some`
+case exhaustive. Use `Some(_)` or a payload binding to cover every present
+value.
+
 String matches are useful for selecting exact host identities while keeping
 the dispatch exhaustive:
 

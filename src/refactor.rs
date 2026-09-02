@@ -820,11 +820,6 @@ impl<'ast> Visitor<'ast> for ExpressionFacts<'_> {
 
     fn visit_pattern(&mut self, pattern: &'ast MatchPattern) {
         let binding = match pattern {
-            MatchPattern::Enum { binding, .. }
-            | MatchPattern::OptionSome(binding)
-            | MatchPattern::IteratorItem(binding)
-            | MatchPattern::ResultSuccess(binding)
-            | MatchPattern::ResultError(binding) => binding.as_ref(),
             MatchPattern::Bool(_)
             | MatchPattern::Char(_)
             | MatchPattern::String(_)
@@ -833,6 +828,11 @@ impl<'ast> Visitor<'ast> for ExpressionFacts<'_> {
             | MatchPattern::None
             | MatchPattern::IteratorEnd
             | MatchPattern::Wildcard
+            | MatchPattern::Enum { .. }
+            | MatchPattern::OptionSome(_)
+            | MatchPattern::IteratorItem(_)
+            | MatchPattern::ResultSuccess(_)
+            | MatchPattern::ResultError(_)
             | MatchPattern::Array(_)
             | MatchPattern::Alternation(_) => None,
             MatchPattern::Binding(binding) => Some(binding),
@@ -924,11 +924,6 @@ fn value_names(program: &Program) -> HashMap<ValueId, String> {
         }
         fn visit_pattern(&mut self, pattern: &'ast MatchPattern) {
             let binding = match pattern {
-                MatchPattern::Enum { binding, .. }
-                | MatchPattern::OptionSome(binding)
-                | MatchPattern::IteratorItem(binding)
-                | MatchPattern::ResultSuccess(binding)
-                | MatchPattern::ResultError(binding) => binding.as_ref(),
                 MatchPattern::Binding(binding) => Some(binding),
                 _ => None,
             };

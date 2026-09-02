@@ -1019,6 +1019,10 @@ remaining work is product hardening and distribution.
   union to exhaustiveness, try left to right, and retain one guard/body scope.
   Every alternative binds the same names with compatible types; repeated
   occurrences share hover, navigation, rename, highlighting, and debug identity.
+- [x] Make wrapper and enum payloads recursive patterns rather than
+  binding-only slots. `Some("Inf") | Some("inf")`, `Ok([first, second])`, and
+  nested enum payload patterns now share the same inference, exhaustiveness,
+  tooling, and code-generation path as array patterns and bindings.
 - [x] Add shorthand struct field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename

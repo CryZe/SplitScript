@@ -853,7 +853,7 @@ impl HighlightCollector<'_> {
             MatchPattern::Enum {
                 enumeration,
                 variant,
-                binding,
+                payload,
             } => {
                 let mut segments = enumeration.name.split('.').peekable();
                 while let Some(segment) = segments.next() {
@@ -869,25 +869,22 @@ impl HighlightCollector<'_> {
                     );
                 }
                 self.mark_ident(span, variant, SemanticTokenKind::EnumMember, 0);
-                if let Some(binding) = binding {
-                    self.mark_ident(
-                        span,
-                        &binding.name,
-                        SemanticTokenKind::Variable,
-                        MODIFIER_DECLARATION,
-                    );
+                if let Some(payload) = payload {
+                    self.mark_pattern(&payload.kind, payload.span);
                 }
             }
-            MatchPattern::OptionSome(Some(binding))
-            | MatchPattern::IteratorItem(Some(binding))
-            | MatchPattern::ResultSuccess(Some(binding))
-            | MatchPattern::ResultError(Some(binding))
-            | MatchPattern::Binding(binding) => self.mark_ident(
+            MatchPattern::Binding(binding) => self.mark_ident(
                 span,
                 &binding.name,
                 SemanticTokenKind::Variable,
                 MODIFIER_DECLARATION,
             ),
+            MatchPattern::OptionSome(payload)
+            | MatchPattern::IteratorItem(payload)
+            | MatchPattern::ResultSuccess(payload)
+            | MatchPattern::ResultError(payload) => {
+                self.mark_pattern(&payload.kind, payload.span);
+            }
             MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
                 for element in elements {
                     self.mark_pattern(&element.kind, element.span);

@@ -35,7 +35,7 @@ use super::{
     managed_state_reads::ManagedStateReadCache,
     memarg,
     memory_plan::AbiReadScratch,
-    range_bound_type, resolved_intrinsic, result_value_type,
+    option_value_type, range_bound_type, resolved_intrinsic, result_value_type,
     runtime_helpers::emit_value_equality,
     script_functions::emit_action_default,
     semantic_type, standard_field_type, state_storage_index, struct_field_type,
@@ -843,7 +843,7 @@ fn compile_projected_pattern(
         wasm_ir::LoweredPattern::Enum {
             enumeration,
             variant,
-            binding,
+            payload,
         } => {
             let variant_index =
                 context
@@ -855,15 +855,24 @@ fn compile_projected_pattern(
             function
                 .instruction(&Instruction::I32Const(variant_index as i32))
                 .instruction(&Instruction::I32Eq);
-            if let Some(binding) = binding {
-                let ty = context.ty(context
-                    .semantics
-                    .value_type(*binding)
-                    .expect("checked pattern bindings have types"));
-                bindings.push(MatchPatternBinding {
-                    value: *binding,
-                    source: value.field(value.ty, variant_index as u32 + 1, ty),
-                });
+            if let Some(payload) = payload {
+                function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                let crate::semantic::ResolvedEnumVariantId::Source(variant) = *variant else {
+                    unreachable!("standard-library enum variants do not have payloads")
+                };
+                let payload_type = enum_variant_payload(variant, context.semantics)
+                    .expect("checked enum payload patterns have payload types");
+                let payload_value = value.field(value.ty, variant_index as u32 + 1, payload_type);
+                bindings.extend(compile_projected_pattern(
+                    function,
+                    payload,
+                    &payload_value,
+                    context,
+                ));
+                function
+                    .instruction(&Instruction::Else)
+                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::End);
             }
         }
         wasm_ir::LoweredPattern::Bool(expected) => {
@@ -926,25 +935,36 @@ fn compile_projected_pattern(
             value.emit(function, context);
             function.instruction(&Instruction::RefIsNull);
         }
-        wasm_ir::LoweredPattern::OptionSome { binding, .. }
-        | wasm_ir::LoweredPattern::IteratorItem { binding, .. } => {
+        wasm_ir::LoweredPattern::OptionSome { payload, .. }
+        | wasm_ir::LoweredPattern::IteratorItem { payload, .. } => {
             value.emit(function, context);
             function
                 .instruction(&Instruction::RefIsNull)
                 .instruction(&Instruction::I32Eqz);
-            if let Some(binding) = binding {
-                let ty = context.ty(context
-                    .semantics
-                    .value_type(*binding)
-                    .expect("checked pattern bindings have types"));
-                bindings.push(MatchPatternBinding {
-                    value: *binding,
-                    source: value.field(value.ty, 0, ty),
-                });
-            }
+            function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+            let payload_type = match value.ty {
+                Type::Option(option) => option_value_type(option, context.semantics),
+                Type::Application(step) => application_type_argument(
+                    step,
+                    StdlibTypeConstructorId::IteratorStep,
+                    context.semantics,
+                ),
+                _ => unreachable!("checked wrapper patterns have wrapper value types"),
+            };
+            let payload_value = value.field(value.ty, 0, payload_type);
+            bindings.extend(compile_projected_pattern(
+                function,
+                payload,
+                &payload_value,
+                context,
+            ));
+            function
+                .instruction(&Instruction::Else)
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::End);
         }
-        wasm_ir::LoweredPattern::ResultSuccess { binding, .. }
-        | wasm_ir::LoweredPattern::ResultError { binding, .. } => {
+        wasm_ir::LoweredPattern::ResultSuccess { payload, .. }
+        | wasm_ir::LoweredPattern::ResultError { payload, .. } => {
             value.emit(function, context);
             function.instruction(&Instruction::RefAsNonNull);
             emit_typed_struct_get(function, context.gc.index(value.ty), 1, Type::I32);
@@ -952,16 +972,26 @@ fn compile_projected_pattern(
             function
                 .instruction(&Instruction::I32Const(is_error as i32))
                 .instruction(&Instruction::I32Eq);
-            if let Some(binding) = binding {
-                let ty = context.ty(context
-                    .semantics
-                    .value_type(*binding)
-                    .expect("checked pattern bindings have types"));
-                bindings.push(MatchPatternBinding {
-                    value: *binding,
-                    source: value.field(value.ty, if is_error { 2 } else { 0 }, ty),
-                });
-            }
+            function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+            let Type::Result(result) = value.ty else {
+                unreachable!("checked result patterns have result value types")
+            };
+            let payload_type = if is_error {
+                Type::Standard(StdlibTypeId::String)
+            } else {
+                result_value_type(result, context.semantics)
+            };
+            let payload_value = value.field(value.ty, if is_error { 2 } else { 0 }, payload_type);
+            bindings.extend(compile_projected_pattern(
+                function,
+                payload,
+                &payload_value,
+                context,
+            ));
+            function
+                .instruction(&Instruction::Else)
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::End);
         }
         wasm_ir::LoweredPattern::Array(elements) => {
             let Type::Array(array) = value.ty else {

@@ -1273,19 +1273,13 @@ impl Parser<'_> {
             {
                 self.bump();
                 self.bump();
-                let (binding_name, binding_span) =
-                    self.expect_declared_ident("expected a binding or `_` in the wrapper pattern")?;
-                self.expect(TokenKind::RParen, "expected `)` after the wrapper binding")?;
-                let binding = (binding_name != "_").then(|| PatternBinding {
-                    id: self.new_value_id(),
-                    name: binding_name,
-                    name_span: binding_span,
-                });
+                let payload = Box::new(self.match_pattern(true)?);
+                self.expect(TokenKind::RParen, "expected `)` after the wrapper pattern")?;
                 match name.as_str() {
-                    "Some" => MatchPattern::OptionSome(binding),
-                    "Ok" => MatchPattern::ResultSuccess(binding),
-                    "Err" => MatchPattern::ResultError(binding),
-                    "Item" => MatchPattern::IteratorItem(binding),
+                    "Some" => MatchPattern::OptionSome(payload),
+                    "Ok" => MatchPattern::ResultSuccess(payload),
+                    "Err" => MatchPattern::ResultError(payload),
+                    "Item" => MatchPattern::IteratorItem(payload),
                     _ => unreachable!(),
                 }
             }
@@ -1300,15 +1294,10 @@ impl Parser<'_> {
                         (segment, _) = self.expect_any_ident("expected a variant name")?;
                     }
                     let variant = segment;
-                    let binding = if self.eat(&TokenKind::LParen).is_some() {
-                        let (name, name_span) =
-                            self.expect_declared_ident("expected a payload binding")?;
-                        self.expect(TokenKind::RParen, "expected `)` after the payload binding")?;
-                        (name != "_").then(|| PatternBinding {
-                            id: self.new_value_id(),
-                            name,
-                            name_span,
-                        })
+                    let payload = if self.eat(&TokenKind::LParen).is_some() {
+                        let payload = Box::new(self.match_pattern(true)?);
+                        self.expect(TokenKind::RParen, "expected `)` after the payload pattern")?;
+                        Some(payload)
                     } else {
                         None
                     };
@@ -1318,7 +1307,7 @@ impl Parser<'_> {
                             span: pattern_start,
                         },
                         variant,
-                        binding,
+                        payload,
                     }
                 } else if allow_binding {
                     MatchPattern::Binding(PatternBinding {

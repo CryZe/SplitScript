@@ -1436,26 +1436,18 @@ impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
 
     fn visit_pattern(&mut self, pattern: &'ast ast::MatchPattern) {
         let binding = match pattern {
-            ast::MatchPattern::Enum {
-                binding: Some(binding),
-                ..
-            }
-            | ast::MatchPattern::OptionSome(Some(binding))
-            | ast::MatchPattern::IteratorItem(Some(binding))
-            | ast::MatchPattern::ResultSuccess(Some(binding))
-            | ast::MatchPattern::ResultError(Some(binding)) => Some(binding),
-            ast::MatchPattern::Enum { binding: None, .. }
-            | ast::MatchPattern::Bool(_)
+            ast::MatchPattern::Bool(_)
             | ast::MatchPattern::Char(_)
             | ast::MatchPattern::String(_)
             | ast::MatchPattern::Int { .. }
             | ast::MatchPattern::FileVersion(_)
             | ast::MatchPattern::None
             | ast::MatchPattern::IteratorEnd
-            | ast::MatchPattern::OptionSome(None)
-            | ast::MatchPattern::IteratorItem(None)
-            | ast::MatchPattern::ResultSuccess(None)
-            | ast::MatchPattern::ResultError(None)
+            | ast::MatchPattern::OptionSome(_)
+            | ast::MatchPattern::IteratorItem(_)
+            | ast::MatchPattern::ResultSuccess(_)
+            | ast::MatchPattern::ResultError(_)
+            | ast::MatchPattern::Enum { .. }
             | ast::MatchPattern::Wildcard
             | ast::MatchPattern::Array(_)
             | ast::MatchPattern::Alternation(_) => None,

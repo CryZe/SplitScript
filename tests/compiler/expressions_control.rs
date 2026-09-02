@@ -2124,6 +2124,60 @@ fn pattern_alternatives_require_the_same_binding_names_and_types() {
 }
 
 #[test]
+fn wrapper_payload_patterns_are_recursive_and_preserve_exhaustiveness() {
+    let source = r#"
+        enum Message {
+            Payload([String; 2]),
+            Empty,
+        }
+
+        state "game.exe" {}
+
+        fn classify(value: String?) -> u8 {
+            return match value {
+                Some("Inf") | Some("inf") => 1,
+                Some(_) => 2,
+                None => 3,
+            }
+        }
+
+        fn inspect(message: Message) -> String {
+            return match message {
+                Message.Payload(["ok" | "ready", value]) => value,
+                Message.Payload(_) => "other",
+                Message.Empty => "empty",
+            }
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("wrapper and enum payloads should accept arbitrary recursive patterns");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("recursive payload patterns should produce valid Wasm");
+
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn classify(value: String?) -> bool {
+                return match value {
+                    Some("ready") => true,
+                    None => false,
+                }
+            }
+        "#,
+    )
+    .expect_err("one literal payload does not cover every present optional value");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("non-exhaustive match: missing `Some(value)`")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn break_and_continue_require_loops() {
     for (keyword, expected) in [
         ("break", "`break` is only available inside a loop"),
@@ -2556,10 +2610,13 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
         panic!("expected a match expression");
     };
     let splitscript::compiler::ast::MatchPattern::Enum {
-        binding: Some(binding),
+        payload: Some(payload),
         ..
     } = &arms[0].pattern
     else {
+        panic!("expected a payload binding");
+    };
+    let splitscript::compiler::ast::MatchPattern::Binding(binding) = &payload.kind else {
         panic!("expected a payload binding");
     };
     assert_eq!(
@@ -2615,7 +2672,7 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
     let splitscript::compiler::wasm_ir::LoweredPattern::Enum {
         enumeration,
         variant,
-        binding: lowered_binding,
+        payload: Some(ref lowered_payload),
     } = lowered_arms[0].pattern
     else {
         panic!("enum patterns should retain their resolved identities")
@@ -2628,7 +2685,10 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
         variant,
         ResolvedEnumVariantId::Source(checked.syntax().enums[0].variants[0].id)
     );
-    assert_eq!(lowered_binding, Some(binding.id));
+    assert!(matches!(
+        lowered_payload.as_ref(),
+        splitscript::compiler::wasm_ir::LoweredPattern::Binding(id) if *id == binding.id
+    ));
 
     let splitscript::compiler::ast::Stmt::Variable(result) =
         &checked.syntax().actions[0].body.statements[0]

@@ -694,6 +694,19 @@ impl EnumResolver<'_> {
                 if let Some(enumeration) = self.resolve_reference(enumeration, false) {
                     self.resolutions.pattern_enums.insert(id, enumeration);
                 }
+                if let MatchPattern::Enum {
+                    payload: Some(payload),
+                    ..
+                } = pattern
+                {
+                    self.resolve_pattern(&payload.kind, payload.id);
+                }
+            }
+            MatchPattern::OptionSome(payload)
+            | MatchPattern::IteratorItem(payload)
+            | MatchPattern::ResultSuccess(payload)
+            | MatchPattern::ResultError(payload) => {
+                self.resolve_pattern(&payload.kind, payload.id);
             }
             MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
                 for element in elements {

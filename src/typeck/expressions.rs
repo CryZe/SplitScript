@@ -27,6 +27,7 @@ enum PatternCoverage {
     Enum {
         variant: ResolvedEnumVariantId,
         name: String,
+        payload: Box<Self>,
     },
     Bool(bool),
     Char(char),
@@ -34,11 +35,11 @@ enum PatternCoverage {
     Int(u64),
     FileVersion([u16; 4]),
     OptionNone,
-    OptionSome,
+    OptionSome(Box<Self>),
     IteratorEnd,
-    IteratorItem,
-    ResultSuccess,
-    ResultError,
+    IteratorItem(Box<Self>),
+    ResultSuccess(Box<Self>),
+    ResultError(Box<Self>),
     Array(Vec<Self>),
     Alternation(Vec<Self>),
     Invalid(crate::ast::PatternId),
@@ -62,6 +63,22 @@ impl PatternCoverage {
                 .iter()
                 .zip(right)
                 .all(|(left, right)| left.covers(right)),
+            (
+                Self::Enum {
+                    variant: left_variant,
+                    payload: left_payload,
+                    ..
+                },
+                Self::Enum {
+                    variant: right_variant,
+                    payload: right_payload,
+                    ..
+                },
+            ) if left_variant == right_variant => left_payload.covers(right_payload),
+            (Self::OptionSome(left), Self::OptionSome(right))
+            | (Self::IteratorItem(left), Self::IteratorItem(right))
+            | (Self::ResultSuccess(left), Self::ResultSuccess(right))
+            | (Self::ResultError(left), Self::ResultError(right)) => left.covers(right),
             _ => self == other,
         }
     }
@@ -69,7 +86,8 @@ impl PatternCoverage {
     fn display(&self) -> String {
         match self {
             Self::Irrefutable => "_".to_owned(),
-            Self::Enum { name, .. } => name.clone(),
+            Self::Enum { name, payload, .. } if payload.is_irrefutable() => name.clone(),
+            Self::Enum { name, payload, .. } => format!("{name}({})", payload.display()),
             Self::Bool(value) => value.to_string(),
             Self::Char(value) => format!("{value:?}"),
             Self::String(value) => format!("{value:?}"),
@@ -78,11 +96,11 @@ impl PatternCoverage {
                 format!("v\"{}.{}.{}.{}\"", parts[0], parts[1], parts[2], parts[3])
             }
             Self::OptionNone => "None".to_owned(),
-            Self::OptionSome => "Some(value)".to_owned(),
+            Self::OptionSome(payload) => format!("Some({})", payload.display()),
             Self::IteratorEnd => "End".to_owned(),
-            Self::IteratorItem => "Item(value)".to_owned(),
-            Self::ResultSuccess => "Ok(value)".to_owned(),
-            Self::ResultError => "Err(error)".to_owned(),
+            Self::IteratorItem(payload) => format!("Item({})", payload.display()),
+            Self::ResultSuccess(payload) => format!("Ok({})", payload.display()),
+            Self::ResultError(payload) => format!("Err({})", payload.display()),
             Self::Array(elements) => format!(
                 "[{}]",
                 elements
@@ -698,7 +716,12 @@ impl Checker {
                         Type::Option(_) => {
                             for (pattern, display) in [
                                 (PatternCoverage::OptionNone, "None"),
-                                (PatternCoverage::OptionSome, "Some(value)"),
+                                (
+                                    PatternCoverage::OptionSome(Box::new(
+                                        PatternCoverage::Irrefutable,
+                                    )),
+                                    "Some(value)",
+                                ),
                             ] {
                                 if !patterns_cover(&unguarded_patterns, &pattern) {
                                     self.error(
@@ -710,8 +733,18 @@ impl Checker {
                         }
                         Type::Result(_) => {
                             for (pattern, display) in [
-                                (PatternCoverage::ResultSuccess, "Ok(value)"),
-                                (PatternCoverage::ResultError, "Err(error)"),
+                                (
+                                    PatternCoverage::ResultSuccess(Box::new(
+                                        PatternCoverage::Irrefutable,
+                                    )),
+                                    "Ok(value)",
+                                ),
+                                (
+                                    PatternCoverage::ResultError(Box::new(
+                                        PatternCoverage::Irrefutable,
+                                    )),
+                                    "Err(error)",
+                                ),
                             ] {
                                 if !patterns_cover(&unguarded_patterns, &pattern) {
                                     self.error(
@@ -726,7 +759,12 @@ impl Checker {
                                 == crate::stdlib::StdlibTypeConstructorId::IteratorStep =>
                         {
                             for (pattern, display) in [
-                                (PatternCoverage::IteratorItem, "Item(value)"),
+                                (
+                                    PatternCoverage::IteratorItem(Box::new(
+                                        PatternCoverage::Irrefutable,
+                                    )),
+                                    "Item(value)",
+                                ),
                                 (PatternCoverage::IteratorEnd, "End"),
                             ] {
                                 if !patterns_cover(&unguarded_patterns, &pattern) {
@@ -759,6 +797,7 @@ impl Checker {
                                     let coverage = PatternCoverage::Enum {
                                         variant: variant.id,
                                         name: variant.name.clone(),
+                                        payload: Box::new(PatternCoverage::Irrefutable),
                                     };
                                     if !patterns_cover(&unguarded_patterns, &coverage) {
                                         self.error(
@@ -1767,7 +1806,7 @@ impl Checker {
     ) -> CheckedPattern {
         match pattern {
             MatchPattern::Enum {
-                variant, binding, ..
+                variant, payload, ..
             } => {
                 let Some(enumeration) = self.resolutions.pattern_enum(pattern_id) else {
                     self.error("unresolved enum type", span);
@@ -1775,23 +1814,15 @@ impl Checker {
                 };
                 self.unify(value_type, self.enum_type(enumeration), span);
                 let mut resolved_variant = None;
+                let mut declared_payload = None;
                 if let Some(declaration) = self.enum_info(enumeration) {
                     if let Some(declared_variant) = declaration
                         .variants
                         .iter()
                         .find(|declared| declared.name == *variant)
                     {
-                        self.semantics
-                            .resolve_pattern_variant(pattern_id, declared_variant.id);
                         resolved_variant = Some(declared_variant.id);
-                        match (declared_variant.payload, binding) {
-                            (Some(payload), Some(binding)) => {
-                                self.bind_pattern_value(binding, payload, span)
-                            }
-                            (None, Some(_)) => self
-                                .error(format!("variant `{variant}` has no payload to bind"), span),
-                            _ => {}
-                        }
+                        declared_payload = declared_variant.payload;
                     } else {
                         self.error(
                             format!("enum `{}` has no variant `{variant}`", declaration.name),
@@ -1804,10 +1835,27 @@ impl Checker {
                 let Some(resolved_variant) = resolved_variant else {
                     return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
                 };
+                self.semantics
+                    .resolve_pattern_variant(pattern_id, resolved_variant);
+                let payload_coverage = match (declared_payload, payload) {
+                    (Some(payload_type), Some(payload)) => {
+                        self.check_pattern(&payload.kind, payload.id, payload_type, payload.span)
+                            .coverage
+                    }
+                    (None, Some(payload)) => {
+                        self.error(
+                            format!("variant `{variant}` has no payload to match"),
+                            payload.span,
+                        );
+                        PatternCoverage::Invalid(payload.id)
+                    }
+                    _ => PatternCoverage::Irrefutable,
+                };
                 CheckedPattern {
                     coverage: PatternCoverage::Enum {
                         variant: resolved_variant,
                         name: variant.clone(),
+                        payload: Box::new(payload_coverage),
                     },
                     layout_variants: match resolved_variant {
                         ResolvedEnumVariantId::Source(variant) => Some(HashSet::from([variant])),
@@ -1877,7 +1925,7 @@ impl Checker {
                 );
                 CheckedPattern::new(PatternCoverage::OptionNone)
             }
-            MatchPattern::OptionSome(binding) => {
+            MatchPattern::OptionSome(payload) => {
                 let Some(option) = self.infer_option_pattern(
                     value_type,
                     span,
@@ -1889,10 +1937,13 @@ impl Checker {
                     pattern_id,
                     ResolvedWrapperPattern::OptionSome(option),
                 );
-                if let Some(binding) = binding {
-                    self.bind_pattern_value(binding, self.inference.option_value(option), span);
-                }
-                CheckedPattern::new(PatternCoverage::OptionSome)
+                let checked = self.check_pattern(
+                    &payload.kind,
+                    payload.id,
+                    self.inference.option_value(option),
+                    payload.span,
+                );
+                CheckedPattern::new(PatternCoverage::OptionSome(Box::new(checked.coverage)))
             }
             MatchPattern::IteratorEnd => {
                 let Some((step, _)) = self.infer_iterator_step_pattern(
@@ -1906,7 +1957,7 @@ impl Checker {
                     .resolve_wrapper_pattern(pattern_id, ResolvedWrapperPattern::IteratorEnd(step));
                 CheckedPattern::new(PatternCoverage::IteratorEnd)
             }
-            MatchPattern::IteratorItem(binding) => {
+            MatchPattern::IteratorItem(payload) => {
                 let Some((step, item)) = self.infer_iterator_step_pattern(
                     value_type,
                     span,
@@ -1918,12 +1969,10 @@ impl Checker {
                     pattern_id,
                     ResolvedWrapperPattern::IteratorItem(step),
                 );
-                if let Some(binding) = binding {
-                    self.bind_pattern_value(binding, item, span);
-                }
-                CheckedPattern::new(PatternCoverage::IteratorItem)
+                let checked = self.check_pattern(&payload.kind, payload.id, item, payload.span);
+                CheckedPattern::new(PatternCoverage::IteratorItem(Box::new(checked.coverage)))
             }
-            MatchPattern::ResultSuccess(binding) => {
+            MatchPattern::ResultSuccess(payload) => {
                 let Some(result) = self.infer_result_pattern(
                     value_type,
                     span,
@@ -1935,12 +1984,15 @@ impl Checker {
                     pattern_id,
                     ResolvedWrapperPattern::ResultSuccess(result),
                 );
-                if let Some(binding) = binding {
-                    self.bind_pattern_value(binding, self.inference.result_value(result), span);
-                }
-                CheckedPattern::new(PatternCoverage::ResultSuccess)
+                let checked = self.check_pattern(
+                    &payload.kind,
+                    payload.id,
+                    self.inference.result_value(result),
+                    payload.span,
+                );
+                CheckedPattern::new(PatternCoverage::ResultSuccess(Box::new(checked.coverage)))
             }
-            MatchPattern::ResultError(binding) => {
+            MatchPattern::ResultError(payload) => {
                 let Some(result) = self.infer_result_pattern(
                     value_type,
                     span,
@@ -1952,14 +2004,13 @@ impl Checker {
                     pattern_id,
                     ResolvedWrapperPattern::ResultError(result),
                 );
-                if let Some(binding) = binding {
-                    self.bind_pattern_value(
-                        binding,
-                        self.standard_type(StdlibTypeId::String),
-                        span,
-                    );
-                }
-                CheckedPattern::new(PatternCoverage::ResultError)
+                let checked = self.check_pattern(
+                    &payload.kind,
+                    payload.id,
+                    self.standard_type(StdlibTypeId::String),
+                    payload.span,
+                );
+                CheckedPattern::new(PatternCoverage::ResultError(Box::new(checked.coverage)))
             }
             MatchPattern::Array(elements) => {
                 self.check_array_pattern(elements, pattern_id, value_type, span)

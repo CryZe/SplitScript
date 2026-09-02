@@ -333,7 +333,7 @@ pub enum LoweredPattern {
     Enum {
         enumeration: EnumTypeId,
         variant: ResolvedEnumVariantId,
-        binding: Option<ValueId>,
+        payload: Option<Box<LoweredPattern>>,
     },
     Bool(bool),
     Char(char),
@@ -343,20 +343,20 @@ pub enum LoweredPattern {
     OptionNone(OptionTypeId),
     OptionSome {
         option: OptionTypeId,
-        binding: Option<ValueId>,
+        payload: Box<LoweredPattern>,
     },
     IteratorEnd(crate::ast::TypeApplicationId),
     IteratorItem {
         step: crate::ast::TypeApplicationId,
-        binding: Option<ValueId>,
+        payload: Box<LoweredPattern>,
     },
     ResultSuccess {
         result: ResultTypeId,
-        binding: Option<ValueId>,
+        payload: Box<LoweredPattern>,
     },
     ResultError {
         result: ResultTypeId,
-        binding: Option<ValueId>,
+        payload: Box<LoweredPattern>,
     },
     Array(Vec<LoweredPattern>),
     Alternation(Vec<LoweredPattern>),
@@ -367,27 +367,15 @@ pub enum LoweredPattern {
 impl LoweredPattern {
     pub fn visit_bindings(&self, visitor: &mut impl FnMut(ValueId)) {
         match self {
+            Self::Binding(binding) => visitor(*binding),
             Self::Enum {
-                binding: Some(binding),
+                payload: Some(payload),
                 ..
             }
-            | Self::OptionSome {
-                binding: Some(binding),
-                ..
-            }
-            | Self::IteratorItem {
-                binding: Some(binding),
-                ..
-            }
-            | Self::ResultSuccess {
-                binding: Some(binding),
-                ..
-            }
-            | Self::ResultError {
-                binding: Some(binding),
-                ..
-            }
-            | Self::Binding(binding) => visitor(*binding),
+            | Self::OptionSome { payload, .. }
+            | Self::IteratorItem { payload, .. }
+            | Self::ResultSuccess { payload, .. }
+            | Self::ResultError { payload, .. } => payload.visit_bindings(visitor),
             Self::Array(elements) | Self::Alternation(elements) => {
                 for element in elements {
                     element.visit_bindings(visitor);
@@ -399,17 +387,24 @@ impl LoweredPattern {
 
     pub fn contains_string(&self) -> bool {
         matches!(self, Self::String(_))
+            || matches!(self, Self::Enum { payload: Some(payload), .. } if payload.contains_string())
+            || matches!(self, Self::OptionSome { payload, .. } | Self::IteratorItem { payload, .. } | Self::ResultSuccess { payload, .. } | Self::ResultError { payload, .. } if payload.contains_string())
             || matches!(self, Self::Array(elements) | Self::Alternation(elements) if elements.iter().any(Self::contains_string))
     }
 
     pub fn binds_result_error(&self) -> bool {
-        matches!(
-            self,
-            Self::ResultError {
-                binding: Some(_),
-                ..
-            }
-        ) || matches!(self, Self::Alternation(alternatives) if alternatives.iter().any(Self::binds_result_error))
+        matches!(self, Self::ResultError { payload, .. } if payload.demands_value())
+            || matches!(self, Self::Enum { payload: Some(payload), .. } if payload.binds_result_error())
+            || matches!(self, Self::OptionSome { payload, .. } | Self::IteratorItem { payload, .. } | Self::ResultSuccess { payload, .. } if payload.binds_result_error())
+            || matches!(self, Self::Array(elements) | Self::Alternation(elements) if elements.iter().any(Self::binds_result_error))
+    }
+
+    fn demands_value(&self) -> bool {
+        match self {
+            Self::Wildcard => false,
+            Self::Alternation(alternatives) => alternatives.iter().any(Self::demands_value),
+            _ => true,
+        }
     }
 }
 
@@ -1203,14 +1198,16 @@ fn lower_pattern(pattern: &TypedPattern, resolution: &hir::ResolvedPattern) -> L
     match pattern {
         TypedPattern::Enum {
             enumeration,
-            binding,
+            payload,
             ..
         } => LoweredPattern::Enum {
             enumeration: *enumeration,
             variant: resolution
                 .variant
                 .expect("checked enum patterns have resolved variants"),
-            binding: binding.as_ref().map(|binding| binding.id),
+            payload: payload
+                .as_ref()
+                .map(|payload| Box::new(lower_pattern(&payload.pattern, &payload.resolution))),
         },
         TypedPattern::Bool(value) => LoweredPattern::Bool(*value),
         TypedPattern::Char(value) => LoweredPattern::Char(*value),
@@ -1223,13 +1220,13 @@ fn lower_pattern(pattern: &TypedPattern, resolution: &hir::ResolvedPattern) -> L
             };
             LoweredPattern::OptionNone(option)
         }
-        TypedPattern::OptionSome(binding) => {
+        TypedPattern::OptionSome(payload) => {
             let Some(ResolvedWrapperPattern::OptionSome(option)) = resolution.wrapper else {
                 unreachable!("checked Some patterns resolve to Options")
             };
             LoweredPattern::OptionSome {
                 option,
-                binding: binding.as_ref().map(|binding| binding.id),
+                payload: Box::new(lower_pattern(&payload.pattern, &payload.resolution)),
             }
         }
         TypedPattern::IteratorEnd => {
@@ -1238,31 +1235,31 @@ fn lower_pattern(pattern: &TypedPattern, resolution: &hir::ResolvedPattern) -> L
             };
             LoweredPattern::IteratorEnd(step)
         }
-        TypedPattern::IteratorItem(binding) => {
+        TypedPattern::IteratorItem(payload) => {
             let Some(ResolvedWrapperPattern::IteratorItem(step)) = resolution.wrapper else {
                 unreachable!("checked Item patterns resolve to IteratorStep")
             };
             LoweredPattern::IteratorItem {
                 step,
-                binding: binding.as_ref().map(|binding| binding.id),
+                payload: Box::new(lower_pattern(&payload.pattern, &payload.resolution)),
             }
         }
-        TypedPattern::ResultSuccess(binding) => {
+        TypedPattern::ResultSuccess(payload) => {
             let Some(ResolvedWrapperPattern::ResultSuccess(result)) = resolution.wrapper else {
                 unreachable!("checked Ok patterns resolve to Results")
             };
             LoweredPattern::ResultSuccess {
                 result,
-                binding: binding.as_ref().map(|binding| binding.id),
+                payload: Box::new(lower_pattern(&payload.pattern, &payload.resolution)),
             }
         }
-        TypedPattern::ResultError(binding) => {
+        TypedPattern::ResultError(payload) => {
             let Some(ResolvedWrapperPattern::ResultError(result)) = resolution.wrapper else {
                 unreachable!("checked Err patterns resolve to Results")
             };
             LoweredPattern::ResultError {
                 result,
-                binding: binding.as_ref().map(|binding| binding.id),
+                payload: Box::new(lower_pattern(&payload.pattern, &payload.resolution)),
             }
         }
         TypedPattern::Array(elements) => LoweredPattern::Array(
@@ -1959,16 +1956,18 @@ fn closure_captures(
 
         fn declare_pattern(&mut self, pattern: &hir::TypedPattern) {
             match pattern {
+                hir::TypedPattern::Binding(binding) => {
+                    self.declared.insert(binding.id);
+                }
                 hir::TypedPattern::Enum {
-                    binding: Some(binding),
+                    payload: Some(payload),
                     ..
                 }
-                | hir::TypedPattern::OptionSome(Some(binding))
-                | hir::TypedPattern::IteratorItem(Some(binding))
-                | hir::TypedPattern::ResultSuccess(Some(binding))
-                | hir::TypedPattern::ResultError(Some(binding))
-                | hir::TypedPattern::Binding(binding) => {
-                    self.declared.insert(binding.id);
+                | hir::TypedPattern::OptionSome(payload)
+                | hir::TypedPattern::IteratorItem(payload)
+                | hir::TypedPattern::ResultSuccess(payload)
+                | hir::TypedPattern::ResultError(payload) => {
+                    self.declare_pattern(&payload.pattern);
                 }
                 hir::TypedPattern::Array(elements) | hir::TypedPattern::Alternation(elements) => {
                     for element in elements {

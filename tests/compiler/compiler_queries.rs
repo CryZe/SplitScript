@@ -679,9 +679,11 @@ fn alternative_pattern_bindings_have_one_editor_identity() {
         enum Side { Left(u32), Right(u32) }
         state "game.exe" {}
 
-        fn unwrap(side: Side) -> u32 {
+        fn unwrap(side: Side?) -> u32 {
             return match side {
-                Side.Left(value) | Side.Right(value) => value,
+                Some(Side.Left(value)) | Some(Side.Right(value)) => value,
+                Some(_) => 0,
+                None => 0,
             }
         }
     "#;
@@ -689,9 +691,9 @@ fn alternative_pattern_bindings_have_one_editor_identity() {
     database
         .check()
         .expect("compatible alternative bindings should type check");
-    let first = source.find("value) | ").unwrap();
-    let operator = first + "value) ".len();
-    let second = source.find("value) =>").unwrap();
+    let first = source.find("value)) | ").unwrap();
+    let operator = first + "value)) ".len();
+    let second = source.find("value)) =>").unwrap();
     let used = source.rfind("=> value").unwrap() + "=> ".len();
 
     let target = database.definition_at(used).unwrap();

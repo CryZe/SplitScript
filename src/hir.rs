@@ -283,7 +283,7 @@ pub enum TypedPattern {
     Enum {
         enumeration: EnumTypeId,
         variant: String,
-        binding: Option<PatternBinding>,
+        payload: Option<Box<TypedPatternNode>>,
     },
     Bool(bool),
     Char(char),
@@ -294,11 +294,11 @@ pub enum TypedPattern {
     },
     FileVersion([u16; 4]),
     None,
-    OptionSome(Option<PatternBinding>),
+    OptionSome(Box<TypedPatternNode>),
     IteratorEnd,
-    IteratorItem(Option<PatternBinding>),
-    ResultSuccess(Option<PatternBinding>),
-    ResultError(Option<PatternBinding>),
+    IteratorItem(Box<TypedPatternNode>),
+    ResultSuccess(Box<TypedPatternNode>),
+    ResultError(Box<TypedPatternNode>),
     Array(Vec<TypedPatternNode>),
     Alternation(Vec<TypedPatternNode>),
     Binding(PatternBinding),
@@ -1364,7 +1364,7 @@ fn lower_pattern(
 ) -> TypedPattern {
     match pattern {
         MatchPattern::Enum {
-            variant, binding, ..
+            variant, payload, ..
         } => TypedPattern::Enum {
             enumeration: enum_type_for_variant(
                 semantics
@@ -1374,7 +1374,14 @@ fn lower_pattern(
                 standard_library,
             ),
             variant: variant.clone(),
-            binding: binding.clone(),
+            payload: payload.as_ref().map(|payload| {
+                Box::new(lower_pattern_node(
+                    payload,
+                    semantics,
+                    syntax,
+                    standard_library,
+                ))
+            }),
         },
         MatchPattern::Bool(value) => TypedPattern::Bool(*value),
         MatchPattern::Char(value) => TypedPattern::Char(*value),
@@ -1385,53 +1392,52 @@ fn lower_pattern(
         },
         MatchPattern::FileVersion(components) => TypedPattern::FileVersion(*components),
         MatchPattern::None => TypedPattern::None,
-        MatchPattern::OptionSome(binding) => TypedPattern::OptionSome(binding.clone()),
+        MatchPattern::OptionSome(payload) => TypedPattern::OptionSome(Box::new(
+            lower_pattern_node(payload, semantics, syntax, standard_library),
+        )),
         MatchPattern::IteratorEnd => TypedPattern::IteratorEnd,
-        MatchPattern::IteratorItem(binding) => TypedPattern::IteratorItem(binding.clone()),
-        MatchPattern::ResultSuccess(binding) => TypedPattern::ResultSuccess(binding.clone()),
-        MatchPattern::ResultError(binding) => TypedPattern::ResultError(binding.clone()),
+        MatchPattern::IteratorItem(payload) => TypedPattern::IteratorItem(Box::new(
+            lower_pattern_node(payload, semantics, syntax, standard_library),
+        )),
+        MatchPattern::ResultSuccess(payload) => TypedPattern::ResultSuccess(Box::new(
+            lower_pattern_node(payload, semantics, syntax, standard_library),
+        )),
+        MatchPattern::ResultError(payload) => TypedPattern::ResultError(Box::new(
+            lower_pattern_node(payload, semantics, syntax, standard_library),
+        )),
         MatchPattern::Array(elements) => TypedPattern::Array(
             elements
                 .iter()
-                .map(|element| TypedPatternNode {
-                    pattern: lower_pattern(
-                        &element.kind,
-                        element.id,
-                        semantics,
-                        syntax,
-                        standard_library,
-                    ),
-                    resolution: ResolvedPattern {
-                        id: element.id,
-                        variant: semantics.pattern_variant(element.id),
-                        wrapper: semantics.wrapper_pattern(element.id),
-                        span: element.span,
-                    },
-                })
+                .map(|element| lower_pattern_node(element, semantics, syntax, standard_library))
                 .collect(),
         ),
         MatchPattern::Alternation(alternatives) => TypedPattern::Alternation(
             alternatives
                 .iter()
-                .map(|alternative| TypedPatternNode {
-                    pattern: lower_pattern(
-                        &alternative.kind,
-                        alternative.id,
-                        semantics,
-                        syntax,
-                        standard_library,
-                    ),
-                    resolution: ResolvedPattern {
-                        id: alternative.id,
-                        variant: semantics.pattern_variant(alternative.id),
-                        wrapper: semantics.wrapper_pattern(alternative.id),
-                        span: alternative.span,
-                    },
+                .map(|alternative| {
+                    lower_pattern_node(alternative, semantics, syntax, standard_library)
                 })
                 .collect(),
         ),
         MatchPattern::Binding(binding) => TypedPattern::Binding(binding.clone()),
         MatchPattern::Wildcard => TypedPattern::Wildcard,
+    }
+}
+
+fn lower_pattern_node(
+    node: &crate::ast::PatternNode,
+    semantics: &SemanticModel,
+    syntax: &SyntaxProgram,
+    standard_library: &StandardLibrary,
+) -> TypedPatternNode {
+    TypedPatternNode {
+        pattern: lower_pattern(&node.kind, node.id, semantics, syntax, standard_library),
+        resolution: ResolvedPattern {
+            id: node.id,
+            variant: semantics.pattern_variant(node.id),
+            wrapper: semantics.wrapper_pattern(node.id),
+            span: node.span,
+        },
     }
 }
 

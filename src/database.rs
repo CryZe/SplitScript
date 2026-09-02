@@ -1022,6 +1022,19 @@ impl DefinitionCollector<'_> {
                 {
                     self.add_reference(definition.id, variant_span);
                 }
+                if let MatchPattern::Enum {
+                    payload: Some(payload),
+                    ..
+                } = pattern
+                {
+                    self.add_pattern_references(&payload.kind, payload.id, payload.span);
+                }
+            }
+            MatchPattern::OptionSome(payload)
+            | MatchPattern::IteratorItem(payload)
+            | MatchPattern::ResultSuccess(payload)
+            | MatchPattern::ResultError(payload) => {
+                self.add_pattern_references(&payload.kind, payload.id, payload.span);
             }
             MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
                 for element in elements {

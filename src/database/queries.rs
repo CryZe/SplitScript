@@ -790,11 +790,21 @@ impl CompilerDatabase {
                 .syntax()
                 .state
                 .as_ref()
-                .and_then(|state| state.provider.as_ref())
-                .filter(|provider| {
-                    provider.span.start <= offset
-                        && offset < provider.span.end
-                        && provider.name == *name
+                .and_then(|state| {
+                    state
+                        .provider
+                        .iter()
+                        .chain(
+                            state
+                                .provider_alternatives
+                                .iter()
+                                .map(|alternative| &alternative.provider),
+                        )
+                        .find(|provider| {
+                            provider.span.start <= offset
+                                && offset < provider.span.end
+                                && provider.name == *name
+                        })
                 })
                 .and_then(|provider| {
                     self.context
@@ -810,13 +820,23 @@ impl CompilerDatabase {
                 .syntax()
                 .state
                 .as_ref()
-                .and_then(|state| state.provider.as_ref())
-                .filter(|provider| {
-                    provider.selector.as_ref().is_some_and(|selector| {
-                        selector.name_span.start <= offset
-                            && offset < selector.name_span.end
-                            && selector.name == *name
-                    })
+                .and_then(|state| {
+                    state
+                        .provider
+                        .iter()
+                        .chain(
+                            state
+                                .provider_alternatives
+                                .iter()
+                                .map(|alternative| &alternative.provider),
+                        )
+                        .find(|provider| {
+                            provider.selector.as_ref().is_some_and(|selector| {
+                                selector.name_span.start <= offset
+                                    && offset < selector.name_span.end
+                                    && selector.name == *name
+                            })
+                        })
                 })
                 .and_then(|provider| {
                     self.context

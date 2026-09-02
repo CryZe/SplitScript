@@ -179,6 +179,7 @@ pub(crate) fn language_identifier_kind(
             LanguageItemId::ManagedStaticField
             | LanguageItemId::ManagedMetadataNames
             | LanguageItemId::ManagedStringMaxLength
+            | LanguageItemId::StateProviderAlternative
             | LanguageItemId::StatePointerField
                 if fragment =>
             {
@@ -882,15 +883,26 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 self.insert_language_token(rate.keyword_span, "detached", 0);
             }
         }
-        if let Some(provider) = program
-            .state
-            .as_ref()
-            .and_then(|state| state.provider.as_ref())
-            && self
+        if let Some(state) = &program.state {
+            for alternative in &state.provider_alternatives {
+                self.insert_language_token(alternative.keyword_span, "provider", 0);
+            }
+        }
+        for provider in program.state.iter().flat_map(|state| {
+            state.provider.iter().chain(
+                state
+                    .provider_alternatives
+                    .iter()
+                    .map(|alternative| &alternative.provider),
+            )
+        }) {
+            if self
                 .standard_library
                 .state_provider_by_name(&provider.name)
-                .is_some()
-        {
+                .is_none()
+            {
+                continue;
+            }
             self.mark_ident(
                 provider.span,
                 &provider.name,

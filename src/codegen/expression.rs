@@ -15,9 +15,9 @@ use crate::{
     },
     stdlib::{
         IntrinsicId, MANAGED_POINTER_SIZE_FIELD, PROVIDER_BINDINGS_TYPE, RuntimeRepresentation,
-        StandardLibrary, StdlibFieldId, StdlibOwner, StdlibTypeConstructorId, StdlibTypeId,
-        managed_field_offset_name, managed_instance_header_name, managed_static_table_name,
-        provider_context_field_name,
+        StandardLibrary, StdlibFieldId, StdlibOwner, StdlibStateProviderId,
+        StdlibTypeConstructorId, StdlibTypeId, managed_field_offset_name,
+        managed_instance_header_name, managed_static_table_name, provider_context_field_name,
     },
     types::{EnumTypeId, ResolvedArrayType, TypeId},
     wasm_ir::{self, SnapshotProjection, SnapshotRoot, TemporaryId},
@@ -101,12 +101,13 @@ pub(super) struct ExprContext<'a> {
     pub reachability: &'a super::reachability::Reachability,
     pub failure_payloads: &'a super::failure_payload::FailurePayloadDemand,
     pub abi: &'a Abi,
-    pub state: &'a crate::ast::StateDecl,
     pub locals: LocalStorage<'a>,
     pub globals: &'a HashMap<ValueId, u32>,
     pub global_types: &'a HashMap<ValueId, Type>,
     pub settings: &'a HashMap<ValueId, SettingStorage>,
     pub runtime_globals: RuntimeGlobals,
+    pub provider_values: &'a HashMap<StdlibStateProviderId, u32>,
+    pub process_names: &'a [&'a str],
     /// Candidate snapshot parameter while evaluating a state field source or
     /// transform that depends on sibling fields.
     pub state_candidate: Option<u32>,
@@ -190,7 +191,6 @@ impl<'a> ExprContext<'a> {
             reachability: lowering.reachability,
             failure_payloads: lowering.failure_payloads,
             abi: lowering.abi,
-            state: lowering.state,
             locals: LocalStorage::Wasm {
                 values,
                 temporaries,
@@ -199,6 +199,8 @@ impl<'a> ExprContext<'a> {
             global_types: lowering.global_types,
             settings: lowering.settings,
             runtime_globals: lowering.runtime_globals,
+            provider_values: lowering.provider_values,
+            process_names: lowering.process_names,
             state_candidate: None,
             runtime_helpers: lowering.runtime_helpers,
             functions: lowering.functions,
@@ -1527,8 +1529,10 @@ pub(super) fn compile_resolved_path(
             } else {
                 function.instruction(&Instruction::GlobalGet(
                     context
-                        .runtime_globals
-                        .provider_value
+                        .provider_values
+                        .get(&provider)
+                        .copied()
+                        .or(context.runtime_globals.provider_value)
                         .expect("provider value references require provider storage"),
                 ));
             }
@@ -4423,19 +4427,7 @@ fn compile_expr_unconverted(
                 // of the scalar process handle.
                 compile_receiver(function, target, context);
                 function.instruction(&Instruction::Drop);
-                let provider = context
-                    .semantics
-                    .state_provider()
-                    .map(|provider| context.standard_library.state_provider(provider))
-                    .expect("checked states resolve a process provider");
-                let names = match provider.processes {
-                    crate::stdlib::StateProviderProcesses::Declared(processes) => {
-                        processes.to_vec()
-                    }
-                    crate::stdlib::StateProviderProcesses::SourceState => {
-                        context.state.processes.iter().map(String::as_str).collect()
-                    }
-                };
+                let names = context.process_names;
                 debug_assert!(!names.is_empty());
                 let string_type = context.gc.val_type(Type::Standard(StdlibTypeId::String));
                 for (index, name) in names.iter().enumerate() {

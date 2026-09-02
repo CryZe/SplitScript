@@ -167,6 +167,24 @@ fn initialize_checker(
             ),
         )
     });
+    let provider_values = resolutions
+        .state_providers()
+        .map(|provider| {
+            let declaration = standard_library.state_provider(provider);
+            (
+                provider,
+                Type::Known(
+                    inference
+                        .type_store()
+                        .id_for_standard(declaration.process_type),
+                ),
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let provider_alternatives = resolutions
+        .state_provider_alternatives()
+        .map(|(variant, alternative)| (variant, (alternative.provider, alternative.selector)))
+        .collect();
 
     let mut checker = Checker {
         standard_library,
@@ -185,6 +203,7 @@ fn initialize_checker(
         ),
         inference,
         provider_value,
+        provider_values,
         layout_value: program.state.as_ref().and_then(|state| state.layout_value),
         layout_available_in_on_attach: false,
         active_state_layout: None,
@@ -204,6 +223,7 @@ fn initialize_checker(
         semantics: SemanticBuilder::with_state_provider(
             resolutions.state_provider(),
             resolutions.state_provider_selector(),
+            provider_alternatives,
         ),
         standard_field_types: std::collections::HashMap::new(),
         active_function_component: std::collections::HashSet::new(),

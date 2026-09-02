@@ -515,7 +515,8 @@ impl Checker {
                 let refines_state_layout = matches!(
                     &value.kind,
                     ExprKind::Path(path)
-                        if path.as_slice() == ["layout"] && self.layout_value.is_some()
+                        if matches!(path.as_slice(), [name] if name == "layout" || name == "provider")
+                            && self.layout_value.is_some()
                 );
                 let mut unguarded_patterns = HashSet::new();
                 let mut has_unguarded_wildcard = false;

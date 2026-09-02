@@ -695,7 +695,8 @@ impl Checker {
 
     pub(super) fn binding_for_use(&mut self, name: &str, span: Span) -> Option<Binding> {
         let binding = self.binding(name)?;
-        if binding.id == self.layout_value
+        if name == "layout"
+            && binding.id == self.layout_value
             && matches!(self.callable, CallableContext::Action(ActionKind::OnAttach))
             && !self.layout_available_in_on_attach
         {

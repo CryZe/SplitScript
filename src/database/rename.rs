@@ -336,7 +336,7 @@ impl CompilerDatabase {
         let Some(state) = &parsed.syntax().state else {
             return Ok(vec![SourceDefinitionId::Value(target)]);
         };
-        if state.layouts.is_empty() {
+        if !state.has_named_variants() {
             return Ok(vec![SourceDefinitionId::Value(target)]);
         }
         let Some(name) = state

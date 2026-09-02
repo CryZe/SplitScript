@@ -2143,11 +2143,25 @@ impl Checker {
                 if !matches!(
                     self.callable,
                     CallableContext::Action(ActionKind::SelectProcess)
-                ) && self.provider_value.is_some_and(|(provider, _)| {
-                    self.standard_library.state_provider(provider).value_name == name
-                }) =>
+                ) && self.provider_value_by_name(name).is_some() =>
             {
-                let (provider, provider_type) = self.provider_value.unwrap();
+                let (provider, provider_type) = self
+                    .provider_value_by_name(name)
+                    .expect("provider name was discovered above");
+                if !matches!(
+                    self.callable,
+                    CallableContext::LibraryFunction(_) | CallableContext::CompilerGenerated
+                ) && self.active_state_provider() != Some(provider)
+                {
+                    self.error(
+                        format!(
+                            "`{name}` is available only when the `{}` state provider is selected",
+                            self.standard_library.state_provider(provider).name
+                        ),
+                        span,
+                    );
+                    return None;
+                }
                 let (ty, members) =
                     self.resolve_members_or_defer(provider_type, fields, span, expression)?;
                 Some(PathResolution {
@@ -2160,23 +2174,25 @@ impl Checker {
                 if !matches!(
                     self.callable,
                     CallableContext::Action(ActionKind::SelectProcess)
-                ) && self.provider_value.is_some_and(|(provider, _)| {
-                    self.standard_library
-                        .state_provider(provider)
-                        .contexts
-                        .iter()
-                        .any(|context| context.name == name)
-                }) =>
+                ) && self.provider_context_by_name(name).is_some() =>
             {
-                let (provider, _) = self.provider_value.unwrap();
-                let declaration = self.standard_library.state_provider(provider);
-                let (context, context_declaration) = declaration
-                    .contexts
-                    .iter()
-                    .enumerate()
-                    .find(|(_, context)| context.name == name)
+                let (provider, context, context_type) = self
+                    .provider_context_by_name(name)
                     .expect("provider context name was discovered above");
-                let context_type = self.standard_type(context_declaration.ty);
+                if !matches!(
+                    self.callable,
+                    CallableContext::LibraryFunction(_) | CallableContext::CompilerGenerated
+                ) && self.active_state_provider() != Some(provider)
+                {
+                    self.error(
+                        format!(
+                            "`{name}` is available only when the `{}` state provider is selected",
+                            self.standard_library.state_provider(provider).name
+                        ),
+                        span,
+                    );
+                    return None;
+                }
                 let (ty, members) =
                     self.resolve_members_or_defer(context_type, fields, span, expression)?;
                 Some(PathResolution {

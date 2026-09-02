@@ -163,13 +163,12 @@ pub(crate) fn analyze(
     let layouts = syntax.state.as_ref().map_or_else(
         || vec![AttachmentLayout::Single],
         |state| {
-            if state.layouts.is_empty() {
+            if !state.has_named_variants() {
                 vec![AttachmentLayout::Single]
             } else {
                 state
-                    .layouts
-                    .iter()
-                    .map(|layout| AttachmentLayout::Named(layout.variant))
+                    .variant_fields()
+                    .map(|(variant, _)| AttachmentLayout::Named(variant))
                     .collect()
             }
         },
@@ -1317,7 +1316,7 @@ fn validate_uses(
     }
 
     if let Some(state) = &syntax.state {
-        let field_layouts = if state.layouts.is_empty() {
+        let field_layouts = if !state.has_named_variants() {
             state
                 .fields
                 .iter()
@@ -1325,13 +1324,11 @@ fn validate_uses(
                 .collect::<HashMap<_, _>>()
         } else {
             state
-                .layouts
-                .iter()
-                .flat_map(|layout| {
-                    layout
-                        .fields
+                .variant_fields()
+                .flat_map(|(variant, fields)| {
+                    fields
                         .iter()
-                        .map(move |field| (field.id, AttachmentLayout::Named(layout.variant)))
+                        .map(move |field| (field.id, AttachmentLayout::Named(variant)))
                 })
                 .collect()
         };

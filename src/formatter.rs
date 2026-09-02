@@ -109,6 +109,9 @@ impl<'ast> Visitor<'ast> for HeaderCollector {
     }
 
     fn visit_state(&mut self, state: &'ast StateDecl) {
+        for alternative in &state.provider_alternatives {
+            self.push(alternative.span.start, alternative.opening_span.start);
+        }
         for group in &state.conditional_fields {
             self.push(group.span.start, group.opening_span.start);
         }
@@ -330,6 +333,12 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
     }
 
     fn visit_state(&mut self, state: &'ast StateDecl) {
+        for alternative in &state.provider_alternatives {
+            self.mark_separator_after(alternative.span.end);
+            for field in &alternative.fields {
+                self.visit_state_field(field);
+            }
+        }
         if let Some(layout) = &state.layout {
             self.break_after.insert(layout.span.end);
         }
@@ -1321,6 +1330,17 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
     }
 
     fn visit_state(&mut self, state: &'ast StateDecl) {
+        if !state.provider_alternatives.is_empty() {
+            self.mark_comma(state.span);
+            for alternative in &state.provider_alternatives {
+                if !alternative.fields.is_empty() {
+                    self.mark_semicolon(alternative.span);
+                }
+                for field in &alternative.fields {
+                    self.visit_state_field(field);
+                }
+            }
+        }
         let last_field = state.fields.iter().map(|field| field.span.end).max();
         let last_group = state
             .conditional_fields
@@ -2591,6 +2611,23 @@ tickRate {
 }
 onAttach {
     return StateLayout.Steam
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn formats_named_state_provider_alternatives() {
+        let source = r#"state{provider Windows:Native["game.exe"]{level:u32 at 0x100},provider Advance:GBA{level:u32 at 0x03000010}}"#;
+        let expected = r#"state {
+    provider Windows: Native ["game.exe"] {
+        level: u32 at 0x100;
+    },
+    provider Advance: GBA {
+        level: u32 at 0x03000010;
+    },
 }
 "#;
         let formatted = format_source(source).unwrap();

@@ -185,6 +185,16 @@ pub fn walk_state<'ast, V: Visitor<'ast>>(visitor: &mut V, state: &'ast StateDec
             visitor.visit_expr(argument);
         }
     }
+    for alternative in &state.provider_alternatives {
+        if let Some(selector) = &alternative.provider.selector {
+            for argument in &selector.arguments {
+                visitor.visit_expr(argument);
+            }
+        }
+        for field in &alternative.fields {
+            visitor.visit_state_field(field);
+        }
+    }
     for field in &state.fields {
         visitor.visit_state_field(field);
     }
@@ -639,6 +649,16 @@ pub fn walk_program_mut<F: Folder>(folder: &mut F, program: &mut Program) {
 }
 
 pub fn walk_state_mut<F: Folder>(folder: &mut F, state: &mut StateDecl) {
+    for alternative in &mut state.provider_alternatives {
+        if let Some(selector) = &mut alternative.provider.selector {
+            for argument in &mut selector.arguments {
+                folder.fold_expr(argument);
+            }
+        }
+        for field in &mut alternative.fields {
+            folder.fold_state_field(field);
+        }
+    }
     for field in &mut state.fields {
         folder.fold_state_field(field);
     }

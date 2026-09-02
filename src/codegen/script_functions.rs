@@ -43,7 +43,6 @@ pub(super) fn compile_read(
             reachability: lowering.reachability,
             failure_payloads: lowering.failure_payloads,
             abi: lowering.abi,
-            state: lowering.state,
             locals: LocalStorage::Wasm {
                 values: &locals,
                 temporaries: &matches.temporaries,
@@ -52,6 +51,8 @@ pub(super) fn compile_read(
             global_types: lowering.global_types,
             settings: lowering.settings,
             runtime_globals: lowering.runtime_globals,
+            provider_values: lowering.provider_values,
+            process_names: lowering.process_names,
             state_candidate: candidate_parameter,
             runtime_helpers: lowering.runtime_helpers,
             functions: lowering.functions,
@@ -109,7 +110,8 @@ pub(super) fn compile_read(
     let Type::Result(result_type) = poll_result else {
         unreachable!("state poll-result types are Result layouts")
     };
-    if let Some(provider) = lowering.semantics.state_provider() {
+    if let Some(provider_id) = lowering.semantics.state_field_provider(field.id) {
+        let provider = provider_id;
         let provider = lowering.standard_library.state_provider(provider);
         let Implementation::Intrinsic(direct_read) = lowering
             .standard_library
@@ -133,6 +135,7 @@ pub(super) fn compile_read(
                 field_size,
                 result_type,
                 contract,
+                provider_id,
                 &path.offsets,
                 lowering,
             );
@@ -396,7 +399,6 @@ pub(super) fn compile_state_transform(
         reachability: lowering.reachability,
         failure_payloads: lowering.failure_payloads,
         abi: lowering.abi,
-        state: lowering.state,
         locals: LocalStorage::Wasm {
             values: &locals,
             temporaries: &matches.temporaries,
@@ -405,6 +407,8 @@ pub(super) fn compile_state_transform(
         global_types: lowering.global_types,
         settings: lowering.settings,
         runtime_globals: lowering.runtime_globals,
+        provider_values: lowering.provider_values,
+        process_names: lowering.process_names,
         state_candidate: has_dependencies.then_some(1),
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
@@ -454,6 +458,7 @@ fn compile_provider_direct_read(
     field_size: u32,
     result_type: ResultTypeId,
     contract: crate::intrinsic_registry::ProviderReadContract,
+    provider: crate::stdlib::StdlibStateProviderId,
     offsets: &[i64],
     lowering: &EmissionContext<'_>,
 ) -> Function {
@@ -485,6 +490,7 @@ fn compile_provider_direct_read(
             optional,
             result_type,
             contract,
+            provider,
             lowering,
         );
         emit_memory_load(
@@ -507,6 +513,7 @@ fn compile_provider_direct_read(
         optional,
         result_type,
         contract,
+        provider,
         lowering,
     );
     emit_memory_value(
@@ -534,14 +541,17 @@ fn emit_provider_read(
     optional: Option<crate::ast::OptionTypeId>,
     result_type: ResultTypeId,
     contract: crate::intrinsic_registry::ProviderReadContract,
+    provider: crate::stdlib::StdlibStateProviderId,
     lowering: &EmissionContext<'_>,
 ) {
     function
         .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
         .instruction(&Instruction::GlobalGet(
             lowering
-                .runtime_globals
-                .provider_value
+                .provider_values
+                .get(&provider)
+                .copied()
+                .or(lowering.runtime_globals.provider_value)
                 .expect("provider direct reads require provider storage"),
         ))
         .instruction(&Instruction::LocalGet(guest_address_local))
@@ -800,7 +810,6 @@ pub(super) fn compile_user_function(
         reachability: lowering.reachability,
         failure_payloads: lowering.failure_payloads,
         abi: lowering.abi,
-        state: lowering.state,
         locals: LocalStorage::Wasm {
             values: &locals,
             temporaries: &matches.temporaries,
@@ -809,6 +818,8 @@ pub(super) fn compile_user_function(
         global_types: lowering.global_types,
         settings: lowering.settings,
         runtime_globals: lowering.runtime_globals,
+        provider_values: lowering.provider_values,
+        process_names: lowering.process_names,
         state_candidate: None,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
@@ -980,7 +991,6 @@ pub(super) fn compile_closure(
         reachability: lowering.reachability,
         failure_payloads: lowering.failure_payloads,
         abi: lowering.abi,
-        state: lowering.state,
         locals: LocalStorage::Wasm {
             values: &locals,
             temporaries: &matches.temporaries,
@@ -989,6 +999,8 @@ pub(super) fn compile_closure(
         global_types: lowering.global_types,
         settings: lowering.settings,
         runtime_globals: lowering.runtime_globals,
+        provider_values: lowering.provider_values,
+        process_names: lowering.process_names,
         state_candidate: None,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
@@ -1207,7 +1219,6 @@ pub(super) fn compile_action(
         reachability: lowering.reachability,
         failure_payloads: lowering.failure_payloads,
         abi: lowering.abi,
-        state: lowering.state,
         locals: LocalStorage::Wasm {
             values: &locals,
             temporaries: &matches.temporaries,
@@ -1216,6 +1227,8 @@ pub(super) fn compile_action(
         global_types: lowering.global_types,
         settings: lowering.settings,
         runtime_globals: lowering.runtime_globals,
+        provider_values: lowering.provider_values,
+        process_names: lowering.process_names,
         state_candidate: None,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,

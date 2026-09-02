@@ -8,7 +8,10 @@ use crate::{
     abi::AbiImportId,
     ast::{ActionKind, Program, StateField, ValueId},
     semantic::SemanticModel,
-    stdlib::{CoreTypeId, RuntimeRepresentation, StdlibFieldId, StdlibTypeId},
+    stdlib::{
+        CoreTypeId, RuntimeRepresentation, StdlibFieldId, StdlibStateProvider,
+        StdlibStateProviderId, StdlibTypeId,
+    },
     wasm_ir,
 };
 
@@ -34,6 +37,7 @@ pub(super) struct UpdateContext<'a> {
     pub gc: &'a GcLayout,
     pub failure_payloads: &'a super::failure_payload::FailurePayloadDemand,
     pub runtime_globals: RuntimeGlobals,
+    pub provider_values: &'a HashMap<StdlibStateProviderId, u32>,
     pub semantics: &'a crate::semantic::SemanticModel,
     pub managed: &'a crate::managed::ManagedBindingPlan,
     pub managed_state_reads: &'a ManagedStateReadCache,
@@ -47,7 +51,15 @@ pub(super) struct UpdateContext<'a> {
     pub scoped_globals: &'a crate::ScopedGlobalAnalysis,
     pub process_names: &'a [&'a str],
     pub provider_attach: Option<ProviderAttach>,
+    pub provider_alternatives: &'a [ProviderAlternative<'a>],
     pub provider_preparation: Option<ProviderPreparation>,
+}
+
+pub(super) struct ProviderAlternative<'a> {
+    pub provider: StdlibStateProviderId,
+    pub declaration: &'a StdlibStateProvider,
+    pub source_processes: &'a [String],
+    pub attachment: Option<ProviderAttach>,
 }
 
 #[derive(Clone, Copy)]
@@ -526,12 +538,32 @@ pub(super) fn compile_update(
         emit_provider_default(&mut function, provider_type, lowering);
         function.instruction(&Instruction::GlobalSet(provider_global));
     }
+    for alternative in lowering.provider_alternatives {
+        let Some(provider_global) = lowering.provider_values.get(&alternative.provider).copied()
+        else {
+            continue;
+        };
+        let provider_type = alternative.declaration.process_type;
+        emit_provider_default(&mut function, provider_type, lowering);
+        function.instruction(&Instruction::GlobalSet(provider_global));
+    }
     if let (Some(frame_global), Some(ProviderAttach { frame_type, .. })) =
         (globals.provider_attachment_frame, lowering.provider_attach)
     {
         function
             .instruction(&Instruction::RefNull(HeapType::Concrete(frame_type)))
             .instruction(&Instruction::GlobalSet(frame_global));
+    }
+    for attachment in lowering
+        .provider_alternatives
+        .iter()
+        .filter_map(|alternative| alternative.attachment)
+    {
+        function
+            .instruction(&Instruction::RefNull(HeapType::Concrete(
+                attachment.frame_type,
+            )))
+            .instruction(&Instruction::GlobalSet(attachment.frame_global));
     }
     if let Some(preparation) = lowering.provider_preparation {
         function
@@ -576,6 +608,101 @@ pub(super) fn compile_update(
     function
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
+
+    if !lowering.provider_alternatives.is_empty() {
+        let selected = globals
+            .selected_layout
+            .expect("multi-provider state has selected-provider storage");
+        let enumeration = state
+            .layout_enum
+            .as_ref()
+            .expect("multi-provider state generates StateProvider");
+        for (variant_index, alternative) in lowering.provider_alternatives.iter().enumerate() {
+            function
+                .instruction(&Instruction::GlobalGet(selected))
+                .instruction(&Instruction::RefIsNull)
+                .instruction(&Instruction::If(BlockType::Empty));
+            let accepted = match alternative.declaration.processes {
+                crate::stdlib::StateProviderProcesses::Declared(names) => names.to_vec(),
+                crate::stdlib::StateProviderProcesses::SourceState => alternative
+                    .source_processes
+                    .iter()
+                    .map(String::as_str)
+                    .collect(),
+            };
+            let mut emitted_process = false;
+            for (index, name) in lowering.process_names.iter().enumerate() {
+                if !accepted.iter().any(|accepted| accepted == name) {
+                    continue;
+                }
+                function
+                    .instruction(&Instruction::GlobalGet(globals.process_name))
+                    .instruction(&Instruction::I32Const(index as i32))
+                    .instruction(&Instruction::I32Eq);
+                if emitted_process {
+                    function.instruction(&Instruction::I32Or);
+                }
+                emitted_process = true;
+            }
+            debug_assert!(emitted_process, "every provider contributes a process name");
+            function.instruction(&Instruction::If(BlockType::Empty));
+            if let Some(attachment) = alternative.attachment {
+                function
+                    .instruction(&Instruction::GlobalGet(attachment.frame_global))
+                    .instruction(&Instruction::RefIsNull)
+                    .instruction(&Instruction::If(BlockType::Empty))
+                    .instruction(&Instruction::Call(attachment.init))
+                    .instruction(&Instruction::GlobalSet(attachment.frame_global))
+                    .instruction(&Instruction::End)
+                    .instruction(&Instruction::GlobalGet(attachment.frame_global))
+                    .instruction(&Instruction::RefAsNonNull)
+                    .instruction(&Instruction::Call(attachment.poll))
+                    .instruction(&Instruction::If(BlockType::Empty))
+                    .instruction(&Instruction::GlobalGet(attachment.frame_global))
+                    .instruction(&Instruction::RefAsNonNull)
+                    .instruction(&Instruction::StructGet {
+                        struct_type_index: attachment.frame_type,
+                        field_index: attachment.completion_field,
+                    })
+                    .instruction(&Instruction::GlobalSet(
+                        lowering.provider_values[&alternative.provider],
+                    ))
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(
+                        attachment.frame_type,
+                    )))
+                    .instruction(&Instruction::GlobalSet(attachment.frame_global));
+                emit_provider_selection(
+                    &mut function,
+                    variant_index,
+                    enumeration,
+                    selected,
+                    lowering,
+                );
+                function.instruction(&Instruction::End);
+            } else {
+                debug_assert_eq!(
+                    alternative.declaration.attachment,
+                    crate::stdlib::StateProviderAttachment::Identity
+                );
+                emit_provider_selection(
+                    &mut function,
+                    variant_index,
+                    enumeration,
+                    selected,
+                    lowering,
+                );
+            }
+            function
+                .instruction(&Instruction::End)
+                .instruction(&Instruction::End);
+        }
+        function
+            .instruction(&Instruction::GlobalGet(selected))
+            .instruction(&Instruction::RefIsNull)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End);
+    }
 
     if let (Some(provider_global), Some(provider_attach)) =
         (globals.provider_value, lowering.provider_attach)
@@ -780,7 +907,7 @@ pub(super) fn compile_update(
     function
         .instruction(&Instruction::StructNewDefault(STATE_TYPE))
         .instruction(&Instruction::LocalSet(candidate_state));
-    if state.layouts.is_empty() {
+    if !state.has_named_variants() {
         let mut prefix_emission = PrefixEmissionState::default();
         for field in state_dependency_order(&all_fields, semantics) {
             let read_index = read_indices[&field.id];
@@ -820,7 +947,7 @@ pub(super) fn compile_update(
             .layout_enum
             .as_ref()
             .expect("named layouts generate a typed enum");
-        for (layout_index, layout) in state.layouts.iter().enumerate() {
+        for (layout_index, (_, fields)) in state.variant_fields().enumerate() {
             let mut prefix_emission = PrefixEmissionState::default();
             function
                 .instruction(&Instruction::GlobalGet(selected))
@@ -832,7 +959,7 @@ pub(super) fn compile_update(
                 .instruction(&Instruction::I32Const(layout_index as i32))
                 .instruction(&Instruction::I32Eq)
                 .instruction(&Instruction::If(BlockType::Empty));
-            let layout_fields = layout.fields.iter().collect::<Vec<_>>();
+            let layout_fields = fields.iter().collect::<Vec<_>>();
             for field in state_dependency_order(&layout_fields, semantics) {
                 let read_index = read_indices[&field.id];
                 emit_state_field_poll(
@@ -1481,6 +1608,24 @@ fn emit_storage_default(function: &mut Function, ty: ValType) {
         ValType::V128 => function.instruction(&Instruction::V128Const(0)),
         ValType::Ref(reference) => function.instruction(&Instruction::RefNull(reference.heap_type)),
     };
+}
+
+fn emit_provider_selection(
+    function: &mut Function,
+    variant_index: usize,
+    enumeration: &crate::ast::EnumDecl,
+    selected: u32,
+    lowering: &UpdateContext<'_>,
+) {
+    function.instruction(&Instruction::I32Const(variant_index as i32));
+    for _ in &enumeration.variants {
+        function.instruction(&Instruction::I32Const(0));
+    }
+    function
+        .instruction(&Instruction::StructNew(
+            lowering.gc.index(Type::Enum(enumeration.id)),
+        ))
+        .instruction(&Instruction::GlobalSet(selected));
 }
 
 /// Stable topological order for the physical fields active in one state

@@ -395,12 +395,13 @@ fn validate_provider_guest_memory_ranges(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    if let Some(provider_id) = semantics.state_provider()
-        && let Some(state) = &syntax.state
-    {
-        let provider = standard_library.state_provider(provider_id);
-        if !provider.readable_ranges.is_empty() {
-            for field in state.all_fields() {
+    if let Some(state) = &syntax.state {
+        for field in state.all_fields() {
+            let Some(provider_id) = semantics.state_field_provider(field.id) else {
+                continue;
+            };
+            let provider = standard_library.state_provider(provider_id);
+            if !provider.readable_ranges.is_empty() {
                 let StateSource::Pointer(path) = &field.source else {
                     continue;
                 };

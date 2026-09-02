@@ -2884,7 +2884,7 @@ mod tests {
         for (query, expected_uri) in [
             ("modules.First()", "/migration/asl/process/modules.md"),
             ("multiple processes", "/migration/asl/state/attachment.md"),
-            (".exe", "/language/state.md"),
+            (".exe", "/language/provider.md"),
             ("refreshRate", "/migration/asl/runtime/refresh-rate.md"),
             (
                 "TimeSpan.FromMilliseconds",

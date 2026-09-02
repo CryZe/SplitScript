@@ -328,6 +328,32 @@ fn timer_lifecycle_actions_observe_transitions_once_while_detached() {
 }
 
 #[test]
+fn multi_provider_state_selects_the_applicable_provider_before_lifecycle_code() {
+    let source = r#"
+        state {
+            provider Windows: Native ["game.exe"] {},
+            provider Advance: GBA {},
+        }
+
+        whileAttached {
+            match provider {
+                StateProvider.Windows => print("windows"),
+                StateProvider.Advance => print("advance"),
+            }
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(store.data().messages, ["windows"]);
+}
+
+#[test]
 fn attempt_scoped_storage_is_hidden_until_start_and_cleared_after_reset() {
     let source = r#"
         let label

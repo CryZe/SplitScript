@@ -825,14 +825,6 @@ concepts rather than maintaining a parallel inventory.
   reject native-state `as utf8(...)` sugar. Prefer one provider-independent
   bounded decoding facility with explicit encoding and failure semantics over a
   PS2-only spelling, and bring the source API back for approval.
-- [ ] Decide whether one SplitScript file may select among fundamentally
-  different state providers. The SEGA Master Splitter dynamically spans SMS and
-  Genesis, while the Spider-Man and Code: Veronica X sources span several
-  consoles. Compare a typed multi-provider attachment model with the simpler
-  canonical rule that each provider/edition is a separate script, including
-  settings sharing, discovery, host packaging, simultaneous candidate
-  processes, and state-shape typing. Document the chosen migration even if no
-  language feature is added.
 - [ ] Assess an Unreal provider only after representative `GWorld`, object, and
   name traversal ports establish the required surface.
 ## P1 — expand migration guidance and automated fixes
@@ -1332,20 +1324,18 @@ remaining work is product hardening and distribution.
 1. Resolve the PS2 provider's low-memory product-code gap against ASR, then
    decide one provider-independent bounded guest-string facility. Keep SNES and
    Unity managed arrays/lists deferred until ASR has tested implementations.
-2. Decide whether multi-console legacy scripts become separate provider-specific
-   SplitScript packages or justify a typed multi-provider source model.
-3. Design the read-only timer metadata/time surface, imperative timer-control
+2. Design the read-only timer metadata/time surface, imperative timer-control
    boundary, and writable persistent file API as separate decisions. Abe's
    Oddysee is the acceptance case for current timer time and persistence; Ato,
    Spider-Man, and the SEGA Master Splitter supply the remaining evidence.
-4. Add safe module enumeration. Deterministic executable identity is now
+3. Add safe module enumeration. Deterministic executable identity is now
    available through bounded exact-file `Module.md5()` without weakening
    source hashes to version metadata.
-5. Decide fixed-array equality/patterns and runtime-varying watched types using
+4. Decide fixed-array equality/patterns and runtime-varying watched types using
    the Code: Veronica X and FNaF ports. Prefer reusable static typing and
    ordinary aggregate architecture over compatibility-shaped intrinsics.
-6. Resume measured editor/compiler performance, release hardening, hosted IDE,
+5. Resume measured editor/compiler performance, release hardening, hosted IDE,
    and debugging work after the porting correctness and design sequence above.
-7. Keep `unity.time`, SNES, and managed collections gated on ASR evidence, and
+6. Keep `unity.time`, SNES, and managed collections gated on ASR evidence, and
    keep writes/injection, physical `None` specialization, and other broad host
    powers deferred until their explicit dependencies and policies are ready.

@@ -31,7 +31,7 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
     let provider = checker
         .provider_value
         .map(|(provider, _)| checker.standard_library.state_provider(provider));
-    if state.layouts.is_empty() {
+    if !state.has_named_variants() {
         for field in &state.fields {
             let ty = collect_state_field_type(checker, field, provider);
             checker.semantics.resolve_value_type(field.id, ty);
@@ -100,10 +100,24 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
     } else {
         // First collect every physical declaration independently. Layouts are
         // allowed to omit names or use the same name with a different type.
-        for layout in &state.layouts {
+        for (variant, variant_fields) in state.variant_fields() {
+            let variant_provider = checker
+                .resolutions
+                .state_provider_alternative(variant)
+                .map(|alternative| {
+                    checker
+                        .standard_library
+                        .state_provider(alternative.provider)
+                })
+                .or(provider);
             let mut fields = HashMap::new();
-            for field in &layout.fields {
-                let ty = collect_state_field_type(checker, field, provider);
+            for field in variant_fields {
+                let ty = collect_state_field_type(checker, field, variant_provider);
+                if let Some(alternative) = checker.resolutions.state_provider_alternative(variant) {
+                    checker
+                        .semantics
+                        .resolve_state_field_provider(field.id, alternative.provider);
+                }
                 checker.semantics.resolve_value_type(field.id, ty);
                 checker.declarations.state_fields_by_id.insert(field.id, ty);
                 checker
@@ -120,19 +134,18 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
             checker
                 .declarations
                 .layout_state_fields
-                .insert(layout.variant, fields);
+                .insert(variant, fields);
         }
 
         // A name becomes part of StateSnapshot's common interface only when
         // every layout declares it and explicit annotations do not conflict.
         // Unannotated declarations still participate in bidirectional
         // inference by unifying with the canonical declaration.
-        let first = &state.layouts[0];
-        for field in &first.fields {
+        let first = state.canonical_fields();
+        for field in first {
             let declarations = state
-                .layouts
-                .iter()
-                .map(|layout| layout.fields.iter().find(|item| item.name == field.name))
+                .variant_fields()
+                .map(|(_, fields)| fields.iter().find(|item| item.name == field.name))
                 .collect::<Option<Vec<_>>>();
             let is_common = state.is_common_field(&field.name);
             if is_common {
@@ -166,8 +179,8 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
             }
         }
 
-        for layout in &state.layouts {
-            for field in &layout.fields {
+        for (_, fields) in state.variant_fields() {
+            for field in fields {
                 checker
                     .declarations
                     .state_storage_fields
@@ -187,7 +200,10 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
         };
         checker.semantics.resolve_value_type(layout_value, ty);
         checker.declarations.globals.insert(
-            "layout".to_owned(),
+            state
+                .refinement_value_name()
+                .expect("a refinement value has a source name")
+                .to_owned(),
             Binding {
                 id: Some(layout_value),
                 ty,
@@ -198,11 +214,11 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
         );
     }
 
-    let storage_fields = if state.layouts.is_empty() {
+    let storage_fields = if !state.has_named_variants() {
         state.all_fields().map(|field| field.id).collect()
     } else {
-        let mut fields = state.layouts[0]
-            .fields
+        let mut fields = state
+            .canonical_fields()
             .iter()
             .filter(|field| {
                 checker
@@ -222,14 +238,8 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
         fields
     };
     let layout_fields = state
-        .layouts
-        .iter()
-        .map(|layout| {
-            (
-                layout.variant,
-                layout.fields.iter().map(|field| field.id).collect(),
-            )
-        })
+        .variant_fields()
+        .map(|(variant, fields)| (variant, fields.iter().map(|field| field.id).collect()))
         .collect();
     checker.semantics.resolve_state_layout(
         storage_fields,

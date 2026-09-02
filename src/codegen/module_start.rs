@@ -131,7 +131,6 @@ fn emit_runtime_global_initializers(
         reachability: lowering.reachability,
         failure_payloads: lowering.failure_payloads,
         abi: lowering.abi,
-        state: lowering.state,
         locals: LocalStorage::Wasm {
             values: locals,
             temporaries: &matches.temporaries,
@@ -140,6 +139,8 @@ fn emit_runtime_global_initializers(
         global_types: lowering.global_types,
         settings: lowering.settings,
         runtime_globals: lowering.runtime_globals,
+        provider_values: lowering.provider_values,
+        process_names: lowering.process_names,
         state_candidate: None,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,

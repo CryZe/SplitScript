@@ -49,38 +49,52 @@ fn check_layout_conditions(checker: &mut Checker, program: &Program) {
 }
 
 fn check_state_provider_configuration(checker: &mut Checker, program: &Program) {
-    let Some(reference) = program
-        .state
-        .as_ref()
-        .and_then(|state| state.provider.as_ref())
-        .and_then(|provider| provider.selector.as_ref())
-    else {
+    let Some(state) = program.state.as_ref() else {
         return;
     };
-    let Some(provider_id) = checker.resolutions.state_provider() else {
-        return;
-    };
-    let Some(selector_index) = checker.resolutions.state_provider_selector() else {
-        return;
-    };
-    let selector = checker
-        .standard_library
-        .state_provider(provider_id)
-        .selectors[selector_index];
-    checker.scopes.clear();
-    for (argument, parameter) in reference.arguments.iter().zip(selector.parameters) {
-        let expected = checker.catalog_type(parameter.ty, &HashMap::new());
-        let expected_name = checker.type_name(expected);
-        checker.with_expected_type_source(
-            super::ExpectedTypeSource {
-                span: reference.name_span,
-                label: format!(
-                    "selector parameter `{}` is declared as `{expected_name}`",
-                    parameter.name
-                ),
-            },
-            |checker| checker.expr(argument, Some(expected)),
-        );
+    let configurations = state
+        .provider
+        .iter()
+        .filter_map(|provider| {
+            Some((
+                provider.selector.as_ref()?,
+                checker.resolutions.state_provider()?,
+                checker.resolutions.state_provider_selector()?,
+            ))
+        })
+        .chain(
+            state
+                .provider_alternatives
+                .iter()
+                .filter_map(|alternative| {
+                    let reference = alternative.provider.selector.as_ref()?;
+                    let resolved = checker
+                        .resolutions
+                        .state_provider_alternative(alternative.variant)?;
+                    Some((reference, resolved.provider, resolved.selector?))
+                }),
+        )
+        .collect::<Vec<_>>();
+    for (reference, provider_id, selector_index) in configurations {
+        let selector = checker
+            .standard_library
+            .state_provider(provider_id)
+            .selectors[selector_index];
+        checker.scopes.clear();
+        for (argument, parameter) in reference.arguments.iter().zip(selector.parameters) {
+            let expected = checker.catalog_type(parameter.ty, &HashMap::new());
+            let expected_name = checker.type_name(expected);
+            checker.with_expected_type_source(
+                super::ExpectedTypeSource {
+                    span: reference.name_span,
+                    label: format!(
+                        "selector parameter `{}` is declared as `{expected_name}`",
+                        parameter.name
+                    ),
+                },
+                |checker| checker.expr(argument, Some(expected)),
+            );
+        }
     }
 }
 
@@ -264,6 +278,13 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
                 }
             });
         }
+        for alternative in &state.provider_alternatives {
+            checker.with_state_layout(Some(alternative.variant), |checker| {
+                for field in &alternative.fields {
+                    check_state_expression(checker, field);
+                }
+            });
+        }
         check_state_dependency_cycles(checker, state);
     });
 }
@@ -409,7 +430,7 @@ fn check_state_expression_inner(checker: &mut Checker, field: &StateField) {
 }
 
 fn state_pointer_base_type(checker: &mut Checker) -> Type {
-    let Some((provider, _)) = checker.provider_value else {
+    let Some(provider) = checker.active_state_provider() else {
         return checker.core_type(crate::stdlib::CoreTypeId::Address);
     };
     let provider = checker.standard_library.state_provider(provider);
@@ -1165,6 +1186,8 @@ fn action_return_type(
                     checker.core_type(CoreTypeId::None)
                 } else if let Some(layout) = &state.layout {
                     checker.struct_type(layout.structure)
+                } else if !state.provider_alternatives.is_empty() {
+                    checker.core_type(CoreTypeId::None)
                 } else if let Some(enumeration) = &state.layout_enum {
                     checker.enum_type(crate::types::EnumTypeId::Source(enumeration.id))
                 } else {

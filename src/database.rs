@@ -974,12 +974,22 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                 let span = state
                     .layout
                     .as_ref()
-                    .map_or(definition.span, |layout| layout.keyword_span);
+                    .map(|layout| layout.keyword_span)
+                    .or_else(|| {
+                        state
+                            .provider_alternatives
+                            .first()
+                            .map(|alternative| alternative.keyword_span)
+                    })
+                    .unwrap_or(definition.span);
                 self.index.values.insert(
                     value,
                     SourceDefinition {
                         id: SourceDefinitionId::Value(value),
-                        name: "layout".to_owned(),
+                        name: state
+                            .refinement_value_name()
+                            .expect("a refinement value has a source name")
+                            .to_owned(),
                         span,
                     },
                 );

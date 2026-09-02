@@ -158,6 +158,7 @@ struct Checker {
     declarations: DeclarationEnvironment,
     inference: InferenceContext,
     provider_value: Option<(StdlibStateProviderId, Type)>,
+    provider_values: HashMap<StdlibStateProviderId, Type>,
     layout_value: Option<ValueId>,
     layout_available_in_on_attach: bool,
     active_state_layout: Option<crate::ast::EnumVariantId>,
@@ -192,10 +193,44 @@ impl Checker {
     }
 
     fn is_provider_value_name(&self, name: &str) -> bool {
-        self.provider_value.is_some_and(|(provider, _)| {
-            let provider = self.standard_library.state_provider(provider);
+        self.provider_values.keys().any(|provider| {
+            let provider = self.standard_library.state_provider(*provider);
             provider.value_name == name
                 || provider.contexts.iter().any(|context| context.name == name)
+        })
+    }
+
+    fn active_state_provider(&self) -> Option<StdlibStateProviderId> {
+        self.active_state_layout
+            .and_then(|variant| {
+                self.resolutions
+                    .state_provider_alternative(variant)
+                    .map(|alternative| alternative.provider)
+            })
+            .or_else(|| self.provider_value.map(|(provider, _)| provider))
+    }
+
+    fn provider_value_by_name(&self, name: &str) -> Option<(StdlibStateProviderId, Type)> {
+        self.provider_values.iter().find_map(|(provider, ty)| {
+            (self.standard_library.state_provider(*provider).value_name == name)
+                .then_some((*provider, *ty))
+        })
+    }
+
+    fn provider_context_by_name(&self, name: &str) -> Option<(StdlibStateProviderId, usize, Type)> {
+        self.provider_values.keys().find_map(|provider| {
+            let declaration = self.standard_library.state_provider(*provider);
+            declaration
+                .contexts
+                .iter()
+                .position(|context| context.name == name)
+                .map(|context| {
+                    (
+                        *provider,
+                        context,
+                        self.standard_type(declaration.contexts[context].ty),
+                    )
+                })
         })
     }
 

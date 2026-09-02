@@ -134,6 +134,14 @@ impl<'ast> Visitor<'ast> for SpanCollector {
         for layout in &state.layouts {
             self.push(layout.span);
         }
+        for alternative in &state.provider_alternatives {
+            self.push(alternative.span);
+            self.push(alternative.provider.span);
+            if let Some(selector) = &alternative.provider.selector {
+                self.push(selector.name_span);
+                self.push(selector.span);
+            }
+        }
         visit::walk_state(self, state);
     }
 

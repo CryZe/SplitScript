@@ -1,5 +1,23 @@
 # SplitScript roadmap
 
+## 2026-09-02: one script can select among typed state providers
+
+- Added named `provider Name: Provider { ... }` alternatives inside `state`,
+  with one generated read-only `provider: StateProvider` discriminant. Common
+  fields remain available through the ordinary snapshots, while a direct match
+  refines provider-only fields and roots through the existing layout-aware type
+  and scoped-global architecture.
+- Attachment now deduplicates the alternatives' process-name union, polls every
+  applicable provider discovery cooperatively, and selects the first completed
+  alternative in source order. Native identity selection and suspending
+  emulator discovery share the same generated lifecycle without attaching to a
+  candidate process more than once.
+- Generalized provider resolution, direct reads, validation, reachability,
+  runtime storage, process-name metadata, formatting, navigation, hover,
+  completion, semantic highlighting, and documentation around provider sets.
+  Added valid-Wasm and mocked-runtime coverage while retaining the concise
+  single-provider form unchanged.
+
 ## 2026-09-01: bounded signature scans can report exhaustion
 
 - Added `process.scanOnce(address, size, signature) -> async address?` as the

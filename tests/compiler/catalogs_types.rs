@@ -1127,6 +1127,62 @@ fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
 }
 
 #[test]
+fn named_state_provider_alternatives_compile() {
+    let source = r#"
+        state {
+            provider Windows: Native ["game.exe"] {
+                value: u8 at 0x10;
+                windowsOnly: u8 at 0x11
+            },
+            provider Advance: GBA {
+                value: u8 at 0x03000010;
+                advanceOnly: u8 at 0x03000011
+            },
+        }
+
+        split {
+            return match provider {
+                StateProvider.Windows => current.value == 1 && current.windowsOnly == 2,
+                StateProvider.Advance => current.value == 2 && current.advanceOnly == 3,
+            }
+        }
+    "#;
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::compile(source).unwrap())
+        .expect("multi-provider state should compile to valid Wasm");
+    let mut database = splitscript::tooling::database::CompilerDatabase::new(source);
+    let keyword = source.find("provider Windows").unwrap() + 1;
+    let hover = database
+        .hover(keyword)
+        .unwrap()
+        .expect("the contextual provider keyword should have documentation");
+    assert!(hover.markdown.contains("runtime alternative"));
+    let value = source.find("match provider").unwrap() + "match ".len() + 1;
+    let hover = database
+        .hover(value)
+        .unwrap()
+        .expect("the selected provider value should have inferred hover information");
+    assert!(hover.markdown.contains("provider: StateProvider"));
+
+    let diagnostics = splitscript::compile(
+        r#"
+            state {
+                provider Windows: Native ["game.exe"] { windowsOnly: u8 at 0x10 },
+                provider Advance: GBA { advanceOnly: u8 at 0x03000010 },
+            }
+            split { return current.windowsOnly == 1 }
+        "#,
+    )
+    .expect_err("provider-specific fields require provider refinement");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("state field `windowsOnly`")
+            || diagnostic
+                .message
+                .contains("unknown state field `windowsOnly`")
+    }));
+}
+
+#[test]
 fn unknown_state_providers_list_valid_choices_and_fix_clear_typos() {
     let diagnostics = splitscript::check(splitscript::lower(
         splitscript::parse(r#"state Untiy ["game.exe"] {}"#).unwrap(),

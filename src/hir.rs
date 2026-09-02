@@ -66,7 +66,14 @@ impl DeclarationIndex {
                 );
             }
             if let (Some(value), Some(enumeration)) = (state.layout_value, &state.layout_enum) {
-                program.push(DeclarationId::Global(value), None, "layout", state.span);
+                program.push(
+                    DeclarationId::Global(value),
+                    None,
+                    state
+                        .refinement_value_name()
+                        .expect("a refinement value has a source name"),
+                    state.span,
+                );
                 program.push(
                     DeclarationId::Enum(enumeration.id),
                     None,

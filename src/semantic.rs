@@ -382,6 +382,8 @@ pub struct SemanticModel {
     types: TypeStore,
     state_provider: Option<StdlibStateProviderId>,
     state_provider_selector: Option<usize>,
+    state_provider_alternatives: HashMap<EnumVariantId, (StdlibStateProviderId, Option<usize>)>,
+    state_field_providers: HashMap<ValueId, StdlibStateProviderId>,
     expression_types: HashMap<ExprId, TypeId>,
     calls: HashMap<ExprId, ResolvedCall>,
     dynamic_calls: HashMap<ExprId, DynamicCallCallee>,
@@ -436,6 +438,28 @@ impl SemanticModel {
 
     pub fn state_provider_selector(&self) -> Option<usize> {
         self.state_provider_selector
+    }
+
+    pub fn state_provider_alternative(
+        &self,
+        variant: EnumVariantId,
+    ) -> Option<(StdlibStateProviderId, Option<usize>)> {
+        self.state_provider_alternatives.get(&variant).copied()
+    }
+
+    pub fn state_provider_alternatives(
+        &self,
+    ) -> impl Iterator<Item = (EnumVariantId, StdlibStateProviderId, Option<usize>)> + '_ {
+        self.state_provider_alternatives
+            .iter()
+            .map(|(variant, (provider, selector))| (*variant, *provider, *selector))
+    }
+
+    pub fn state_field_provider(&self, field: ValueId) -> Option<StdlibStateProviderId> {
+        self.state_field_providers
+            .get(&field)
+            .copied()
+            .or(self.state_provider)
     }
 
     pub fn expression_type(&self, expression: ExprId) -> Option<TypeId> {
@@ -1338,6 +1362,8 @@ struct PendingValueConversion {
 pub(crate) struct SemanticBuilder {
     state_provider: Option<StdlibStateProviderId>,
     state_provider_selector: Option<usize>,
+    state_provider_alternatives: HashMap<EnumVariantId, (StdlibStateProviderId, Option<usize>)>,
+    state_field_providers: HashMap<ValueId, StdlibStateProviderId>,
     expression_types: HashMap<ExprId, Type>,
     calls: HashMap<ExprId, PendingResolvedCall>,
     dynamic_calls: HashMap<ExprId, DynamicCallCallee>,
@@ -1449,12 +1475,23 @@ impl SemanticBuilder {
     pub(crate) fn with_state_provider(
         state_provider: Option<StdlibStateProviderId>,
         state_provider_selector: Option<usize>,
+        state_provider_alternatives: HashMap<EnumVariantId, (StdlibStateProviderId, Option<usize>)>,
     ) -> Self {
         Self {
             state_provider,
             state_provider_selector,
+            state_provider_alternatives,
             ..Self::default()
         }
+    }
+
+    pub(crate) fn resolve_state_field_provider(
+        &mut self,
+        field: ValueId,
+        provider: StdlibStateProviderId,
+    ) {
+        let previous = self.state_field_providers.insert(field, provider);
+        debug_assert!(previous.is_none(), "state-field providers are unique");
     }
 
     pub(crate) fn resolve_expression_type(&mut self, expression: ExprId, ty: Type) {
@@ -1744,6 +1781,8 @@ impl SemanticBuilder {
         let Self {
             state_provider,
             state_provider_selector,
+            state_provider_alternatives,
+            state_field_providers,
             expression_types,
             calls,
             dynamic_calls,
@@ -2044,6 +2083,8 @@ impl SemanticBuilder {
             types,
             state_provider,
             state_provider_selector,
+            state_provider_alternatives,
+            state_field_providers,
             expression_types,
             calls,
             dynamic_calls,

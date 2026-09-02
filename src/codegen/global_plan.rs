@@ -3,11 +3,12 @@ use std::collections::HashMap;
 use wasm_encoder::{ConstExpr, GlobalSection, GlobalType, HeapType, RefType, ValType};
 
 use crate::{
-    ast::{ActionKind, Program, ValueId},
+    ast::{ActionKind, EnumVariantId, Program, ValueId},
     managed::ManagedBindingPlan,
     semantic::{FunctionInstance, SemanticModel},
     stdlib::{
-        CoreTypeId, RuntimeRepresentation, StandardLibrary, StateProviderAttachment, StdlibTypeId,
+        CoreTypeId, RuntimeRepresentation, StandardLibrary, StateProviderAttachment,
+        StdlibStateProviderId, StdlibTypeId,
     },
     wasm_ir,
 };
@@ -33,6 +34,8 @@ pub(super) struct GlobalPlan {
     pub variable_types: HashMap<ValueId, Type>,
     pub settings: HashMap<ValueId, SettingStorage>,
     pub managed_state_reads: ManagedStateReadCache,
+    pub provider_values: HashMap<StdlibStateProviderId, u32>,
+    pub provider_attachment_frames: HashMap<EnumVariantId, u32>,
 }
 
 #[derive(Clone, Copy)]
@@ -84,15 +87,28 @@ pub(super) struct RuntimeGlobals {
     pub while_attached_result: Option<u32>,
 }
 
-pub(super) fn encode(
-    program: &Program,
-    semantics: &SemanticModel,
-    gc: &GcLayout,
-    wasm_ir: &wasm_ir::Program,
-    managed: &ManagedBindingPlan,
-    provider_attachment: Option<&FunctionInstance>,
-    provider_preparation: Option<&FunctionInstance>,
-) -> GlobalPlan {
+pub(super) struct Inputs<'a> {
+    pub program: &'a Program,
+    pub semantics: &'a SemanticModel,
+    pub gc: &'a GcLayout,
+    pub wasm_ir: &'a wasm_ir::Program,
+    pub managed: &'a ManagedBindingPlan,
+    pub provider_attachment: Option<&'a FunctionInstance>,
+    pub provider_alternatives: &'a [(EnumVariantId, StdlibStateProviderId, FunctionInstance)],
+    pub provider_preparation: Option<&'a FunctionInstance>,
+}
+
+pub(super) fn encode(inputs: Inputs<'_>) -> GlobalPlan {
+    let Inputs {
+        program,
+        semantics,
+        gc,
+        wasm_ir,
+        managed,
+        provider_attachment,
+        provider_alternatives,
+        provider_preparation,
+    } = inputs;
     let mut section = GlobalSection::new();
     let process = section.len();
     section.global(
@@ -149,6 +165,37 @@ pub(super) fn encode(
         );
         Some(index)
     });
+    let mut provider_values = HashMap::new();
+    for (_, provider, _) in provider_alternatives {
+        let declaration = wasm_ir.standard_library().state_provider(*provider);
+        if declaration.attachment == StateProviderAttachment::Identity {
+            continue;
+        }
+        let ty = declaration.process_type;
+        let index = section.len();
+        let initial = match wasm_ir.standard_library().type_decl(ty).representation {
+            RuntimeRepresentation::Scalar {
+                storage: CoreTypeId::I64,
+            } => ConstExpr::i64_const(0),
+            RuntimeRepresentation::GcStruct { .. }
+            | RuntimeRepresentation::GcArray { .. }
+            | RuntimeRepresentation::Enum { .. } => {
+                ConstExpr::ref_null(HeapType::Concrete(gc.standard_index(ty)))
+            }
+            representation => {
+                unreachable!("unsupported state-provider representation: {representation:?}")
+            }
+        };
+        section.global(
+            GlobalType {
+                val_type: gc.val_type(Type::Standard(ty)),
+                mutable: true,
+                shared: false,
+            },
+            &initial,
+        );
+        provider_values.insert(*provider, index);
+    }
     let provider_attachment_frame = provider_attachment.map(|attachment| {
         let index = section.len();
         let frame_type = gc.function_frame_index(attachment);
@@ -165,6 +212,23 @@ pub(super) fn encode(
         );
         index
     });
+    let mut provider_attachment_frames = HashMap::new();
+    for (variant, _, attachment) in provider_alternatives {
+        let index = section.len();
+        let frame_type = gc.function_frame_index(attachment);
+        section.global(
+            GlobalType {
+                val_type: ValType::Ref(RefType {
+                    nullable: true,
+                    heap_type: HeapType::Concrete(frame_type),
+                }),
+                mutable: true,
+                shared: false,
+            },
+            &ConstExpr::ref_null(HeapType::Concrete(frame_type)),
+        );
+        provider_attachment_frames.insert(*variant, index);
+    }
     let provider_preparation_value = provider_preparation.map(|preparation| {
         let completion = semantic_type(
             semantics.specialize_type(
@@ -448,6 +512,8 @@ pub(super) fn encode(
         variable_types,
         settings,
         managed_state_reads,
+        provider_values,
+        provider_attachment_frames,
     }
 }
 

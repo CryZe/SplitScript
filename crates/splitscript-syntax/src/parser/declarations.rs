@@ -9,9 +9,9 @@ use super::{
     ManagedMetadataName, ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId, Parameter,
     Parser, PointerPath, PointerPathBase, SettingChoiceOption, SettingDecl, SettingExternalKey,
     SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span,
-    StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
-    StateProviderSelectorRef, StateSource, StateTransform, StructDecl, StructField, StructId,
-    TickRateDecl, TickRateValue, TokenKind, TypeRef,
+    StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderAlternativeDecl,
+    StateProviderRef, StateProviderSelectorRef, StateSource, StateTransform, StructDecl,
+    StructField, StructId, TickRateDecl, TickRateValue, TokenKind, TypeRef,
 };
 use crate::{
     ast::ManagedFieldMaxLength,
@@ -670,54 +670,12 @@ impl Parser<'_> {
 
     pub(super) fn state_block_decl(&mut self) -> Result<StateDecl, Diagnostic> {
         let start = self.expect_ident("state")?.start;
+        if self.at(&TokenKind::LBrace) {
+            return self.multi_provider_state_decl(start);
+        }
         let (provider, processes) = if matches!(self.current().kind, TokenKind::Ident(_)) {
-            let (name, span) = self.expect_any_ident("expected a state provider name")?;
-            let selector = if self.eat(&TokenKind::Dot).is_some() {
-                let selector_start = self.previous().span.start;
-                let (name, name_span) =
-                    self.expect_any_ident("expected a state-provider selector after `.`")?;
-                self.expect(
-                    TokenKind::LParen,
-                    "expected `(` after the state-provider selector",
-                )?;
-                let mut arguments = Vec::new();
-                while !self.at(&TokenKind::RParen) {
-                    arguments.push(self.expression(0)?);
-                    if self.eat(&TokenKind::Comma).is_none() {
-                        break;
-                    }
-                }
-                let end = self
-                    .expect(
-                        TokenKind::RParen,
-                        "expected `)` after the state-provider selector arguments",
-                    )?
-                    .end;
-                Some(StateProviderSelectorRef {
-                    name,
-                    name_span,
-                    arguments,
-                    span: Span {
-                        start: selector_start,
-                        end,
-                    },
-                })
-            } else {
-                None
-            };
-            let processes = if self.at(&TokenKind::LBrace) {
-                Vec::new()
-            } else {
-                self.process_names()?
-            };
-            (
-                Some(StateProviderRef {
-                    name,
-                    span,
-                    selector,
-                }),
-                processes,
-            )
+            let (provider, processes) = self.state_provider_reference()?;
+            (Some(provider), processes)
         } else {
             (None, self.process_names()?)
         };
@@ -831,6 +789,7 @@ impl Parser<'_> {
         Ok(StateDecl {
             provider,
             processes,
+            provider_alternatives: Vec::new(),
             fields,
             conditional_fields,
             layout: attachment_layout,
@@ -839,6 +798,177 @@ impl Parser<'_> {
             layout_value,
             span: Span { start, end },
         })
+    }
+
+    fn state_provider_reference(&mut self) -> Result<(StateProviderRef, Vec<String>), Diagnostic> {
+        let (name, span) = self.expect_any_ident("expected a state provider name")?;
+        let selector = if self.eat(&TokenKind::Dot).is_some() {
+            let selector_start = self.previous().span.start;
+            let (name, name_span) =
+                self.expect_any_ident("expected a state-provider selector after `.`")?;
+            self.expect(
+                TokenKind::LParen,
+                "expected `(` after the state-provider selector",
+            )?;
+            let mut arguments = Vec::new();
+            while !self.at(&TokenKind::RParen) {
+                arguments.push(self.expression(0)?);
+                if self.eat(&TokenKind::Comma).is_none() {
+                    break;
+                }
+            }
+            let end = self
+                .expect(
+                    TokenKind::RParen,
+                    "expected `)` after the state-provider selector arguments",
+                )?
+                .end;
+            Some(StateProviderSelectorRef {
+                name,
+                name_span,
+                arguments,
+                span: Span {
+                    start: selector_start,
+                    end,
+                },
+            })
+        } else {
+            None
+        };
+        let processes = if self.at(&TokenKind::LBrace) {
+            Vec::new()
+        } else {
+            self.process_names()?
+        };
+        Ok((
+            StateProviderRef {
+                name,
+                span,
+                selector,
+            },
+            processes,
+        ))
+    }
+
+    fn multi_provider_state_decl(&mut self, start: usize) -> Result<StateDecl, Diagnostic> {
+        self.expect(TokenKind::LBrace, "expected `{` after `state`")?;
+        let body_depth = self.brace_depth_before(self.cursor.position());
+        let mut alternatives = Vec::new();
+        let mut variants = Vec::new();
+        while !self.at(&TokenKind::RBrace) {
+            if self.at(&TokenKind::Eof) {
+                self.record_missing_closing("unterminated multi-provider state declaration");
+                break;
+            }
+            let item_start = self.cursor.position();
+            let documentation = self.take_source_documentation();
+            let parsed = self.state_provider_alternative(documentation);
+            if let Some((alternative, variant)) =
+                self.recover_delimited_item(parsed, item_start, body_depth)
+            {
+                alternatives.push(alternative);
+                variants.push(variant);
+                self.require_comma_between("state providers");
+            }
+        }
+        let end = self
+            .eat(&TokenKind::RBrace)
+            .map_or(self.current().span.end, |span| span.end);
+        if alternatives.len() < 2 {
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "a multi-provider state declaration needs at least two provider alternatives",
+                    Span { start, end },
+                )
+                .with_primary_label(
+                    "use the ordinary `state Provider { ... }` form for one provider",
+                ),
+            );
+        }
+        let enum_id = EnumId::from_index(self.next_enum_id);
+        self.next_enum_id += 1;
+        let name_span = Span {
+            start,
+            end: start + "state".len(),
+        };
+        Ok(StateDecl {
+            provider: None,
+            processes: Vec::new(),
+            provider_alternatives: alternatives,
+            fields: Vec::new(),
+            conditional_fields: Vec::new(),
+            layout: None,
+            layouts: Vec::new(),
+            layout_enum: Some(EnumDecl {
+                id: enum_id,
+                name: "StateProvider".to_owned(),
+                documentation: Some(
+                    "The state provider selected for the attached game process.".to_owned(),
+                ),
+                name_span,
+                variants,
+                span: Span { start, end },
+            }),
+            layout_value: Some(self.new_value_id()),
+            span: Span { start, end },
+        })
+    }
+
+    fn state_provider_alternative(
+        &mut self,
+        documentation: Option<String>,
+    ) -> Result<(StateProviderAlternativeDecl, EnumVariant), Diagnostic> {
+        let keyword_span = self.expect_ident("provider")?;
+        let start = keyword_span.start;
+        let (name, name_span) =
+            self.expect_declared_ident("expected a state-provider alternative name")?;
+        self.expect(
+            TokenKind::Colon,
+            "expected `:` after the state-provider alternative name",
+        )?;
+        let (provider, processes) = self.state_provider_reference()?;
+        let variant = EnumVariant {
+            id: self.new_enum_variant_id(),
+            name,
+            name_span,
+            documentation,
+            payload: None,
+            span: name_span,
+        };
+        let opening_span = self.expect(
+            TokenKind::LBrace,
+            "expected `{` after the state-provider configuration",
+        )?;
+        let body_depth = self.brace_depth_before(self.cursor.position());
+        let mut fields = Vec::new();
+        while !self.at(&TokenKind::RBrace) {
+            if self.at(&TokenKind::Eof) {
+                self.record_missing_closing("unterminated state-provider alternative");
+                break;
+            }
+            let item_start = self.cursor.position();
+            let field_documentation = self.take_source_documentation();
+            let parsed = self.state_field(field_documentation);
+            if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                fields.push(field);
+                self.require_semicolon_between("state fields");
+            }
+        }
+        let end = self
+            .eat(&TokenKind::RBrace)
+            .map_or(self.current().span.end, |span| span.end);
+        Ok((
+            StateProviderAlternativeDecl {
+                keyword_span,
+                variant: variant.id,
+                provider,
+                processes,
+                opening_span,
+                fields,
+                span: Span { start, end },
+            },
+            variant,
+        ))
     }
 
     fn state_conditional_fields_decl(
@@ -1958,6 +2088,7 @@ impl Parser<'_> {
         Ok(StateDecl {
             provider: None,
             processes: vec![process],
+            provider_alternatives: Vec::new(),
             fields,
             conditional_fields: Vec::new(),
             layout: None,

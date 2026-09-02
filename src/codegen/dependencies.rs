@@ -61,22 +61,21 @@ impl BackendDependencies {
         }
 
         if let Some(state) = &program.state {
-            if let Some(provider) = semantics.state_provider() {
+            let pointer_providers = state
+                .all_fields()
+                .filter(|field| matches!(field.source, StateSource::Pointer(_)))
+                .filter_map(|field| semantics.state_field_provider(field.id))
+                .collect::<BTreeSet<_>>();
+            for provider in pointer_providers {
                 let provider = wasm_ir.standard_library().state_provider(provider);
-                if state
-                    .fields
-                    .iter()
-                    .any(|field| matches!(field.source, StateSource::Pointer(_)))
-                {
-                    let Implementation::Intrinsic(direct_read) = wasm_ir
-                        .standard_library()
-                        .item(provider.direct_read)
-                        .implementation
-                    else {
-                        unreachable!("validated state-provider reads are intrinsic")
-                    };
-                    dependencies.require_intrinsic(direct_read);
-                }
+                let Implementation::Intrinsic(direct_read) = wasm_ir
+                    .standard_library()
+                    .item(provider.direct_read)
+                    .implementation
+                else {
+                    unreachable!("validated state-provider reads are intrinsic")
+                };
+                dependencies.require_intrinsic(direct_read);
             }
             for field in state.all_fields() {
                 if let StateSource::Pointer(path) = &field.source {

@@ -655,16 +655,15 @@ fn add_state_source_bindings(builder: &mut CompletionBuilder, syntax: &Program, 
     let Some(state) = &syntax.state else {
         return;
     };
-    if !state.layouts.is_empty() {
-        let Some(layout) = state.layouts.iter().find(|layout| {
-            layout
-                .fields
+    if state.has_named_variants() {
+        let Some((_, fields)) = state.variant_fields().find(|(_, fields)| {
+            fields
                 .iter()
                 .any(|field| contains_offset(field.span, offset))
         }) else {
             return;
         };
-        for field in &layout.fields {
+        for field in fields {
             builder.add_scoped(simple_completion(
                 &field.name,
                 CompletionKind::StateField,

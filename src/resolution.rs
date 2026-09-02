@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use crate::{
     Diagnostic, DiagnosticFix, FixApplicability, TextEdit,
     ast::{
-        EnumReference, ExprId, ExprKind, MatchPattern, PatternId, Program, SettingKind, Span,
-        TypeApplicationId, TypeNameId, TypeRef, ValueId,
+        EnumReference, EnumVariantId, ExprId, ExprKind, MatchPattern, PatternId, Program,
+        SettingKind, Span, StateProviderRef, TypeApplicationId, TypeNameId, TypeRef, ValueId,
     },
     migration::{legacy_type_diagnostic, migration_diagnostic},
     name_matching::closest_single_typo,
@@ -28,12 +28,19 @@ use crate::{
 pub(crate) struct ProgramResolutions {
     state_provider: Option<StdlibStateProviderId>,
     state_provider_selector: Option<usize>,
+    state_provider_alternatives: HashMap<EnumVariantId, ResolvedStateProviderAlternative>,
     type_names: HashMap<TypeNameId, ResolvedTypeRef>,
     type_applications: HashMap<TypeApplicationId, ResolvedTypeRef>,
     managed_references: HashMap<crate::ast::ManagedReferenceTypeId, ResolvedTypeRef>,
     expression_enums: HashMap<ExprId, EnumTypeId>,
     pattern_enums: HashMap<PatternId, EnumTypeId>,
     setting_enums: HashMap<ValueId, EnumTypeId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ResolvedStateProviderAlternative {
+    pub provider: StdlibStateProviderId,
+    pub selector: Option<usize>,
 }
 
 impl ProgramResolutions {
@@ -43,6 +50,29 @@ impl ProgramResolutions {
 
     pub(crate) fn state_provider_selector(&self) -> Option<usize> {
         self.state_provider_selector
+    }
+
+    pub(crate) fn state_provider_alternative(
+        &self,
+        variant: EnumVariantId,
+    ) -> Option<ResolvedStateProviderAlternative> {
+        self.state_provider_alternatives.get(&variant).copied()
+    }
+
+    pub(crate) fn state_provider_alternatives(
+        &self,
+    ) -> impl Iterator<Item = (EnumVariantId, ResolvedStateProviderAlternative)> + '_ {
+        self.state_provider_alternatives
+            .iter()
+            .map(|(variant, provider)| (*variant, *provider))
+    }
+
+    pub(crate) fn state_providers(&self) -> impl Iterator<Item = StdlibStateProviderId> + '_ {
+        self.state_provider.into_iter().chain(
+            self.state_provider_alternatives
+                .values()
+                .map(|alternative| alternative.provider),
+        )
     }
 
     pub(crate) fn type_ref(&self, ty: TypeRef) -> Option<ResolvedTypeRef> {
@@ -212,103 +242,62 @@ pub(crate) fn resolve_program(
 ) -> Vec<Diagnostic> {
     let mut provider_diagnostics = Vec::new();
     if let Some(state) = &program.state {
-        if let Some(reference) = &state.provider {
-            if let Some(provider) = standard_library.state_provider_by_name(&reference.name) {
-                resolutions.state_provider = Some(provider.id);
-                if let Some(reference) = &reference.selector {
-                    if let Some((index, selector)) = provider
-                        .selectors
-                        .iter()
-                        .enumerate()
-                        .find(|(_, selector)| selector.name == reference.name)
+        if !state.provider_alternatives.is_empty() {
+            let mut seen = HashMap::new();
+            for alternative in &state.provider_alternatives {
+                if let Some(resolved) = resolve_state_provider_reference(
+                    &alternative.provider,
+                    &alternative.processes,
+                    standard_library,
+                    &mut provider_diagnostics,
+                ) {
+                    if standard_library
+                        .state_provider_preparation(resolved.provider, resolved.selector)
+                        .is_some()
+                        || !standard_library
+                            .state_provider(resolved.provider)
+                            .contexts
+                            .is_empty()
                     {
-                        resolutions.state_provider_selector = Some(index);
-                        if reference.arguments.len() != selector.parameters.len() {
-                            provider_diagnostics.push(Diagnostic::type_error(
-                                format!(
-                                    "state-provider selector `{}.{}` expects {} argument{}, found {}",
-                                    provider.name,
-                                    selector.name,
-                                    selector.parameters.len(),
-                                    if selector.parameters.len() == 1 { "" } else { "s" },
-                                    reference.arguments.len(),
-                                ),
-                                reference.span,
-                            ));
-                        }
-                    } else {
-                        provider_diagnostics.push(Diagnostic::type_error(
-                            format!(
-                                "state provider `{}` has no selector `{}`",
-                                provider.name, reference.name
-                            ),
-                            reference.name_span,
-                        ));
-                    }
-                }
-                match provider.processes {
-                    StateProviderProcesses::SourceState if state.processes.is_empty() => {
                         provider_diagnostics.push(
                             Diagnostic::type_error(
                                 format!(
-                                    "state provider `{}` needs at least one process name",
-                                    reference.name
+                                    "state provider `{}` requires its own attachment preparation context",
+                                    alternative.provider.name
                                 ),
-                                reference.span,
+                                alternative.provider.span,
                             )
                             .with_primary_label(
-                                "add an exact process name after the provider, such as `[\"game.exe\"]`",
+                                "multi-provider state alternatives must read directly from the attached process",
                             ),
                         );
                     }
-                    StateProviderProcesses::Declared(_) if !state.processes.is_empty() => {
+                    if let Some(previous) = seen.insert(resolved.provider, alternative.span) {
                         provider_diagnostics.push(
                             Diagnostic::type_error(
                                 format!(
-                                    "state provider `{}` declares its supported processes",
-                                    reference.name
+                                    "state provider `{}` is listed more than once",
+                                    alternative.provider.name
                                 ),
-                                reference.span,
+                                alternative.provider.span,
                             )
-                            .with_primary_label("remove the process name list after this provider"),
+                            .with_secondary_label(previous, "the first alternative is here"),
                         );
                     }
-                    StateProviderProcesses::SourceState | StateProviderProcesses::Declared(_) => {}
+                    resolutions
+                        .state_provider_alternatives
+                        .insert(alternative.variant, resolved);
                 }
-            } else {
-                let mut provider_names = standard_library
-                    .state_providers()
-                    .iter()
-                    .map(|provider| provider.name)
-                    .collect::<Vec<_>>();
-                provider_names.sort_unstable_by_key(|name| name.to_ascii_lowercase());
-                let suggestion =
-                    closest_single_typo(&reference.name, provider_names.iter().copied());
-                let message = suggestion.as_ref().map_or_else(
-                    || format!("unknown state provider `{}`", reference.name),
-                    |suggestion| {
-                        format!(
-                            "unknown state provider `{}`; did you mean `{suggestion}`?",
-                            reference.name
-                        )
-                    },
-                );
-                let valid = provider_names
-                    .iter()
-                    .map(|name| format!("`{name}`"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let mut diagnostic = Diagnostic::type_error(message, reference.span)
-                    .with_note(format!("valid state providers are {valid}"))
-                    .with_documentation_uri(crate::documentation::STATE_PROVIDER_INDEX_URI);
-                if let Some(suggestion) = suggestion {
-                    diagnostic = diagnostic.with_machine_applicable_fix(
-                        format!("replace with `{suggestion}`"),
-                        reference.span,
-                        suggestion,
-                    );
-                }
-                provider_diagnostics.push(diagnostic);
+            }
+        } else if let Some(reference) = &state.provider {
+            if let Some(resolved) = resolve_state_provider_reference(
+                reference,
+                &state.processes,
+                standard_library,
+                &mut provider_diagnostics,
+            ) {
+                resolutions.state_provider = Some(resolved.provider);
+                resolutions.state_provider_selector = resolved.selector;
             }
         } else {
             resolutions.state_provider = standard_library
@@ -491,6 +480,116 @@ pub(crate) fn resolve_program(
         }
     }
     provider_diagnostics
+}
+
+fn resolve_state_provider_reference(
+    reference: &StateProviderRef,
+    processes: &[String],
+    standard_library: &StandardLibrary,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<ResolvedStateProviderAlternative> {
+    let Some(provider) = standard_library.state_provider_by_name(&reference.name) else {
+        let mut provider_names = standard_library
+            .state_providers()
+            .iter()
+            .map(|provider| provider.name)
+            .collect::<Vec<_>>();
+        provider_names.sort_unstable_by_key(|name| name.to_ascii_lowercase());
+        let suggestion = closest_single_typo(&reference.name, provider_names.iter().copied());
+        let message = suggestion.as_ref().map_or_else(
+            || format!("unknown state provider `{}`", reference.name),
+            |suggestion| {
+                format!(
+                    "unknown state provider `{}`; did you mean `{suggestion}`?",
+                    reference.name
+                )
+            },
+        );
+        let valid = provider_names
+            .iter()
+            .map(|name| format!("`{name}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut diagnostic = Diagnostic::type_error(message, reference.span)
+            .with_note(format!("valid state providers are {valid}"))
+            .with_documentation_uri(crate::documentation::STATE_PROVIDER_INDEX_URI);
+        if let Some(suggestion) = suggestion {
+            diagnostic = diagnostic.with_machine_applicable_fix(
+                format!("replace with `{suggestion}`"),
+                reference.span,
+                suggestion,
+            );
+        }
+        diagnostics.push(diagnostic);
+        return None;
+    };
+
+    let selector = reference.selector.as_ref().and_then(|reference| {
+        let Some((index, selector)) = provider
+            .selectors
+            .iter()
+            .enumerate()
+            .find(|(_, selector)| selector.name == reference.name)
+        else {
+            diagnostics.push(Diagnostic::type_error(
+                format!(
+                    "state provider `{}` has no selector `{}`",
+                    provider.name, reference.name
+                ),
+                reference.name_span,
+            ));
+            return None;
+        };
+        if reference.arguments.len() != selector.parameters.len() {
+            diagnostics.push(Diagnostic::type_error(
+                format!(
+                    "state-provider selector `{}.{}` expects {} argument{}, found {}",
+                    provider.name,
+                    selector.name,
+                    selector.parameters.len(),
+                    if selector.parameters.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    },
+                    reference.arguments.len(),
+                ),
+                reference.span,
+            ));
+        }
+        Some(index)
+    });
+
+    match provider.processes {
+        StateProviderProcesses::SourceState if processes.is_empty() => diagnostics.push(
+            Diagnostic::type_error(
+                format!(
+                    "state provider `{}` needs at least one process name",
+                    reference.name
+                ),
+                reference.span,
+            )
+            .with_primary_label(
+                "add an exact process name after the provider, such as `[\"game.exe\"]`",
+            ),
+        ),
+        StateProviderProcesses::Declared(_) if !processes.is_empty() => diagnostics.push(
+            Diagnostic::type_error(
+                format!(
+                    "state provider `{}` declares its supported processes",
+                    reference.name
+                ),
+                reference.span,
+            )
+            .with_primary_label("remove the process name list after this provider"),
+        ),
+        StateProviderProcesses::SourceState | StateProviderProcesses::Declared(_) => {}
+    }
+
+    Some(ResolvedStateProviderAlternative {
+        provider: provider.id,
+        selector,
+    })
 }
 
 fn legacy_type_migration_diagnostic(name: &str, span: Span) -> Option<Diagnostic> {

@@ -21,10 +21,11 @@ use crate::{
         RangeTypeId, ResultTypeDecl, ResultTypeId, SettingChoiceOption, SettingChoiceOptionId,
         SettingDecl, SettingExternalKey, SettingFamilyDecl, SettingFileFilter, SettingKind,
         SettingTextPart, SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl,
-        StateMemoryDecoder, StateProviderRef, StateProviderSelectorRef, StateSource,
-        StateTransform, Stmt, StructDecl, StructField, StructFieldId, StructId, SuspensionMode,
-        TickRateDecl, TickRateValue, TypeApplicationDecl, TypeApplicationId,
-        TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
+        StateMemoryDecoder, StateProviderAlternativeDecl, StateProviderRef,
+        StateProviderSelectorRef, StateSource, StateTransform, Stmt, StructDecl, StructField,
+        StructFieldId, StructId, SuspensionMode, TickRateDecl, TickRateValue, TypeApplicationDecl,
+        TypeApplicationId, TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId,
+        VariableDecl,
     },
     diagnostic::{Diagnostic, DiagnosticFix, FixApplicability, TextEdit},
     migration::{ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
@@ -984,6 +985,34 @@ mod tests {
         assert_eq!(selector.name, "mono");
         assert_eq!(selector.arguments.len(), 1);
         assert!(matches!(selector.arguments[0].kind, ExprKind::Path(_)));
+    }
+
+    #[test]
+    fn parses_named_multi_provider_state_alternatives() {
+        let source = r#"
+state {
+    provider Windows: Native ["game.exe"] {
+        level: u32 at "game.exe", 0x1000;
+    },
+    provider PlayStation: PS1 {
+        level: u32 at 0x80001000;
+    },
+}
+"#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap())
+            .expect("multi-provider state syntax should parse");
+        let state = program.state.unwrap();
+        assert!(state.provider.is_none());
+        assert_eq!(state.provider_alternatives.len(), 2);
+        assert_eq!(state.provider_alternatives[0].provider.name, "Native");
+        assert_eq!(state.provider_alternatives[0].processes, ["game.exe"]);
+        assert_eq!(state.provider_alternatives[1].provider.name, "PS1");
+        assert!(state.provider_alternatives[1].processes.is_empty());
+        let enumeration = state.layout_enum.as_ref().expect("generated provider enum");
+        assert_eq!(enumeration.name, "StateProvider");
+        assert_eq!(enumeration.variants[0].name, "Windows");
+        assert_eq!(enumeration.variants[1].name, "PlayStation");
+        assert_eq!(state.refinement_value_name(), Some("provider"));
     }
 
     #[test]

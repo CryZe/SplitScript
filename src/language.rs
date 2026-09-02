@@ -123,6 +123,24 @@ split {
     return current.score > old.score
 }"#;
 
+const MULTI_PROVIDER_STATE_SOURCE: &str = r#"state {
+    provider Windows: Native ["game.exe"] {
+        level: u32 at 0x1000;
+        checkpoint: u8 at 0x1100;
+    },
+    provider Advance: GBA {
+        level: u32 at 0x03000010;
+        room: u8 at 0x03000020;
+    },
+}
+
+split {
+    return match provider {
+        StateProvider.Windows => current.checkpoint == 1,
+        StateProvider.Advance => current.room == 5,
+    }
+}"#;
+
 const MULTI_LAYOUT_STATE_SOURCE: &str = r#"state "game.exe" {
     layout Steam {
         level: u32 at 0x1000;
@@ -724,6 +742,11 @@ const STATE_DECL_EXAMPLES: &[Example] = &[
         "Try alternate executable names",
         "state [\"game.exe\", \"game-demo.exe\"] {\n    score: i32 at 0x1000;\n}",
         ALTERNATE_PROCESS_STATE_SOURCE,
+    ),
+    Example::checked(
+        "Share one autosplitter across different runtimes",
+        MULTI_PROVIDER_STATE_SOURCE,
+        MULTI_PROVIDER_STATE_SOURCE,
     ),
     Example::checked(
         "Support multiple game builds",
@@ -1370,10 +1393,26 @@ define_language_catalog! {
         State,
         "state",
         LanguageItemKind::Declaration,
-        "state \"game.exe\" { ... } | state [\"game.exe\", \"demo.exe\"] { ... } | state Provider { ... }",
+        "state \"game.exe\" { ... } | state Provider { ... } | state { provider Name: Provider { ... }, ... }",
         "Declares process attachment and persistent watched state.",
-        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. A named standard-library provider selects a typed memory model. [`Unity`] binds managed [`image`] schemas while [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`], [`GCN`], and [`Wii`] expose emulator-specific read roots and accept original console addresses in state fields. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. With attachment-wide layout dimensions, conditional state fields may use an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain; later branches cover the exact layout combinations left unmatched by earlier branches. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. A field may use another field from the same active layout by name, including as the base of an [`at`](syntax@at) path. Declaration order is irrelevant: the compiler evaluates dependencies first and rejects cycles. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful independent fields advance; a dependent field is not evaluated when one of its dependencies fails. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
+        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. A named standard-library provider selects a typed memory model. [`Unity`] binds managed [`image`] schemas while [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`], [`GCN`], and [`Wii`] expose emulator-specific read roots and accept original console addresses in state fields. When one autosplitter supports genuinely different runtimes, a `state { provider Name: Provider { ... }, ... }` declaration cooperatively tries the alternatives that accept the attached process and selects the first one that completes. The read-only `provider: StateProvider` value identifies that choice. Fields with compatible declarations in every alternative remain directly available through [`current`] and [`old`]; a direct [`match`] on [`provider`] exposes alternative-only fields and provider roots. Process names shared by alternatives are attached only once. A provider alternative must read directly from an attached process; providers with a prepared schema or attachment context, such as [`Unity`], use the concise single-provider form. For one provider with several build-specific memory shapes, use named [`layout`] blocks. With attachment-wide layout dimensions, conditional state fields may use an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain; later branches cover the exact layout combinations left unmatched by earlier branches. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. A field may use another field from the same active layout by name, including as the base of an [`at`](syntax@at) path. Declaration order is irrelevant: the compiler evaluates dependencies first and rejects cycles. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful independent fields advance; a dependent field is not evaluated when one of its dependencies fails. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
         STATE_DECL_EXAMPLES
+    ),
+    language_item!(
+        StateProviderAlternative,
+        "provider",
+        LanguageItemKind::Syntax,
+        "provider Name: Provider [\"process.exe\"] { ... }",
+        "Declares one named runtime alternative inside a multi-provider state.",
+        "Each [`provider`](syntax@provider) alternative gives a local `StateProvider` variant name, a standard-library state provider, that provider's process configuration, and its physical state fields. Alternatives are tried cooperatively in source order only when they accept the attached process. The first one whose provider discovery completes becomes the attachment's read-only [`provider`] value. Compatible fields declared by every alternative form the common snapshot interface. Match directly on [`provider`] to use alternative-only fields or roots such as [`process`](provider@Native) and [`gba`](provider@GBA). The process-name union is deduplicated before attachment. Alternatives must use providers that read directly from the attached process; a provider with a prepared attachment context, such as [`Unity`], uses the single-provider [`state`] form.",
+        &[Example::checked(
+            "Refine runtime-specific state",
+            "provider Advance: GBA {
+    level: u32 at 0x03000010;
+    room: u8 at 0x03000020;
+}",
+            MULTI_PROVIDER_STATE_SOURCE,
+        )]
     ),
     language_item!(
         TickRate,

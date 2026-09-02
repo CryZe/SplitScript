@@ -78,7 +78,9 @@ use self::script_functions::{
     compile_user_function, plan_wasm_locals,
 };
 use self::set_functions::SetFunctions;
-use self::update::{ProviderAttach, ProviderPreparation, StatePollFunctions, compile_update};
+use self::update::{
+    ProviderAlternative, ProviderAttach, ProviderPreparation, StatePollFunctions, compile_update,
+};
 use crate::intrinsic_registry::RuntimeHelperId;
 
 const STATE_TYPE: u32 = 0;
@@ -357,12 +359,45 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let state = program.state.as_ref().unwrap();
     let provider = semantics
         .state_provider()
-        .map(|provider| standard_library.state_provider(provider))
-        .expect("checked state declarations resolve a standard-library provider");
-    let process_names = match provider.processes {
-        StateProviderProcesses::Declared(processes) => processes.to_vec(),
-        StateProviderProcesses::SourceState => state.processes.iter().map(String::as_str).collect(),
-    };
+        .map(|provider| standard_library.state_provider(provider));
+    let mut process_name_values = Vec::<String>::new();
+    let mut append_process_names =
+        |provider: &crate::stdlib::StdlibStateProvider, source_processes: &[String]| {
+            let names: Vec<&str> = match provider.processes {
+                StateProviderProcesses::Declared(processes) => processes.to_vec(),
+                StateProviderProcesses::SourceState => {
+                    source_processes.iter().map(String::as_str).collect()
+                }
+            };
+            for name in names {
+                if !process_name_values.iter().any(|existing| existing == name) {
+                    process_name_values.push(name.to_owned());
+                }
+            }
+        };
+    if let Some(provider) = provider {
+        append_process_names(provider, &state.processes);
+    }
+    let provider_declarations = state
+        .provider_alternatives
+        .iter()
+        .filter_map(|alternative| {
+            let (provider, _) = semantics.state_provider_alternative(alternative.variant)?;
+            Some((
+                alternative.variant,
+                provider,
+                standard_library.state_provider(provider),
+                alternative.processes.as_slice(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    for (_, _, declaration, processes) in &provider_declarations {
+        append_process_names(declaration, processes);
+    }
+    let process_names = process_name_values
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
     let cancellation_region = [ActionKind::OnAttach, ActionKind::WhileAttached]
         .into_iter()
         .filter_map(|action| {
@@ -371,8 +406,16 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
                 .and_then(|body| body.cancellation_region)
         })
         .next();
-    let provider_attachment =
-        provider_attachment_function(provider, program, semantics, &standard_library);
+    let provider_attachment = provider.and_then(|provider| {
+        provider_attachment_function(provider, program, semantics, &standard_library)
+    });
+    let provider_alternatives = provider_declarations
+        .iter()
+        .filter_map(|(variant, provider, declaration, _)| {
+            provider_attachment_function(declaration, program, semantics, &standard_library)
+                .map(|function| (*variant, *provider, function))
+        })
+        .collect::<Vec<_>>();
     let provider_preparation = provider_preparation_function(program, semantics, &standard_library);
     let mut reachability = reachability::Reachability::analyze(
         program,
@@ -383,6 +426,11 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         provider_attachment
             .clone()
             .into_iter()
+            .chain(
+                provider_alternatives
+                    .iter()
+                    .map(|(_, _, function)| function.clone()),
+            )
             .chain(provider_preparation.clone()),
     );
     let async_frames = AsyncFrameLayouts::plan(program, wasm_ir, semantics, &reachability);
@@ -449,15 +497,18 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         variable_types: global_types,
         settings: setting_indices,
         managed_state_reads,
-    } = global_plan::encode(
+        provider_values,
+        provider_attachment_frames,
+    } = global_plan::encode(global_plan::Inputs {
         program,
         semantics,
-        &gc,
+        gc: &gc,
         wasm_ir,
-        &managed,
-        provider_attachment.as_ref(),
-        provider_preparation.as_ref(),
-    );
+        managed: &managed,
+        provider_attachment: provider_attachment.as_ref(),
+        provider_alternatives: &provider_alternatives,
+        provider_preparation: provider_preparation.as_ref(),
+    });
 
     let function_plan::FunctionPlan {
         section: functions,
@@ -523,6 +574,8 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         global_types: &global_types,
         settings: &setting_indices,
         runtime_globals,
+        provider_values: &provider_values,
+        process_names: &process_names,
         runtime_helpers: &runtime_helpers,
         functions: &user_functions,
         closures: &closure_functions,
@@ -570,7 +623,10 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         let (completion_field, completion_type) = layout
             .completion
             .expect("source provider attachments return their provider value");
-        debug_assert_eq!(completion_type, Type::Standard(provider.process_type));
+        debug_assert_eq!(
+            completion_type,
+            Type::Standard(provider.unwrap().process_type)
+        );
         ProviderAttach {
             init: plan.call,
             poll: plan.poll.expect("source provider attachments are async"),
@@ -581,6 +637,37 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             completion_field,
         }
     });
+    let runtime_provider_alternatives = provider_declarations
+        .iter()
+        .map(|(variant, provider, declaration, source_processes)| {
+            let attachment = provider_alternatives
+                .iter()
+                .find(|(candidate, _, _)| candidate == variant)
+                .map(|(_, _, instance)| {
+                    let plan = user_functions[instance];
+                    let layout = async_frames
+                        .function(instance)
+                        .expect("source provider attachments must suspend");
+                    let (completion_field, completion_type) = layout
+                        .completion
+                        .expect("source provider attachments return their provider value");
+                    debug_assert_eq!(completion_type, Type::Standard(declaration.process_type));
+                    ProviderAttach {
+                        init: plan.call,
+                        poll: plan.poll.expect("source provider attachments are async"),
+                        frame_global: provider_attachment_frames[variant],
+                        frame_type: gc.function_frame_index(instance),
+                        completion_field,
+                    }
+                });
+            ProviderAlternative {
+                provider: *provider,
+                declaration,
+                source_processes,
+                attachment,
+            }
+        })
+        .collect::<Vec<_>>();
     let provider_preparation = provider_preparation.as_ref().map(|instance| {
         let plan = user_functions[instance];
         let layout = async_frames
@@ -614,6 +701,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         gc: &gc,
         failure_payloads: &failure_payloads,
         runtime_globals,
+        provider_values: &provider_values,
         semantics,
         managed: &managed,
         managed_state_reads: &managed_state_reads,
@@ -627,6 +715,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         scoped_globals,
         process_names: &process_names,
         provider_attach,
+        provider_alternatives: &runtime_provider_alternatives,
         provider_preparation,
     };
 

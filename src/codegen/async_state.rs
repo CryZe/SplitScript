@@ -222,7 +222,6 @@ pub(super) fn compile_leaf_future_poll(
         reachability: runtime.lowering.reachability,
         failure_payloads: runtime.lowering.failure_payloads,
         abi: runtime.abi,
-        state: runtime.lowering.state,
         locals: LocalStorage::Hybrid {
             frame,
             wasm_values: &empty_values,
@@ -234,6 +233,8 @@ pub(super) fn compile_leaf_future_poll(
         global_types: runtime.lowering.global_types,
         settings: runtime.lowering.settings,
         runtime_globals: runtime.lowering.runtime_globals,
+        provider_values: runtime.lowering.provider_values,
+        process_names: runtime.lowering.process_names,
         state_candidate: None,
         runtime_helpers: runtime.lowering.runtime_helpers,
         functions: runtime.lowering.functions,
@@ -373,7 +374,6 @@ fn compile_async_body(
         reachability: runtime.lowering.reachability,
         failure_payloads: runtime.lowering.failure_payloads,
         abi: runtime.abi,
-        state: runtime.lowering.state,
         locals: LocalStorage::Hybrid {
             frame,
             wasm_values: &planned_locals,
@@ -385,6 +385,8 @@ fn compile_async_body(
         global_types: runtime.lowering.global_types,
         settings: runtime.lowering.settings,
         runtime_globals: runtime.lowering.runtime_globals,
+        provider_values: runtime.lowering.provider_values,
+        process_names: runtime.lowering.process_names,
         state_candidate: None,
         runtime_helpers: runtime.lowering.runtime_helpers,
         functions: runtime.lowering.functions,
@@ -3309,17 +3311,7 @@ fn emit_process_module_query(
 }
 
 fn provider_process_names<'a>(context: &'a ExprContext<'_>) -> Vec<&'a str> {
-    let provider = context
-        .semantics
-        .state_provider()
-        .map(|provider| context.standard_library.state_provider(provider))
-        .expect("checked states resolve a process provider");
-    match provider.processes {
-        crate::stdlib::StateProviderProcesses::Declared(processes) => processes.to_vec(),
-        crate::stdlib::StateProviderProcesses::SourceState => {
-            context.state.processes.iter().map(String::as_str).collect()
-        }
-    }
+    context.process_names.to_vec()
 }
 
 fn compile_retry_poll(

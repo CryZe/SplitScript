@@ -35,23 +35,53 @@ pub fn document_symbols(document: &SourceDocument, program: &Program) -> Vec<Doc
 
     if let Some(state) = &program.state {
         let selection = identifier_in(document, state.span, "state").unwrap_or(state.span);
-        let mut children = state
-            .fields
-            .iter()
-            .map(|field| DocumentSymbol {
-                name: field.name.clone(),
-                detail: Some("state field".to_owned()),
-                kind: DocumentSymbolKind::Field,
-                range: field.span,
-                selection_range: identifier_in(document, field.span, &field.name)
-                    .unwrap_or(field.span),
-                children: Vec::new(),
-            })
-            .collect::<Vec<_>>();
+        let field_symbol = |field: &crate::ast::StateField| DocumentSymbol {
+            name: field.name.clone(),
+            detail: Some("state field".to_owned()),
+            kind: DocumentSymbolKind::Field,
+            range: field.span,
+            selection_range: identifier_in(document, field.span, &field.name).unwrap_or(field.span),
+            children: Vec::new(),
+        };
+        let mut children = if state.provider_alternatives.is_empty() {
+            state.all_fields().map(field_symbol).collect::<Vec<_>>()
+        } else {
+            state
+                .provider_alternatives
+                .iter()
+                .map(|alternative| DocumentSymbol {
+                    name: state
+                        .layout_enum
+                        .as_ref()
+                        .and_then(|enumeration| {
+                            enumeration
+                                .variants
+                                .iter()
+                                .find(|variant| variant.id == alternative.variant)
+                        })
+                        .map(|variant| variant.name.clone())
+                        .expect("provider alternatives have generated enum variants"),
+                    detail: Some(alternative.provider.name.clone()),
+                    kind: DocumentSymbolKind::Namespace,
+                    range: alternative.span,
+                    selection_range: alternative.span,
+                    children: alternative.fields.iter().map(field_symbol).collect(),
+                })
+                .collect()
+        };
         sort_symbols(&mut children);
         symbols.push(DocumentSymbol {
             name: "state".to_owned(),
-            detail: Some(state.processes.join(", ")),
+            detail: Some(if state.provider_alternatives.is_empty() {
+                state.processes.join(", ")
+            } else {
+                state
+                    .provider_alternatives
+                    .iter()
+                    .map(|alternative| alternative.provider.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" / ")
+            }),
             kind: DocumentSymbolKind::Namespace,
             range: state.span,
             selection_range: selection,

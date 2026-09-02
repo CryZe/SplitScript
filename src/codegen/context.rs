@@ -7,7 +7,7 @@ use crate::{
     managed::ManagedBindingPlan,
     memory::MemoryLayouts,
     semantic::{FunctionInstance, SemanticModel},
-    stdlib::StandardLibrary,
+    stdlib::{StandardLibrary, StdlibStateProviderId},
     types::ResolvedArrayType,
     wasm_ir,
 };
@@ -40,6 +40,8 @@ pub(super) struct EmissionContext<'a> {
     pub global_types: &'a HashMap<ValueId, Type>,
     pub settings: &'a HashMap<ValueId, SettingStorage>,
     pub runtime_globals: RuntimeGlobals,
+    pub provider_values: &'a HashMap<StdlibStateProviderId, u32>,
+    pub process_names: &'a [&'a str],
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
     pub closures: &'a HashMap<crate::semantic::ClosureInstance, u32>,

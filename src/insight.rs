@@ -66,7 +66,22 @@ pub(crate) fn hover(
         .syntax()
         .state
         .as_ref()
-        .and_then(|state| state.provider.as_ref())
+        .and_then(|state| {
+            state
+                .provider
+                .iter()
+                .chain(
+                    state
+                        .provider_alternatives
+                        .iter()
+                        .map(|alternative| &alternative.provider),
+                )
+                .find(|provider| {
+                    provider.selector.as_ref().is_some_and(|selector| {
+                        selector.name_span.start <= offset && offset < selector.name_span.end
+                    })
+                })
+        })
         .and_then(|provider| {
             provider.selector.as_ref().and_then(|selector| {
                 (selector.name_span.start <= offset && offset < selector.name_span.end).then(|| {
@@ -820,10 +835,17 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 .as_ref()
                 .is_some_and(|state| state.layout_value == Some(value))
             {
-                (
-                    format!("layout: {ty}"),
-                    "Read-only memory layout selected for the attached game build.".to_owned(),
-                )
+                let name = syntax
+                    .state
+                    .as_ref()
+                    .and_then(|state| state.refinement_value_name())
+                    .unwrap_or("layout");
+                let description = if name == "provider" {
+                    "Read-only state provider selected for the attached process. Match on it to refine provider-specific state fields and roots."
+                } else {
+                    "Read-only memory layout selected for the attached game build."
+                };
+                (format!("{name}: {ty}"), description.to_owned())
             } else if let Some(global) = syntax.globals.iter().find(|global| global.id == value) {
                 let scoped = context
                     .snapshot

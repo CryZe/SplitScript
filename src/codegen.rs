@@ -57,7 +57,7 @@ mod update;
 use self::array_functions::ArrayFunctions;
 use self::async_frame::AsyncFrameLayouts;
 use self::async_state::{
-    compile_async_attach, compile_async_closure_poll, compile_async_function_poll,
+    compile_async_action, compile_async_closure_poll, compile_async_function_poll,
     compile_leaf_future_poll,
 };
 use self::backend_type::Type;
@@ -363,16 +363,14 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         StateProviderProcesses::Declared(processes) => processes.to_vec(),
         StateProviderProcesses::SourceState => state.processes.iter().map(String::as_str).collect(),
     };
-    let on_attach = program
-        .actions
-        .iter()
-        .find(|action| action.kind == ActionKind::OnAttach)
-        .map(|action| action.kind);
-    let cancellation_region = on_attach.and_then(|action| {
-        wasm_ir
-            .body(BodyOwner::Action(action))
-            .and_then(|body| body.cancellation_region)
-    });
+    let cancellation_region = [ActionKind::OnAttach, ActionKind::WhileAttached]
+        .into_iter()
+        .filter_map(|action| {
+            wasm_ir
+                .body(BodyOwner::Action(action))
+                .and_then(|body| body.cancellation_region)
+        })
+        .next();
     let provider_attachment =
         provider_attachment_function(provider, program, semantics, &standard_library);
     let provider_preparation = provider_preparation_function(program, semantics, &standard_library);
@@ -387,9 +385,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             .into_iter()
             .chain(provider_preparation.clone()),
     );
-    let async_frames =
-        AsyncFrameLayouts::plan(on_attach, program, wasm_ir, semantics, &reachability);
-    let async_layout = async_frames.attach.as_ref();
+    let async_frames = AsyncFrameLayouts::plan(program, wasm_ir, semantics, &reachability);
     let managed = crate::managed::ManagedBindingPlan::build(program, semantics);
     let explicit_layout_selection = crate::layout_selection::has_explicit_layout_return(program);
     let automatic_layout = if explicit_layout_selection {
@@ -425,7 +421,6 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         program,
         wasm_ir,
         semantics,
-        async_layout,
         async_frames: &async_frames,
         enums,
         array_types,
@@ -752,13 +747,9 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         }
     }
     for action in &program.actions {
-        if action.kind == ActionKind::OnAttach {
-            let body = compile_async_attach(
-                action,
-                action_functions[&action.kind],
-                async_layout.unwrap(),
-                &runtime,
-            );
+        if let Some(layout) = async_frames.action(action.kind) {
+            let body =
+                compile_async_action(action, action_functions[&action.kind], layout, &runtime);
             codes.push(&body);
         } else {
             let body = compile_action(action, action_functions[&action.kind], &lowering);
@@ -776,7 +767,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             refresh_settings,
             setup: action_functions.get(&ActionKind::Setup).copied(),
         },
-        async_layout.is_some(),
+        async_frames.actions().len() != 0,
     );
     codes.push(&body);
     let body = compile_update(

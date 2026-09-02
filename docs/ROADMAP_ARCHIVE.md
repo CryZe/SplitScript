@@ -4477,3 +4477,23 @@ language catalog document the refinement rule.
 - Kept the existing attachment-versus-attempt conflict labels and subsequent
   per-path initialization analysis unchanged, with a regression for the
   formerly confusing helper-assignment case.
+
+# 2026-09-02: cancellable post-attachment discovery
+
+- Allowed `whileAttached` to use `await` and `retry` through the same typed
+  continuation lowering as `onAttach`, with disjoint action slots in one
+  process-lifetime frame rather than a scan-specific task abstraction.
+- Retained exactly one invocation per attachment. It is polled once after each
+  state refresh; pending skips every timer-decision action, completion applies
+  the existing Boolean gate, and the next invocation starts on the following
+  update.
+- Cancelled and discarded a pending invocation on process closure. A later
+  attachment always starts from the action entry with fresh locals and nested
+  future state.
+- Kept signature scan budgets unchanged and cooperative. Runtime coverage uses
+  the Metal Slug 3 shape: validate a stored address, rescan after the allocation
+  moves without process restart, assign the replacement, and return `false` so
+  decisions cannot observe the completion update's older state snapshot.
+- Documented the lifecycle, state-replacement timing, and canonical division:
+  ordinary one-time discovery belongs in `onAttach`; suspending
+  `whileAttached` is for resources that can move while the process stays open.

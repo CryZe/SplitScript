@@ -1992,8 +1992,9 @@ define_language_catalog! {
         WhileAttached,
         "whileAttached",
         "Runs on every initialized attached update.",
-        "State and [`settings`] data has already refreshed when this action runs. The initialization poll is deliberately skipped. Falling through or returning `true` continues to the timer-decision actions; returning `false` skips all of them for this update.",
-        "whileAttached {\n    if !dataReady {\n        return false\n    }\n}"
+        "State and [`settings`] data has already refreshed when this action runs. The initialization poll is deliberately skipped. This action may use [`await`] or [`retry`]; at most one invocation is in flight for an attachment, it is polled once per attached update, and process closure cancels it. While it is pending, every timer-decision action is skipped. Completion does not start another invocation until the next update. Falling through or returning `true` continues to the timer-decision actions; returning `false` skips all of them for the completion update.",
+        "let marker\n\nonAttach {\n    marker = await process.scanMemory(sig\"10 08 ?? ??\")\n}\n\nwhileAttached {\n    if (process.read<u16>(marker) else 0) != 0x0810 {\n        marker = await process.scanMemory(sig\"10 08 ?? ??\")\n        return false\n    }\n}",
+        related: &[LanguageItemId::OnAttach, LanguageItemId::Await, LanguageItemId::Retry]
     ),
     action_item!(
         Start,
@@ -2228,9 +2229,9 @@ impl LanguageCatalog {
             ActionKind::WhileAttached => ActionReferenceFacts {
                 timing: "Every initialized attached update after state refresh",
                 available_context: "process, provider roots, layout, globals, old, and current",
-                suspension: "not allowed",
+                suspension: "await and retry allowed; one invocation is polled per update and cancelled on process close",
                 result: "bool",
-                fallthrough: "true; continue to timer decisions",
+                fallthrough: "true; continue to timer decisions after completion; pending skips them",
             },
             ActionKind::Start => ActionReferenceFacts {
                 timing: "After whileAttached when the sampled timer is NotRunning",

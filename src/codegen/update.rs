@@ -713,6 +713,9 @@ pub(super) fn compile_update(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             emit_return_if_attachment_rejected(&mut function, globals);
+            if globals.while_attached_result.is_some() {
+                emit_reset_async_action_frame(&mut function, lowering.gc, globals);
+            }
             function
                 .instruction(&Instruction::I32Const(ATTACH_READY))
                 .instruction(&Instruction::GlobalSet(globals.attach_ready))
@@ -731,6 +734,9 @@ pub(super) fn compile_update(
             .instruction(&Instruction::End);
         emit_return_if_attachment_rejected(&mut function, globals);
         emit_managed_field_presence_validation(&mut function, program, lowering);
+        if globals.while_attached_result.is_some() {
+            emit_reset_async_action_frame(&mut function, lowering.gc, globals);
+        }
         function
             .instruction(&Instruction::I32Const(ATTACH_READY))
             .instruction(&Instruction::GlobalSet(globals.attach_ready))
@@ -874,8 +880,20 @@ pub(super) fn compile_update(
 
     if let Some(update) = actions.get(&ActionKind::WhileAttached) {
         emit_action_args(&mut function, globals);
+        function.instruction(&Instruction::Call(*update));
+        if let Some(result) = globals.while_attached_result {
+            // The action's return is readiness while its Boolean lifecycle
+            // gate is stored separately. A pending invocation owns this
+            // attachment's single continuation and suppresses timer decisions.
+            function
+                .instruction(&Instruction::I32Eqz)
+                .instruction(&Instruction::If(BlockType::Empty))
+                .instruction(&Instruction::Return)
+                .instruction(&Instruction::End);
+            emit_reset_async_action_frame(&mut function, lowering.gc, globals);
+            function.instruction(&Instruction::GlobalGet(result));
+        }
         function
-            .instruction(&Instruction::Call(*update))
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::Return)
@@ -1792,11 +1810,16 @@ fn emit_cancel_region(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::GlobalSet(globals.attach_ready))
                 .instruction(&Instruction::I32Const(0))
-                .instruction(&Instruction::GlobalSet(globals.state_ready))
-                .instruction(&Instruction::StructNewDefault(gc.async_frame_index()))
-                .instruction(&Instruction::GlobalSet(globals.async_frame));
+                .instruction(&Instruction::GlobalSet(globals.state_ready));
+            emit_reset_async_action_frame(function, gc, globals);
         }
     }
+}
+
+fn emit_reset_async_action_frame(function: &mut Function, gc: &GcLayout, globals: RuntimeGlobals) {
+    function
+        .instruction(&Instruction::StructNewDefault(gc.async_frame_index()))
+        .instruction(&Instruction::GlobalSet(globals.async_frame));
 }
 
 fn emit_split(function: &mut Function, split: u32, abi: &Abi, lowering: &UpdateContext<'_>) {

@@ -47,7 +47,7 @@ use super::{
 /// monopolize the autosplitter runtime.
 const SIGNATURE_SCAN_CANDIDATES_PER_POLL: i64 = 512 * 1024;
 
-pub(super) fn compile_async_attach(
+pub(super) fn compile_async_action(
     action: &Action,
     function_index: u32,
     layout: &AsyncFrameLayout,
@@ -62,25 +62,38 @@ pub(super) fn compile_async_attach(
         struct_type: runtime.lowering.gc.async_frame_index(),
         source: AsyncFrameSource::Global(runtime.lowering.runtime_globals.async_frame),
     };
-    let result_global = runtime
-        .lowering
-        .state
-        .layout_value
-        .is_some_and(|_| runtime.lowering.explicit_layout_selection)
-        .then_some(runtime.lowering.runtime_globals.selected_layout)
-        .flatten();
+    let result_global = match action.kind {
+        crate::ast::ActionKind::OnAttach => runtime
+            .lowering
+            .state
+            .layout_value
+            .is_some_and(|_| runtime.lowering.explicit_layout_selection)
+            .then_some(runtime.lowering.runtime_globals.selected_layout)
+            .flatten(),
+        crate::ast::ActionKind::WhileAttached => Some(
+            runtime
+                .lowering
+                .runtime_globals
+                .while_attached_result
+                .expect("suspending whileAttached has result storage"),
+        ),
+        _ => unreachable!("only suspending lifecycle actions use the async action compiler"),
+    };
     compile_async_body(
         &wasm_body.entry,
         &wasm_body.locals,
         wasm_body.async_state_count,
         wasm_body
             .cancellation_region
-            .expect("onAttach has a process-lifetime cancellation region"),
+            .expect("suspending lifecycle actions have a process-lifetime cancellation region"),
         layout,
         runtime,
         frame,
         None,
-        BareReturn::AsyncAttach { result_global },
+        BareReturn::AsyncAction {
+            action: action.kind,
+            result_global,
+        },
         result_global,
         function_index,
     )
@@ -336,7 +349,16 @@ fn compile_async_body(
         &mut matches,
         &mut local_types,
         LocalPlanOptions {
-            parameter_count: 1,
+            parameter_count: match bare_return {
+                BareReturn::AsyncAction {
+                    action: crate::ast::ActionKind::WhileAttached,
+                    ..
+                } => 2,
+                BareReturn::AsyncAction { .. } | BareReturn::AsyncFuture { .. } => 1,
+                BareReturn::None | BareReturn::Action(_) => {
+                    unreachable!("direct bodies do not use the async compiler")
+                }
+            },
             semantics: runtime.lowering.semantics,
             wasm_ir: runtime.lowering.wasm_ir,
             gc: runtime.lowering.gc,
@@ -529,6 +551,7 @@ fn compile_async_body(
                 function.instruction(&Instruction::Br(1));
             }
         }
+        emit_async_action_default(&mut function, bare_return);
         mark_future_complete(&mut function, bare_return);
         function
             .instruction(&Instruction::I32Const(1))
@@ -542,6 +565,18 @@ fn compile_async_body(
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::End);
     function
+}
+
+fn emit_async_action_default(function: &mut Function, target: BareReturn) {
+    if let BareReturn::AsyncAction {
+        action: crate::ast::ActionKind::WhileAttached,
+        result_global: Some(result),
+    } = target
+    {
+        function
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::GlobalSet(result));
+    }
 }
 
 fn mark_future_complete(function: &mut Function, target: BareReturn) {
@@ -3809,13 +3844,21 @@ fn compile_async_flow(
                         }
                     }
                 }
-                BareReturn::AsyncAttach { .. } => {
+                BareReturn::AsyncAction {
+                    action,
+                    result_global: _,
+                } => {
                     if let Some(global) = result_global {
-                        compile_expr(
-                            function,
-                            value.expect("layout selection returns a typed layout"),
-                            context,
-                        );
+                        if let Some(value) = value {
+                            compile_expr(function, *value, context);
+                        } else {
+                            super::script_functions::emit_action_default(
+                                function,
+                                action,
+                                context.semantics,
+                                context.gc,
+                            );
+                        }
                         function.instruction(&Instruction::GlobalSet(global));
                     } else {
                         debug_assert!(value.is_none());

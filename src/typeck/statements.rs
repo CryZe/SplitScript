@@ -455,7 +455,9 @@ impl Checker {
                         SuspensionMode::Retry => "retry",
                     };
                     self.error(
-                        format!("`{keyword}` is only available inside `onAttach`"),
+                        format!(
+                            "`{keyword}` is only available inside `onAttach`, `whileAttached`, or an inferred async function"
+                        ),
                         *span,
                     );
                 }

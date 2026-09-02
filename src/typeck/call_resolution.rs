@@ -1590,7 +1590,10 @@ impl Checker {
         concrete_signature.push(result_type);
         if operation.availability == Availability::OnAttach && !self.callable.can_suspend() {
             self.error(
-                format!("`{}` must be awaited in `onAttach`", item.qualified_name),
+                format!(
+                    "`{}` must be awaited in `onAttach`, `whileAttached`, or an inferred async function",
+                    item.qualified_name
+                ),
                 span,
             );
         }

@@ -434,8 +434,9 @@ pub enum BodyAbi {
     /// Ordinary parameters and result, unchanged from the synchronous Wasm
     /// calling convention.
     Direct,
-    /// Existing host-facing `onAttach(process) -> i32` poll contract.
-    AttachPoll,
+    /// Host-facing lifecycle action poll contract. The action stores its
+    /// source result separately and returns whether this invocation is ready.
+    AsyncAction,
     /// A source function is initialized with its ordinary parameters, then
     /// polled through a typed frame. Dropping that frame at the body's
     /// cancellation boundary cancels the computation without producing a
@@ -2045,7 +2046,12 @@ fn lower_body(
     wasm_ir: &mut Program,
 ) -> Body {
     let abi = match &owner {
-        BodyOwner::Action(ActionKind::OnAttach) => BodyAbi::AttachPoll,
+        BodyOwner::Action(ActionKind::OnAttach) => BodyAbi::AsyncAction,
+        BodyOwner::Action(ActionKind::WhileAttached)
+            if typed_block_contains_await(block, typed_hir, source.profile) =>
+        {
+            BodyAbi::AsyncAction
+        }
         BodyOwner::Action(_) => BodyAbi::Direct,
         BodyOwner::Function(instance)
             if effects.function(instance.function).suspension == SuspensionKind::Suspends =>
@@ -2078,7 +2084,11 @@ fn lower_body(
         })
         .collect();
     let cancellation_region = match &owner {
-        BodyOwner::Action(ActionKind::OnAttach) => Some(CancellationRegion::ProcessLifetime),
+        BodyOwner::Action(ActionKind::OnAttach | ActionKind::WhileAttached)
+            if matches!(abi, BodyAbi::AsyncAction) =>
+        {
+            Some(CancellationRegion::ProcessLifetime)
+        }
         BodyOwner::Function(instance)
             if effects.function(instance.function).cancellation
                 == CancellationKind::ProcessClose =>

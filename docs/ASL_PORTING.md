@@ -1963,7 +1963,7 @@ LiveSplit component invokes them at different boundaries:
 | --- | --- | --- |
 | `startup` | Once when the script is loaded, before process attachment | Put settings in [`settings`], constant data in global initializers, and remaining process-independent statements in [`setup`]. |
 | `init` | Once for each found process, after one legacy state refresh; a failure retries attachment initialization | Put suspending discovery and layout selection in [`onAttach`]. Put synchronous work that consumes the first complete snapshot in [`onStateReady`]. |
-| `update` | After each refresh and before all timer decisions; `false` skips the remaining decisions for that tick | Put ordinary per-tick work in [`whileAttached`]. An explicit `return false` preserves the legacy control result exactly. |
+| `update` | After each refresh and before all timer decisions; `false` skips the remaining decisions for that tick | Put per-tick work in [`whileAttached`]. It may suspend for recoverable discovery; an explicit `return false` preserves the legacy control result exactly. |
 | `exit` | When the attached process exits | Use [`onDetach`]. It runs exactly once for a real process closure and never at initial detached startup. |
 | `shutdown` | When the script is disabled, reloaded, dropped, or LiveSplit exits | No exact host callback exists yet; do not approximate it with [`onDetach`]. |
 | `timer.OnStart`, `timer.OnReset` | Timer events that may be raised independently of this script's decision blocks and while no game is attached | Keep the logic in [`onStart`] and [`onReset`]. SplitScript samples timer state before process attachment on every update, so these actions remain available while detached. |
@@ -2065,6 +2065,40 @@ whileAttached {
 Falling through, a bare [`return`], or `return true` continues to [`start`],
 [`isLoading`], [`gameTime`], [`reset`], and [`split`] as applicable. This control result
 does not reject or roll back the refreshed snapshot.
+
+[`whileAttached`] may also [`await`] or [`retry`] when data must be rediscovered
+without waiting for the process to restart. The runtime owns at most one
+invocation per attachment and polls it once after each state refresh. While it
+is pending, all timer-decision blocks are skipped. When it completes, `false`
+still skips that completion update; falling through or `true` permits the
+decisions, and a fresh invocation starts only on the following update. Process
+closure cancels the pending invocation.
+
+Keep ordinary one-time discovery in [`onAttach`]. Use suspending
+[`whileAttached`] only when the discovered allocation itself can move while the
+same process remains open:
+
+```splitscript
+# state "game.exe" {}
+let framebuffer
+
+onAttach {
+    framebuffer = await process.scanMemory(sig"10 08 ?? ??")
+}
+
+whileAttached {
+    let header = process.read<u16>(framebuffer) else 0
+    if header != 0x0810 {
+        framebuffer = await process.scanMemory(sig"10 08 ?? ??")
+        return false
+    }
+}
+```
+
+State fields have already refreshed before each poll of this action. A newly
+assigned address therefore affects declarative state reads on the following
+update; returning `false` on rediscovery prevents timer decisions from using
+the completion update's older snapshot.
 
 ASL `refreshRate` is a frequency. Migrate a stable attached cadence to the
 declarative lifecycle policy:

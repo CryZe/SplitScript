@@ -1533,7 +1533,7 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
     );
     assert_eq!(
         library.render_operation_semantics(process_closed.id),
-        "available only in onAttach; suspends; cancels when the process closes"
+        "available in suspending attachment code; suspends; cancels when the process closes"
     );
 
     assert!(library.item_by_name("UnityClass.fieldAny").is_none());
@@ -1552,8 +1552,8 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
 }
 
 #[test]
-fn process_closed_is_only_available_while_attaching() {
-    let diagnostics = splitscript::compile(
+fn process_closed_is_available_in_suspending_attached_lifecycle_actions() {
+    let wasm = splitscript::compile(
         r#"
             state "game.exe" {}
             whileAttached {
@@ -1561,13 +1561,10 @@ fn process_closed_is_only_available_while_attaching() {
             }
         "#,
     )
-    .expect_err("waiting out an attachment should only be valid in onAttach");
-    assert!(
-        diagnostics.iter().any(
-            |diagnostic| diagnostic.message == "`Process.closed` must be awaited in `onAttach`"
-        ),
-        "{diagnostics:#?}"
-    );
+    .expect("waiting for process closure is valid while attached");
+    wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("a never-completing whileAttached continuation should produce valid Wasm");
 }
 
 #[test]

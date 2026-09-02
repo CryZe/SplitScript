@@ -437,7 +437,7 @@ operation category: [`await`](LANGUAGE.md#await) accepts an `async T`
 expression, while [`retry`](LANGUAGE.md#retry) accepts synchronous
 fallible `T!` work. Privileged intrinsic declarations separately record only
 the runtime context that cannot be recovered from a body: attached-process and
-state-snapshot requirements, `onAttach` availability, and process-close
+state-snapshot requirements, suspending attachment availability, and process-close
 cancellation. The loader validates those attributes and the closed Rust
 registry independently verifies that they match the trusted lowering contract.
 
@@ -463,7 +463,7 @@ a catalog-construction error; it cannot survive until demand-driven
 specialization or backend emission.
 Catalog validation rejects empty sets, purity mixed with observable behavior,
 cancellation without an async result or attachment, process reads without
-attachment, and synchronous `onAttach`-only calls.
+attachment, and synchronous calls to attachment-suspending operations.
 `OperationSemantics` is the shared normalized view used by checking, hover,
 async planning, and documentation. The trusted intrinsic registry enforces the
 intrinsic implementation contract; source-body conformance is enforced against
@@ -565,12 +565,12 @@ or receiver. Action, state-read, and async encoders can therefore reuse
 ordinary expression semantics without reaching into their implementation or
 re-querying typed HIR.
 
-[`src/codegen/async_state.rs`](../src/codegen/async_state.rs) owns `onAttach`
-state-machine emission. It discovers the already-numbered Wasm-IR poll and
+[`src/codegen/async_state.rs`](../src/codegen/async_state.rs) owns lifecycle
+action and source-future state-machine emission. It discovers the already-numbered Wasm-IR poll and
 resume states, traverses nested continuation blocks, emits builtin suspension
 polls and arbitrary `retry T!` polling, stores live values in the GC frame, and
-applies the process-lifetime cancellation region. Only the completed
-`compile_async_attach` entry point is visible to the final orchestrator;
+applies the process-lifetime cancellation region. Only the completed async
+action and future entry points are visible to the final orchestrator;
 ordinary values and receivers are delegated through the expression module.
 
 [`src/codegen/gc_types.rs`](../src/codegen/gc_types.rs) owns deterministic GC
@@ -633,7 +633,8 @@ function counters themselves.
 
 [`src/codegen/global_plan.rs`](../src/codegen/global_plan.rs) allocates runtime,
 source, and settings globals. Its `RuntimeGlobals` result names the process
-handle, current/old snapshots, attach readiness, async frame, and detached
+handle, current/old snapshots, attach readiness, async frame, async action
+completion, and detached
 entry latch. All emitters consume those roles rather than relying on raw global
 numbers or declaration order.
 
@@ -789,7 +790,7 @@ being appended to the parsed AST.
 product. Its bodies contain structured statements plus explicit
 `Fallthrough`, `Return`, and `Suspend` terminators. A suspend records whether
 its source operation is `await` or `retry` and owns its continuation, so
-`onAttach` state-machine construction no longer rediscovers suspension
+async lifecycle state-machine construction no longer rediscovers suspension
 boundaries from syntax or typed HIR. The same product plans declared
 values, match inputs and payload bindings, and numeric-intrinsic scratch locals
 with semantic `TypeId`s. Code generation assigns their concrete Wasm local or
@@ -804,7 +805,8 @@ locals. Await bindings are frame-backed only when a later segment reads them.
 Keeping the per-suspension sets in the IR also permits future physical slot
 coalescing without making the encoder reconstruct data flow.
 
-An `onAttach` body also owns a `ProcessLifetime` cancellation region. Awaited
+Suspending `onAttach` and `whileAttached` bodies own a `ProcessLifetime`
+cancellation region. Awaited
 catalog operations whose normalized `OperationSemantics` cancel on process
 close attach their `Suspend`
 terminator to that region. The generated runtime consumes the body-level region

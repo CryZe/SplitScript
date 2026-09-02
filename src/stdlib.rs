@@ -815,7 +815,7 @@ impl StandardLibrary {
             semantics.requires_state_snapshots,
             semantics.requires_attached_process,
         ) {
-            (Availability::OnAttach, _, _) => "available only in onAttach",
+            (Availability::OnAttach, _, _) => "available in suspending attachment code",
             (Availability::Everywhere, true, _) => {
                 "available after old and current state snapshots are initialized"
             }

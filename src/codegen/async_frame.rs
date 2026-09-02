@@ -76,15 +76,15 @@ impl AsyncFrameLayout {
     }
 
     pub(super) fn for_action(
-        action: Option<ActionKind>,
+        action: ActionKind,
+        base_fields: u32,
         wasm_ir: &wasm_ir::Program,
         semantics: &SemanticModel,
-    ) -> Option<Self> {
-        let action = action?;
+    ) -> Self {
         let body = wasm_ir
             .body(BodyOwner::Action(action))
             .expect("checked actions have Wasm IR bodies");
-        Some(Self::for_body(
+        Self::for_body(
             &body.entry,
             &body.locals,
             &body.frame_values,
@@ -92,9 +92,9 @@ impl AsyncFrameLayout {
             wasm_ir,
             semantics,
             None,
-            1,
+            base_fields,
             std::iter::empty(),
-        ))
+        )
     }
 
     pub(super) fn for_function(
@@ -117,7 +117,7 @@ impl AsyncFrameLayout {
                     semantic_type(semantics.specialize_type(instance, completion), semantics);
                 completion.has_runtime_value().then_some(completion)
             }
-            wasm_ir::BodyAbi::Direct | wasm_ir::BodyAbi::AttachPoll => {
+            wasm_ir::BodyAbi::Direct | wasm_ir::BodyAbi::AsyncAction => {
                 unreachable!("only suspending functions receive typed future frames")
             }
         };
@@ -320,7 +320,8 @@ impl AsyncFrameLayout {
 
 #[derive(Default)]
 pub(super) struct AsyncFrameLayouts {
-    pub attach: Option<AsyncFrameLayout>,
+    actions: HashMap<ActionKind, AsyncFrameLayout>,
+    ordered_actions: Vec<ActionKind>,
     functions: HashMap<FunctionInstance, AsyncFrameLayout>,
     ordered_functions: Vec<FunctionInstance>,
     closures: HashMap<ClosureInstance, AsyncFrameLayout>,
@@ -346,13 +347,27 @@ pub(super) struct LeafFutureLayout {
 
 impl AsyncFrameLayouts {
     pub(super) fn plan(
-        on_attach: Option<ActionKind>,
         program: &Program,
         wasm_ir: &wasm_ir::Program,
         semantics: &SemanticModel,
         reachability: &super::reachability::Reachability,
     ) -> Self {
-        let attach = AsyncFrameLayout::for_action(on_attach, wasm_ir, semantics);
+        let mut actions = HashMap::new();
+        let mut ordered_actions = Vec::new();
+        let mut next_action_field = 1;
+        for action in [ActionKind::OnAttach, ActionKind::WhileAttached] {
+            let Some(body) = wasm_ir.body(BodyOwner::Action(action)) else {
+                continue;
+            };
+            if !matches!(body.abi, wasm_ir::BodyAbi::AsyncAction) {
+                continue;
+            }
+            let layout =
+                AsyncFrameLayout::for_action(action, next_action_field, wasm_ir, semantics);
+            next_action_field += layout.types.len() as u32;
+            ordered_actions.push(action);
+            actions.insert(action, layout);
+        }
         let mut functions = HashMap::new();
         let mut ordered_functions = Vec::new();
         for instance in reachability.functions() {
@@ -592,7 +607,8 @@ impl AsyncFrameLayouts {
             );
         }
         Self {
-            attach,
+            actions,
+            ordered_actions,
             functions,
             ordered_functions,
             closures,
@@ -600,6 +616,17 @@ impl AsyncFrameLayouts {
             leaves,
             ordered_leaves,
         }
+    }
+
+    pub(super) fn action(&self, action: ActionKind) -> Option<&AsyncFrameLayout> {
+        self.actions.get(&action)
+    }
+
+    pub(super) fn actions(&self) -> impl ExactSizeIterator<Item = (ActionKind, &AsyncFrameLayout)> {
+        self.ordered_actions
+            .iter()
+            .copied()
+            .map(|action| (action, &self.actions[&action]))
     }
 
     pub(super) fn function(&self, instance: &FunctionInstance) -> Option<&AsyncFrameLayout> {

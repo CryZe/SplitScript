@@ -405,6 +405,138 @@ fn timer_state_monitor_is_absent_without_lifecycle_or_decision_actions() {
 }
 
 #[test]
+fn while_attached_owns_one_cancellable_invocation_and_gates_timer_decisions() {
+    let source = r#"
+        let suppress
+        state "game.exe" {}
+
+        onAttach {
+            suppress = true
+        }
+
+        whileAttached {
+            print("begin")
+            await nextTick()
+            print("end")
+            if suppress {
+                suppress = false
+                return false
+            }
+        }
+
+        start {
+            print("decision")
+            return true
+        }
+
+        onDetach {
+            print("detached")
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    // Attachment and its first state snapshot complete without starting the
+    // per-update action in the same host call.
+    update.call(&mut store, ()).unwrap();
+    assert!(store.data().messages.is_empty());
+
+    // Exactly one invocation remains in flight. Pending suppresses every
+    // timer-decision action, and completion does not start the next invocation
+    // in the same update. Its explicit false result keeps decisions gated.
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["begin"]);
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["begin", "end"]);
+    assert_eq!(store.data().timer_state, 0);
+
+    // A fresh invocation starts on the following update. Falling through is
+    // the existing true gate, so its later completion may run `start`.
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["begin", "end", "begin"]);
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        ["begin", "end", "begin", "end", "decision"]
+    );
+    assert_eq!(store.data().timer_state, 1);
+
+    // Closing the process discards a pending continuation. A later attachment
+    // begins at the action entry instead of resuming the old frame.
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages.last().unwrap(), "begin");
+    store.data_mut().process_open = false;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages.last().unwrap(), "detached");
+    store.data_mut().process_open = true;
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages.last().unwrap(), "begin");
+}
+
+#[test]
+fn while_attached_can_rediscover_memory_after_the_process_is_initialized() {
+    let source = r#"
+        let marker
+        state "game.exe" {}
+
+        onAttach {
+            marker = 0x2000
+        }
+
+        whileAttached {
+            if (process.read<u8>(marker) else 0) != 0xaa {
+                marker = await process.scan(0x2000, 600_000u64, sig"AA BB")
+                print(marker)
+                return false
+            }
+        }
+
+        start {
+            print("decision")
+            return true
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let mut bytes = vec![0; 600_000];
+    bytes[550_000..550_002].copy_from_slice(&[0xaa, 0xbb]);
+    store.data_mut().memory_regions = vec![(0x2000, bytes)];
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert!(
+        store.data().messages.is_empty(),
+        "the first bounded scan window should remain pending"
+    );
+    for _ in 0..8 {
+        update.call(&mut store, ()).unwrap();
+        if !store.data().messages.is_empty() {
+            break;
+        }
+        assert_eq!(
+            store.data().timer_state,
+            0,
+            "timer decisions remain gated while rediscovery is pending"
+        );
+    }
+    assert_eq!(store.data().messages, [(0x2000u64 + 550_000).to_string()]);
+    assert_eq!(store.data().timer_state, 0, "return false gates decisions");
+
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        [(0x2000u64 + 550_000).to_string(), "decision".to_owned()]
+    );
+}
+
+#[test]
 fn script_timer_decisions_are_observed_on_the_following_update() {
     let source = r#"
         state "game.exe" {}

@@ -110,7 +110,7 @@ impl CallableContext {
                 | Self::Closure
                 | Self::LibraryFunction(_)
                 | Self::CompilerGenerated
-                | Self::Action(ActionKind::OnAttach)
+                | Self::Action(ActionKind::OnAttach | ActionKind::WhileAttached)
         )
     }
 

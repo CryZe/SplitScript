@@ -85,7 +85,8 @@ impl LocalStorage<'_> {
 pub(super) enum BareReturn {
     None,
     Action(ActionKind),
-    AsyncAttach {
+    AsyncAction {
+        action: ActionKind,
         result_global: Option<u32>,
     },
     AsyncFuture {
@@ -4900,7 +4901,13 @@ pub(super) fn emit_failure_return(
     preserve_discarded_payload: bool,
     emit_error: impl FnOnce(&mut Function),
 ) {
-    if matches!(context.bare_return, BareReturn::AsyncAttach { .. }) {
+    if matches!(
+        context.bare_return,
+        BareReturn::AsyncAction {
+            action: ActionKind::OnAttach,
+            ..
+        }
+    ) {
         // `onAttach` catches ordinary errors as rejection of this acquired
         // process. Retain the process handle until it closes so discovery
         // cannot select the same live process again on the next update.
@@ -5324,13 +5331,16 @@ fn compile_return_expression(
                 });
             function.instruction(&Instruction::I32Const(1));
         }
-        BareReturn::AsyncAttach { result_global } => {
+        BareReturn::AsyncAction {
+            action,
+            result_global,
+        } => {
             if let Some(global) = result_global {
-                compile_expr(
-                    function,
-                    value.expect("layout selection returns a typed layout"),
-                    context,
-                );
+                if let Some(value) = value {
+                    compile_expr(function, value, context);
+                } else {
+                    emit_action_default(function, action, context.semantics, context.gc);
+                }
                 function.instruction(&Instruction::GlobalSet(global));
             } else {
                 debug_assert!(value.is_none());

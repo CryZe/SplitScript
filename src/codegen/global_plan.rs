@@ -79,6 +79,9 @@ pub(super) struct RuntimeGlobals {
     /// than once during one update.
     pub future_poll_epoch: u32,
     pub async_frame: u32,
+    /// Boolean completion of a suspending `whileAttached` invocation. The
+    /// action's Wasm return remains the poll readiness flag.
+    pub while_attached_result: Option<u32>,
 }
 
 pub(super) fn encode(
@@ -333,6 +336,21 @@ pub(super) fn encode(
         },
         &ConstExpr::ref_null(HeapType::Concrete(gc.async_frame_index())),
     );
+    let while_attached_result = wasm_ir
+        .body(wasm_ir::BodyOwner::Action(ActionKind::WhileAttached))
+        .is_some_and(|body| matches!(body.abi, wasm_ir::BodyAbi::AsyncAction))
+        .then(|| {
+            let index = section.len();
+            section.global(
+                GlobalType {
+                    val_type: ValType::I32,
+                    mutable: true,
+                    shared: false,
+                },
+                &ConstExpr::i32_const(1),
+            );
+            index
+        });
 
     let mut variables = HashMap::new();
     let mut variable_types = HashMap::new();
@@ -424,6 +442,7 @@ pub(super) fn encode(
             debug_depth,
             future_poll_epoch,
             async_frame,
+            while_attached_result,
         },
         variables,
         variable_types,

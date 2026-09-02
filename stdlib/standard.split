@@ -743,7 +743,8 @@ intrinsic type Process {
     ///
     /// This suspension never closes or detaches the process itself and never
     /// completes normally. When the process closes, the automatic process
-    /// lifetime boundary cancels [`onAttach`] before it can resume.
+    /// lifetime boundary cancels the surrounding [`onAttach`] or
+    /// [`whileAttached`] invocation before it can resume.
     ///
     /// # Example
     ///
@@ -766,7 +767,8 @@ intrinsic type Process {
 
     /// Waits for a process module.
     ///
-    /// Suspends attachment until both module address and size are available.
+    /// Suspends the surrounding attachment lifecycle invocation until both
+    /// module address and size are available.
     ///
     /// # Example
     ///
@@ -1007,6 +1009,11 @@ intrinsic type Process {
     /// module or explicit-range scans when the target is known because they
     /// perform less work. Only a bounded window is inspected per tick, so even
     /// a large process-wide search keeps yielding to the host.
+    ///
+    /// This can initialize an attachment-scoped address in [`onAttach`] or
+    /// rediscover an allocation that moved while the same process remains
+    /// open from [`whileAttached`]. A pending per-update invocation suppresses
+    /// timer decisions until the scan completes.
     ///
     /// # Example
     ///

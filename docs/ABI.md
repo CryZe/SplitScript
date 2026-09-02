@@ -151,20 +151,23 @@ linear-memory data. A generated scanner reads the target module through
 `process_read` in overlapping 4 KiB chunks. They overlap by the pattern length
 minus one so matches spanning a page boundary are not lost.
 
-An `onAttach` block lowers to an internal poll function `(process: i64) -> i32`.
-It returns zero while an await barrier is pending and one when initialization is
-complete. Its continuation frame program counter selects generated entry, poll,
-and continuation states; successful polls redispatch within the same call.
+Suspending lifecycle blocks lower to internal poll functions. `onAttach` uses
+`(process: i64) -> i32`; a suspending `whileAttached` keeps its ordinary two
+snapshot parameters but uses the same `i32` poll result. Zero means pending and
+one means the invocation completed. The source-level `whileAttached` Boolean is
+stored separately so readiness cannot be confused with its timer-decision gate.
+The continuation frame program counter selects generated entry, poll, and
+continuation states; successful polls redispatch within the same call.
 The exported `update` loop checks process liveness before every poll
 and consumes the lowered process-lifetime cancellation region on detach,
 providing structured cancellation without exposing continuation management to
 the source language.
 
-When `onAttach` contains locals, the compiler adds a mutable GC continuation
-struct. Its first field is the resume program counter and its remaining fields
-hold the deterministic union of values live across individual suspension
-points. Replacing this frame on process exit cancels the old continuation and
-clears its state.
+When a lifecycle block contains suspension, the compiler adds its live values
+to a mutable GC continuation struct. Its first field is the resume program
+counter; disjoint action layouts occupy deterministic slots because
+`onAttach` and `whileAttached` can never be live concurrently. Replacing this
+frame on process exit cancels the old continuation and clears its state.
 
 State initialization requires one poll in which every required field succeeds.
 The resulting GC object initializes both `old` and `current`, then the compiler
@@ -175,11 +178,14 @@ copy that field from `current`; unrelated fields can therefore advance
 independently. Detachment clears the ready flag, so a later attachment repeats
 this initialization boundary.
 
-The internal `whileAttached` function returns an `i32` continuation flag. Its
-fallthrough default is one. An explicit source `false` returns zero, causing the
-generated update export to return before reading timer state or invoking any
-timer-decision action. The committed state and settings snapshots remain
-advanced.
+The internal synchronous `whileAttached` function directly returns its `i32`
+gate. A suspending form returns poll readiness and stores that gate in a private
+global on completion. At most one invocation exists per attachment and it is
+polled once after each state refresh. Pending returns from the exported update
+before timer decisions. Ready resets the continuation for the next update, then
+applies the stored gate: fallthrough or `true` continues, while `false` skips
+the remaining decisions. The committed state and settings snapshots remain
+advanced in either case.
 
 The module includes a `splitscript` custom section containing UTF-8 JSON with
 the compiler package version, optional full Git revision, GC target, and host

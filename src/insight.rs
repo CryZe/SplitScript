@@ -1270,7 +1270,7 @@ fn source_function_description(
             crate::stdlib::SuspensionKind::Suspends => "suspends",
         });
         if operation.availability == crate::stdlib::Availability::OnAttach {
-            description.push_str("; available only in `onAttach`");
+            description.push_str("; available in suspending attachment code");
         }
         if operation.requires_attached_process {
             description.push_str("; requires an attached process and is unavailable in `onDetach`");
@@ -2177,7 +2177,7 @@ fn ranges() {
         assert!(
             hover
                 .markdown
-                .contains("available only in onAttach; suspends")
+                .contains("available in suspending attachment code; suspends")
         );
     }
 
@@ -2220,11 +2220,9 @@ fn ranges() {
                 .markdown
                 .contains("never closes or detaches the process itself")
         );
-        assert!(
-            hover
-                .markdown
-                .contains("available only in onAttach; suspends; cancels when the process closes")
-        );
+        assert!(hover.markdown.contains(
+            "available in suspending attachment code; suspends; cancels when the process closes"
+        ));
     }
 
     #[test]

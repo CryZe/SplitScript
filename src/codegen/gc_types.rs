@@ -20,10 +20,9 @@ use crate::{
 };
 
 use super::{
-    GcLayout, Type, array_element_type,
-    async_frame::{AsyncFrameLayout, AsyncFrameLayouts},
-    enum_variant_payload, managed_snapshot_field_type, option_value_type, reachability,
-    result_value_type, semantic_type, standard_field_type, struct_field_type, value_type,
+    GcLayout, Type, array_element_type, async_frame::AsyncFrameLayouts, enum_variant_payload,
+    managed_snapshot_field_type, option_value_type, reachability, result_value_type, semantic_type,
+    standard_field_type, struct_field_type, value_type,
 };
 
 pub(super) struct EncodedTypes {
@@ -37,7 +36,6 @@ pub(super) struct Inputs<'a> {
     pub program: &'a Program,
     pub wasm_ir: &'a crate::wasm_ir::Program,
     pub semantics: &'a SemanticModel,
-    pub async_layout: Option<&'a AsyncFrameLayout>,
     pub async_frames: &'a AsyncFrameLayouts,
     pub enums: &'a [EnumDecl],
     pub array_types: &'a [ResolvedArrayType],
@@ -57,7 +55,6 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         program,
         wasm_ir,
         semantics,
-        async_layout,
         async_frames,
         enums,
         array_types,
@@ -153,15 +150,16 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         });
     }
     let mut fields = Vec::with_capacity(
-        async_layout
-            .as_ref()
-            .map_or(1, |layout| layout.types.len() + 1),
+        1 + async_frames
+            .actions()
+            .map(|(_, layout)| layout.types.len())
+            .sum::<usize>(),
     );
     fields.push(FieldType {
         element_type: StorageType::Val(ValType::I32),
         mutable: true,
     });
-    if let Some(frame_layout) = &async_layout {
+    for (_, frame_layout) in async_frames.actions() {
         debug_assert!(
             frame_layout.types.iter().all(|ty| *ty != Type::Never),
             "async frame contains a `Never` field: {frame_layout:?}"

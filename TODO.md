@@ -61,9 +61,11 @@ physical-width mapping and qualified exact search aliases that do not
 masquerade as compiler rewrite spellings. Literal provider-memory reads are
 now checked against the same catalog-owned ranges used by runtime translation
 and reference documentation. The confirmed campaign-defect sequence is
-complete, and the approved finite `process.scanOnce` primitive now reports
-bounded-range exhaustion without changing waiting scans. Continue with the
-recoverable post-attachment discovery design below. Do not begin managed
+complete, the approved finite `process.scanOnce` primitive now reports
+bounded-range exhaustion without changing waiting scans, and suspending
+`whileAttached` now supports cancellable post-attachment rediscovery without
+running timer decisions against stale snapshots. Continue with the remaining
+P0 porting gaps below. Do not begin managed
 collection support itself until ASR has a tested
 representation, and bring every language, standard-library, provider, or
 host-surface decision below back to the user.
@@ -667,14 +669,6 @@ concepts rather than maintaining a parallel inventory.
   Waiting scans retain their repeat-until-found behavior, and no unrelated
   discovery API gains a `Once` variant. Keep the remaining extensions gated on
   representative ports rather than broadening signatures speculatively.
-- [ ] Design recoverable post-attachment signature discovery from the Metal
-  Slug 3 framebuffer case. The allocation can move while the same process stays
-  attached, but scanning is currently confined to suspending `onAttach` code.
-  Compare an ordinary cancellable scan future usable from a suspending polling
-  task, a relocatable signature-backed address abstraction, and a provider
-  refresh lifecycle. Define work budgets, replacement timing, state retention,
-  and cancellation before implementation; do not add a synchronous rescan loop
-  or special-case framebuffer code.
 - [ ] Design typed byte-order reads for every [`MemoryReadable`] value once a
   representative port needs more than scalar conversion. The design must
   recursively decode structs and fixed arrays, compose with ordinary reads and
@@ -1335,30 +1329,22 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Close the small but high-impact docs-first defects: explain ASL numeric-root
-   semantics, fix and compile-check the `choice` example, document fixed-array
-   limits and primitive mappings, and improve provider, match-arm, lifecycle,
-   and constant guest-address diagnostics.
-2. Separately decide how a Metal Slug framebuffer can be rediscovered after
-   attachment now that the approved finite `process.scanOnce` operation covers
-   OpenGOAL and Abe's Oddysee. Reuse future cancellation/composition rather than
-   multiplying unrelated `Once` APIs.
-3. Resolve the PS2 provider's low-memory product-code gap against ASR, then
+1. Resolve the PS2 provider's low-memory product-code gap against ASR, then
    decide one provider-independent bounded guest-string facility. Keep SNES and
    Unity managed arrays/lists deferred until ASR has tested implementations.
-4. Decide whether multi-console legacy scripts become separate provider-specific
+2. Decide whether multi-console legacy scripts become separate provider-specific
    SplitScript packages or justify a typed multi-provider source model.
-5. Design the read-only timer metadata/time surface, imperative timer-control
+3. Design the read-only timer metadata/time surface, imperative timer-control
    boundary, and writable persistent file API as separate decisions. Abe's
    Oddysee is the acceptance case for current timer time and persistence; Ato,
    Spider-Man, and the SEGA Master Splitter supply the remaining evidence.
-6. Add safe module enumeration and decide deterministic executable identity
+4. Add safe module enumeration and decide deterministic executable identity
    without weakening exact source hashes to version metadata.
-7. Decide fixed-array equality/patterns and runtime-varying watched types using
+5. Decide fixed-array equality/patterns and runtime-varying watched types using
    the Code: Veronica X and FNaF ports. Prefer reusable static typing and
    ordinary aggregate architecture over compatibility-shaped intrinsics.
-8. Resume measured editor/compiler performance, release hardening, hosted IDE,
-    and debugging work after the porting correctness and design sequence above.
-9. Keep `unity.time`, SNES, and managed collections gated on ASR evidence, and
-    keep writes/injection, physical `None` specialization, and other broad host
-    powers deferred until their explicit dependencies and policies are ready.
+6. Resume measured editor/compiler performance, release hardening, hosted IDE,
+   and debugging work after the porting correctness and design sequence above.
+7. Keep `unity.time`, SNES, and managed collections gated on ASR evidence, and
+   keep writes/injection, physical `None` specialization, and other broad host
+   powers deferred until their explicit dependencies and policies are ready.

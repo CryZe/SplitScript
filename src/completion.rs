@@ -2,11 +2,13 @@
 
 use std::collections::BTreeMap;
 
+mod patterns;
 mod settings;
 mod state;
 mod top_level;
 mod types;
 
+use patterns::complete_pattern;
 use settings::complete_settings_dsl;
 use state::complete_state_dsl;
 use top_level::{complete_state_header, complete_top_level};
@@ -146,6 +148,8 @@ pub(crate) fn complete(
     } else if let Some(completions) = complete_type_position(&request, &standard_library) {
         Ok(completions)
     } else if let Some(completions) = complete_state_dsl(&request, &standard_library) {
+        Ok(completions)
+    } else if let Some(completions) = complete_pattern(database, &request, &standard_library)? {
         Ok(completions)
     } else if let Some(context) = member_context(&request) {
         Ok(complete_member(
@@ -523,14 +527,14 @@ struct MemberContext {
     replacement: Span,
 }
 
-struct CompletionBuilder {
+pub(super) struct CompletionBuilder {
     prefix: String,
     replacement: Span,
     items: BTreeMap<String, CompletionItem>,
 }
 
 impl CompletionBuilder {
-    fn new(prefix: String, replacement: Span) -> Self {
+    pub(super) fn new(prefix: String, replacement: Span) -> Self {
         Self {
             prefix,
             replacement,
@@ -538,7 +542,7 @@ impl CompletionBuilder {
         }
     }
 
-    fn add(&mut self, item: CompletionItem) {
+    pub(super) fn add(&mut self, item: CompletionItem) {
         if self.accepts(&item) {
             self.items.entry(item.label.clone()).or_insert(item);
         }
@@ -558,7 +562,7 @@ impl CompletionBuilder {
             .starts_with(&self.prefix.to_ascii_lowercase())
     }
 
-    fn finish(self) -> CompletionList {
+    pub(super) fn finish(self) -> CompletionList {
         let mut items = self.items.into_values().collect::<Vec<_>>();
         items.sort_by_key(|item| (item.kind, item.label.to_ascii_lowercase()));
         CompletionList {

@@ -1033,12 +1033,16 @@ remaining work is product hardening and distribution.
   constructors. Multiple arms can jointly cover wrapper and enum payloads,
   struct fields, and fixed-array elements while preserving correlations;
   missing nested cases produce a concrete witness when one is useful.
-- [ ] Add type-directed completion inside patterns. Offer only constructors
+- [x] Add type-directed completion inside patterns. Offer only constructors
   legal for the matched type: enum variants, `Some` / `None`, `Ok` / `Err`,
   `Item` / `End`, booleans, remaining struct fields, fixed-array shapes, and
   recursive subpattern snippets. Suppress expression-only keywords and generic
   declarations in pattern position. Keep the candidate model compiler-owned
   so terminal/editor clients do not duplicate pattern grammar or type logic.
+  Completion now derives the matched and nested payload types from the
+  recovering semantic snapshot, recognizes half-written arms and delimiters,
+  narrows qualified enums, omits already-used struct fields, and hands one
+  compiler-owned candidate list to every editor frontend.
 - [ ] Design and implement explicit range patterns using the language's
   unambiguous `..<` and `..=` bounds. Decide open-ended forms, binding and
   alternation precedence, integer/character applicability, unreachable-range

@@ -1202,6 +1202,32 @@ for hovering, navigation, renaming, the guard, and the arm body. `_` is the
 catch-all pattern. Patterns participate in inference, so the parameter types
 below are inferred as an integer and `bool` from their uses.
 
+Closed integer intervals use the same explicit endpoint operators as range
+values: `start..<end` excludes `end`, while `start..=end` includes it. Both
+bounds are integer literals (including negative signed literals) of the matched
+integer type. A bare `..` is rejected, so a reader never needs to remember an
+implicit inclusion convention. Range patterns bind more tightly than
+alternation, making `0..<10 | 20..=30` the union of two intervals. Empty or
+reversed intervals are errors.
+
+```text
+fn classify(value: i8) -> String {
+    return match value {
+        -128..<-10 => "low",
+        -10..=10 => "middle",
+        11..=127 => "high",
+    }
+}
+```
+
+Range patterns currently test an interval rather than introducing a binding.
+When an arm body needs the matched value, match a named local and refer to that
+local from the body. Exhaustiveness and unreachable-arm analysis operate on
+intervals without expanding them into individual integers. Consequently,
+complete finite partitions such as the `i8` example above need no wildcard,
+partially overlapping ranges remain reachable for their uncovered portion, and
+a range already covered by earlier arms is diagnosed as unreachable.
+
 ```text
 fn characterName(character, dlcDemo) {
     return match character {
@@ -1304,15 +1330,17 @@ onAttach {
 An unguarded arm counts toward exhaustiveness; a guarded arm may still reject
 its pattern. Alternatives contribute the union of their patterns. Enum matches
 must cover every variant, boolean matches must cover
-`true` and `false`. String, character, integer, and file-version domains are
-open-ended and require an unguarded `_` arm. A wildcard can also make an enum
-or boolean match exhaustive. Exhaustiveness and unreachable-arm analysis are
-recursive: separate arms can jointly partition wrapper or enum payloads,
-struct fields, and fixed-array elements, while correlations between several
-fields or elements remain intact. For example, the four combinations of two
-booleans exhaust `[bool; 2]`; only the two equal pairs do not. A different
-fixed-array element count is a compile-time error. A growable `[T]` may have
-any runtime length, so exact array arms always need a fallback.
+`true` and `false`. String, character, and file-version domains are open-ended
+and require an unguarded `_` arm. Integer matches require `_` unless their
+literal and range patterns cover the complete finite domain. A wildcard can
+also make an enum or boolean match exhaustive. Exhaustiveness and
+unreachable-arm analysis are recursive: separate arms can jointly partition
+wrapper or enum payloads, struct fields, and fixed-array elements, while
+correlations between several fields or elements remain intact. For example,
+the four combinations of two booleans exhaust `[bool; 2]`; only the two equal
+pairs do not. A different fixed-array element count is a compile-time error. A
+growable `[T]` may have any runtime length, so exact array arms always need a
+fallback.
 
 ```text
 fn decodeHeader(bytes: [u8]) -> u8? {

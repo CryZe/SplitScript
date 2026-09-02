@@ -939,6 +939,29 @@ fn compile_projected_pattern(
                 },
             );
         }
+        wasm_ir::LoweredPattern::IntRange {
+            start,
+            start_negative,
+            end,
+            end_negative,
+            kind,
+        } => {
+            value.emit(function, context);
+            emit_integer_literal(function, *start, *start_negative, value.ty);
+            function.instruction(&compare(value.ty, value.ty.is_signed(), Compare::Ge));
+            value.emit(function, context);
+            emit_integer_literal(function, *end, *end_negative, value.ty);
+            function
+                .instruction(&compare(
+                    value.ty,
+                    value.ty.is_signed(),
+                    match kind {
+                        crate::ast::RangeKind::Exclusive => Compare::Lt,
+                        crate::ast::RangeKind::Inclusive => Compare::Le,
+                    },
+                ))
+                .instruction(&Instruction::I32And);
+        }
         wasm_ir::LoweredPattern::FileVersion(components) => {
             let fields = [
                 StdlibFieldId::FileVersionMajor,

@@ -1440,6 +1440,7 @@ impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
             | ast::MatchPattern::Char(_)
             | ast::MatchPattern::String(_)
             | ast::MatchPattern::Int { .. }
+            | ast::MatchPattern::IntRange { .. }
             | ast::MatchPattern::FileVersion(_)
             | ast::MatchPattern::None
             | ast::MatchPattern::IteratorEnd

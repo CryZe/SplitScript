@@ -641,7 +641,10 @@ impl Checker {
                 } else {
                     for missing in missing_patterns {
                         let message = if self.inference.is_integer(matched_type) {
-                            "non-exhaustive integer match: add a `_` arm".to_owned()
+                            format!(
+                                "non-exhaustive integer match: missing `{}`; add a `_` arm",
+                                missing.display()
+                            )
                         } else if matched_type == self.core_type(crate::stdlib::CoreTypeId::Char) {
                             "non-exhaustive character match: add a `_` arm".to_owned()
                         } else if matched_type == self.standard_type(StdlibTypeId::String) {
@@ -1620,6 +1623,39 @@ impl Checker {
         }
     }
 
+    fn integer_pattern_bound_type(
+        &mut self,
+        value: u64,
+        negative: bool,
+        suffix: Option<crate::ast::TypeRef>,
+        span: Span,
+    ) -> Type {
+        if let Some(suffix) = suffix {
+            if !suffix.is_integer() {
+                self.error("integer match patterns require an integer type", span);
+            } else if !(if negative {
+                self.inference
+                    .fits_negative_literal(value, self.syntax_type(suffix))
+            } else {
+                self.inference
+                    .fits_unsigned_literal(value, self.syntax_type(suffix))
+            }) {
+                self.error(format!("integer literal does not fit in `{suffix}`"), span);
+            }
+            self.syntax_type(suffix)
+        } else if negative {
+            self.inference.fresh_negative_integer_literal(
+                Requirements::capability(StdlibCapabilityId::Integer),
+                value,
+            )
+        } else {
+            self.fresh_inference(
+                Requirements::capability(StdlibCapabilityId::Integer),
+                Some(value),
+            )
+        }
+    }
+
     fn check_pattern(
         &mut self,
         pattern: &MatchPattern,
@@ -1771,36 +1807,50 @@ impl Checker {
                 negative,
                 suffix,
             } => {
-                let pattern_type = if let Some(suffix) = suffix {
-                    if !suffix.is_integer() {
-                        self.error("integer match patterns require an integer type", span);
-                    } else if !(if *negative {
-                        self.inference
-                            .fits_negative_literal(*value, self.syntax_type(*suffix))
-                    } else {
-                        self.inference
-                            .fits_unsigned_literal(*value, self.syntax_type(*suffix))
-                    }) {
-                        self.error(format!("integer literal does not fit in `{suffix}`"), span);
-                    }
-                    self.syntax_type(*suffix)
-                } else {
-                    if *negative {
-                        self.inference.fresh_negative_integer_literal(
-                            Requirements::capability(StdlibCapabilityId::Integer),
-                            *value,
-                        )
-                    } else {
-                        self.fresh_inference(
-                            Requirements::capability(StdlibCapabilityId::Integer),
-                            Some(*value),
-                        )
-                    }
-                };
+                let pattern_type =
+                    self.integer_pattern_bound_type(*value, *negative, *suffix, span);
                 self.unify(value_type, pattern_type, span);
                 CheckedPattern::new(PatternCoverage::Int {
                     value: *value,
                     negative: *negative,
+                })
+            }
+            MatchPattern::IntRange {
+                start,
+                start_negative,
+                start_suffix,
+                start_span,
+                end,
+                end_negative,
+                end_suffix,
+                end_span,
+                kind,
+                ..
+            } => {
+                let start_type = self.integer_pattern_bound_type(
+                    *start,
+                    *start_negative,
+                    *start_suffix,
+                    *start_span,
+                );
+                let end_type =
+                    self.integer_pattern_bound_type(*end, *end_negative, *end_suffix, *end_span);
+                self.unify(value_type, start_type, *start_span);
+                self.unify(value_type, end_type, *end_span);
+                let start = signed_pattern_integer(*start, *start_negative);
+                let end = signed_pattern_integer(*end, *end_negative);
+                let empty = match kind {
+                    crate::ast::RangeKind::Exclusive => start >= end,
+                    crate::ast::RangeKind::Inclusive => start > end,
+                };
+                if empty {
+                    self.error("integer range pattern matches no values", span);
+                    return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
+                }
+                CheckedPattern::new(PatternCoverage::IntRange {
+                    start,
+                    end,
+                    kind: *kind,
                 })
             }
             MatchPattern::FileVersion(components) => {
@@ -2206,6 +2256,14 @@ impl Checker {
         let u32_type = self.core_type(crate::stdlib::CoreTypeId::U32);
         self.expr(index, Some(u32_type));
         Some(element)
+    }
+}
+
+fn signed_pattern_integer(value: u64, negative: bool) -> i128 {
+    if negative && value != 0 {
+        -i128::from(value)
+    } else {
+        i128::from(value)
     }
 }
 

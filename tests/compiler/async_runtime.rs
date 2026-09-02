@@ -354,6 +354,38 @@ fn multi_provider_state_selects_the_applicable_provider_before_lifecycle_code() 
 }
 
 #[test]
+fn integer_range_patterns_execute_with_signed_and_inclusive_endpoints() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn classify(value: i8) -> String {
+            return match value {
+                -128..<-10 => "low",
+                -10..=10 => "middle",
+                11..=127 => "high",
+            }
+        }
+
+        onAttach {
+            for value in [-128i8, -11, -10, 0, 10, 11, 127] {
+                print(classify(value))
+            }
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        ["low", "low", "middle", "middle", "middle", "high", "high"]
+    );
+}
+
+#[test]
 fn attempt_scoped_storage_is_hidden_until_start_and_cleared_after_reset() {
     let source = r#"
         let label

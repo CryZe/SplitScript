@@ -4,7 +4,7 @@
 
 use super::{
     BinaryOp, DelimiterDepth, Diagnostic, EnumReference, Expr, ExprKind, InterpolatedPart,
-    MatchArm, MatchPattern, Parser, PatternBinding, Span, TokenKind, TypeRef, UnaryOp,
+    MatchArm, MatchPattern, Parser, PatternBinding, RangeKind, Span, TokenKind, TypeRef, UnaryOp,
     ambiguous_range_diagnostic, assignment_operator, parse_integer,
 };
 use crate::ast::{PatternNode, StructLiteralField, StructPatternField};
@@ -1212,7 +1212,7 @@ impl Parser<'_> {
     }
 
     fn match_pattern(&mut self, allow_binding: bool) -> Result<PatternNode, Diagnostic> {
-        let first = self.match_pattern_atom(allow_binding)?;
+        let first = self.match_range_pattern(allow_binding)?;
         if self.eat(&TokenKind::Or).is_none() {
             return Ok(first);
         }
@@ -1220,7 +1220,7 @@ impl Parser<'_> {
         let pattern_start = first.span;
         let mut alternatives = vec![first];
         loop {
-            alternatives.push(self.match_pattern_atom(allow_binding)?);
+            alternatives.push(self.match_range_pattern(allow_binding)?);
             if self.eat(&TokenKind::Or).is_none() {
                 break;
             }
@@ -1248,6 +1248,75 @@ impl Parser<'_> {
         Ok(PatternNode {
             id: self.new_pattern_id(),
             kind: MatchPattern::Alternation(alternatives),
+            span,
+        })
+    }
+
+    /// Parses the range layer between atomic patterns and `|`. Keeping this
+    /// precedence explicit makes `1..<5 | 10..=20` a union of two ranges and
+    /// prevents expression precedence from leaking into the pattern grammar.
+    fn match_range_pattern(&mut self, allow_binding: bool) -> Result<PatternNode, Diagnostic> {
+        let start = self.match_pattern_atom(allow_binding)?;
+        if !matches!(
+            self.current().kind,
+            TokenKind::DotDot | TokenKind::DotDotLt | TokenKind::DotDotEq
+        ) {
+            return Ok(start);
+        }
+
+        let operator = self.bump().clone();
+        let kind = match operator.kind {
+            TokenKind::DotDotLt => RangeKind::Exclusive,
+            TokenKind::DotDotEq => RangeKind::Inclusive,
+            TokenKind::DotDot => return Err(ambiguous_range_diagnostic(operator.span)),
+            _ => unreachable!(),
+        };
+        let end = self.match_pattern_atom(false)?;
+        if matches!(
+            self.current().kind,
+            TokenKind::DotDot | TokenKind::DotDotLt | TokenKind::DotDotEq
+        ) {
+            return Err(self.error(
+                "range patterns cannot be chained; combine separate ranges with `|` instead",
+            ));
+        }
+        let span = start.span.join(end.span);
+        let MatchPattern::Int {
+            value: start_value,
+            negative: start_negative,
+            suffix: start_suffix,
+        } = start.kind
+        else {
+            return Err(Diagnostic::new(
+                "an integer range pattern requires an integer literal lower bound",
+                start.span,
+            ));
+        };
+        let MatchPattern::Int {
+            value: end_value,
+            negative: end_negative,
+            suffix: end_suffix,
+        } = end.kind
+        else {
+            return Err(Diagnostic::new(
+                "an integer range pattern requires an integer literal upper bound",
+                end.span,
+            ));
+        };
+        Ok(PatternNode {
+            id: self.new_pattern_id(),
+            kind: MatchPattern::IntRange {
+                start: start_value,
+                start_negative,
+                start_suffix,
+                start_span: start.span,
+                end: end_value,
+                end_negative,
+                end_suffix,
+                end_span: end.span,
+                kind,
+                operator_span: operator.span,
+            },
             span,
         })
     }

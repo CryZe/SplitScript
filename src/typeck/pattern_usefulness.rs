@@ -4,6 +4,26 @@ use crate::{inference::Type, semantic::ResolvedEnumVariantId, stdlib::StdlibType
 
 use super::Checker;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct IntegerInterval {
+    start: i128,
+    end: i128,
+}
+
+impl IntegerInterval {
+    fn intersect(self, other: Self) -> Option<Self> {
+        let interval = Self {
+            start: self.start.max(other.start),
+            end: self.end.min(other.end),
+        };
+        (interval.start <= interval.end).then_some(interval)
+    }
+
+    fn contains(self, other: Self) -> bool {
+        self.start <= other.start && other.end <= self.end
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum PatternCoverage {
     Irrefutable,
@@ -23,6 +43,11 @@ pub(super) enum PatternCoverage {
     Int {
         value: u64,
         negative: bool,
+    },
+    IntRange {
+        start: i128,
+        end: i128,
+        kind: crate::ast::RangeKind,
     },
     FileVersion([u16; 4]),
     OptionNone,
@@ -59,6 +84,9 @@ impl PatternCoverage {
             Self::String(value) => format!("{value:?}"),
             Self::Int { value, negative } => {
                 format!("{}{value}", if *negative { "-" } else { "" })
+            }
+            Self::IntRange { start, end, kind } => {
+                format!("{start}{}{end}", kind.operator())
             }
             Self::FileVersion(parts) => {
                 format!("v\"{}.{}.{}.{}\"", parts[0], parts[1], parts[2], parts[3])
@@ -147,6 +175,7 @@ impl PatternConstructor {
             PatternCoverage::ResultError(_) => Some(Self::ResultError),
             PatternCoverage::Array(elements) => Some(Self::Array(elements.len())),
             PatternCoverage::Irrefutable
+            | PatternCoverage::IntRange { .. }
             | PatternCoverage::Alternation(_)
             | PatternCoverage::Invalid(_) => None,
         }
@@ -459,6 +488,164 @@ impl Checker {
         }
     }
 
+    fn integer_pattern_domain(&mut self, ty: Type) -> Option<IntegerInterval> {
+        let ty = self.shallow_type(ty);
+        let bounds = [
+            (
+                crate::stdlib::CoreTypeId::I8,
+                i8::MIN as i128,
+                i8::MAX as i128,
+            ),
+            (crate::stdlib::CoreTypeId::U8, 0, u8::MAX as i128),
+            (
+                crate::stdlib::CoreTypeId::I16,
+                i16::MIN as i128,
+                i16::MAX as i128,
+            ),
+            (crate::stdlib::CoreTypeId::U16, 0, u16::MAX as i128),
+            (
+                crate::stdlib::CoreTypeId::I32,
+                i32::MIN as i128,
+                i32::MAX as i128,
+            ),
+            (crate::stdlib::CoreTypeId::U32, 0, u32::MAX as i128),
+            (
+                crate::stdlib::CoreTypeId::I64,
+                i64::MIN as i128,
+                i64::MAX as i128,
+            ),
+            (crate::stdlib::CoreTypeId::U64, 0, u64::MAX as i128),
+            (crate::stdlib::CoreTypeId::Address, 0, u64::MAX as i128),
+        ];
+        for (core, start, end) in bounds {
+            if ty == self.core_type(core) {
+                return Some(IntegerInterval { start, end });
+            }
+        }
+        self.inference.is_integer(ty).then_some(IntegerInterval {
+            start: -(u64::MAX as i128),
+            end: u64::MAX as i128,
+        })
+    }
+
+    fn integer_interval(
+        &self,
+        pattern: &PatternCoverage,
+        domain: IntegerInterval,
+    ) -> Option<IntegerInterval> {
+        let interval = match pattern {
+            PatternCoverage::Irrefutable => domain,
+            PatternCoverage::Int { value, negative } => {
+                let value = if *negative && *value != 0 {
+                    -i128::from(*value)
+                } else {
+                    i128::from(*value)
+                };
+                IntegerInterval {
+                    start: value,
+                    end: value,
+                }
+            }
+            PatternCoverage::IntRange { start, end, kind } => IntegerInterval {
+                start: *start,
+                end: match kind {
+                    crate::ast::RangeKind::Exclusive => end - 1,
+                    crate::ast::RangeKind::Inclusive => *end,
+                },
+            },
+            _ => return None,
+        };
+        interval.intersect(domain)
+    }
+
+    fn integer_interval_pattern(interval: IntegerInterval) -> PatternCoverage {
+        if interval.start == interval.end {
+            let negative = interval.start < 0;
+            let value = if negative {
+                (-interval.start) as u64
+            } else {
+                interval.start as u64
+            };
+            PatternCoverage::Int { value, negative }
+        } else {
+            PatternCoverage::IntRange {
+                start: interval.start,
+                end: interval.end,
+                kind: crate::ast::RangeKind::Inclusive,
+            }
+        }
+    }
+
+    fn specialize_integer_matrix(
+        &self,
+        matrix: &[Vec<PatternCoverage>],
+        cell: IntegerInterval,
+        domain: IntegerInterval,
+    ) -> Vec<Vec<PatternCoverage>> {
+        let mut specialized = Vec::new();
+        for row in matrix {
+            let Some((head, tail)) = row.split_first() else {
+                continue;
+            };
+            let mut alternatives = Vec::new();
+            Self::expand_pattern_alternatives(head, &mut alternatives);
+            if alternatives.into_iter().any(|alternative| {
+                self.integer_interval(&alternative, domain)
+                    .is_some_and(|interval| interval.contains(cell))
+            }) {
+                specialized.push(tail.to_vec());
+            }
+        }
+        specialized
+    }
+
+    fn useful_integer_witness(
+        &mut self,
+        matrix: &[Vec<PatternCoverage>],
+        candidate: IntegerInterval,
+        tail: &[PatternCoverage],
+        remaining_types: &[Type],
+        domain: IntegerInterval,
+    ) -> Option<Vec<PatternCoverage>> {
+        let mut boundaries = vec![candidate.start, candidate.end + 1];
+        for row in matrix {
+            let Some(head) = row.first() else {
+                continue;
+            };
+            let mut alternatives = Vec::new();
+            Self::expand_pattern_alternatives(head, &mut alternatives);
+            for alternative in alternatives {
+                if let Some(interval) = self
+                    .integer_interval(&alternative, domain)
+                    .and_then(|interval| interval.intersect(candidate))
+                {
+                    boundaries.push(interval.start);
+                    boundaries.push(interval.end + 1);
+                }
+            }
+        }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+
+        for pair in boundaries.windows(2) {
+            let cell = IntegerInterval {
+                start: pair[0],
+                end: pair[1] - 1,
+            };
+            if cell.start > cell.end {
+                continue;
+            }
+            let specialized = self.specialize_integer_matrix(matrix, cell, domain);
+            if let Some(mut witness) =
+                self.useful_pattern_witness(&specialized, tail, remaining_types)
+            {
+                witness.insert(0, Self::integer_interval_pattern(cell));
+                return Some(witness);
+            }
+        }
+        None
+    }
+
     fn useful_pattern_witness(
         &mut self,
         matrix: &[Vec<PatternCoverage>],
@@ -481,6 +668,12 @@ impl Checker {
         }
         if matches!(head, PatternCoverage::Invalid(_)) {
             return Some(candidate.to_vec());
+        }
+
+        if let Some(domain) = self.integer_pattern_domain(ty)
+            && let Some(interval) = self.integer_interval(head, domain)
+        {
+            return self.useful_integer_witness(matrix, interval, tail, remaining_types, domain);
         }
 
         if let Some(constructor) = PatternConstructor::of(head) {

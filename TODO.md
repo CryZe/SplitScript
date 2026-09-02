@@ -1043,11 +1043,17 @@ remaining work is product hardening and distribution.
   recovering semantic snapshot, recognizes half-written arms and delimiters,
   narrows qualified enums, omits already-used struct fields, and hands one
   compiler-owned candidate list to every editor frontend.
-- [ ] Design and implement explicit range patterns using the language's
-  unambiguous `..<` and `..=` bounds. Decide open-ended forms, binding and
-  alternation precedence, integer/character applicability, unreachable-range
-  diagnostics, and how the usefulness analysis represents intervals without
-  enumerating them before choosing syntax or semantics.
+- [x] Add closed integer range patterns using the language's unambiguous `..<`
+  and `..=` bounds. Literal bounds, including negative signed literals, bind
+  more tightly than alternation. Use interval-based usefulness analysis rather
+  than enumerating values, so finite integer domains can be proven exhaustive
+  and fully covered ranges become unreachable while partial overlaps remain
+  useful. Reject empty, reversed, bare-`..`, non-integer, and chained forms;
+  cover code generation, completion, hover documentation, and language guides.
+- [ ] Revisit range-pattern breadth when a concrete use case needs it:
+  open-ended or character intervals and general `value @ pattern` binding.
+  Keep these orthogonal to the closed integer interval semantics rather than
+  overloading `..` or adding a range-specific binding special case.
 - [ ] Design and implement array rest patterns for fixed and growable arrays.
   Cover prefix/suffix forms such as `[first, ..]`, whether a rest value can be
   bound and with what type, exact-length interactions, code generation, and

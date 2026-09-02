@@ -1395,6 +1395,77 @@ state {
     }
 
     #[test]
+    fn integer_range_patterns_bind_more_tightly_than_alternation() {
+        let source = r#"
+            state "game.exe" {}
+            fn classify(value: i16) -> bool {
+                return match value {
+                    -10i16..<0 | 10..=20 => true,
+                    _ => false,
+                }
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let Stmt::Expression(expression) = &program.functions[0].body.statements[0] else {
+            panic!("expected a return expression")
+        };
+        let ExprKind::Return(Some(returned)) = &expression.kind else {
+            panic!("expected return")
+        };
+        let ExprKind::Match { arms, .. } = &returned.kind else {
+            panic!("expected match")
+        };
+        let MatchPattern::Alternation(alternatives) = &arms[0].pattern else {
+            panic!("expected range alternatives")
+        };
+        assert_eq!(alternatives.len(), 2);
+        assert!(matches!(
+            alternatives[0].kind,
+            MatchPattern::IntRange {
+                start: 10,
+                start_negative: true,
+                end: 0,
+                end_negative: false,
+                kind: RangeKind::Exclusive,
+                ..
+            }
+        ));
+        assert!(matches!(
+            alternatives[1].kind,
+            MatchPattern::IntRange {
+                start: 10,
+                start_negative: false,
+                end: 20,
+                end_negative: false,
+                kind: RangeKind::Inclusive,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn range_patterns_require_explicit_integer_bounds() {
+        for (source, expected) in [
+            (
+                r#"state "game.exe" {} fn bad(value: i32) { match value { 0..10 => 1, _ => 0 } }"#,
+                "upper bound is included",
+            ),
+            (
+                r#"state "game.exe" {} fn bad(value: bool) { match value { false..<true => 1, _ => 0 } }"#,
+                "integer literal lower bound",
+            ),
+            (
+                r#"state "game.exe" {} fn bad(value: i32) { match value { 0..<10..<20 => 1, _ => 0 } }"#,
+                "cannot be chained",
+            ),
+        ] {
+            let diagnostic = parse(source, lex(source, SyntaxMode::Program).unwrap())
+                .expect_err("invalid range pattern should fail during parsing");
+            assert!(diagnostic.message.contains(expected), "{diagnostic:#?}");
+        }
+    }
+
+    #[test]
     fn array_indexes_are_postfix_expressions_and_can_be_chained() {
         let source = r#"
             state "game.exe" {}

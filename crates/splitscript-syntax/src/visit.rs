@@ -497,6 +497,19 @@ pub fn walk_pattern<'ast, V: Visitor<'ast>>(visitor: &mut V, pattern: &'ast Matc
     {
         visitor.visit_type_ref(suffix);
     }
+    if let MatchPattern::IntRange {
+        start_suffix,
+        end_suffix,
+        ..
+    } = pattern
+    {
+        if let Some(suffix) = start_suffix {
+            visitor.visit_type_ref(suffix);
+        }
+        if let Some(suffix) = end_suffix {
+            visitor.visit_type_ref(suffix);
+        }
+    }
     match pattern {
         MatchPattern::Struct { fields, .. } => {
             for field in fields {
@@ -978,6 +991,19 @@ pub fn walk_pattern_mut<F: Folder>(folder: &mut F, pattern: &mut MatchPattern) {
     } = pattern
     {
         folder.fold_type_ref(suffix);
+    }
+    if let MatchPattern::IntRange {
+        start_suffix,
+        end_suffix,
+        ..
+    } = pattern
+    {
+        if let Some(suffix) = start_suffix {
+            folder.fold_type_ref(suffix);
+        }
+        if let Some(suffix) = end_suffix {
+            folder.fold_type_ref(suffix);
+        }
     }
     match pattern {
         MatchPattern::Struct { fields, .. } => {

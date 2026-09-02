@@ -414,6 +414,25 @@ fn add_value_patterns(
                 Some("Matches one integer value, including a negative signed value.".to_owned()),
                 None,
             ));
+            builder.add(pattern_item(
+                "exclusive integer range",
+                "${1:0}..<${2:10}",
+                true,
+                &detail,
+                Some(
+                    "Matches integers from the lower bound up to, but excluding, the upper bound."
+                        .to_owned(),
+                ),
+                None,
+            ));
+            builder.add(pattern_item(
+                "inclusive integer range",
+                "${1:0}..=${2:10}",
+                true,
+                &detail,
+                Some("Matches integers from the lower bound through the upper bound.".to_owned()),
+                None,
+            ));
         }
         TypeKind::Standard(StdlibTypeId::String) => builder.add(pattern_item(
             "string literal",
@@ -647,6 +666,32 @@ fn inspect(value: bool) {
         }
         for expression in ["print", "return", "String", "while"] {
             assert!(!labels.contains(&expression.to_owned()), "{labels:#?}");
+        }
+    }
+
+    #[test]
+    fn integer_pattern_completion_offers_both_explicit_range_shapes() {
+        let items = completions(
+            r#"
+state "game.exe" {}
+fn inspect(value: i16) {
+    return match value {
+        <|>
+    }
+}
+"#,
+        )
+        .items;
+        for (label, insert) in [
+            ("exclusive integer range", "${1:0}..<${2:10}"),
+            ("inclusive integer range", "${1:0}..=${2:10}"),
+        ] {
+            let item = items
+                .iter()
+                .find(|item| item.label == label)
+                .unwrap_or_else(|| panic!("missing `{label}` in {items:#?}"));
+            assert_eq!(item.insert_text, insert);
+            assert!(item.is_snippet);
         }
     }
 

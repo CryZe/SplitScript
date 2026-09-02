@@ -349,6 +349,13 @@ pub enum LoweredPattern {
         value: u64,
         negative: bool,
     },
+    IntRange {
+        start: u64,
+        start_negative: bool,
+        end: u64,
+        end_negative: bool,
+        kind: crate::ast::RangeKind,
+    },
     FileVersion([u16; 4]),
     OptionNone(OptionTypeId),
     OptionSome {
@@ -1246,6 +1253,20 @@ fn lower_pattern(pattern: &TypedPattern, resolution: &hir::ResolvedPattern) -> L
         } => LoweredPattern::Int {
             value: *value,
             negative: *negative,
+        },
+        TypedPattern::IntRange {
+            start,
+            start_negative,
+            end,
+            end_negative,
+            kind,
+            ..
+        } => LoweredPattern::IntRange {
+            start: *start,
+            start_negative: *start_negative,
+            end: *end,
+            end_negative: *end_negative,
+            kind: *kind,
         },
         TypedPattern::FileVersion(components) => LoweredPattern::FileVersion(*components),
         TypedPattern::None => {

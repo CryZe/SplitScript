@@ -172,6 +172,123 @@ fn ranges_require_matching_integer_bounds() {
 }
 
 #[test]
+fn integer_range_patterns_cover_finite_domains_without_enumeration() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn unsigned(value: u8) -> bool {
+                return match value {
+                    0..<128 => false,
+                    128..=255 => true,
+                }
+            }
+
+            fn signed(value: i8) -> String {
+                return match value {
+                    -128..<-10 => "low",
+                    -10..=10 => "middle",
+                    11..=127 => "high",
+                }
+            }
+
+            fn nested(value: u8?) -> bool {
+                return match value {
+                    Some(0..<128) => false,
+                    Some(128..=255) => true,
+                    None => false,
+                }
+            }
+
+            fn paired(value: [u8; 2]) -> u8 {
+                return match value {
+                    [0..<128, 0..<128] => 0,
+                    [0..<128, 128..=255] => 1,
+                    [128..=255, 0..<128] => 2,
+                    [128..=255, 128..=255] => 3,
+                }
+            }
+        "#,
+    )
+    .expect("complete integer interval partitions should be exhaustive recursively");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("integer range pattern lowering should produce valid Wasm");
+}
+
+#[test]
+fn integer_range_usefulness_distinguishes_partial_and_complete_overlap() {
+    splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn partial(value: i16) -> u8 {
+                return match value {
+                    0..<10 => 1,
+                    5..<15 => 2,
+                    _ => 3,
+                }
+            }
+        "#,
+    )
+    .expect("a partially overlapping range still covers new values");
+
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn covered(value: i16) -> u8 {
+                return match value {
+                    0..<10 => 1,
+                    2..=5 => 2,
+                    _ => 3,
+                }
+            }
+        "#,
+    )
+    .expect_err("a completely covered range should be unreachable");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("unreachable match arm `2..=5`")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn integer_range_patterns_report_empty_intervals_and_concrete_gaps() {
+    for pattern in ["5..<5", "6..<5", "6..=5"] {
+        let source = format!(
+            "state \"game.exe\" {{}} fn bad(value: i16) -> bool {{ return match value {{ {pattern} => true, _ => false }} }}"
+        );
+        let diagnostics = splitscript::compile(&source)
+            .expect_err("an empty or reversed range pattern should be rejected");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("integer range pattern matches no values")),
+            "{diagnostics:#?}"
+        );
+    }
+
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn missingMaximum(value: u8) -> bool {
+                return match value {
+                    0..<255 => false,
+                }
+            }
+        "#,
+    )
+    .expect_err("the maximum u8 value remains uncovered");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("non-exhaustive integer match: missing `255`")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn suspending_range_loops_preserve_iteration_state() {
     let wasm = splitscript::compile(
         r#"

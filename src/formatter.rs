@@ -2190,11 +2190,18 @@ whileAttached {
     fn keeps_range_operators_compact_in_values_and_types() {
         let source = r#"state "game.exe"{}
 fn visit(values:u16 ..< u16?){for value in values else 0u16 ..< 0{print(value)}}
+fn classify(value:i16)->bool{return match value{-10 ..< 0|10 ..= 20=>true,_=>false}}
 whileAttached{let values=1u16 ..= 3;visit(0u16+1 ..< 8/2);for value in values{print(value)}}"#;
         let expected = r#"state "game.exe" {}
 fn visit(values: u16..<u16?) {
     for value in values else 0u16..<0 {
         print(value)
+    }
+}
+fn classify(value: i16) -> bool {
+    return match value {
+        -10..<0 | 10..=20 => true,
+        _ => false,
     }
 }
 whileAttached {

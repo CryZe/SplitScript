@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::{
-    ast::{Expr, ExprKind, Program, Span},
+    ast::{Expr, ExprKind, MatchPattern, Program, RangeKind, Span},
     database::{
         CompilerDatabase, DefinitionTarget, SemanticQueryResult, SemanticSnapshot,
         SourceDefinition, SourceDefinitionId,
@@ -140,6 +140,19 @@ pub(crate) fn hover(
             span: token.span,
             markdown,
             documentation_uri: None,
+        }));
+    }
+    if let Some(kind) = range_pattern_kind_at(database.recovering_parse()?.syntax(), offset) {
+        let catalog = LanguageCatalog::new();
+        let item = catalog.item(crate::language::LanguageItemId::Range);
+        let form = match kind {
+            RangeKind::Exclusive => "start..<end",
+            RangeKind::Inclusive => "start..=end",
+        };
+        return Ok(Some(HoverInfo {
+            span: token.span,
+            markdown: render_language_hover_with_form(item, Some(form)),
+            documentation_uri: Some(language_item_uri(item.id)),
         }));
     }
     if let Some(constructor) = range_constructor_for_token(&token.kind)
@@ -415,6 +428,35 @@ fn range_constructor_for_token(kind: &TokenKind) -> Option<StdlibTypeConstructor
         TokenKind::DotDotEq => Some(StdlibTypeConstructorId::InclusiveRange),
         _ => None,
     }
+}
+
+fn range_pattern_kind_at(program: &Program, offset: usize) -> Option<RangeKind> {
+    struct Finder {
+        offset: usize,
+        kind: Option<RangeKind>,
+    }
+
+    impl<'ast> Visitor<'ast> for Finder {
+        fn visit_pattern(&mut self, pattern: &'ast MatchPattern) {
+            if let MatchPattern::IntRange {
+                kind,
+                operator_span,
+                ..
+            } = pattern
+                && operator_span.start <= self.offset
+                && self.offset < operator_span.end
+            {
+                self.kind = Some(*kind);
+            }
+            if self.kind.is_none() {
+                visit::walk_pattern(self, pattern);
+            }
+        }
+    }
+
+    let mut finder = Finder { offset, kind: None };
+    finder.visit_program(program);
+    finder.kind
 }
 
 fn provider_value_for_resolution(
@@ -2120,6 +2162,34 @@ fn ranges() {
             assert_eq!(
                 expression_hover.documentation_uri.as_deref(),
                 Some(expected_uri)
+            );
+        }
+    }
+
+    #[test]
+    fn range_pattern_operator_hover_explains_pattern_semantics() {
+        let source = r#"state "game.exe" {}
+fn classify(value: i16) -> bool {
+    return match value {
+        -10..<0 | 10..=20 => true,
+        _ => false,
+    }
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        for (operator, form, endpoint) in [
+            ("..<", "start..<end", "excludes the upper endpoint"),
+            ("..=", "start..=end", "includes the upper endpoint"),
+        ] {
+            let offset = source.find(operator).unwrap() + 1;
+            let hover = database
+                .hover(offset)
+                .unwrap()
+                .expect("range pattern operator should have hover documentation");
+            assert!(hover.markdown.contains(form), "{}", hover.markdown);
+            assert!(hover.markdown.contains(endpoint), "{}", hover.markdown);
+            assert_eq!(
+                hover.documentation_uri.as_deref(),
+                Some("/language/range.md")
             );
         }
     }

@@ -327,26 +327,6 @@ abi_catalog! {
         "Reads the WASI monotonic clock in nanoseconds."
     ),
     import!(
-        WasiEnvironSizesGet,
-        in "wasi_snapshot_preview1",
-        "environ_sizes_get",
-        &[output("count_pointer"), output("buffer_size_pointer")],
-        &[value("errno", AbiType::I32)],
-        FILESYSTEM_READ,
-        "Writes the environment entry count and total byte length to guest memory.",
-        "Sizes the WASI environment used to resolve a relative file path."
-    ),
-    import!(
-        WasiEnvironGet,
-        in "wasi_snapshot_preview1",
-        "environ_get",
-        &[output("entries_pointer"), output("buffer_pointer")],
-        &[value("errno", AbiType::I32)],
-        FILESYSTEM_READ,
-        "Writes environment pointers and NUL-terminated bytes to guest memory.",
-        "Reads the WASI environment used to locate the loaded autosplitter."
-    ),
-    import!(
         WasiFdPrestatGet,
         in "wasi_snapshot_preview1",
         "fd_prestat_get",

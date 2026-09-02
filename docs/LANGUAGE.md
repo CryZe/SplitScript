@@ -1477,7 +1477,12 @@ comments and do not become GUI text.
 A boolean setting infers its type from `true` or `false`. A `choice` is backed
 by a payloadless enum, so matching it is exhaustive and type checked. A `file`
 setting is a `String` and can declare named glob filters, an unnamed fallback
-filter, and MIME filters.
+filter, and MIME filters. A selected file is stored as an absolute path in the
+runtime's portable filesystem namespace and can be passed directly to
+`File.readAllBytes` or `File.readAllText`. The host filesystem is currently
+mounted read-only below `/mnt`: Windows `C:\foo\bar.txt` becomes
+`/mnt/c/foo/bar.txt`, while Linux or macOS `/foo/bar.txt` becomes
+`/mnt/foo/bar.txt`.
 
 The optional `key "host-key"` clause gives a setting the exact string key used
 in the host settings map. Without it, the source identifier is also the host
@@ -2039,9 +2044,11 @@ rather than an alias for `u64`, preventing a module size or counter from being
 passed where a target pointer is required.
 
 `Module` values retain the identity used to discover them. In addition to
-`address` and `size`, `module.path()` returns the runtime's portable,
-host-provided filesystem path as `String!`. The operation is fallible because
-the host may not expose a path; it does not provide general filesystem access.
+`address` and `size`, `module.path()` returns the runtime's absolute portable
+filesystem path as `String!`. Windows paths map below `/mnt/<drive>`; Linux and
+macOS paths gain the `/mnt` prefix. The operation is fallible because the host
+may not expose a path. A returned path can be passed directly to
+`File.readAllBytes` or `File.readAllText`.
 
 ```text
 let executable = await process.mainModule()

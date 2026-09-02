@@ -12,9 +12,6 @@ use super::super::memory_plan::RuntimeScratch;
 use super::super::{GcLayout, Type, array_value, imports::Abi, memarg};
 
 const MAX_PATH_BYTES: i32 = 65_536;
-const MAX_ENVIRONMENT_BYTES: i32 = 65_536;
-const MAX_ENVIRONMENT_ENTRIES: i32 = 256;
-const ENVIRONMENT_POINTER_BYTES: i32 = MAX_ENVIRONMENT_ENTRIES * 4;
 const FILE_READ_CHUNK: i32 = 65_536;
 const FIRST_PREOPEN_DESCRIPTOR: i32 = 3;
 const MAX_PREOPEN_DESCRIPTOR: i32 = 1_024;
@@ -27,37 +24,27 @@ pub(super) fn compile_open_read_only(
     scratch: RuntimeScratch,
 ) -> Function {
     let path_start = scratch.host_strings_start;
-    let auxiliary_start = path_start + MAX_PATH_BYTES;
-    let environment_start = auxiliary_start + ENVIRONMENT_POINTER_BYTES;
-    let staging_end = environment_start + MAX_ENVIRONMENT_BYTES;
-    let count_pointer = scratch.abi_read.start();
-    let environment_size_pointer = scratch.abi_read.at(4);
-    let prestat_pointer = scratch.abi_read.at(8);
+    let preopen_path_start = path_start + MAX_PATH_BYTES;
+    let staging_end = preopen_path_start + MAX_PATH_BYTES;
+    let prestat_pointer = scratch.abi_read.at(4);
     let opened_descriptor_pointer = scratch.abi_read.start();
     let string_type = gc.standard_index(StdlibTypeId::String);
 
     // Parameter: path. All remaining locals are i32 bookkeeping values.
-    let mut function = Function::new([(19, ValType::I32)]);
+    let mut function = Function::new([(12, ValType::I32)]);
     let path = 0;
     let path_length = 1;
     let index = 2;
-    let environment_count = 3;
-    let environment_size = 4;
-    let environment_index = 5;
-    let entry_pointer = 6;
-    let script_path_start = 7;
-    let script_path_length = 8;
-    let directory_length = 9;
-    let resolved_length = 10;
-    let descriptor = 11;
-    let preopen_length = 12;
-    let best_descriptor = 13;
-    let best_prefix_length = 14;
-    let compare_index = 15;
-    let matches = 16;
-    let required_pages = 17;
-    let relative_pointer = 18;
-    let relative_length = 19;
+    let resolved_length = 3;
+    let descriptor = 4;
+    let preopen_length = 5;
+    let best_descriptor = 6;
+    let best_prefix_length = 7;
+    let compare_index = 8;
+    let matches = 9;
+    let required_pages = 10;
+    let relative_pointer = 11;
+    let relative_length = 12;
 
     emit_ensure_linear_capacity_for_open(&mut function, staging_end, required_pages);
     function
@@ -71,23 +58,25 @@ pub(super) fn compile_open_read_only(
     emit_open_failure(&mut function);
     function.instruction(&Instruction::End);
 
-    // Absolute portable WASI paths can be copied directly. Relative paths are
-    // resolved beside SCRIPT_PATH, which the runtime already publishes through
-    // the Preview 1 environment.
+    // The host exposes native files only through its absolute portable WASI
+    // namespace. There is no stable working directory: normal runtime clients
+    // do not provide the autosplitter's path to the guest.
     function
         .instruction(&Instruction::LocalGet(path_length))
         .instruction(&Instruction::I32Eqz)
-        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
-        .instruction(&Instruction::I32Const(0))
-        .instruction(&Instruction::Else)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_open_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(path))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::ArrayGetU(string_type))
         .instruction(&Instruction::I32Const(b'/' as i32))
-        .instruction(&Instruction::I32Eq)
-        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Ne)
         .instruction(&Instruction::If(BlockType::Empty));
+    emit_open_failure(&mut function);
+    function.instruction(&Instruction::End);
     emit_copy_string_to_memory(
         &mut function,
         path,
@@ -98,236 +87,7 @@ pub(super) fn compile_open_read_only(
     );
     function
         .instruction(&Instruction::LocalGet(path_length))
-        .instruction(&Instruction::LocalSet(resolved_length))
-        .instruction(&Instruction::Else);
-
-    function
-        .instruction(&Instruction::I32Const(count_pointer))
-        .instruction(&Instruction::I32Const(environment_size_pointer))
-        .instruction(&Instruction::Call(
-            abi.function(AbiImportId::WasiEnvironSizesGet),
-        ))
-        .instruction(&Instruction::If(BlockType::Empty));
-    emit_open_failure(&mut function);
-    function
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::I32Const(count_pointer))
-        .instruction(&Instruction::I32Load(memarg()))
-        .instruction(&Instruction::LocalTee(environment_count))
-        .instruction(&Instruction::I32Const(MAX_ENVIRONMENT_ENTRIES))
-        .instruction(&Instruction::I32GtU)
-        .instruction(&Instruction::I32Const(environment_size_pointer))
-        .instruction(&Instruction::I32Load(memarg()))
-        .instruction(&Instruction::LocalTee(environment_size))
-        .instruction(&Instruction::I32Const(MAX_ENVIRONMENT_BYTES))
-        .instruction(&Instruction::I32GtU)
-        .instruction(&Instruction::I32Or)
-        .instruction(&Instruction::If(BlockType::Empty));
-    emit_open_failure(&mut function);
-    function
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::I32Const(auxiliary_start))
-        .instruction(&Instruction::I32Const(environment_start))
-        .instruction(&Instruction::Call(
-            abi.function(AbiImportId::WasiEnvironGet),
-        ))
-        .instruction(&Instruction::If(BlockType::Empty));
-    emit_open_failure(&mut function);
-    function.instruction(&Instruction::End);
-
-    // Locate the exact SCRIPT_PATH entry. The runtime currently supplies at
-    // most this one variable, but the scan remains correct if more are added.
-    function
-        .instruction(&Instruction::Block(BlockType::Empty))
-        .instruction(&Instruction::Loop(BlockType::Empty))
-        .instruction(&Instruction::LocalGet(environment_index))
-        .instruction(&Instruction::LocalGet(environment_count))
-        .instruction(&Instruction::I32GeU)
-        .instruction(&Instruction::BrIf(1))
-        .instruction(&Instruction::I32Const(auxiliary_start))
-        .instruction(&Instruction::LocalGet(environment_index))
-        .instruction(&Instruction::I32Const(4))
-        .instruction(&Instruction::I32Mul)
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::I32Load(memarg()))
-        .instruction(&Instruction::LocalSet(entry_pointer))
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::LocalSet(matches));
-    for (offset, byte) in b"SCRIPT_PATH=".iter().copied().enumerate() {
-        function
-            .instruction(&Instruction::LocalGet(entry_pointer))
-            .instruction(&Instruction::I32Load8U(wasm_encoder::MemArg {
-                offset: offset as u64,
-                align: 0,
-                memory_index: 0,
-            }))
-            .instruction(&Instruction::I32Const(byte as i32))
-            .instruction(&Instruction::I32Ne)
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::I32Const(0))
-            .instruction(&Instruction::LocalSet(matches))
-            .instruction(&Instruction::End);
-    }
-    function
-        .instruction(&Instruction::LocalGet(matches))
-        .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::LocalGet(entry_pointer))
-        .instruction(&Instruction::I32Const(12))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::LocalSet(script_path_start))
-        .instruction(&Instruction::Br(2))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::LocalGet(environment_index))
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::LocalSet(environment_index))
-        .instruction(&Instruction::Br(0))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::LocalGet(script_path_start))
-        .instruction(&Instruction::I32Eqz)
-        .instruction(&Instruction::If(BlockType::Empty));
-    emit_open_failure(&mut function);
-    function.instruction(&Instruction::End);
-
-    // Measure the NUL-terminated value without leaving the environment buffer.
-    function
-        .instruction(&Instruction::Block(BlockType::Empty))
-        .instruction(&Instruction::Loop(BlockType::Empty))
-        .instruction(&Instruction::LocalGet(script_path_start))
-        .instruction(&Instruction::LocalGet(script_path_length))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::I32Const(environment_start))
-        .instruction(&Instruction::LocalGet(environment_size))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::I32GeU)
-        .instruction(&Instruction::If(BlockType::Empty));
-    emit_open_failure(&mut function);
-    function
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::LocalGet(script_path_start))
-        .instruction(&Instruction::LocalGet(script_path_length))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::I32Load8U(memarg()))
-        .instruction(&Instruction::I32Eqz)
-        .instruction(&Instruction::BrIf(1))
-        .instruction(&Instruction::LocalGet(script_path_length))
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::LocalSet(script_path_length))
-        .instruction(&Instruction::Br(0))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::LocalGet(script_path_length))
-        .instruction(&Instruction::I32Eqz)
-        .instruction(&Instruction::If(BlockType::Empty));
-    emit_open_failure(&mut function);
-    function
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::LocalGet(script_path_start))
-        .instruction(&Instruction::I32Load8U(memarg()))
-        .instruction(&Instruction::I32Const(b'/' as i32))
-        .instruction(&Instruction::I32Ne)
-        .instruction(&Instruction::If(BlockType::Empty));
-    emit_open_failure(&mut function);
-    function.instruction(&Instruction::End);
-
-    // Find the final separator and concatenate its directory with the input.
-    function
-        .instruction(&Instruction::I32Const(0))
-        .instruction(&Instruction::LocalSet(index))
-        .instruction(&Instruction::Block(BlockType::Empty))
-        .instruction(&Instruction::Loop(BlockType::Empty))
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::LocalGet(script_path_length))
-        .instruction(&Instruction::I32GeU)
-        .instruction(&Instruction::BrIf(1))
-        .instruction(&Instruction::LocalGet(script_path_start))
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::I32Load8U(memarg()))
-        .instruction(&Instruction::I32Const(b'/' as i32))
-        .instruction(&Instruction::I32Eq)
-        .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::LocalSet(directory_length))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::LocalSet(index))
-        .instruction(&Instruction::Br(0))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::LocalGet(directory_length))
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::LocalGet(path_length))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::LocalTee(resolved_length))
-        .instruction(&Instruction::I32Const(MAX_PATH_BYTES))
-        .instruction(&Instruction::I32GtU)
-        .instruction(&Instruction::If(BlockType::Empty));
-    emit_open_failure(&mut function);
-    function.instruction(&Instruction::End);
-
-    function
-        .instruction(&Instruction::I32Const(0))
-        .instruction(&Instruction::LocalSet(index))
-        .instruction(&Instruction::Block(BlockType::Empty))
-        .instruction(&Instruction::Loop(BlockType::Empty))
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::LocalGet(directory_length))
-        .instruction(&Instruction::I32GeU)
-        .instruction(&Instruction::BrIf(1))
-        .instruction(&Instruction::I32Const(path_start))
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::LocalGet(script_path_start))
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::I32Load8U(memarg()))
-        .instruction(&Instruction::I32Store8(memarg()))
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::LocalSet(index))
-        .instruction(&Instruction::Br(0))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::I32Const(path_start))
-        .instruction(&Instruction::LocalGet(directory_length))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::I32Const(b'/' as i32))
-        .instruction(&Instruction::I32Store8(memarg()))
-        .instruction(&Instruction::I32Const(0))
-        .instruction(&Instruction::LocalSet(index))
-        .instruction(&Instruction::Block(BlockType::Empty))
-        .instruction(&Instruction::Loop(BlockType::Empty))
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::LocalGet(path_length))
-        .instruction(&Instruction::I32GeU)
-        .instruction(&Instruction::BrIf(1))
-        .instruction(&Instruction::I32Const(path_start))
-        .instruction(&Instruction::LocalGet(directory_length))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::LocalGet(path))
-        .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::ArrayGetU(string_type))
-        .instruction(&Instruction::I32Store8(memarg()))
-        .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::LocalSet(index))
-        .instruction(&Instruction::Br(0))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::End);
+        .instruction(&Instruction::LocalSet(resolved_length));
 
     // Select the longest matching preopen prefix, so mapped network paths win
     // over their containing drive preopen.
@@ -363,7 +123,7 @@ pub(super) fn compile_open_read_only(
         .instruction(&Instruction::I32LeU)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(descriptor))
-        .instruction(&Instruction::I32Const(auxiliary_start))
+        .instruction(&Instruction::I32Const(preopen_path_start))
         .instruction(&Instruction::LocalGet(preopen_length))
         .instruction(&Instruction::Call(
             abi.function(AbiImportId::WasiFdPrestatDirName),
@@ -384,7 +144,7 @@ pub(super) fn compile_open_read_only(
         .instruction(&Instruction::LocalGet(preopen_length))
         .instruction(&Instruction::I32GeU)
         .instruction(&Instruction::BrIf(1))
-        .instruction(&Instruction::I32Const(auxiliary_start))
+        .instruction(&Instruction::I32Const(preopen_path_start))
         .instruction(&Instruction::LocalGet(compare_index))
         .instruction(&Instruction::I32Add)
         .instruction(&Instruction::I32Load8U(memarg()))
@@ -413,7 +173,7 @@ pub(super) fn compile_open_read_only(
         .instruction(&Instruction::LocalGet(preopen_length))
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::I32Eq)
-        .instruction(&Instruction::I32Const(auxiliary_start))
+        .instruction(&Instruction::I32Const(preopen_path_start))
         .instruction(&Instruction::I32Load8U(memarg()))
         .instruction(&Instruction::I32Const(b'/' as i32))
         .instruction(&Instruction::I32Eq)

@@ -77,29 +77,6 @@ fn execute(source: &str) -> FileTestHost {
                         };
                     }
                     match host_name.as_str() {
-                        "environ_sizes_get" => {
-                            let entry = b"SCRIPT_PATH=/mnt/c/autosplitter/test.wasm\0";
-                            write_memory(
-                                &mut caller,
-                                parameters[0].unwrap_i32(),
-                                &1_u32.to_le_bytes(),
-                            );
-                            write_memory(
-                                &mut caller,
-                                parameters[1].unwrap_i32(),
-                                &(entry.len() as u32).to_le_bytes(),
-                            );
-                        }
-                        "environ_get" => {
-                            let entry = b"SCRIPT_PATH=/mnt/c/autosplitter/test.wasm\0";
-                            let bytes_pointer = parameters[1].unwrap_i32();
-                            write_memory(
-                                &mut caller,
-                                parameters[0].unwrap_i32(),
-                                &(bytes_pointer as u32).to_le_bytes(),
-                            );
-                            write_memory(&mut caller, bytes_pointer, entry);
-                        }
                         "fd_prestat_get" => {
                             if parameters[0].unwrap_i32() == 3 {
                                 let pointer = parameters[1].unwrap_i32();
@@ -232,13 +209,13 @@ fn execute(source: &str) -> FileTestHost {
 }
 
 #[test]
-fn whole_file_apis_resolve_paths_read_partially_and_validate_utf8() {
+fn whole_file_apis_require_absolute_paths_read_partially_and_validate_utf8() {
     let host = execute(
         r#"
             state "game.exe" {}
 
             setup {
-                let text = File.readAllText("configuration.txt") else "text-error"
+                let text = File.readAllText("/mnt/c/autosplitter/configuration.txt") else "text-error"
                 print(text.byteLength())
                 print(text.byteAt(8190) else 0)
 
@@ -247,21 +224,26 @@ fn whole_file_apis_resolve_paths_read_partially_and_validate_utf8() {
                 print(bytes[42])
                 print(bytes[70002])
 
-                let invalid = File.readAllText("invalid.txt") else "invalid"
+                let invalid = File.readAllText("/mnt/c/autosplitter/invalid.txt") else "invalid"
                 print(invalid)
-                let missing = File.readAllBytes("missing.bin") else []
+                let missing = File.readAllBytes("/mnt/c/autosplitter/missing.bin") else []
                 print(missing.length())
-                let incomplete = File.readAllBytes("read-error.bin") else []
+                let incomplete = File.readAllBytes("/mnt/c/autosplitter/read-error.bin") else []
                 print(incomplete.length())
-                let empty = File.readAllText("empty.txt") else "empty-error"
+                let empty = File.readAllText("/mnt/c/autosplitter/empty.txt") else "empty-error"
                 print(empty.byteLength())
+
+                let relative = File.readAllBytes("absolute.bin") else []
+                print(relative.length())
             }
         "#,
     );
 
     assert_eq!(
         host.messages,
-        ["8195", "195", "70003", "0", "114", "invalid", "0", "0", "0"]
+        [
+            "8195", "195", "70003", "0", "114", "invalid", "0", "0", "0", "0"
+        ]
     );
     assert_eq!(
         host.opened_paths,
@@ -302,12 +284,10 @@ fn filesystem_imports_are_demand_driven() {
     let used = imports(
         r#"
             state "game.exe" {}
-            setup { File.readAllText("settings.txt") else "" }
+            setup { File.readAllText("/mnt/settings.txt") else "" }
         "#,
     );
     for name in [
-        "environ_sizes_get",
-        "environ_get",
         "fd_prestat_get",
         "fd_prestat_dir_name",
         "path_open",

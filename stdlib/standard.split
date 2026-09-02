@@ -701,10 +701,13 @@ intrinsic type Process {
 
     /// Returns the executable's host-provided filesystem path.
     ///
-    /// The runtime uses a portable WASI spelling, such as `/mnt/c/game.exe`
-    /// for a Windows path. The path is metadata only; obtaining it does not
-    /// grant unrestricted host filesystem access. It is available while
-    /// inspecting a candidate in [`selectProcess`] as well as after attachment.
+    /// The returned value is an absolute path in the runtime's portable,
+    /// read-only filesystem namespace. Windows paths map by drive, so
+    /// `C:\Games\game.exe` becomes `/mnt/c/Games/game.exe`. Linux and macOS
+    /// paths gain the `/mnt` prefix, so `/opt/game/game` becomes
+    /// `/mnt/opt/game/game`. It can be passed directly to [`File.readAllBytes`]
+    /// or [`File.readAllText`]. The path is also available while inspecting a
+    /// candidate in [`selectProcess`].
     ///
     /// # Example
     ///
@@ -4448,9 +4451,16 @@ intrinsic type String {
 /// Provides whole-file, read-only filesystem operations.
 ///
 /// These associated functions open, consume, and close a file within one call;
-/// no file handle escapes into SplitScript. Paths use the runtime's portable
-/// WASI spelling. Absolute paths commonly begin with `/mnt`, while relative
-/// paths resolve beside the loaded autosplitter when its path is available.
+/// no file handle escapes into SplitScript. The WASI filesystem is otherwise
+/// almost empty; the host filesystem is currently mounted read-only below
+/// `/mnt`. Paths must be absolute because there is no portable current
+/// directory. Other absolute roots may be exposed by the runtime in the future.
+///
+/// On Windows, `C:\foo\bar.txt` becomes `/mnt/c/foo/bar.txt` (and likewise
+/// for other drive letters). On Linux or macOS, `/foo/bar.txt` becomes
+/// `/mnt/foo/bar.txt`.
+///
+/// [`Process.path`] and [`Module.path`] already return this portable spelling.
 ///
 /// # Example
 ///
@@ -4475,12 +4485,15 @@ intrinsic type File {
     /// Load a binary lookup table
     ///
     /// ```splitscript
-    /// let table = File.readAllBytes("tables/rooms.bin")?
+    /// let table = File.readAllBytes("/mnt/c/Games/example/tables/rooms.bin")?
     /// ```
     @mustUse("The file contents or error must be used.")
     @intrinsic(FileReadAllBytes)
     static fn readAllBytes(
-        /// Absolute portable WASI path, or a path relative to the autosplitter.
+        /// Absolute path in the portable WASI namespace. The host filesystem is
+        /// currently below `/mnt`: `C:\Games\data.bin` maps to
+        /// `/mnt/c/Games/data.bin`, while `/opt/game/data.bin` maps to
+        /// `/mnt/opt/game/data.bin`.
         path: String,
     ) -> [u8]!;
 
@@ -4493,15 +4506,18 @@ intrinsic type File {
     ///
     /// # Example
     ///
-    /// Load adjacent configuration text
+    /// Load configuration text
     ///
     /// ```splitscript
-    /// let configuration = File.readAllText("configuration.json")?
+    /// let configuration = File.readAllText("/mnt/home/player/game/configuration.json")?
     /// ```
     @mustUse("The file text or error must be used.")
     @intrinsic(FileReadAllText)
     static fn readAllText(
-        /// Absolute portable WASI path, or a path relative to the autosplitter.
+        /// Absolute path in the portable WASI namespace. The host filesystem is
+        /// currently below `/mnt`: `C:\Games\config.json` maps to
+        /// `/mnt/c/Games/config.json`, while `/home/player/config.json` maps to
+        /// `/mnt/home/player/config.json`.
         path: String,
     ) -> String!;
 }
@@ -5775,9 +5791,12 @@ struct Module {
 
     /// Returns the module's host-provided filesystem path.
     ///
-    /// The path uses the runtime's portable filesystem spelling. It is
-    /// metadata only: SplitScript does not grant scripts unrestricted host
-    /// filesystem access.
+    /// The returned value is an absolute path in the runtime's portable,
+    /// read-only filesystem namespace. Windows paths map by drive, so
+    /// `C:\Games\engine.dll` becomes `/mnt/c/Games/engine.dll`. Linux and
+    /// macOS paths gain the `/mnt` prefix, so `/opt/game/engine.so` becomes
+    /// `/mnt/opt/game/engine.so`. It can be passed directly to
+    /// [`File.readAllBytes`] or [`File.readAllText`].
     ///
     /// # Example
     ///

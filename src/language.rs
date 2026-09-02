@@ -1924,7 +1924,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "\"Label\" => name: file { \"Files\" => \"*.ext\" mime => \"type/*\" }",
         "Declares a file-selection setting.",
-        "File settings support named glob filters, a wildcard fallback, and one or more MIME filters.",
+        "File settings support named glob filters, a wildcard fallback, and one or more MIME filters. A selected file is stored as an absolute path in the runtime's portable filesystem namespace and can be passed to [`File.readAllBytes`] or [`File.readAllText`]. The host filesystem is currently mounted read-only below `/mnt`: Windows `C:\\foo\\bar.txt` becomes `/mnt/c/foo/bar.txt`, while Linux or macOS `/foo/bar.txt` becomes `/mnt/foo/bar.txt`.",
         FILE_EXAMPLE
     ),
     }

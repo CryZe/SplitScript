@@ -2307,12 +2307,12 @@ fn classify(name: String) -> u8 {
     #[test]
     fn formats_recursive_array_match_patterns() {
         let source = r#"state "game.exe"{}
-fn decode(values:[u8?;2])->u8{return match values{[Some(first),Some(second)]=>first+second,_=>0}}"#;
+fn decode(values:[u8?;2])->u8{return match values{[Some(value),None]|[None,Some(value)]=>value,[None|Some(_),_]=>0}}"#;
         let expected = r#"state "game.exe" {}
 fn decode(values: [u8?; 2]) -> u8 {
     return match values {
-        [Some(first), Some(second)] => first + second,
-        _ => 0,
+        [Some(value), None] | [None, Some(value)] => value,
+        [None | Some(_), _] => 0,
     }
 }
 "#;

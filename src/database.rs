@@ -840,7 +840,7 @@ impl DefinitionCollector<'_> {
             SourceDefinitionId::State => self.index.state = Some(definition),
             SourceDefinitionId::Settings => self.index.settings = Some(definition),
             SourceDefinitionId::Value(id) => {
-                self.index.values.insert(id, definition);
+                self.index.values.entry(id).or_insert(definition);
             }
             SourceDefinitionId::Function(id) => {
                 self.index.functions.insert(id, definition);
@@ -1023,7 +1023,7 @@ impl DefinitionCollector<'_> {
                     self.add_reference(definition.id, variant_span);
                 }
             }
-            MatchPattern::Array(elements) => {
+            MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
                 for element in elements {
                     self.add_pattern_references(&element.kind, element.id, element.span);
                 }
@@ -1315,7 +1315,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
 
     fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
         arm.pattern.visit_bindings(&mut |binding| {
-            self.insert_value(binding.id, &binding.name, arm.span);
+            self.insert_value(binding.id, &binding.name, binding.name_span);
         });
         let pattern_end = arm
             .guard

@@ -1185,6 +1185,47 @@ impl Parser<'_> {
     }
 
     fn match_pattern(&mut self, allow_binding: bool) -> Result<PatternNode, Diagnostic> {
+        let first = self.match_pattern_atom(allow_binding)?;
+        if self.eat(&TokenKind::Or).is_none() {
+            return Ok(first);
+        }
+
+        let pattern_start = first.span;
+        let mut alternatives = vec![first];
+        loop {
+            alternatives.push(self.match_pattern_atom(allow_binding)?);
+            if self.eat(&TokenKind::Or).is_none() {
+                break;
+            }
+        }
+
+        // All occurrences of one name in an or-pattern denote one logical
+        // arm binding. Type checking still validates that every alternative
+        // binds the complete set exactly once.
+        let mut binding_ids = std::collections::HashMap::new();
+        for alternative in &mut alternatives {
+            alternative.kind.visit_bindings_mut(&mut |binding| {
+                let id = *binding_ids
+                    .entry(binding.name.clone())
+                    .or_insert(binding.id);
+                binding.id = id;
+            });
+        }
+
+        let span = pattern_start.join(
+            alternatives
+                .last()
+                .expect("an alternation has at least two patterns")
+                .span,
+        );
+        Ok(PatternNode {
+            id: self.new_pattern_id(),
+            kind: MatchPattern::Alternation(alternatives),
+            span,
+        })
+    }
+
+    fn match_pattern_atom(&mut self, allow_binding: bool) -> Result<PatternNode, Diagnostic> {
         let token = self.current().clone();
         let pattern_start = token.span;
         let kind = match token.kind {
@@ -1263,7 +1304,7 @@ impl Parser<'_> {
                         let (name, name_span) =
                             self.expect_declared_ident("expected a payload binding")?;
                         self.expect(TokenKind::RParen, "expected `)` after the payload binding")?;
-                        Some(PatternBinding {
+                        (name != "_").then(|| PatternBinding {
                             id: self.new_value_id(),
                             name,
                             name_span,

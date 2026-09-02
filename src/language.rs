@@ -674,6 +674,11 @@ const LET_EXAMPLE: &[Example] = &[
         "let retryDelay = defaultDelay()",
         MODULE_GLOBAL_SOURCE,
     ),
+    Example::checked(
+        "Combine patterns while sharing one binding",
+        "return match side {\n    Side.Left(value) | Side.Right(value) => value,\n    Side.Idle => 0,\n}",
+        "enum Side { Left(u32), Right(u32), Idle }\nstate \"game.exe\" {}\nfn unwrap(side: Side) -> u32 {\n    return match side {\n        Side.Left(value) | Side.Right(value) => value,\n        Side.Idle => 0,\n    }\n}",
+    ),
 ];
 focused_example!(
     FUNCTION_EXAMPLE,
@@ -1620,7 +1625,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "match value { pattern => expression }",
         "Exhaustively matches a value.",
-        "[`match`] supports enum payloads, optional [`None`]/[`Some`]`(value)` patterns, iterator [`End`]/[`Item`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, exact recursive array patterns, string, character, integer, boolean, and file-version literals, guards, and a wildcard. Array elements can bind values or contain any other pattern. A [`[T; N]`] pattern must have exactly `N` elements; a growable [`[T]`] pattern tests its length at runtime. String patterns compare contents, not WebAssembly GC identities. Enum and wrapper matches must cover every state; open-ended literal domains and growable arrays require `_`; guarded arms do not establish coverage.",
+        "[`match`] supports enum payloads, optional [`None`]/[`Some`]`(value)` patterns, iterator [`End`]/[`Item`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, exact recursive array patterns, string, character, integer, boolean, and file-version literals, guards, a wildcard, and recursive `left | right` alternatives. Alternatives are tried left to right and contribute their union to exhaustiveness. Every alternative in one arm must bind exactly the same names with compatible types; those occurrences form one logical binding for the guard and body. Array elements can bind values or contain any other pattern. A [`[T; N]`] pattern must have exactly `N` elements; a growable [`[T]`] pattern tests its length at runtime. String patterns compare contents, not WebAssembly GC identities. Enum and wrapper matches must cover every state; open-ended literal domains and growable arrays require `_`; guarded arms do not establish coverage.",
         MATCH_EXAMPLES
     ),
     language_item!(

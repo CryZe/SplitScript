@@ -695,7 +695,7 @@ impl EnumResolver<'_> {
                     self.resolutions.pattern_enums.insert(id, enumeration);
                 }
             }
-            MatchPattern::Array(elements) => {
+            MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
                 for element in elements {
                     self.resolve_pattern(&element.kind, element.id);
                 }

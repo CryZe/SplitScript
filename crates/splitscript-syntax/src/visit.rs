@@ -497,7 +497,7 @@ pub fn walk_pattern<'ast, V: Visitor<'ast>>(visitor: &mut V, pattern: &'ast Matc
     {
         visitor.visit_type_ref(suffix);
     }
-    if let MatchPattern::Array(elements) = pattern {
+    if let MatchPattern::Array(elements) | MatchPattern::Alternation(elements) = pattern {
         for element in elements {
             visitor.visit_pattern(&element.kind);
         }
@@ -963,7 +963,7 @@ pub fn walk_pattern_mut<F: Folder>(folder: &mut F, pattern: &mut MatchPattern) {
     {
         folder.fold_type_ref(suffix);
     }
-    if let MatchPattern::Array(elements) = pattern {
+    if let MatchPattern::Array(elements) | MatchPattern::Alternation(elements) = pattern {
         for element in elements {
             folder.fold_pattern(&mut element.kind);
         }

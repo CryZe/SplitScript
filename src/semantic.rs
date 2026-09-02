@@ -1546,6 +1546,10 @@ impl SemanticBuilder {
         debug_assert!(previous.is_none(), "value IDs must be unique");
     }
 
+    pub(crate) fn pending_value_type(&self, value: ValueId) -> Option<Type> {
+        self.value_types.get(&value).copied()
+    }
+
     pub(crate) fn resolve_action_result(&mut self, action: ActionKind, ty: Type) {
         let previous = self.action_results.insert(action, ty);
         debug_assert!(previous.is_none(), "action kinds must be unique");

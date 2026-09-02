@@ -21,6 +21,109 @@ use crate::{
 
 use super::{Checker, context::NonePolicy, declarations::Binding};
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum PatternCoverage {
+    Irrefutable,
+    Enum {
+        variant: ResolvedEnumVariantId,
+        name: String,
+    },
+    Bool(bool),
+    Char(char),
+    String(String),
+    Int(u64),
+    FileVersion([u16; 4]),
+    OptionNone,
+    OptionSome,
+    IteratorEnd,
+    IteratorItem,
+    ResultSuccess,
+    ResultError,
+    Array(Vec<Self>),
+    Alternation(Vec<Self>),
+    Invalid(crate::ast::PatternId),
+}
+
+impl PatternCoverage {
+    fn is_irrefutable(&self) -> bool {
+        matches!(self, Self::Irrefutable)
+    }
+
+    fn covers(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Irrefutable, _) => true,
+            (Self::Alternation(alternatives), _) => {
+                alternatives.iter().any(|pattern| pattern.covers(other))
+            }
+            (_, Self::Alternation(alternatives)) => {
+                alternatives.iter().all(|pattern| self.covers(pattern))
+            }
+            (Self::Array(left), Self::Array(right)) if left.len() == right.len() => left
+                .iter()
+                .zip(right)
+                .all(|(left, right)| left.covers(right)),
+            _ => self == other,
+        }
+    }
+
+    fn display(&self) -> String {
+        match self {
+            Self::Irrefutable => "_".to_owned(),
+            Self::Enum { name, .. } => name.clone(),
+            Self::Bool(value) => value.to_string(),
+            Self::Char(value) => format!("{value:?}"),
+            Self::String(value) => format!("{value:?}"),
+            Self::Int(value) => value.to_string(),
+            Self::FileVersion(parts) => {
+                format!("v\"{}.{}.{}.{}\"", parts[0], parts[1], parts[2], parts[3])
+            }
+            Self::OptionNone => "None".to_owned(),
+            Self::OptionSome => "Some(value)".to_owned(),
+            Self::IteratorEnd => "End".to_owned(),
+            Self::IteratorItem => "Item(value)".to_owned(),
+            Self::ResultSuccess => "Ok(value)".to_owned(),
+            Self::ResultError => "Err(error)".to_owned(),
+            Self::Array(elements) => format!(
+                "[{}]",
+                elements
+                    .iter()
+                    .map(Self::display)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Self::Alternation(alternatives) => alternatives
+                .iter()
+                .map(Self::display)
+                .collect::<Vec<_>>()
+                .join(" | "),
+            Self::Invalid(_) => "<invalid pattern>".to_owned(),
+        }
+    }
+}
+
+fn patterns_cover(patterns: &[PatternCoverage], target: &PatternCoverage) -> bool {
+    match target {
+        PatternCoverage::Alternation(alternatives) => alternatives
+            .iter()
+            .all(|alternative| patterns_cover(patterns, alternative)),
+        _ => patterns.iter().any(|pattern| pattern.covers(target)),
+    }
+}
+
+struct CheckedPattern {
+    coverage: PatternCoverage,
+    layout_variants: Option<HashSet<crate::ast::EnumVariantId>>,
+}
+
+impl CheckedPattern {
+    fn new(coverage: PatternCoverage) -> Self {
+        Self {
+            coverage,
+            layout_variants: None,
+        }
+    }
+}
+
 impl Checker {
     pub(super) fn expr(&mut self, expr: &Expr, expected: Option<Type>) -> Option<Type> {
         let ty = match &expr.kind {
@@ -518,38 +621,26 @@ impl Checker {
                         if matches!(path.as_slice(), [name] if name == "layout" || name == "provider")
                             && self.layout_value.is_some()
                 );
-                let mut unguarded_patterns = HashSet::new();
-                let mut has_unguarded_wildcard = false;
+                let mut unguarded_patterns = Vec::<PatternCoverage>::new();
+                let mut has_unguarded_irrefutable = false;
                 let mut result_type = expected;
                 let mut never_arm_type = None;
                 for arm in arms {
-                    if has_unguarded_wildcard {
-                        self.error("unreachable match arm after `_`", arm.span);
+                    if has_unguarded_irrefutable {
+                        self.error(
+                            "unreachable match arm after an irrefutable pattern",
+                            arm.span,
+                        );
                     }
                     self.scopes.push(HashMap::new());
-                    let (pattern_key, pattern_irrefutable) =
+                    let checked =
                         self.check_pattern(&arm.pattern, arm.pattern_id, value_type, arm.span);
-                    let state_layout = if refines_state_layout
-                        && let MatchPattern::Enum { variant, .. } = &arm.pattern
-                    {
-                        self.resolutions
-                            .pattern_enum(arm.pattern_id)
-                            .and_then(|enumeration| self.enum_info(enumeration))
-                            .and_then(|declaration| {
-                                declaration
-                                    .variants
-                                    .iter()
-                                    .find(|declared| declared.name == *variant)
-                                    .and_then(|declared| match declared.id {
-                                        ResolvedEnumVariantId::Source(variant) => Some(variant),
-                                        ResolvedEnumVariantId::Standard(_) => None,
-                                    })
-                            })
+                    let state_layouts = if refines_state_layout {
+                        checked.layout_variants.clone()
                     } else {
                         None
                     };
-                    let state_layout = state_layout.or(self.active_state_layout);
-                    let arm_type = self.with_state_layout(state_layout, |checker| {
+                    let arm_type = self.with_state_layouts(state_layouts, |checker| {
                         if let Some(guard) = &arm.guard {
                             checker.expr(
                                 guard,
@@ -572,22 +663,31 @@ impl Checker {
                     }
 
                     if arm.guard.is_none() {
-                        if !unguarded_patterns.insert(pattern_key.clone()) {
-                            self.error(format!("duplicate match arm `{pattern_key}`"), arm.span);
+                        if patterns_cover(&unguarded_patterns, &checked.coverage) {
+                            let message = if unguarded_patterns.contains(&checked.coverage) {
+                                format!("duplicate match arm `{}`", checked.coverage.display())
+                            } else {
+                                format!("unreachable match arm `{}`", checked.coverage.display())
+                            };
+                            self.error(message, arm.span);
                         }
-                        if pattern_irrefutable {
-                            has_unguarded_wildcard = true;
+                        if checked.coverage.is_irrefutable() {
+                            has_unguarded_irrefutable = true;
                         }
-                    } else if unguarded_patterns.contains(&pattern_key) {
+                        unguarded_patterns.push(checked.coverage);
+                    } else if patterns_cover(&unguarded_patterns, &checked.coverage) {
                         self.error("unreachable guarded match arm", arm.span);
                     }
                 }
 
-                if !has_unguarded_wildcard {
+                if !has_unguarded_irrefutable {
                     match self.shallow_type(value_type) {
                         ty if ty == self.core_type(crate::stdlib::CoreTypeId::Bool) => {
                             for value in [false, true] {
-                                if !unguarded_patterns.contains(&format!("bool:{value}")) {
+                                if !patterns_cover(
+                                    &unguarded_patterns,
+                                    &PatternCoverage::Bool(value),
+                                ) {
                                     self.error(
                                         format!("non-exhaustive match: missing `{value}`"),
                                         expr.span,
@@ -595,10 +695,12 @@ impl Checker {
                                 }
                             }
                         }
-                        Type::Option(option) => {
-                            for (state, display) in [("none", "None"), ("some", "Some(value)")] {
-                                if !unguarded_patterns.contains(&format!("option:{option}:{state}"))
-                                {
+                        Type::Option(_) => {
+                            for (pattern, display) in [
+                                (PatternCoverage::OptionNone, "None"),
+                                (PatternCoverage::OptionSome, "Some(value)"),
+                            ] {
+                                if !patterns_cover(&unguarded_patterns, &pattern) {
                                     self.error(
                                         format!("non-exhaustive match: missing `{display}`"),
                                         expr.span,
@@ -606,12 +708,12 @@ impl Checker {
                                 }
                             }
                         }
-                        Type::Result(result) => {
-                            for (state, display) in
-                                [("success", "Ok(value)"), ("error", "Err(error)")]
-                            {
-                                if !unguarded_patterns.contains(&format!("result:{result}:{state}"))
-                                {
+                        Type::Result(_) => {
+                            for (pattern, display) in [
+                                (PatternCoverage::ResultSuccess, "Ok(value)"),
+                                (PatternCoverage::ResultError, "Err(error)"),
+                            ] {
+                                if !patterns_cover(&unguarded_patterns, &pattern) {
                                     self.error(
                                         format!("non-exhaustive match: missing `{display}`"),
                                         expr.span,
@@ -623,10 +725,11 @@ impl Checker {
                             if self.inference.application_constructor(step)
                                 == crate::stdlib::StdlibTypeConstructorId::IteratorStep =>
                         {
-                            for (state, display) in [("item", "Item(value)"), ("end", "End")] {
-                                if !unguarded_patterns
-                                    .contains(&format!("iterator-step:{step}:{state}"))
-                                {
+                            for (pattern, display) in [
+                                (PatternCoverage::IteratorItem, "Item(value)"),
+                                (PatternCoverage::IteratorEnd, "End"),
+                            ] {
+                                if !patterns_cover(&unguarded_patterns, &pattern) {
                                     self.error(
                                         format!("non-exhaustive match: missing `{display}`"),
                                         expr.span,
@@ -651,10 +754,13 @@ impl Checker {
                             self.error("non-exhaustive array match: add a `_` arm", expr.span)
                         }
                         ty @ Type::Known(_) => {
-                            if let Some((enum_key, declaration)) = self.enum_info_for_type(ty) {
+                            if let Some((_, declaration)) = self.enum_info_for_type(ty) {
                                 for variant in &declaration.variants {
-                                    let key = format!("enum:{enum_key}:{}", variant.name);
-                                    if !unguarded_patterns.contains(&key) {
+                                    let coverage = PatternCoverage::Enum {
+                                        variant: variant.id,
+                                        name: variant.name.clone(),
+                                    };
+                                    if !patterns_cover(&unguarded_patterns, &coverage) {
                                         self.error(
                                             format!(
                                                 "non-exhaustive match: missing `{}`",
@@ -1527,16 +1633,17 @@ impl Checker {
     fn check_array_pattern(
         &mut self,
         elements: &[crate::ast::PatternNode],
+        pattern_id: crate::ast::PatternId,
         value_type: Type,
         span: Span,
-    ) -> (String, bool) {
+    ) -> CheckedPattern {
         let Type::Array(array) = self.shallow_type(value_type) else {
             let ty = self.type_name(value_type);
             self.error(
                 format!("an array pattern requires an array value, found `{ty}`"),
                 span,
             );
-            return ("invalid-array".to_owned(), false);
+            return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
         };
         let element_type = self.inference.array_element(array);
         let fixed_length = self.inference.array_length(array);
@@ -1552,18 +1659,103 @@ impl Checker {
                 span,
             );
         }
-        let mut keys = Vec::with_capacity(elements.len());
+        let mut coverage = Vec::with_capacity(elements.len());
         let mut all_irrefutable = true;
         for element in elements {
-            let (key, irrefutable) =
-                self.check_pattern(&element.kind, element.id, element_type, element.span);
-            keys.push(key);
-            all_irrefutable &= irrefutable;
+            let checked = self.check_pattern(&element.kind, element.id, element_type, element.span);
+            all_irrefutable &= checked.coverage.is_irrefutable();
+            coverage.push(checked.coverage);
         }
-        (
-            format!("array:{array}:[{}]", keys.join(",")),
-            fixed_length == Some(elements.len() as u32) && all_irrefutable,
+        CheckedPattern::new(
+            if fixed_length == Some(elements.len() as u32) && all_irrefutable {
+                PatternCoverage::Irrefutable
+            } else {
+                PatternCoverage::Array(coverage)
+            },
         )
+    }
+
+    fn check_alternation_pattern(
+        &mut self,
+        alternatives: &[crate::ast::PatternNode],
+        value_type: Type,
+    ) -> CheckedPattern {
+        let base_scope = self
+            .scopes
+            .last()
+            .expect("patterns are checked inside an arm scope")
+            .clone();
+        let mut expected_names = None::<HashSet<String>>;
+        let mut arm_bindings = HashMap::<String, Binding>::new();
+        let mut coverage = Vec::with_capacity(alternatives.len());
+        let mut layout_variants = Some(HashSet::new());
+
+        for alternative in alternatives {
+            *self.scopes.last_mut().unwrap() = base_scope.clone();
+            let checked = self.check_pattern(
+                &alternative.kind,
+                alternative.id,
+                value_type,
+                alternative.span,
+            );
+            if coverage
+                .iter()
+                .any(|previous: &PatternCoverage| previous.covers(&checked.coverage))
+            {
+                self.error(
+                    format!("unreachable alternative `{}`", checked.coverage.display()),
+                    alternative.span,
+                );
+            }
+
+            let mut names = HashSet::new();
+            alternative.kind.visit_bindings(&mut |binding| {
+                names.insert(binding.name.clone());
+            });
+            if let Some(expected) = &expected_names {
+                for missing in expected.difference(&names) {
+                    self.error(
+                        format!("this alternative does not bind `{missing}`"),
+                        alternative.span,
+                    );
+                }
+                for extra in names.difference(expected) {
+                    self.error(
+                        format!(
+                            "this alternative binds `{extra}`, but the other alternatives do not"
+                        ),
+                        alternative.span,
+                    );
+                }
+            } else {
+                expected_names = Some(names.clone());
+                for name in &names {
+                    if let Some(binding) = self.scopes.last().unwrap().get(name).copied() {
+                        arm_bindings.insert(name.clone(), binding);
+                    }
+                }
+            }
+
+            match (&mut layout_variants, checked.layout_variants) {
+                (Some(all), Some(current)) => all.extend(current),
+                (slot, None) => *slot = None,
+                (None, Some(_)) => {}
+            }
+            coverage.push(checked.coverage);
+        }
+
+        *self.scopes.last_mut().unwrap() = base_scope;
+        self.scopes.last_mut().unwrap().extend(arm_bindings);
+
+        let coverage = if coverage.iter().any(PatternCoverage::is_irrefutable) {
+            PatternCoverage::Irrefutable
+        } else {
+            PatternCoverage::Alternation(coverage)
+        };
+        CheckedPattern {
+            coverage,
+            layout_variants,
+        }
     }
 
     fn check_pattern(
@@ -1572,16 +1764,17 @@ impl Checker {
         pattern_id: crate::ast::PatternId,
         value_type: Type,
         span: Span,
-    ) -> (String, bool) {
-        let key = match pattern {
+    ) -> CheckedPattern {
+        match pattern {
             MatchPattern::Enum {
                 variant, binding, ..
             } => {
                 let Some(enumeration) = self.resolutions.pattern_enum(pattern_id) else {
                     self.error("unresolved enum type", span);
-                    return (format!("invalid:{}", pattern_id.index()), false);
+                    return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
                 };
                 self.unify(value_type, self.enum_type(enumeration), span);
+                let mut resolved_variant = None;
                 if let Some(declaration) = self.enum_info(enumeration) {
                     if let Some(declared_variant) = declaration
                         .variants
@@ -1590,6 +1783,7 @@ impl Checker {
                     {
                         self.semantics
                             .resolve_pattern_variant(pattern_id, declared_variant.id);
+                        resolved_variant = Some(declared_variant.id);
                         match (declared_variant.payload, binding) {
                             (Some(payload), Some(binding)) => {
                                 self.bind_pattern_value(binding, payload, span)
@@ -1607,7 +1801,19 @@ impl Checker {
                 } else {
                     self.error("unknown enum type", span);
                 }
-                format!("enum:{enumeration}:{variant}")
+                let Some(resolved_variant) = resolved_variant else {
+                    return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
+                };
+                CheckedPattern {
+                    coverage: PatternCoverage::Enum {
+                        variant: resolved_variant,
+                        name: variant.clone(),
+                    },
+                    layout_variants: match resolved_variant {
+                        ResolvedEnumVariantId::Source(variant) => Some(HashSet::from([variant])),
+                        ResolvedEnumVariantId::Standard(_) => None,
+                    },
+                }
             }
             MatchPattern::Bool(value) => {
                 self.unify(
@@ -1615,7 +1821,7 @@ impl Checker {
                     self.core_type(crate::stdlib::CoreTypeId::Bool),
                     span,
                 );
-                format!("bool:{value}")
+                CheckedPattern::new(PatternCoverage::Bool(*value))
             }
             MatchPattern::Char(value) => {
                 self.unify(
@@ -1623,11 +1829,11 @@ impl Checker {
                     self.core_type(crate::stdlib::CoreTypeId::Char),
                     span,
                 );
-                format!("char:{value}")
+                CheckedPattern::new(PatternCoverage::Char(*value))
             }
             MatchPattern::String(value) => {
                 self.unify(value_type, self.standard_type(StdlibTypeId::String), span);
-                format!("string:{value:?}")
+                CheckedPattern::new(PatternCoverage::String(value.clone()))
             }
             MatchPattern::Int { value, suffix } => {
                 let pattern_type = if let Some(suffix) = suffix {
@@ -1647,7 +1853,7 @@ impl Checker {
                     )
                 };
                 self.unify(value_type, pattern_type, span);
-                format!("int:{value}")
+                CheckedPattern::new(PatternCoverage::Int(*value))
             }
             MatchPattern::FileVersion(components) => {
                 self.unify(
@@ -1655,10 +1861,7 @@ impl Checker {
                     self.standard_type(StdlibTypeId::FileVersion),
                     span,
                 );
-                format!(
-                    "version:{}:{}:{}:{}",
-                    components[0], components[1], components[2], components[3]
-                )
+                CheckedPattern::new(PatternCoverage::FileVersion(*components))
             }
             MatchPattern::None => {
                 let Some(option) = self.infer_option_pattern(
@@ -1666,13 +1869,13 @@ impl Checker {
                     span,
                     "a `None` pattern requires an optional value",
                 ) else {
-                    return (format!("invalid:{}", pattern_id.index()), false);
+                    return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
                 };
                 self.semantics.resolve_wrapper_pattern(
                     pattern_id,
                     ResolvedWrapperPattern::OptionNone(option),
                 );
-                format!("option:{option}:none")
+                CheckedPattern::new(PatternCoverage::OptionNone)
             }
             MatchPattern::OptionSome(binding) => {
                 let Some(option) = self.infer_option_pattern(
@@ -1680,7 +1883,7 @@ impl Checker {
                     span,
                     "a `Some(value)` pattern requires an optional value",
                 ) else {
-                    return (format!("invalid:{}", pattern_id.index()), false);
+                    return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
                 };
                 self.semantics.resolve_wrapper_pattern(
                     pattern_id,
@@ -1689,7 +1892,7 @@ impl Checker {
                 if let Some(binding) = binding {
                     self.bind_pattern_value(binding, self.inference.option_value(option), span);
                 }
-                format!("option:{option}:some")
+                CheckedPattern::new(PatternCoverage::OptionSome)
             }
             MatchPattern::IteratorEnd => {
                 let Some((step, _)) = self.infer_iterator_step_pattern(
@@ -1697,11 +1900,11 @@ impl Checker {
                     span,
                     "an `End` pattern requires an iterator step",
                 ) else {
-                    return (format!("invalid:{}", pattern_id.index()), false);
+                    return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
                 };
                 self.semantics
                     .resolve_wrapper_pattern(pattern_id, ResolvedWrapperPattern::IteratorEnd(step));
-                format!("iterator-step:{step}:end")
+                CheckedPattern::new(PatternCoverage::IteratorEnd)
             }
             MatchPattern::IteratorItem(binding) => {
                 let Some((step, item)) = self.infer_iterator_step_pattern(
@@ -1709,7 +1912,7 @@ impl Checker {
                     span,
                     "an `Item(value)` pattern requires an iterator step",
                 ) else {
-                    return (format!("invalid:{}", pattern_id.index()), false);
+                    return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
                 };
                 self.semantics.resolve_wrapper_pattern(
                     pattern_id,
@@ -1718,7 +1921,7 @@ impl Checker {
                 if let Some(binding) = binding {
                     self.bind_pattern_value(binding, item, span);
                 }
-                format!("iterator-step:{step}:item")
+                CheckedPattern::new(PatternCoverage::IteratorItem)
             }
             MatchPattern::ResultSuccess(binding) => {
                 let Some(result) = self.infer_result_pattern(
@@ -1726,7 +1929,7 @@ impl Checker {
                     span,
                     "an `Ok(value)` pattern requires a result value",
                 ) else {
-                    return (format!("invalid:{}", pattern_id.index()), false);
+                    return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
                 };
                 self.semantics.resolve_wrapper_pattern(
                     pattern_id,
@@ -1735,7 +1938,7 @@ impl Checker {
                 if let Some(binding) = binding {
                     self.bind_pattern_value(binding, self.inference.result_value(result), span);
                 }
-                format!("result:{result}:success")
+                CheckedPattern::new(PatternCoverage::ResultSuccess)
             }
             MatchPattern::ResultError(binding) => {
                 let Some(result) = self.infer_result_pattern(
@@ -1743,7 +1946,7 @@ impl Checker {
                     span,
                     "an `Err(error)` pattern requires a result value",
                 ) else {
-                    return (format!("invalid:{}", pattern_id.index()), false);
+                    return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
                 };
                 self.semantics.resolve_wrapper_pattern(
                     pattern_id,
@@ -1756,18 +1959,20 @@ impl Checker {
                         span,
                     );
                 }
-                format!("result:{result}:error")
+                CheckedPattern::new(PatternCoverage::ResultError)
             }
             MatchPattern::Array(elements) => {
-                return self.check_array_pattern(elements, value_type, span);
+                self.check_array_pattern(elements, pattern_id, value_type, span)
+            }
+            MatchPattern::Alternation(alternatives) => {
+                self.check_alternation_pattern(alternatives, value_type)
             }
             MatchPattern::Binding(binding) => {
                 self.bind_pattern_value(binding, value_type, span);
-                return ("binding".to_owned(), true);
+                CheckedPattern::new(PatternCoverage::Irrefutable)
             }
-            MatchPattern::Wildcard => return ("wildcard".to_owned(), true),
-        };
-        (key, false)
+            MatchPattern::Wildcard => CheckedPattern::new(PatternCoverage::Irrefutable),
+        }
     }
 
     pub(super) fn binary(

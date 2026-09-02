@@ -991,6 +991,9 @@ fn compile_projected_pattern(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::End);
         }
+        wasm_ir::LoweredPattern::Alternation(alternatives) => {
+            compile_pattern_alternatives(function, alternatives, value, context);
+        }
         wasm_ir::LoweredPattern::Binding(binding) => {
             function.instruction(&Instruction::I32Const(1));
             bindings.push(MatchPatternBinding {
@@ -1003,6 +1006,27 @@ fn compile_projected_pattern(
         }
     }
     bindings
+}
+
+fn compile_pattern_alternatives(
+    function: &mut Function,
+    alternatives: &[wasm_ir::LoweredPattern],
+    value: &PatternValue,
+    context: &ExprContext<'_>,
+) {
+    let Some((alternative, remaining)) = alternatives.split_first() else {
+        function.instruction(&Instruction::I32Const(0));
+        return;
+    };
+    let bindings = compile_projected_pattern(function, alternative, value, context);
+    function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+    for binding in bindings {
+        store_match_binding(function, binding, context);
+    }
+    function.instruction(&Instruction::I32Const(1));
+    function.instruction(&Instruction::Else);
+    compile_pattern_alternatives(function, remaining, value, context);
+    function.instruction(&Instruction::End);
 }
 
 pub(super) fn compile_statement_pattern(

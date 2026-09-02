@@ -337,7 +337,10 @@ lifecycle blocks can compare or exhaustively match `layout`.
 
 Layout-specific fields become available when a direct `match layout` arm proves
 which memory layout is active. The refinement applies to both `old` and
-`current`, because the selected layout is stable for the attachment:
+`current`, because the selected layout is stable for the attachment. An
+alternative such as `StateLayout.V8 | StateLayout.V9` retains fields that have
+the same name and type in every selected layout; a field missing from either
+layout remains unavailable:
 
 ```text
 state "Ronin.exe" {
@@ -1180,9 +1183,13 @@ Strings, characters, integers, booleans, file versions, and arrays can be
 matched with literals. String patterns compare decoded text contents. An array
 pattern is exact: `[first, second]` matches precisely two elements and binds
 their values. Element patterns are recursive, so literals, `_`, wrapper or enum
-patterns, nested arrays, and bindings can be mixed. Arms may have an `if` guard,
-and `_` is the catch-all pattern. Patterns participate in inference, so the
-parameter types below are inferred as an integer and `bool` from their uses.
+patterns, nested arrays, bindings, and `left | right` alternatives can be mixed.
+Alternatives are attempted from left to right. They remain one arm, so an `if`
+guard applies after any alternative succeeds. Every alternative must bind the
+same names with compatible types; repeated occurrences are one logical binding
+for hovering, navigation, renaming, the guard, and the arm body. `_` is the
+catch-all pattern. Patterns participate in inference, so the parameter types
+below are inferred as an integer and `bool` from their uses.
 
 ```text
 fn characterName(character, dlcDemo) {
@@ -1194,6 +1201,28 @@ fn characterName(character, dlcDemo) {
     }
 }
 ```
+
+Alternatives avoid repeating an arm body and may destructure the same logical
+value from different shapes:
+
+```text
+enum Side {
+    Left(u32),
+    Right(u32),
+    Idle,
+}
+
+fn unwrap(side: Side) -> u32 {
+    return match side {
+        Side.Left(value) | Side.Right(value) => value,
+        Side.Idle => 0,
+    }
+}
+```
+
+Writing `Side.Left(value) | Side.Right(other)` is an error because `value` and
+`other` would not both be initialized for the shared arm. The same rule applies
+recursively, such as `[Some(value), None] | [None, Some(value)]`.
 
 String matches are useful for selecting exact host identities while keeping
 the dispatch exhaustive:
@@ -1214,7 +1243,8 @@ onAttach {
 ```
 
 An unguarded arm counts toward exhaustiveness; a guarded arm may still reject
-its pattern. Enum matches must cover every variant, boolean matches must cover
+its pattern. Alternatives contribute the union of their patterns. Enum matches
+must cover every variant, boolean matches must cover
 `true` and `false`. String, character, integer, and file-version domains are
 open-ended and require an unguarded `_` arm. A wildcard can also make an enum
 or boolean match exhaustive. A fixed `[T; N]` array pattern with `N` elements

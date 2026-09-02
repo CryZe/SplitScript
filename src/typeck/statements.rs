@@ -733,7 +733,11 @@ impl Checker {
             );
             return;
         }
-        self.semantics.resolve_value_type(binding.id, ty);
+        if let Some(previous) = self.semantics.pending_value_type(binding.id) {
+            self.unify(previous, ty, binding.name_span);
+        } else {
+            self.semantics.resolve_value_type(binding.id, ty);
+        }
         self.scopes.last_mut().unwrap().insert(
             binding.name.clone(),
             Binding {

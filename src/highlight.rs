@@ -888,7 +888,7 @@ impl HighlightCollector<'_> {
                 SemanticTokenKind::Variable,
                 MODIFIER_DECLARATION,
             ),
-            MatchPattern::Array(elements) => {
+            MatchPattern::Array(elements) | MatchPattern::Alternation(elements) => {
                 for element in elements {
                     self.mark_pattern(&element.kind, element.span);
                 }

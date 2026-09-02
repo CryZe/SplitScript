@@ -318,16 +318,12 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
             declaration_span: Span,
             scope_span: Span,
         ) {
-            let previous = self.variables.insert(
-                id,
-                SourceVariable {
-                    name: name.to_owned(),
-                    name_span,
-                    declaration_span,
-                    scope_span,
-                },
-            );
-            debug_assert!(previous.is_none());
+            self.variables.entry(id).or_insert_with(|| SourceVariable {
+                name: name.to_owned(),
+                name_span,
+                declaration_span,
+                scope_span,
+            });
         }
     }
 

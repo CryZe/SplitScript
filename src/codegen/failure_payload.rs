@@ -52,16 +52,9 @@ impl FailurePayloadDemand {
                 .expect("reachable expressions belong to Wasm IR");
             match &expression.kind {
                 wasm_ir::ExpressionKind::Match { value, arms } => {
-                    if arms.iter().any(|arm| {
-                        matches!(
-                            arm.pattern,
-                            wasm_ir::LoweredPattern::ResultError {
-                                binding: Some(_),
-                                ..
-                            }
-                        )
-                    }) && let Some(result) =
-                        expression_result(*value, owner.as_ref(), program, semantics)
+                    if arms.iter().any(|arm| arm.pattern.binds_result_error())
+                        && let Some(result) =
+                            expression_result(*value, owner.as_ref(), program, semantics)
                     {
                         demanded.insert(result);
                     }
@@ -197,15 +190,7 @@ impl<'a> PatternDemandVisitor<'a> {
 impl Visitor for PatternDemandVisitor<'_> {
     fn visit_statement(&mut self, statement: &wasm_ir::Statement, program: &wasm_ir::Program) {
         if let wasm_ir::Statement::Match { value, arms, .. } = statement
-            && arms.iter().any(|arm| {
-                matches!(
-                    arm.pattern,
-                    wasm_ir::LoweredPattern::ResultError {
-                        binding: Some(_),
-                        ..
-                    }
-                )
-            })
+            && arms.iter().any(|arm| arm.pattern.binds_result_error())
             && let Some(result) = expression_result(*value, self.owner, program, self.semantics)
         {
             self.demanded.insert(result);

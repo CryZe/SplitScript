@@ -671,6 +671,71 @@ fn nested_array_patterns_expose_enum_and_binding_definitions() {
 }
 
 #[test]
+fn alternative_pattern_bindings_have_one_editor_identity() {
+    use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
+    use splitscript::tooling::highlight::SemanticTokenKind;
+
+    let source = r#"
+        enum Side { Left(u32), Right(u32) }
+        state "game.exe" {}
+
+        fn unwrap(side: Side) -> u32 {
+            return match side {
+                Side.Left(value) | Side.Right(value) => value,
+            }
+        }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    database
+        .check()
+        .expect("compatible alternative bindings should type check");
+    let first = source.find("value) | ").unwrap();
+    let operator = first + "value) ".len();
+    let second = source.find("value) =>").unwrap();
+    let used = source.rfind("=> value").unwrap() + "=> ".len();
+
+    let target = database.definition_at(used).unwrap();
+    assert!(matches!(
+        &target,
+        Some(DefinitionTarget::Source(definition))
+            if matches!(definition.id, SourceDefinitionId::Value(_))
+                && definition.span.start == first
+    ));
+    assert_eq!(database.definition_at(first).unwrap(), target);
+    assert_eq!(database.definition_at(second).unwrap(), target);
+    assert_eq!(
+        database.definition_at(operator).unwrap(),
+        Some(DefinitionTarget::Language(
+            splitscript::tooling::language::LanguageItemId::Match
+        ))
+    );
+    for offset in [first, second, used] {
+        assert!(
+            database
+                .hover(offset)
+                .unwrap()
+                .expect("every logical binding occurrence should have hover information")
+                .markdown
+                .contains("value: u32")
+        );
+    }
+    let rename = database.rename_at(second, "payload").unwrap();
+    assert_eq!(rename.edits.len(), 3);
+    assert!(
+        rename
+            .edits
+            .iter()
+            .all(|edit| &source[edit.span.start..edit.span.end] == "value")
+    );
+    let highlights = database.semantic_highlights().unwrap();
+    for offset in [first, second] {
+        assert!(highlights.highlights().iter().any(|highlight| {
+            highlight.span.start == offset && highlight.kind == SemanticTokenKind::Variable
+        }));
+    }
+}
+
+#[test]
 fn compiler_database_exposes_types_resolutions_and_references() {
     use std::sync::Arc;
 

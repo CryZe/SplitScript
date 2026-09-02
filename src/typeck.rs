@@ -161,7 +161,7 @@ struct Checker {
     provider_values: HashMap<StdlibStateProviderId, Type>,
     layout_value: Option<ValueId>,
     layout_available_in_on_attach: bool,
-    active_state_layout: Option<crate::ast::EnumVariantId>,
+    active_state_layouts: Option<HashSet<crate::ast::EnumVariantId>>,
     /// Physical state field whose source or transform is currently checked.
     /// Sibling references struct graph edges against this declaration.
     active_state_field: Option<ValueId>,
@@ -201,13 +201,20 @@ impl Checker {
     }
 
     fn active_state_provider(&self) -> Option<StdlibStateProviderId> {
-        self.active_state_layout
-            .and_then(|variant| {
-                self.resolutions
-                    .state_provider_alternative(variant)
-                    .map(|alternative| alternative.provider)
-            })
-            .or_else(|| self.provider_value.map(|(provider, _)| provider))
+        let Some(layouts) = &self.active_state_layouts else {
+            return self.provider_value.map(|(provider, _)| provider);
+        };
+        let mut providers = layouts.iter().filter_map(|variant| {
+            self.resolutions
+                .state_provider_alternative(*variant)
+                .map(|alternative| alternative.provider)
+        });
+        let first = providers.next();
+        if providers.all(|provider| Some(provider) == first) {
+            first.or_else(|| self.provider_value.map(|(provider, _)| provider))
+        } else {
+            None
+        }
     }
 
     fn provider_value_by_name(&self, name: &str) -> Option<(StdlibStateProviderId, Type)> {
@@ -239,9 +246,22 @@ impl Checker {
         layout: Option<crate::ast::EnumVariantId>,
         operation: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        let previous = std::mem::replace(&mut self.active_state_layout, layout);
+        self.with_state_layouts(layout.map(|layout| HashSet::from([layout])), operation)
+    }
+
+    fn with_state_layouts<T>(
+        &mut self,
+        layouts: Option<HashSet<crate::ast::EnumVariantId>>,
+        operation: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let next = match (&self.active_state_layouts, layouts) {
+            (Some(active), Some(layouts)) => Some(active.intersection(&layouts).copied().collect()),
+            (Some(active), None) => Some(active.clone()),
+            (None, layouts) => layouts,
+        };
+        let previous = std::mem::replace(&mut self.active_state_layouts, next);
         let output = operation(self);
-        self.active_state_layout = previous;
+        self.active_state_layouts = previous;
         output
     }
 

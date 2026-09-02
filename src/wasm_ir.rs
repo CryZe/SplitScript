@@ -359,31 +359,12 @@ pub enum LoweredPattern {
         binding: Option<ValueId>,
     },
     Array(Vec<LoweredPattern>),
+    Alternation(Vec<LoweredPattern>),
     Binding(ValueId),
     Wildcard,
 }
 
 impl LoweredPattern {
-    pub const fn binding(&self) -> Option<ValueId> {
-        match self {
-            Self::Enum { binding, .. }
-            | Self::OptionSome { binding, .. }
-            | Self::IteratorItem { binding, .. }
-            | Self::ResultSuccess { binding, .. }
-            | Self::ResultError { binding, .. } => *binding,
-            Self::Binding(binding) => Some(*binding),
-            Self::Bool(_)
-            | Self::Char(_)
-            | Self::String(_)
-            | Self::Int(_)
-            | Self::FileVersion(_)
-            | Self::OptionNone(_)
-            | Self::IteratorEnd(_)
-            | Self::Array(_)
-            | Self::Wildcard => None,
-        }
-    }
-
     pub fn visit_bindings(&self, visitor: &mut impl FnMut(ValueId)) {
         match self {
             Self::Enum {
@@ -407,7 +388,7 @@ impl LoweredPattern {
                 ..
             }
             | Self::Binding(binding) => visitor(*binding),
-            Self::Array(elements) => {
+            Self::Array(elements) | Self::Alternation(elements) => {
                 for element in elements {
                     element.visit_bindings(visitor);
                 }
@@ -418,7 +399,17 @@ impl LoweredPattern {
 
     pub fn contains_string(&self) -> bool {
         matches!(self, Self::String(_))
-            || matches!(self, Self::Array(elements) if elements.iter().any(Self::contains_string))
+            || matches!(self, Self::Array(elements) | Self::Alternation(elements) if elements.iter().any(Self::contains_string))
+    }
+
+    pub fn binds_result_error(&self) -> bool {
+        matches!(
+            self,
+            Self::ResultError {
+                binding: Some(_),
+                ..
+            }
+        ) || matches!(self, Self::Alternation(alternatives) if alternatives.iter().any(Self::binds_result_error))
     }
 }
 
@@ -1280,6 +1271,12 @@ fn lower_pattern(pattern: &TypedPattern, resolution: &hir::ResolvedPattern) -> L
                 .map(|element| lower_pattern(&element.pattern, &element.resolution))
                 .collect(),
         ),
+        TypedPattern::Alternation(alternatives) => LoweredPattern::Alternation(
+            alternatives
+                .iter()
+                .map(|alternative| lower_pattern(&alternative.pattern, &alternative.resolution))
+                .collect(),
+        ),
         TypedPattern::Binding(binding) => LoweredPattern::Binding(binding.id),
         TypedPattern::Wildcard => LoweredPattern::Wildcard,
     }
@@ -1973,7 +1970,7 @@ fn closure_captures(
                 | hir::TypedPattern::Binding(binding) => {
                     self.declared.insert(binding.id);
                 }
-                hir::TypedPattern::Array(elements) => {
+                hir::TypedPattern::Array(elements) | hir::TypedPattern::Alternation(elements) => {
                     for element in elements {
                         self.declare_pattern(&element.pattern);
                     }
@@ -2474,9 +2471,9 @@ fn analyze_statements_liveness(
                     if let Some(guard) = arm.guard {
                         collect_expression_values(guard, &mut arm_live, local_values, program);
                     }
-                    if let Some(binding) = arm.pattern.binding() {
+                    arm.pattern.visit_bindings(&mut |binding| {
                         arm_live.remove(&binding);
-                    }
+                    });
                     match_live.extend(arm_live);
                 }
                 collect_expression_values(*value, &mut match_live, local_values, program);
@@ -4840,9 +4837,8 @@ impl Visitor for LocalPlanner<'_> {
                     .ty;
                 self.push(value_type, LocalPurpose::MatchValue(*expression));
                 for arm in arms {
-                    if let Some(binding) = arm.pattern.binding() {
-                        self.value(binding);
-                    }
+                    arm.pattern
+                        .visit_bindings(&mut |binding| self.value(binding));
                 }
             }
             Statement::Fallback {

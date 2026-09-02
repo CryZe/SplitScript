@@ -1014,11 +1014,11 @@ remaining work is product hardening and distribution.
   Both `[T]` and `[T; N]` derive structural `Equatable` when `T: Equatable`, and
   exact recursive array patterns support nested tests and bindings. Fixed-array
   lengths are checked statically; growable lengths are tested safely at runtime.
-- [ ] Add pattern alternation with `patternA | patternB` after recursive
-  patterns are established. Define binding compatibility across alternatives,
-  exhaustiveness, reachability, formatting, and editor behavior before
-  implementation; do not encode alternation as duplicated match arms because
-  guards and bindings must retain one arm scope.
+- [x] Add recursive pattern alternation with `patternA | patternB`. Alternatives
+  are represented directly rather than as duplicated arms, contribute their
+  union to exhaustiveness, try left to right, and retain one guard/body scope.
+  Every alternative binds the same names with compatible types; repeated
+  occurrences share hover, navigation, rename, highlighting, and debug identity.
 - [x] Add shorthand struct field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename

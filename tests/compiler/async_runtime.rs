@@ -802,6 +802,40 @@ fn array_equality_and_patterns_execute_structurally() {
 }
 
 #[test]
+fn pattern_alternatives_share_bindings_and_work_recursively() {
+    let source = r#"
+        enum Side {
+            Left(u32),
+            Right(u32),
+            Idle,
+        }
+
+        state "game.exe" {}
+
+        setup {
+            print(match Side.Left(7) {
+                Side.Left(value) | Side.Right(value) => value,
+                Side.Idle => 0,
+            })
+            print(match [1u8, 9u8] {
+                [0 | 1, value] => value,
+                _ => 0,
+            })
+            print(match [1u8, 2u8] {
+                [1, value] | [value, 2] => value,
+                _ => 0,
+            })
+            print(match false {
+                true | false => "covered",
+            })
+        }
+    "#;
+
+    let (store, _) = execute_with_mock_host(source);
+    assert_eq!(store.data().messages, ["7", "9", "2", "covered"]);
+}
+
+#[test]
 fn closed_pure_global_initializers_execute_before_setup() {
     let source = r#"
         fn increment(value: u32) -> u32 {

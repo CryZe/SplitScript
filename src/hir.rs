@@ -300,6 +300,7 @@ pub enum TypedPattern {
     ResultSuccess(Option<PatternBinding>),
     ResultError(Option<PatternBinding>),
     Array(Vec<TypedPatternNode>),
+    Alternation(Vec<TypedPatternNode>),
     Binding(PatternBinding),
     Wildcard,
 }
@@ -939,7 +940,7 @@ impl TypedBodyBuilder<'_> {
                 span,
             },
         );
-        if let MatchPattern::Array(elements) = pattern {
+        if let MatchPattern::Array(elements) | MatchPattern::Alternation(elements) = pattern {
             for element in elements {
                 self.insert_pattern(&element.kind, element.id, element.span);
             }
@@ -1405,6 +1406,26 @@ fn lower_pattern(
                         variant: semantics.pattern_variant(element.id),
                         wrapper: semantics.wrapper_pattern(element.id),
                         span: element.span,
+                    },
+                })
+                .collect(),
+        ),
+        MatchPattern::Alternation(alternatives) => TypedPattern::Alternation(
+            alternatives
+                .iter()
+                .map(|alternative| TypedPatternNode {
+                    pattern: lower_pattern(
+                        &alternative.kind,
+                        alternative.id,
+                        semantics,
+                        syntax,
+                        standard_library,
+                    ),
+                    resolution: ResolvedPattern {
+                        id: alternative.id,
+                        variant: semantics.pattern_variant(alternative.id),
+                        wrapper: semantics.wrapper_pattern(alternative.id),
+                        span: alternative.span,
                     },
                 })
                 .collect(),

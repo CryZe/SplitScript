@@ -2772,13 +2772,25 @@ impl Checker {
                     })
             })
             .or_else(|| {
-                self.active_state_layout.and_then(|layout| {
+                let layouts = self.active_state_layouts.as_ref()?;
+                let mut candidates = layouts.iter().map(|layout| {
                     self.declarations
                         .layout_state_fields
-                        .get(&layout)
+                        .get(layout)
                         .and_then(|fields| fields.get(name))
                         .copied()
-                })
+                });
+                let first = candidates.next()??;
+                let first_storage = self.declarations.state_storage_fields.get(&first.0)?;
+                candidates
+                    .all(|candidate| {
+                        candidate.is_some_and(|candidate| {
+                            candidate.1 == first.1
+                                && self.declarations.state_storage_fields.get(&candidate.0)
+                                    == Some(first_storage)
+                        })
+                    })
+                    .then_some(first)
             })
     }
 
@@ -2786,11 +2798,16 @@ impl Checker {
     /// must select their own declaration even when the field is also part of
     /// the canonical snapshot interface shared by every layout.
     fn visible_state_source_field(&self, name: &str) -> Option<(crate::ast::ValueId, Type)> {
-        self.active_state_layout
-            .and_then(|layout| {
+        self.active_state_layouts
+            .as_ref()
+            .and_then(|layouts| {
+                if layouts.len() != 1 {
+                    return None;
+                }
+                let layout = layouts.iter().next().unwrap();
                 self.declarations
                     .layout_state_fields
-                    .get(&layout)
+                    .get(layout)
                     .and_then(|fields| fields.get(name))
                     .copied()
             })

@@ -1706,6 +1706,7 @@ pub enum MatchPattern {
     ResultSuccess(Option<PatternBinding>),
     ResultError(Option<PatternBinding>),
     Array(Vec<PatternNode>),
+    Alternation(Vec<PatternNode>),
     Binding(PatternBinding),
     Wildcard,
 }
@@ -1722,9 +1723,29 @@ impl MatchPattern {
             | Self::ResultSuccess(Some(binding))
             | Self::ResultError(Some(binding))
             | Self::Binding(binding) => visitor(binding),
-            Self::Array(elements) => {
+            Self::Array(elements) | Self::Alternation(elements) => {
                 for element in elements {
                     element.kind.visit_bindings(visitor);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn visit_bindings_mut(&mut self, visitor: &mut impl FnMut(&mut PatternBinding)) {
+        match self {
+            Self::Enum {
+                binding: Some(binding),
+                ..
+            }
+            | Self::OptionSome(Some(binding))
+            | Self::IteratorItem(Some(binding))
+            | Self::ResultSuccess(Some(binding))
+            | Self::ResultError(Some(binding))
+            | Self::Binding(binding) => visitor(binding),
+            Self::Array(elements) | Self::Alternation(elements) => {
+                for element in elements {
+                    element.kind.visit_bindings_mut(visitor);
                 }
             }
             _ => {}

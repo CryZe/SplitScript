@@ -5,7 +5,7 @@ use std::{cmp::Reverse, sync::Arc};
 use crate::{
     CheckedProgram, CompilerContext, Diagnostic, LoweredProgram, ParsedProgram, RecoveredCheck,
     RecoveredParse, WarningPolicy,
-    ast::{AssignmentId, ExprId, ExprKind, FunctionId, Span, ValueId},
+    ast::{AssignmentId, ExprId, ExprKind, FunctionId, MatchArm, MatchPattern, Span, ValueId},
     highlight::SemanticHighlightIndex,
     hir::{Declaration, TypedExpressionKind},
     language::{LanguageCatalog, LanguageItemId},
@@ -946,6 +946,11 @@ impl CompilerDatabase {
                 }))
             }
             TokenKind::Bang => Some(language.item(LanguageItemId::ResultType)),
+            TokenKind::Or => {
+                let snapshot = self.semantic_snapshot()?;
+                pattern_alternation_at(snapshot.syntax(), offset)
+                    .then(|| language.item(LanguageItemId::Match))
+            }
             TokenKind::LBracket => {
                 let is_index = analysis.is_some_and(|analysis| {
                     let Ok(snapshot) = self.semantic_snapshot() else {
@@ -1012,6 +1017,51 @@ impl CompilerDatabase {
         }
         Arc::clone(self.cache.diagnostics.as_ref().unwrap())
     }
+}
+
+fn pattern_alternation_at(program: &crate::ast::Program, offset: usize) -> bool {
+    fn contains(pattern: &MatchPattern, offset: usize) -> bool {
+        match pattern {
+            MatchPattern::Alternation(alternatives) => {
+                let spans_operator =
+                    alternatives
+                        .first()
+                        .zip(alternatives.last())
+                        .is_some_and(|(first, last)| {
+                            first.span.end <= offset && offset < last.span.start
+                        });
+                spans_operator
+                    || alternatives
+                        .iter()
+                        .any(|alternative| contains(&alternative.kind, offset))
+            }
+            MatchPattern::Array(elements) => elements
+                .iter()
+                .any(|element| contains(&element.kind, offset)),
+            _ => false,
+        }
+    }
+
+    struct Finder {
+        offset: usize,
+        found: bool,
+    }
+
+    impl<'ast> Visitor<'ast> for Finder {
+        fn visit_match_arm(&mut self, arm: &'ast MatchArm) {
+            self.found |= contains(&arm.pattern, self.offset);
+            if !self.found {
+                visit::walk_match_arm(self, arm);
+            }
+        }
+    }
+
+    let mut finder = Finder {
+        offset,
+        found: false,
+    };
+    finder.visit_program(program);
+    finder.found
 }
 
 /// Returns the independently checkable declaration boundary containing a

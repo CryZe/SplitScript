@@ -833,7 +833,8 @@ impl<'ast> Visitor<'ast> for ExpressionFacts<'_> {
             | MatchPattern::None
             | MatchPattern::IteratorEnd
             | MatchPattern::Wildcard
-            | MatchPattern::Array(_) => None,
+            | MatchPattern::Array(_)
+            | MatchPattern::Alternation(_) => None,
             MatchPattern::Binding(binding) => Some(binding),
         };
         if let Some(binding) = binding {

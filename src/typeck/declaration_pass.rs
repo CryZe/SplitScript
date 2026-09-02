@@ -179,13 +179,29 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
             }
         }
 
+        // Layout subsets may also share one physical snapshot slot. This is
+        // what lets an or-pattern such as `StateLayout.V8 | StateLayout.V9`
+        // retain a field that has the same name and type in both layouts even
+        // when a third layout omits it. Conflicting types remain independent.
+        let mut compatible_storage = HashMap::<(String, Type), crate::ast::ValueId>::new();
         for (_, fields) in state.variant_fields() {
             for field in fields {
-                checker
+                let ty = checker.declarations.state_fields_by_id[&field.id];
+                let key = (field.name.clone(), ty);
+                if let Some(storage) = checker
                     .declarations
                     .state_storage_fields
-                    .entry(field.id)
-                    .or_insert(field.id);
+                    .get(&field.id)
+                    .copied()
+                {
+                    compatible_storage.entry(key).or_insert(storage);
+                } else {
+                    let storage = *compatible_storage.entry(key).or_insert(field.id);
+                    checker
+                        .declarations
+                        .state_storage_fields
+                        .insert(field.id, storage);
+                }
             }
         }
     }

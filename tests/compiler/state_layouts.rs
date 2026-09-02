@@ -1400,6 +1400,47 @@ fn named_state_layouts_refine_layout_specific_fields_and_types() {
 }
 
 #[test]
+fn alternative_layout_patterns_retain_fields_shared_by_the_selected_layouts() {
+    let source = r#"
+        state "game.exe" {
+            layout V8 {
+                shared: u16 at 0x100;
+                legacy: u8 at 0x102;
+            },
+            layout V9 {
+                shared: u16 at 0x200;
+                modern: u8 at 0x202;
+            },
+            layout Demo {
+                demoOnly: u32 at 0x300;
+            },
+        }
+        onAttach { return StateLayout.V8 }
+        split {
+            return match layout {
+                StateLayout.V8 | StateLayout.V9 => current.shared > old.shared,
+                StateLayout.Demo => false,
+            }
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("an alternative layout refinement should retain its common fields");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("shared subset storage should produce valid WebAssembly");
+
+    let invalid = source.replace("current.shared > old.shared", "current.legacy > old.legacy");
+    let diagnostics = splitscript::compile(&invalid)
+        .expect_err("a field missing from one selected layout is not available");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("state field `legacy` is layout-specific")
+    }));
+}
+
+#[test]
 fn named_state_layouts_require_a_total_on_attach_selection() {
     for (source, expected) in [
         (

@@ -2067,6 +2067,63 @@ fn growable_array_patterns_require_a_fallback_arm() {
 }
 
 #[test]
+fn pattern_alternatives_require_the_same_binding_names_and_types() {
+    let names = splitscript::compile(
+        r#"
+            enum Side {
+                Left(u32),
+                Right(u32),
+            }
+
+            state "game.exe" {}
+
+            fn value(side: Side) -> u32 {
+                return match side {
+                    Side.Left(value) | Side.Right(other) => value,
+                }
+            }
+        "#,
+    )
+    .expect_err("every alternative must establish the same arm bindings");
+    assert!(
+        names
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("does not bind `value`")),
+        "{names:#?}"
+    );
+    assert!(
+        names.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("binds `other`, but the other alternatives do not")),
+        "{names:#?}"
+    );
+
+    let types = splitscript::compile(
+        r#"
+            enum Mixed {
+                Number(u32),
+                Text(String),
+            }
+
+            state "game.exe" {}
+
+            fn value(mixed: Mixed) -> u32 {
+                return match mixed {
+                    Mixed.Number(value) | Mixed.Text(value) => 1,
+                }
+            }
+        "#,
+    )
+    .expect_err("one logical binding must have one type");
+    assert!(
+        types.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("types do not match: `u32` and `String`")),
+        "{types:#?}"
+    );
+}
+
+#[test]
 fn break_and_continue_require_loops() {
     for (keyword, expected) in [
         ("break", "`break` is only available inside a loop"),

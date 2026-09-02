@@ -1390,6 +1390,9 @@ struct LocalBindingCollector {
 
 impl LocalBindingCollector {
     fn push(&mut self, id: ast::ValueId, name: &str, name_span: ast::Span, kind: LocalBindingKind) {
+        if self.bindings.iter().any(|binding| binding.id == id) {
+            return;
+        }
         self.bindings.push(LocalBinding {
             id,
             name: name.to_owned(),
@@ -1454,7 +1457,8 @@ impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
             | ast::MatchPattern::ResultSuccess(None)
             | ast::MatchPattern::ResultError(None)
             | ast::MatchPattern::Wildcard
-            | ast::MatchPattern::Array(_) => None,
+            | ast::MatchPattern::Array(_)
+            | ast::MatchPattern::Alternation(_) => None,
             ast::MatchPattern::Binding(binding) => Some(binding),
         };
         if let Some(binding) = binding {

@@ -3008,6 +3008,36 @@ fn catalog_declared_unary_operators_execute_for_globals_and_methods() {
 }
 
 #[test]
+fn negative_integer_literals_execute_in_globals_expressions_and_patterns() {
+    let source = r#"
+        let minimum: i64 = -9223372036854775808
+
+        state "game.exe" {}
+
+        whileAttached {
+            let byte: i8 = -128
+            let matched = match byte {
+                -128 => "minimum",
+                _ => "other",
+            }
+            let doubleNegative = --7
+            print(`{minimum}:{byte}:{matched}:{doubleNegative}`)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        ["-9223372036854775808:-128:minimum:7"]
+    );
+}
+
+#[test]
 fn numeric_swap_bytes_preserves_width_signedness_and_bit_patterns() {
     let source = r#"
         state "game.exe" {}

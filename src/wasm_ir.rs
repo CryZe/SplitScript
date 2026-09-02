@@ -140,7 +140,10 @@ pub enum ExpressionKind {
     None,
     IteratorEnd,
     Bool(bool),
-    Int(u64),
+    Int {
+        value: u64,
+        negative: bool,
+    },
     Float(crate::ast::FloatLiteral),
     Char(char),
     String(String),
@@ -342,7 +345,10 @@ pub enum LoweredPattern {
     Bool(bool),
     Char(char),
     String(String),
-    Int(u64),
+    Int {
+        value: u64,
+        negative: bool,
+    },
     FileVersion([u16; 4]),
     OptionNone(OptionTypeId),
     OptionSome {
@@ -1235,7 +1241,12 @@ fn lower_pattern(pattern: &TypedPattern, resolution: &hir::ResolvedPattern) -> L
         TypedPattern::Bool(value) => LoweredPattern::Bool(*value),
         TypedPattern::Char(value) => LoweredPattern::Char(*value),
         TypedPattern::String(value) => LoweredPattern::String(value.clone()),
-        TypedPattern::Int { value, .. } => LoweredPattern::Int(*value),
+        TypedPattern::Int {
+            value, negative, ..
+        } => LoweredPattern::Int {
+            value: *value,
+            negative: *negative,
+        },
         TypedPattern::FileVersion(components) => LoweredPattern::FileVersion(*components),
         TypedPattern::None => {
             let Some(ResolvedWrapperPattern::OptionNone(option)) = resolution.wrapper else {
@@ -1311,7 +1322,12 @@ fn lower_expression(
         TypedExpressionKind::None => ExpressionKind::None,
         TypedExpressionKind::IteratorEnd => ExpressionKind::IteratorEnd,
         TypedExpressionKind::Bool(value) => ExpressionKind::Bool(*value),
-        TypedExpressionKind::Int { value, .. } => ExpressionKind::Int(*value),
+        TypedExpressionKind::Int {
+            value, negative, ..
+        } => ExpressionKind::Int {
+            value: *value,
+            negative: *negative,
+        },
         TypedExpressionKind::Float(value) => ExpressionKind::Float(value.clone()),
         TypedExpressionKind::Char(value) => ExpressionKind::Char(*value),
         TypedExpressionKind::String(value) => ExpressionKind::String(value.clone()),
@@ -3116,7 +3132,7 @@ fn capture_await_value(
         ExpressionKind::None
             | ExpressionKind::IteratorEnd
             | ExpressionKind::Bool(_)
-            | ExpressionKind::Int(_)
+            | ExpressionKind::Int { .. }
             | ExpressionKind::Float(_)
             | ExpressionKind::Char(_)
             | ExpressionKind::String(_)
@@ -3326,7 +3342,7 @@ fn map_expression_children(
         ExpressionKind::None
         | ExpressionKind::IteratorEnd
         | ExpressionKind::Bool(_)
-        | ExpressionKind::Int(_)
+        | ExpressionKind::Int { .. }
         | ExpressionKind::Float(_)
         | ExpressionKind::Char(_)
         | ExpressionKind::String(_)

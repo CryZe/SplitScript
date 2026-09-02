@@ -1527,6 +1527,7 @@ pub enum ExprKind {
     Char(char),
     Int {
         value: u64,
+        negative: bool,
         suffix: Option<TypeRef>,
     },
     Float(FloatLiteral),
@@ -1715,6 +1716,7 @@ pub enum MatchPattern {
     String(String),
     Int {
         value: u64,
+        negative: bool,
         suffix: Option<TypeRef>,
     },
     FileVersion([u16; 4]),

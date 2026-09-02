@@ -158,6 +158,7 @@ struct Variable {
     binding: Option<Type>,
     requirements: Requirements,
     largest_literal: Option<u64>,
+    largest_negative_literal: Option<u64>,
     literal_default: Option<LiteralDefault>,
 }
 
@@ -436,6 +437,10 @@ impl InferenceContext {
         fits_unsigned_literal(&self.types, value, ty)
     }
 
+    pub(crate) fn fits_negative_literal(&self, value: u64, ty: Type) -> bool {
+        fits_negative_literal(&self.types, value, ty)
+    }
+
     pub(crate) fn known_type_name(&self, id: TypeId) -> String {
         match self.types.kind(id) {
             TypeKind::Error => "<unknown>".into(),
@@ -498,12 +503,26 @@ impl InferenceContext {
         largest_literal: Option<u64>,
     ) -> Type {
         let literal_default = largest_literal.map(|_| LiteralDefault::Integer);
-        self.fresh_with_literal_default(requirements, largest_literal, literal_default)
+        self.fresh_with_literal_default(requirements, largest_literal, None, literal_default)
+    }
+
+    pub(crate) fn fresh_negative_integer_literal(
+        &mut self,
+        requirements: Requirements,
+        magnitude: u64,
+    ) -> Type {
+        self.fresh_with_literal_default(
+            requirements,
+            None,
+            Some(magnitude),
+            Some(LiteralDefault::Integer),
+        )
     }
 
     pub(crate) fn fresh_float_literal(&mut self) -> Type {
         self.fresh_with_literal_default(
             Requirements::capability(StdlibCapabilityId::Float),
+            None,
             None,
             Some(LiteralDefault::Float),
         )
@@ -513,6 +532,7 @@ impl InferenceContext {
         &mut self,
         requirements: Requirements,
         largest_literal: Option<u64>,
+        largest_negative_literal: Option<u64>,
         literal_default: Option<LiteralDefault>,
     ) -> Type {
         let requirements = Requirements(
@@ -525,6 +545,7 @@ impl InferenceContext {
             binding: None,
             requirements,
             largest_literal,
+            largest_negative_literal,
             literal_default,
         });
         Type::Variable(id)
@@ -776,6 +797,7 @@ impl InferenceContext {
                 let substitution = self.fresh_with_literal_default(
                     template.requirements,
                     template.largest_literal,
+                    template.largest_negative_literal,
                     template.literal_default,
                 );
                 substitutions.insert(variable, substitution);
@@ -2072,6 +2094,9 @@ impl InferenceContext {
         self.variables[left as usize].largest_literal = left_variable
             .largest_literal
             .max(right_variable.largest_literal);
+        self.variables[left as usize].largest_negative_literal = left_variable
+            .largest_negative_literal
+            .max(right_variable.largest_negative_literal);
         self.variables[left as usize].literal_default = LiteralDefault::merge(
             left_variable.literal_default,
             right_variable.literal_default,
@@ -2167,6 +2192,11 @@ impl InferenceContext {
         {
             return Err(InferenceError::IntegerLiteralOutOfRange(ty));
         }
+        if let Some(literal) = inference.largest_negative_literal
+            && !fits_negative_literal(&self.types, literal, ty)
+        {
+            return Err(InferenceError::IntegerLiteralOutOfRange(ty));
+        }
         Ok(())
     }
 }
@@ -2186,6 +2216,21 @@ fn fits_unsigned_literal(types: &TypeStore, value: u64, ty: Type) -> bool {
         TypeKind::Builtin(BuiltinType::I32) => value <= i32::MAX as u64,
         TypeKind::Builtin(BuiltinType::U64 | BuiltinType::Address) => true,
         TypeKind::Builtin(BuiltinType::I64) => value <= i64::MAX as u64,
+        TypeKind::Builtin(BuiltinType::F32) => integer_is_exact_at_precision(value, 24),
+        TypeKind::Builtin(BuiltinType::F64) => integer_is_exact_at_precision(value, 53),
+        _ => false,
+    }
+}
+
+fn fits_negative_literal(types: &TypeStore, value: u64, ty: Type) -> bool {
+    let Type::Known(id) = ty else {
+        return false;
+    };
+    match types.kind(id) {
+        TypeKind::Builtin(BuiltinType::I8) => value <= (i8::MAX as u64) + 1,
+        TypeKind::Builtin(BuiltinType::I16) => value <= (i16::MAX as u64) + 1,
+        TypeKind::Builtin(BuiltinType::I32) => value <= (i32::MAX as u64) + 1,
+        TypeKind::Builtin(BuiltinType::I64) => value <= (i64::MAX as u64) + 1,
         TypeKind::Builtin(BuiltinType::F32) => integer_is_exact_at_precision(value, 24),
         TypeKind::Builtin(BuiltinType::F64) => integer_is_exact_at_precision(value, 53),
         _ => false,

@@ -29,6 +29,41 @@ fn binary_integer_literals_type_check_and_report_boolean_misuse() {
 }
 
 #[test]
+fn negative_integer_literals_include_each_signed_minimum_and_reject_unsigned_types() {
+    splitscript::compile(
+        r#"
+            state GBA {}
+
+            fn minima() {
+                let byte: i8 = -128
+                let word: i16 = -32768
+                let dword: i32 = -2147483648
+                let qword: i64 = -9223372036854775808
+                let exactFloat: f64 = -2147483648
+                let inferred = -2147483648
+                print(`{byte}:{word}:{dword}:{qword}:{exactFloat}:{inferred}`)
+            }
+        "#,
+    )
+    .expect("negative literals should represent every signed minimum directly");
+
+    for source in [
+        "state GBA {} fn bad() { let value: u8 = -1 }",
+        "state GBA {} fn bad() { let value: i8 = -129 }",
+        "state GBA {} fn bad() { let value = -9223372036854775809 }",
+    ] {
+        let diagnostics = splitscript::compile(source)
+            .expect_err("an out-of-range negative literal should be rejected");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("integer literal does not fit")),
+            "{diagnostics:#?}"
+        );
+    }
+}
+
+#[test]
 fn user_call_type_mismatches_name_the_argument_and_label_the_parameter() {
     let source = r#"
         struct Pos {

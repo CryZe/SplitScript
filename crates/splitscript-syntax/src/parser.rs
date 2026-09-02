@@ -1341,6 +1341,60 @@ state {
     }
 
     #[test]
+    fn negative_integer_literals_are_atomic_while_parenthesized_values_remain_unary() {
+        let source = r#"
+            state "game.exe" {}
+            whileAttached {
+                let literal = -128i8
+                let computed = -(1)
+                let classified = match literal {
+                    -128i8 => true,
+                    _ => false,
+                }
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let statements = &program.actions[0].body.statements;
+        let Stmt::Variable(literal) = &statements[0] else {
+            panic!("expected a variable declaration")
+        };
+        assert!(matches!(
+            literal.value.as_ref().unwrap().kind,
+            ExprKind::Int {
+                value: 128,
+                negative: true,
+                ..
+            }
+        ));
+
+        let Stmt::Variable(computed) = &statements[1] else {
+            panic!("expected a variable declaration")
+        };
+        assert!(matches!(
+            computed.value.as_ref().unwrap().kind,
+            ExprKind::Unary {
+                op: UnaryOp::Neg,
+                ..
+            }
+        ));
+
+        let Stmt::Variable(classified) = &statements[2] else {
+            panic!("expected a variable declaration")
+        };
+        let ExprKind::Match { arms, .. } = &classified.value.as_ref().unwrap().kind else {
+            panic!("expected a match expression")
+        };
+        assert!(matches!(
+            arms[0].pattern,
+            MatchPattern::Int {
+                value: 128,
+                negative: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn array_indexes_are_postfix_expressions_and_can_be_chained() {
         let source = r#"
             state "game.exe" {}

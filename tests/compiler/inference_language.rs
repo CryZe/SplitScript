@@ -1483,7 +1483,7 @@ fn literal_matches_support_guards_wildcards_and_bidirectional_inference() {
         for arm in arms {
             match arm.pattern {
                 splitscript::compiler::wasm_ir::LoweredPattern::Bool(_) => patterns[0] = true,
-                splitscript::compiler::wasm_ir::LoweredPattern::Int(_) => patterns[1] = true,
+                splitscript::compiler::wasm_ir::LoweredPattern::Int { .. } => patterns[1] = true,
                 splitscript::compiler::wasm_ir::LoweredPattern::Wildcard => patterns[2] = true,
                 splitscript::compiler::wasm_ir::LoweredPattern::Enum { .. }
                 | splitscript::compiler::wasm_ir::LoweredPattern::Char(_)

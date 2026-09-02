@@ -300,6 +300,7 @@ pub enum TypedPattern {
     String(String),
     Int {
         value: u64,
+        negative: bool,
         suffix: Option<TypeRef>,
     },
     FileVersion([u16; 4]),
@@ -322,6 +323,7 @@ pub enum TypedExpressionKind {
     Bool(bool),
     Int {
         value: u64,
+        negative: bool,
         suffix: Option<TypeRef>,
     },
     Float(crate::ast::FloatLiteral),
@@ -1438,8 +1440,13 @@ fn lower_pattern(
         MatchPattern::Bool(value) => TypedPattern::Bool(*value),
         MatchPattern::Char(value) => TypedPattern::Char(*value),
         MatchPattern::String(value) => TypedPattern::String(value.clone()),
-        MatchPattern::Int { value, suffix } => TypedPattern::Int {
+        MatchPattern::Int {
+            value,
+            negative,
+            suffix,
+        } => TypedPattern::Int {
             value: *value,
+            negative: *negative,
             suffix: *suffix,
         },
         MatchPattern::FileVersion(components) => TypedPattern::FileVersion(*components),
@@ -1536,8 +1543,13 @@ fn lower_expression_kind(
         ExprKind::None => TypedExpressionKind::None,
         ExprKind::IteratorEnd => TypedExpressionKind::IteratorEnd,
         ExprKind::Bool(value) => TypedExpressionKind::Bool(*value),
-        ExprKind::Int { value, suffix } => TypedExpressionKind::Int {
+        ExprKind::Int {
+            value,
+            negative,
+            suffix,
+        } => TypedExpressionKind::Int {
             value: *value,
+            negative: *negative,
             suffix: *suffix,
         },
         ExprKind::Float(literal) => TypedExpressionKind::Float(literal.clone()),

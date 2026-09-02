@@ -476,6 +476,25 @@ impl Parser<'_> {
                 span,
             ));
         }
+        if self.at(&TokenKind::Minus) && matches!(self.peek(1).kind, TokenKind::Int(_)) {
+            let start = self.current().span;
+            self.bump();
+            let token = self.current().clone();
+            let TokenKind::Int(text) = token.kind else {
+                unreachable!("a negative integer literal was checked above")
+            };
+            self.bump();
+            let (value, suffix) =
+                parse_integer(&text).map_err(|message| Diagnostic::new(message, token.span))?;
+            return Ok(self.new_expr(
+                ExprKind::Int {
+                    value,
+                    negative: true,
+                    suffix,
+                },
+                start.join(token.span),
+            ));
+        }
         if self.eat(&TokenKind::Minus).is_some() {
             let start = self.previous().span;
             let expr = self.required_expression(12)?;
@@ -633,6 +652,7 @@ impl Parser<'_> {
                             self.new_expr(
                                 ExprKind::Int {
                                     value: u64::from(value),
+                                    negative: false,
                                     suffix: None,
                                 },
                                 version_span,
@@ -743,7 +763,14 @@ impl Parser<'_> {
                 let (value, suffix) =
                     parse_integer(&text).map_err(|message| Diagnostic::new(message, token.span))?;
                 self.bump();
-                Ok(self.new_expr(ExprKind::Int { value, suffix }, token.span))
+                Ok(self.new_expr(
+                    ExprKind::Int {
+                        value,
+                        negative: false,
+                        suffix,
+                    },
+                    token.span,
+                ))
             }
             TokenKind::Float(text) => {
                 let normalized = text.replace('_', "");
@@ -1373,7 +1400,26 @@ impl Parser<'_> {
                 self.bump();
                 let (value, suffix) = parse_integer(&text)
                     .map_err(|message| Diagnostic::new(message, pattern_start))?;
-                MatchPattern::Int { value, suffix }
+                MatchPattern::Int {
+                    value,
+                    negative: false,
+                    suffix,
+                }
+            }
+            TokenKind::Minus if matches!(self.peek(1).kind, TokenKind::Int(_)) => {
+                self.bump();
+                let token = self.current().clone();
+                let TokenKind::Int(text) = token.kind else {
+                    unreachable!("a negative integer pattern was checked above")
+                };
+                self.bump();
+                let (value, suffix) =
+                    parse_integer(&text).map_err(|message| Diagnostic::new(message, token.span))?;
+                MatchPattern::Int {
+                    value,
+                    negative: true,
+                    suffix,
+                }
             }
             TokenKind::Char(value) => {
                 self.bump();

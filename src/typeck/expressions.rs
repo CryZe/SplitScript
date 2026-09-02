@@ -37,7 +37,10 @@ enum PatternCoverage {
     Bool(bool),
     Char(char),
     String(String),
-    Int(u64),
+    Int {
+        value: u64,
+        negative: bool,
+    },
     FileVersion([u16; 4]),
     OptionNone,
     OptionSome(Box<Self>),
@@ -123,7 +126,9 @@ impl PatternCoverage {
             Self::Bool(value) => value.to_string(),
             Self::Char(value) => format!("{value:?}"),
             Self::String(value) => format!("{value:?}"),
-            Self::Int(value) => value.to_string(),
+            Self::Int { value, negative } => {
+                format!("{}{value}", if *negative { "-" } else { "" })
+            }
             Self::FileVersion(parts) => {
                 format!("v\"{}.{}.{}.{}\"", parts[0], parts[1], parts[2], parts[3])
             }
@@ -228,10 +233,19 @@ impl Checker {
                 expected,
                 expr.span,
             )?,
-            ExprKind::Int { value, suffix } => {
+            ExprKind::Int {
+                value,
+                negative,
+                suffix,
+            } => {
                 let ty = if let Some(suffix) = suffix {
                     let suffix = self.syntax_type(*suffix);
-                    if !self.inference.fits_unsigned_literal(*value, suffix) {
+                    let fits = if *negative {
+                        self.inference.fits_negative_literal(*value, suffix)
+                    } else {
+                        self.inference.fits_unsigned_literal(*value, suffix)
+                    };
+                    if !fits {
                         self.error(
                             format!("integer literal does not fit in `{suffix}`"),
                             expr.span,
@@ -240,10 +254,17 @@ impl Checker {
                     }
                     suffix
                 } else {
-                    self.fresh_inference(
-                        Requirements::capability(StdlibCapabilityId::Numeric),
-                        Some(*value),
-                    )
+                    if *negative {
+                        self.inference.fresh_negative_integer_literal(
+                            Requirements::capability(StdlibCapabilityId::Numeric),
+                            *value,
+                        )
+                    } else {
+                        self.fresh_inference(
+                            Requirements::capability(StdlibCapabilityId::Numeric),
+                            Some(*value),
+                        )
+                    }
                 };
                 self.expect_expression(expr.id, ty, expected, expr.span)?
             }
@@ -1984,25 +2005,42 @@ impl Checker {
                 self.unify(value_type, self.standard_type(StdlibTypeId::String), span);
                 CheckedPattern::new(PatternCoverage::String(value.clone()))
             }
-            MatchPattern::Int { value, suffix } => {
+            MatchPattern::Int {
+                value,
+                negative,
+                suffix,
+            } => {
                 let pattern_type = if let Some(suffix) = suffix {
                     if !suffix.is_integer() {
                         self.error("integer match patterns require an integer type", span);
-                    } else if !self
-                        .inference
-                        .fits_unsigned_literal(*value, self.syntax_type(*suffix))
-                    {
+                    } else if !(if *negative {
+                        self.inference
+                            .fits_negative_literal(*value, self.syntax_type(*suffix))
+                    } else {
+                        self.inference
+                            .fits_unsigned_literal(*value, self.syntax_type(*suffix))
+                    }) {
                         self.error(format!("integer literal does not fit in `{suffix}`"), span);
                     }
                     self.syntax_type(*suffix)
                 } else {
-                    self.fresh_inference(
-                        Requirements::capability(StdlibCapabilityId::Integer),
-                        Some(*value),
-                    )
+                    if *negative {
+                        self.inference.fresh_negative_integer_literal(
+                            Requirements::capability(StdlibCapabilityId::Integer),
+                            *value,
+                        )
+                    } else {
+                        self.fresh_inference(
+                            Requirements::capability(StdlibCapabilityId::Integer),
+                            Some(*value),
+                        )
+                    }
                 };
                 self.unify(value_type, pattern_type, span);
-                CheckedPattern::new(PatternCoverage::Int(*value))
+                CheckedPattern::new(PatternCoverage::Int {
+                    value: *value,
+                    negative: *negative,
+                })
             }
             MatchPattern::FileVersion(components) => {
                 self.unify(

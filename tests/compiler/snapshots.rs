@@ -398,7 +398,14 @@ fn snapshot_expression_kind(
         TypedExpressionKind::None => "None".to_owned(),
         TypedExpressionKind::IteratorEnd => "End".to_owned(),
         TypedExpressionKind::Bool(value) => value.to_string(),
-        TypedExpressionKind::Int { value, suffix } => format!("int {value} suffix={suffix:?}"),
+        TypedExpressionKind::Int {
+            value,
+            negative,
+            suffix,
+        } => format!(
+            "int {}{value} suffix={suffix:?}",
+            if *negative { "-" } else { "" }
+        ),
         TypedExpressionKind::Float(literal) => format!("float {}", literal.value),
         TypedExpressionKind::Char(value) => format!("char {value:?}"),
         TypedExpressionKind::String(value) => format!("string {value:?}"),

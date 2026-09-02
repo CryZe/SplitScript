@@ -28,8 +28,9 @@ use super::{
     SetFunctions, SettingStorage, Type, application_type_argument, array_element_type, array_value,
     async_frame::{AsyncFrameRef, LeafFutureInstance, LeafFutureLayout},
     emit_array_get, emit_default, emit_failure_transfer, emit_frame_typed_struct_get, emit_int,
-    emit_memory_value, emit_monotonic_nanoseconds, emit_result_error, emit_result_success,
-    emit_string_literal, emit_struct_get, emit_typed_struct_get, enum_variant_payload,
+    emit_integer_literal, emit_memory_value, emit_monotonic_nanoseconds, emit_result_error,
+    emit_result_success, emit_string_literal, emit_struct_get, emit_typed_struct_get,
+    enum_variant_payload,
     global_plan::{ATTACH_REJECTED, RuntimeGlobals},
     imports::Abi,
     managed_state_reads::ManagedStateReadCache,
@@ -924,9 +925,12 @@ fn compile_projected_pattern(
                     .function(RuntimeHelperId::StringEquality),
             ));
         }
-        wasm_ir::LoweredPattern::Int(expected) => {
+        wasm_ir::LoweredPattern::Int {
+            value: expected,
+            negative,
+        } => {
             value.emit(function, context);
-            emit_int(function, *expected, value.ty);
+            emit_integer_literal(function, *expected, *negative, value.ty);
             function.instruction(
                 &if matches!(value.ty, Type::I64 | Type::U64 | Type::Address) {
                     Instruction::I64Eq
@@ -3113,7 +3117,9 @@ fn compile_expr_unconverted(
         wasm_ir::ExpressionKind::Bool(value) => {
             function.instruction(&Instruction::I32Const(*value as i32));
         }
-        wasm_ir::ExpressionKind::Int(value) => emit_int(function, *value, ty),
+        wasm_ir::ExpressionKind::Int { value, negative } => {
+            emit_integer_literal(function, *value, *negative, ty)
+        }
         wasm_ir::ExpressionKind::Char(value) => {
             function.instruction(&Instruction::I32Const(*value as i32));
         }

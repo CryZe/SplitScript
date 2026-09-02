@@ -219,7 +219,7 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
         | ExpressionKind::ValueBlock
         | ExpressionKind::Loop
         | ExpressionKind::Bool(_)
-        | ExpressionKind::Int(_)
+        | ExpressionKind::Int { .. }
         | ExpressionKind::Float(_)
         | ExpressionKind::Char(_)
         | ExpressionKind::String(_)

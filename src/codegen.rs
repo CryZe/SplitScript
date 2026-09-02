@@ -1446,6 +1446,32 @@ fn emit_int(function: &mut Function, value: u64, ty: Type) {
     }
 }
 
+fn emit_integer_literal(function: &mut Function, value: u64, negative: bool, ty: Type) {
+    match ty {
+        Type::F32 => {
+            let value = value as f32;
+            function.instruction(&Instruction::F32Const(
+                (if negative { -value } else { value }).into(),
+            ));
+        }
+        Type::F64 => {
+            let value = value as f64;
+            function.instruction(&Instruction::F64Const(
+                (if negative { -value } else { value }).into(),
+            ));
+        }
+        _ => emit_int(
+            function,
+            if negative {
+                value.wrapping_neg()
+            } else {
+                value
+            },
+            ty,
+        ),
+    }
+}
+
 fn emit_string_literal(function: &mut Function, value: &str, gc: &GcLayout) {
     for byte in value.bytes() {
         function.instruction(&Instruction::I32Const(byte as i32));
@@ -1484,7 +1510,7 @@ fn constant(expression: ExprId, wasm_ir: &wasm_ir::Program, ty: Type) -> ConstEx
         ),
         _ => (None, expression),
     };
-    let negative = operator == Some(IntrinsicId::SignedNegate);
+    let outer_negative = operator == Some(IntrinsicId::SignedNegate);
     let inverted = operator == Some(IntrinsicId::BoolNot);
     let complemented = operator == Some(IntrinsicId::IntegerBitNot);
     match &inner.kind {
@@ -1494,43 +1520,62 @@ fn constant(expression: ExprId, wasm_ir: &wasm_ir::Program, ty: Type) -> ConstEx
         }),
         wasm_ir::ExpressionKind::Bool(value) => ConstExpr::i32_const((*value ^ inverted) as i32),
         wasm_ir::ExpressionKind::Char(value) => ConstExpr::i32_const(*value as i32),
-        wasm_ir::ExpressionKind::Int(value) if ty == Type::F32 => ConstExpr::f32_const(
-            (if negative {
-                -(*value as f32)
-            } else {
-                *value as f32
-            })
-            .into(),
-        ),
-        wasm_ir::ExpressionKind::Int(value) if ty == Type::F64 => ConstExpr::f64_const(
-            (if negative {
-                -(*value as f64)
-            } else {
-                *value as f64
-            })
-            .into(),
-        ),
-        wasm_ir::ExpressionKind::Int(value)
+        wasm_ir::ExpressionKind::Int { value, negative } if ty == Type::F32 => {
+            ConstExpr::f32_const(
+                (if *negative ^ outer_negative {
+                    -(*value as f32)
+                } else {
+                    *value as f32
+                })
+                .into(),
+            )
+        }
+        wasm_ir::ExpressionKind::Int { value, negative } if ty == Type::F64 => {
+            ConstExpr::f64_const(
+                (if *negative ^ outer_negative {
+                    -(*value as f64)
+                } else {
+                    *value as f64
+                })
+                .into(),
+            )
+        }
+        wasm_ir::ExpressionKind::Int { value, negative }
             if matches!(ty, Type::I64 | Type::U64 | Type::Address) =>
         {
-            ConstExpr::i64_const(if complemented {
-                !(*value as i64)
-            } else if negative {
-                -(*value as i64)
+            let value = if *negative {
+                value.wrapping_neg()
             } else {
-                *value as i64
+                *value
+            };
+            let value = if outer_negative {
+                value.wrapping_neg()
+            } else {
+                value
+            };
+            ConstExpr::i64_const(if complemented {
+                !(value as i64)
+            } else {
+                value as i64
             })
         }
-        wasm_ir::ExpressionKind::Int(value) => {
-            let value = *value as i32;
+        wasm_ir::ExpressionKind::Int { value, negative } => {
+            let value = if *negative {
+                value.wrapping_neg()
+            } else {
+                *value
+            };
+            let value = if outer_negative {
+                value.wrapping_neg()
+            } else {
+                value
+            } as i32;
             ConstExpr::i32_const(if complemented {
                 match ty {
                     Type::U8 => !value & 0xff,
                     Type::U16 => !value & 0xffff,
                     _ => !value,
                 }
-            } else if negative {
-                -value
             } else {
                 value
             })
@@ -1540,11 +1585,11 @@ fn constant(expression: ExprId, wasm_ir: &wasm_ir::Program, ty: Type) -> ConstEx
                 .normalized
                 .parse::<f32>()
                 .expect("checked f32 literals fit their target");
-            ConstExpr::f32_const((if negative { -value } else { value }).into())
+            ConstExpr::f32_const((if outer_negative { -value } else { value }).into())
         }
         wasm_ir::ExpressionKind::Float(literal) => {
             let value = literal.value;
-            ConstExpr::f64_const((if negative { -value } else { value }).into())
+            ConstExpr::f64_const((if outer_negative { -value } else { value }).into())
         }
         _ => unreachable!(),
     }
@@ -1563,7 +1608,7 @@ fn is_wasm_global_constant(expression: ExprId, wasm_ir: &wasm_ir::Program) -> bo
         wasm_ir::ExpressionKind::None
             | wasm_ir::ExpressionKind::Bool(_)
             | wasm_ir::ExpressionKind::Char(_)
-            | wasm_ir::ExpressionKind::Int(_)
+            | wasm_ir::ExpressionKind::Int { .. }
             | wasm_ir::ExpressionKind::Float(_)
     ) {
         return true;
@@ -1591,7 +1636,7 @@ fn is_wasm_global_constant(expression: ExprId, wasm_ir: &wasm_ir::Program) -> bo
             matches!(
                 inner.kind,
                 wasm_ir::ExpressionKind::Bool(_)
-                    | wasm_ir::ExpressionKind::Int(_)
+                    | wasm_ir::ExpressionKind::Int { .. }
                     | wasm_ir::ExpressionKind::Float(_)
             )
         })

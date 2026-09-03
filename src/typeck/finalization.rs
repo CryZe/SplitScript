@@ -389,38 +389,44 @@ impl Checker {
             if global.annotation.is_some() {
                 continue;
             }
-            let ty = self.declarations.globals[&global.name].ty;
-            if !self.inference.is_unbound_without_default(ty) {
-                continue;
-            }
+            let mut declared = Vec::new();
+            global.binding.visit_bindings(&mut |binding| {
+                declared.push((binding.id, binding.name.clone(), binding.name_span));
+            });
+            for (id, name, name_span) in declared {
+                let ty = self.declarations.globals[&name].ty;
+                if !self.inference.is_unbound_without_default(ty) {
+                    continue;
+                }
 
-            let qualifier = if global.value.is_none() { "bare " } else { "" };
-            let mut diagnostic = Diagnostic::type_error(
+                let qualifier = if global.value.is_none() { "bare " } else { "" };
+                let mut diagnostic = Diagnostic::type_error(
                 format!(
                     "cannot infer the type of {qualifier}global `{}`",
-                    global.name
+                    name
                 ),
-                global.name_span,
+                name_span,
             )
             .with_primary_label("this declaration needs one concrete type")
             .with_note(
                 "add an explicit type annotation or constrain the value with a concrete assignment or use",
             );
-            let (assignments, uses) = ambiguous_global_sites(program, &self.semantics, global.id);
-            for span in assignments.into_iter().take(3) {
-                diagnostic = diagnostic.with_secondary_label(
-                    span,
-                    "this assignment still does not determine one concrete type",
-                );
+                let (assignments, uses) = ambiguous_global_sites(program, &self.semantics, id);
+                for span in assignments.into_iter().take(3) {
+                    diagnostic = diagnostic.with_secondary_label(
+                        span,
+                        "this assignment still does not determine one concrete type",
+                    );
+                }
+                for span in uses.into_iter().take(3) {
+                    diagnostic = diagnostic.with_secondary_label(
+                        span,
+                        "this use still does not determine one concrete type",
+                    );
+                }
+                self.errors.push(diagnostic);
+                self.inference.recover_unbound_type(ty);
             }
-            for span in uses.into_iter().take(3) {
-                diagnostic = diagnostic.with_secondary_label(
-                    span,
-                    "this use still does not determine one concrete type",
-                );
-            }
-            self.errors.push(diagnostic);
-            self.inference.recover_unbound_type(ty);
         }
     }
 

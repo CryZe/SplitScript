@@ -547,7 +547,11 @@ pub(super) fn emit_enum_variant(
     function.instruction(&Instruction::I32Const(selected as i32));
     for declared in &declaration.variants {
         if let Some(payload_type) = enum_variant_payload(declared.id, semantics) {
-            emit_default(function, payload_type, gc);
+            if payload_type.has_runtime_value() {
+                emit_default(function, payload_type, gc);
+            } else {
+                function.instruction(&Instruction::I32Const(0));
+            }
         } else {
             function.instruction(&Instruction::I32Const(0));
         }

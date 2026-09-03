@@ -336,13 +336,15 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
 
         fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
             if let Some(scope) = self.scopes.last().copied() {
-                self.insert(
-                    parameter.id,
-                    &parameter.name,
-                    parameter.name_span,
-                    parameter.span,
-                    scope,
-                );
+                parameter.binding.visit_bindings(&mut |binding| {
+                    self.insert(
+                        binding.id,
+                        &binding.name,
+                        binding.name_span,
+                        parameter.span,
+                        scope,
+                    );
+                });
             }
             visit::walk_parameter(self, parameter);
         }
@@ -355,13 +357,15 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
 
         fn visit_variable(&mut self, variable: &'ast crate::ast::VariableDecl) {
             if let Some(scope) = self.scopes.last().copied() {
-                self.insert(
-                    variable.id,
-                    &variable.name,
-                    variable.name_span,
-                    variable.span,
-                    scope,
-                );
+                variable.binding.visit_bindings(&mut |binding| {
+                    self.insert(
+                        binding.id,
+                        &binding.name,
+                        binding.name_span,
+                        variable.span,
+                        scope,
+                    );
+                });
             }
             visit::walk_variable(self, variable);
         }
@@ -383,13 +387,9 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
 
         fn visit_stmt(&mut self, statement: &'ast crate::ast::Stmt) {
             if let crate::ast::Stmt::For { binding, body, .. } = statement {
-                self.insert(
-                    binding.id,
-                    &binding.name,
-                    binding.span,
-                    binding.span,
-                    body.span,
-                );
+                binding.binding.visit_bindings(&mut |leaf| {
+                    self.insert(leaf.id, &leaf.name, leaf.name_span, binding.span, body.span);
+                });
             }
             visit::walk_stmt(self, statement);
         }
@@ -427,21 +427,21 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
 }
 
 fn source_globals(program: &Program) -> HashMap<ValueId, SourceVariable> {
-    program
-        .globals
-        .iter()
-        .map(|global| {
-            (
-                global.id,
+    let mut globals = HashMap::new();
+    for global in &program.globals {
+        global.binding.visit_bindings(&mut |binding| {
+            globals.insert(
+                binding.id,
                 SourceVariable {
-                    name: global.name.clone(),
-                    name_span: global.name_span,
+                    name: binding.name.clone(),
+                    name_span: binding.name_span,
                     declaration_span: global.span,
                     scope_span: global.span,
                 },
-            )
-        })
-        .collect()
+            );
+        });
+    }
+    globals
 }
 
 impl DebugArtifactPlan {

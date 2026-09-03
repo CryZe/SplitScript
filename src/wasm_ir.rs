@@ -558,6 +558,10 @@ pub enum Statement {
         operation: Option<AssignmentOperation>,
         value: ExprId,
     },
+    BindPattern {
+        value: ValueId,
+        pattern: LoweredPattern,
+    },
     StateStore {
         target: ValueId,
         operation: Option<AssignmentOperation>,
@@ -599,6 +603,7 @@ pub enum Statement {
     },
     For {
         binding: ValueId,
+        pattern: LoweredPattern,
         iterable_value: ValueId,
         index_value: ValueId,
         version_value: ValueId,
@@ -609,6 +614,7 @@ pub enum Statement {
     },
     ForInit {
         binding: ValueId,
+        pattern: LoweredPattern,
         iterable_value: ValueId,
         index_value: ValueId,
         version_value: ValueId,
@@ -652,6 +658,7 @@ pub enum Terminator {
     },
     AsyncFor {
         binding: ValueId,
+        pattern: LoweredPattern,
         iterable_value: ValueId,
         index_value: ValueId,
         version_value: ValueId,
@@ -719,6 +726,7 @@ pub struct StateExpression {
 pub struct GlobalInitializerPlan {
     pub value: ValueId,
     pub expression: ExprId,
+    pub destructures: bool,
     pub entry: Block,
     pub locals: Vec<Local>,
 }
@@ -763,7 +771,7 @@ pub struct Program {
     standard_library: StandardLibrary,
     profile: crate::BuildProfile,
     bodies: Vec<Body>,
-    global_initializers: Vec<(ValueId, ExprId)>,
+    global_initializers: Vec<(hir::TypedBindingPattern, ExprId)>,
     global_initializer_plans: Vec<GlobalInitializerPlan>,
     attachment_globals: Vec<ValueId>,
     attempt_globals: Vec<ValueId>,
@@ -818,7 +826,7 @@ impl Program {
         let global_initializers = typed_hir
             .global_initializers()
             .filter(|initializer| !initializer.debug_only || profile == crate::BuildProfile::Debug)
-            .map(|initializer| (initializer.value, initializer.expression))
+            .map(|initializer| (initializer.binding.clone(), initializer.expression))
             .collect();
         let bare_globals = typed_hir
             .bare_globals_with_debug()
@@ -855,16 +863,27 @@ impl Program {
             next_temporary: 0,
         };
         let global_initializers = program.global_initializers.clone();
-        for (value, expression) in global_initializers {
+        for (binding, expression) in global_initializers {
             let normalized =
                 normalize_expression_suspensions(expression, typed_hir, semantics, &mut program);
+            let destructures = binding_destructures(&binding);
+            let mut statements = vec![Statement::Store {
+                target: binding.value,
+                // A simple global stores directly into its Wasm global. A
+                // destructuring declaration alone needs a temporary local for
+                // the single incoming aggregate before projecting its leaves.
+                declaration: destructures,
+                operation: None,
+                value: normalized.value,
+            }];
+            if destructures {
+                statements.push(Statement::BindPattern {
+                    value: binding.value,
+                    pattern: lower_pattern(&binding.pattern.pattern, &binding.pattern.resolution),
+                });
+            }
             let continuation = Block {
-                statements: vec![Statement::Store {
-                    target: value,
-                    declaration: false,
-                    operation: None,
-                    value: normalized.value,
-                }],
+                statements,
                 terminator: Terminator::Fallthrough,
             };
             let entry = wrap_async_expression_steps(
@@ -882,8 +901,9 @@ impl Program {
             program
                 .global_initializer_plans
                 .push(GlobalInitializerPlan {
-                    value,
+                    value: binding.value,
                     expression,
+                    destructures,
                     entry,
                     locals,
                 });
@@ -892,7 +912,7 @@ impl Program {
         let globals = program
             .global_initializers
             .iter()
-            .map(|(value, _)| *value)
+            .flat_map(|(binding, _)| pattern_bindings(&binding.pattern.pattern))
             .chain(program.attachment_globals.iter().copied())
             .chain(program.attempt_globals.iter().copied())
             .collect::<HashSet<_>>();
@@ -906,8 +926,20 @@ impl Program {
             })
             .collect::<Vec<_>>();
         for (expression, parameters, body) in &closures {
-            let captures =
-                closure_captures(*body, parameters, typed_hir, &globals, &mutated_values);
+            let declared_parameters = parameters
+                .iter()
+                .flat_map(|parameter| {
+                    std::iter::once(parameter.value)
+                        .chain(pattern_bindings(&parameter.pattern.pattern))
+                })
+                .collect::<Vec<_>>();
+            let captures = closure_captures(
+                *body,
+                &declared_parameters,
+                typed_hir,
+                &globals,
+                &mutated_values,
+            );
             program.mutably_captured_values.extend(
                 captures
                     .iter()
@@ -923,6 +955,7 @@ impl Program {
             let body = lower_body(
                 BodyOwner::Function(function.function.clone()),
                 &function.body,
+                &function.parameters,
                 typed_hir,
                 semantics,
                 effects,
@@ -941,6 +974,7 @@ impl Program {
             let body = lower_body(
                 BodyOwner::Action(action.action),
                 &action.body,
+                &[],
                 typed_hir,
                 semantics,
                 effects,
@@ -1005,6 +1039,21 @@ impl Program {
                 },
                 &mut program,
             );
+            for parameter in parameters.iter().rev() {
+                if !binding_destructures(parameter) {
+                    continue;
+                }
+                entry.statements.insert(
+                    0,
+                    Statement::BindPattern {
+                        value: parameter.value,
+                        pattern: lower_pattern(
+                            &parameter.pattern.pattern,
+                            &parameter.pattern.resolution,
+                        ),
+                    },
+                );
+            }
             let mut next_async_state = 1;
             assign_async_states(&mut entry, &mut next_async_state);
             let locals = plan_block(&entry, &program, semantics, capabilities);
@@ -1029,7 +1078,7 @@ impl Program {
             };
             program.closures.push(ClosureBody {
                 expression,
-                parameters,
+                parameters: parameters.iter().map(|parameter| parameter.value).collect(),
                 captures,
                 entry,
                 locals,
@@ -1070,7 +1119,9 @@ impl Program {
     }
 
     pub fn global_initializers(&self) -> impl Iterator<Item = (ValueId, ExprId)> + '_ {
-        self.global_initializers.iter().copied()
+        self.global_initializers
+            .iter()
+            .map(|(binding, expression)| (binding.value, *expression))
     }
 
     pub fn global_initializer_plans(&self) -> impl Iterator<Item = &GlobalInitializerPlan> {
@@ -1080,7 +1131,7 @@ impl Program {
     pub fn contains_global(&self, value: ValueId) -> bool {
         self.global_initializers
             .iter()
-            .any(|(candidate, _)| *candidate == value)
+            .any(|(binding, _)| pattern_bindings(&binding.pattern.pattern).contains(&value))
             || self.attachment_globals.contains(&value)
             || self.attempt_globals.contains(&value)
     }
@@ -1522,7 +1573,7 @@ fn lower_expression(
         }
         TypedExpressionKind::Closure { parameters, body } => ExpressionKind::Closure {
             closure: expression.id,
-            parameters: parameters.clone(),
+            parameters: parameters.iter().map(|parameter| parameter.value).collect(),
             body: *body,
         },
         TypedExpressionKind::If {
@@ -2025,6 +2076,53 @@ fn mutated_values(program: &TypedProgram) -> HashSet<ValueId> {
     collector.values
 }
 
+fn pattern_bindings(pattern: &hir::TypedPattern) -> Vec<ValueId> {
+    fn collect(pattern: &hir::TypedPattern, output: &mut Vec<ValueId>) {
+        match pattern {
+            hir::TypedPattern::Binding(binding) => {
+                if !output.contains(&binding.id) {
+                    output.push(binding.id);
+                }
+            }
+            hir::TypedPattern::Struct { fields, .. } => {
+                for field in fields {
+                    collect(&field.pattern.pattern, output);
+                }
+            }
+            hir::TypedPattern::Enum {
+                payload: Some(payload),
+                ..
+            }
+            | hir::TypedPattern::OptionSome(payload)
+            | hir::TypedPattern::IteratorItem(payload)
+            | hir::TypedPattern::ResultSuccess(payload)
+            | hir::TypedPattern::ResultError(payload) => collect(&payload.pattern, output),
+            hir::TypedPattern::Array { prefix, suffix, .. } => {
+                for element in prefix.iter().chain(suffix) {
+                    collect(&element.pattern, output);
+                }
+            }
+            hir::TypedPattern::Alternation(alternatives) => {
+                for alternative in alternatives {
+                    collect(&alternative.pattern, output);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut output = Vec::new();
+    collect(pattern, &mut output);
+    output
+}
+
+fn binding_destructures(binding: &hir::TypedBindingPattern) -> bool {
+    !matches!(
+        &binding.pattern.pattern,
+        hir::TypedPattern::Binding(leaf) if leaf.id == binding.value
+    )
+}
+
 fn closure_captures(
     body: ExprId,
     parameters: &[ValueId],
@@ -2082,8 +2180,9 @@ fn closure_captures(
     impl hir::TypedVisitor for Collector {
         fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
             match &statement.kind {
-                TypedStatementKind::Variable { value, .. } => {
-                    self.declared.insert(*value);
+                TypedStatementKind::Variable { binding, .. } => {
+                    self.declared.insert(binding.value);
+                    self.declare_pattern(&binding.pattern.pattern);
                 }
                 TypedStatementKind::Assign { assignment, .. } => {
                     self.referenced.insert(assignment.target);
@@ -2095,8 +2194,13 @@ fn closure_captures(
                     version_value,
                     ..
                 } => {
-                    self.declared
-                        .extend([*binding, *iterable_value, *index_value, *version_value]);
+                    self.declared.extend([
+                        binding.value,
+                        *iterable_value,
+                        *index_value,
+                        *version_value,
+                    ]);
+                    self.declare_pattern(&binding.pattern.pattern);
                 }
                 TypedStatementKind::StateAssign { .. }
                 | TypedStatementKind::IndexAssign { .. }
@@ -2110,7 +2214,10 @@ fn closure_captures(
 
         fn visit_expression(&mut self, expression: &hir::TypedExpression, program: &TypedProgram) {
             if let TypedExpressionKind::Closure { parameters, .. } = &expression.kind {
-                self.declared.extend(parameters.iter().copied());
+                for parameter in parameters {
+                    self.declared.insert(parameter.value);
+                    self.declare_pattern(&parameter.pattern.pattern);
+                }
             }
             if let TypedExpressionKind::Is { pattern, .. } = &expression.kind {
                 self.declare_pattern(&pattern.pattern);
@@ -2174,6 +2281,7 @@ fn closure_captures(
 fn lower_body(
     owner: BodyOwner,
     block: &hir::TypedBlock,
+    parameters: &[hir::TypedBindingPattern],
     typed_hir: &TypedProgram,
     semantics: &SemanticModel,
     effects: &OperationAnalysis,
@@ -2206,6 +2314,18 @@ fn lower_body(
     } else {
         lower_block(block, typed_hir, semantics, source, wasm_ir)
     };
+    for parameter in parameters.iter().rev() {
+        if !binding_destructures(parameter) {
+            continue;
+        }
+        entry.statements.insert(
+            0,
+            Statement::BindPattern {
+                value: parameter.value,
+                pattern: lower_pattern(&parameter.pattern.pattern, &parameter.pattern.resolution),
+            },
+        );
+    }
     let mut next_async_state = 1;
     assign_async_states(&mut entry, &mut next_async_state);
     let mut locals = plan_block(&entry, wasm_ir, semantics, capabilities);
@@ -2443,6 +2563,7 @@ fn analyze_suspension_liveness(
         }
         Terminator::AsyncFor {
             binding,
+            pattern,
             iterable_value,
             index_value,
             version_value,
@@ -2478,6 +2599,9 @@ fn analyze_suspension_liveness(
                 }
             }
             loop_live.remove(binding);
+            pattern.visit_bindings(&mut |binding| {
+                loop_live.remove(&binding);
+            });
             loop_live
         }
         Terminator::Throw { error, .. } => {
@@ -2520,6 +2644,14 @@ fn analyze_statements_liveness(
                     live.insert(*target);
                 }
                 collect_expression_values(*value, live, local_values, program);
+            }
+            Statement::BindPattern { value, pattern } => {
+                pattern.visit_bindings(&mut |binding| {
+                    live.remove(&binding);
+                });
+                if local_values.contains(value) {
+                    live.insert(*value);
+                }
             }
             Statement::StateStore { value, .. } => {
                 collect_expression_values(*value, live, local_values, program);
@@ -2623,6 +2755,7 @@ fn analyze_statements_liveness(
             }
             Statement::For {
                 binding,
+                pattern,
                 iterable_value,
                 index_value,
                 version_value,
@@ -2640,6 +2773,9 @@ fn analyze_statements_liveness(
                 );
                 body_live.extend(live.iter().copied());
                 body_live.remove(binding);
+                pattern.visit_bindings(&mut |binding| {
+                    body_live.remove(&binding);
+                });
                 body_live.remove(iterable_value);
                 body_live.remove(index_value);
                 body_live.remove(version_value);
@@ -2656,6 +2792,7 @@ fn analyze_statements_liveness(
             }
             Statement::ForInit {
                 binding,
+                pattern,
                 iterable_value,
                 index_value,
                 version_value,
@@ -2663,6 +2800,9 @@ fn analyze_statements_liveness(
                 iterator_step,
             } => {
                 live.remove(binding);
+                pattern.visit_bindings(&mut |binding| {
+                    live.remove(&binding);
+                });
                 live.remove(iterable_value);
                 live.remove(index_value);
                 live.remove(version_value);
@@ -3952,13 +4092,28 @@ fn lower_async_statements(
             continue;
         }
         match &statement.kind {
-            TypedStatementKind::Variable { value, initializer } => {
+            TypedStatementKind::Variable {
+                binding,
+                initializer,
+            } => {
                 let normalized =
                     normalize_expression_suspensions(*initializer, typed_hir, semantics, wasm_ir);
+                if binding_destructures(binding) {
+                    result.statements.insert(
+                        0,
+                        Statement::BindPattern {
+                            value: binding.value,
+                            pattern: lower_pattern(
+                                &binding.pattern.pattern,
+                                &binding.pattern.resolution,
+                            ),
+                        },
+                    );
+                }
                 result.statements.insert(
                     0,
                     Statement::Store {
-                        target: *value,
+                        target: binding.value,
                         declaration: true,
                         operation: None,
                         value: normalized.value,
@@ -4287,7 +4442,11 @@ fn lower_async_statements(
                     );
                     result = Block {
                         statements: vec![Statement::ForInit {
-                            binding: *binding,
+                            binding: binding.value,
+                            pattern: lower_pattern(
+                                &binding.pattern.pattern,
+                                &binding.pattern.resolution,
+                            ),
                             iterable_value: *iterable_value,
                             index_value: *index_value,
                             version_value: *version_value,
@@ -4295,7 +4454,11 @@ fn lower_async_statements(
                             iterator_step,
                         }],
                         terminator: Terminator::AsyncFor {
-                            binding: *binding,
+                            binding: binding.value,
+                            pattern: lower_pattern(
+                                &binding.pattern.pattern,
+                                &binding.pattern.resolution,
+                            ),
                             iterable_value: *iterable_value,
                             index_value: *index_value,
                             version_value: *version_value,
@@ -4335,7 +4498,11 @@ fn lower_async_statements(
                 result.statements.insert(
                     0,
                     Statement::For {
-                        binding: *binding,
+                        binding: binding.value,
+                        pattern: lower_pattern(
+                            &binding.pattern.pattern,
+                            &binding.pattern.resolution,
+                        ),
                         iterable_value: *iterable_value,
                         index_value: *index_value,
                         version_value: *version_value,
@@ -4558,6 +4725,7 @@ fn assign_async_states(block: &mut Block, next: &mut u32) {
                 assign_async_states(body, next)
             }
             Statement::Store { .. }
+            | Statement::BindPattern { .. }
             | Statement::StateStore { .. }
             | Statement::DebugLocation(_)
             | Statement::StoreTemporary { .. }
@@ -4655,6 +4823,7 @@ fn set_retry_complete_state(block: &mut Block, resume_state: AsyncStateId) {
                 set_retry_complete_state(body, resume_state);
             }
             Statement::Store { .. }
+            | Statement::BindPattern { .. }
             | Statement::StateStore { .. }
             | Statement::DebugLocation(_)
             | Statement::StoreTemporary { .. }
@@ -4725,6 +4894,7 @@ fn set_async_while_targets(
                 set_async_while_targets(body, header_state, exit_state);
             }
             Statement::Store { .. }
+            | Statement::BindPattern { .. }
             | Statement::StateStore { .. }
             | Statement::DebugLocation(_)
             | Statement::StoreTemporary { .. }
@@ -4937,6 +5107,13 @@ impl Visitor for LocalPlanner<'_> {
                 declaration: true,
                 ..
             } => self.value(*target),
+            Statement::BindPattern { pattern, .. } => {
+                pattern.visit_bindings(&mut |binding| {
+                    if !program.contains_global(binding) {
+                        self.value(binding);
+                    }
+                });
+            }
             Statement::Match {
                 expression,
                 value,
@@ -4972,6 +5149,7 @@ impl Visitor for LocalPlanner<'_> {
             }
             Statement::For {
                 binding,
+                pattern,
                 iterable_value,
                 index_value,
                 version_value,
@@ -4979,12 +5157,14 @@ impl Visitor for LocalPlanner<'_> {
             }
             | Statement::ForInit {
                 binding,
+                pattern,
                 iterable_value,
                 index_value,
                 version_value,
                 ..
             } => {
                 self.value(*binding);
+                pattern.visit_bindings(&mut |binding| self.value(binding));
                 self.value(*iterable_value);
                 self.value(*index_value);
                 self.value(*version_value);

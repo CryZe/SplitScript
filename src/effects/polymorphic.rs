@@ -12,8 +12,9 @@ use super::{
 use crate::{
     ast::{ExprId, FunctionId, Program, ValueId},
     hir::{
-        ExpressionResolution, TypedBlock, TypedExpression, TypedExpressionKind, TypedProgram,
-        TypedStatement, TypedStatementKind,
+        ExpressionResolution, TypedBindingPattern, TypedBlock, TypedExpression,
+        TypedExpressionKind, TypedPattern, TypedPatternNode, TypedProgram, TypedStatement,
+        TypedStatementKind,
     },
     semantic::{
         DynamicCallCallee, ResolvedCall, ResolvedMember, ResolvedStructFieldId, ResolvedValue,
@@ -235,6 +236,57 @@ struct Evaluator<'a> {
 }
 
 impl<'a> Evaluator<'a> {
+    fn bind_pattern_value(&mut self, pattern: &TypedPatternNode, value: SymbolicValue) {
+        match &pattern.pattern {
+            TypedPattern::Binding(binding) => {
+                self.env.insert(binding.id, value);
+            }
+            TypedPattern::Struct { fields, .. } => {
+                for field in fields {
+                    self.bind_pattern_value(
+                        &field.pattern,
+                        value.project(&[ResolvedMember::StructField(field.field)]),
+                    );
+                }
+            }
+            TypedPattern::Enum {
+                payload: Some(payload),
+                ..
+            }
+            | TypedPattern::OptionSome(payload)
+            | TypedPattern::IteratorItem(payload)
+            | TypedPattern::ResultSuccess(payload)
+            | TypedPattern::ResultError(payload) => {
+                self.bind_pattern_value(payload, SymbolicValue::Unknown);
+            }
+            TypedPattern::Array { prefix, suffix, .. } => {
+                for element in prefix.iter().chain(suffix) {
+                    self.bind_pattern_value(element, SymbolicValue::Unknown);
+                }
+            }
+            TypedPattern::Alternation(alternatives) => {
+                for alternative in alternatives {
+                    self.bind_pattern_value(alternative, value.clone());
+                }
+            }
+            TypedPattern::Enum { payload: None, .. }
+            | TypedPattern::Bool(_)
+            | TypedPattern::Char(_)
+            | TypedPattern::String(_)
+            | TypedPattern::Int { .. }
+            | TypedPattern::IntRange { .. }
+            | TypedPattern::FileVersion(_)
+            | TypedPattern::None
+            | TypedPattern::IteratorEnd
+            | TypedPattern::Wildcard => {}
+        }
+    }
+
+    fn bind_declaration(&mut self, binding: &TypedBindingPattern, value: SymbolicValue) {
+        self.env.insert(binding.value, value.clone());
+        self.bind_pattern_value(&binding.pattern, value);
+    }
+
     fn new(
         syntax: &'a Program,
         program: &'a TypedProgram,
@@ -271,9 +323,12 @@ impl<'a> Evaluator<'a> {
 
     fn statement(&mut self, statement: &TypedStatement) {
         match &statement.kind {
-            TypedStatementKind::Variable { value, initializer } => {
+            TypedStatementKind::Variable {
+                binding,
+                initializer,
+            } => {
                 let initialized = self.expression(*initializer);
-                self.env.insert(*value, initialized);
+                self.bind_declaration(binding, initialized);
             }
             TypedStatementKind::Assign {
                 assignment, value, ..
@@ -564,7 +619,7 @@ impl<'a> Evaluator<'a> {
                 returned
             }
             TypedExpressionKind::Closure { parameters, body } => SymbolicValue::Closure {
-                parameters: parameters.clone(),
+                parameters: parameters.iter().map(|parameter| parameter.value).collect(),
                 body: *body,
                 captures: self
                     .env
@@ -630,7 +685,13 @@ impl<'a> Evaluator<'a> {
     }
 
     fn is_source_global(&self, value: ValueId) -> bool {
-        self.syntax.globals.iter().any(|global| global.id == value)
+        self.syntax.globals.iter().any(|global| {
+            let mut contains = false;
+            global
+                .binding
+                .visit_bindings(&mut |binding| contains |= binding.id == value);
+            contains
+        })
     }
 
     fn value_path(&self, id: ExprId) -> SymbolicValue {
@@ -772,10 +833,7 @@ impl<'a> Evaluator<'a> {
                 body,
                 captures,
             } => {
-                let mut env = captures.iter().cloned().collect::<HashMap<_, _>>();
-                for (parameter, argument) in parameters.iter().zip(arguments) {
-                    env.insert(*parameter, argument.clone());
-                }
+                let env = captures.iter().cloned().collect::<HashMap<_, _>>();
                 let mut child = Evaluator::new(
                     self.syntax,
                     self.program,
@@ -785,6 +843,9 @@ impl<'a> Evaluator<'a> {
                     self.summaries,
                     env,
                 );
+                for (parameter, argument) in parameters.iter().zip(arguments) {
+                    child.env.insert(*parameter, argument.clone());
+                }
                 let returned = child.expression(*body);
                 let returned = SymbolicValue::union(child.returns.into_iter().chain([returned]));
                 (child.accumulator.finish(), returned)
@@ -922,34 +983,9 @@ fn intrinsic_operation(
     accumulator.finish()
 }
 
-fn function_environment(function: FunctionId, syntax: &Program) -> HashMap<ValueId, SymbolicValue> {
-    syntax
-        .functions
-        .iter()
-        .find(|candidate| candidate.id == function)
-        .map(|function| {
-            function
-                .params
-                .iter()
-                .enumerate()
-                .map(|(index, parameter)| {
-                    (
-                        parameter.id,
-                        SymbolicValue::Parameter {
-                            index,
-                            fields: Vec::new(),
-                        },
-                    )
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 #[allow(clippy::too_many_arguments)]
 fn evaluate_function(
-    function: FunctionId,
-    body: &TypedBlock,
+    body: &crate::hir::FunctionBody,
     syntax: &Program,
     program: &TypedProgram,
     semantics: &SemanticModel,
@@ -964,9 +1000,18 @@ fn evaluate_function(
         capabilities,
         scoped_globals,
         summaries,
-        function_environment(function, syntax),
+        HashMap::new(),
     );
-    evaluator.block(body);
+    for (index, parameter) in body.parameters.iter().enumerate() {
+        evaluator.bind_declaration(
+            parameter,
+            SymbolicValue::Parameter {
+                index,
+                fields: Vec::new(),
+            },
+        );
+    }
+    evaluator.block(&body.body);
     FunctionSummary {
         operation: evaluator.accumulator.finish(),
         returned: SymbolicValue::union(evaluator.returns),
@@ -990,8 +1035,7 @@ pub(super) fn infer(
         let mut next = summaries.clone();
         for body in program.all_function_bodies() {
             next[body.function.function.index()] = evaluate_function(
-                body.function.function,
-                &body.body,
+                body,
                 syntax,
                 program,
                 semantics,

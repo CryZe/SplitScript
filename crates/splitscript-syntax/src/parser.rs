@@ -10,22 +10,22 @@ use crate::{
     Token, TokenCursor, TokenKind,
     ast::{
         Action, ActionKind, ArrayPattern, ArrayTypeDecl, ArrayTypeId, AssignmentId, AsyncTypeDecl,
-        AsyncTypeId, AttachmentLayoutDecl, BinaryOp, Block, CallableTypeDecl, CallableTypeId,
-        ConditionalFieldsDecl, ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference,
-        EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, ForBinding, FunctionDecl, FunctionId,
-        InterpolatedPart, ManagedClassDecl, ManagedClassId, ManagedFieldDecl, ManagedFieldId,
-        ManagedImageDecl, ManagedImageId, ManagedItemDecl, ManagedMetadataName,
-        ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId, ManagedReferenceTypeDecl,
-        ManagedReferenceTypeId, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter,
-        PatternBinding, PatternId, PointerPath, PointerPathBase, Program, RangeKind, RangeTypeDecl,
-        RangeTypeId, ResultTypeDecl, ResultTypeId, SettingChoiceOption, SettingChoiceOptionId,
-        SettingDecl, SettingExternalKey, SettingFamilyDecl, SettingFileFilter, SettingKind,
-        SettingTextPart, SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl,
-        StateMemoryDecoder, StateProviderAlternativeDecl, StateProviderRef,
-        StateProviderSelectorRef, StateSource, StateTransform, Stmt, StructDecl, StructField,
-        StructFieldId, StructId, SuspensionMode, TickRateDecl, TickRateValue, TypeApplicationDecl,
-        TypeApplicationId, TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId,
-        VariableDecl,
+        AsyncTypeId, AttachmentLayoutDecl, BinaryOp, BindingPattern, Block, CallableTypeDecl,
+        CallableTypeId, ConditionalFieldsDecl, ConstructedTypeIdAllocator, EnumDecl, EnumId,
+        EnumReference, EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, ForBinding,
+        FunctionDecl, FunctionId, InterpolatedPart, ManagedClassDecl, ManagedClassId,
+        ManagedFieldDecl, ManagedFieldId, ManagedImageDecl, ManagedImageId, ManagedItemDecl,
+        ManagedMetadataName, ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId,
+        ManagedReferenceTypeDecl, ManagedReferenceTypeId, MatchArm, MatchPattern, OptionTypeDecl,
+        OptionTypeId, Parameter, PatternBinding, PatternId, PatternNode, PointerPath,
+        PointerPathBase, Program, RangeKind, RangeTypeDecl, RangeTypeId, ResultTypeDecl,
+        ResultTypeId, SettingChoiceOption, SettingChoiceOptionId, SettingDecl, SettingExternalKey,
+        SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern,
+        Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder,
+        StateProviderAlternativeDecl, StateProviderRef, StateProviderSelectorRef, StateSource,
+        StateTransform, Stmt, StructDecl, StructField, StructFieldId, StructId, SuspensionMode,
+        TickRateDecl, TickRateValue, TypeApplicationDecl, TypeApplicationId,
+        TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     diagnostic::{Diagnostic, DiagnosticFix, FixApplicability, TextEdit},
     migration::{ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
@@ -233,6 +233,26 @@ impl Parser<'_> {
         let id = PatternId::from_index(self.next_pattern_id);
         self.next_pattern_id += 1;
         id
+    }
+
+    fn binding_pattern(&mut self, pattern: crate::ast::PatternNode) -> BindingPattern {
+        let id = match &pattern.kind {
+            MatchPattern::Binding(binding) => binding.id,
+            _ => self.new_value_id(),
+        };
+        let name_span = pattern.span;
+        let name = self
+            .source
+            .get(name_span.start..name_span.end)
+            .unwrap_or("<pattern>")
+            .to_owned();
+        BindingPattern {
+            id,
+            name,
+            name_span,
+            span: name_span,
+            pattern,
+        }
     }
 
     fn new_setting_choice_option_id(&mut self) -> SettingChoiceOptionId {

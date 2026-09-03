@@ -692,11 +692,13 @@ fn validate_global_initializers(
     hir: &TypedProgram,
     effects: &OperationAnalysis,
 ) -> Vec<Diagnostic> {
-    let declarations = syntax
-        .globals
-        .iter()
-        .map(|global| (global.id, global))
-        .collect::<HashMap<_, _>>();
+    let mut declarations = HashMap::new();
+    for global in &syntax.globals {
+        declarations.insert(global.id, global);
+        global
+            .binding
+            .visit_bindings(&mut |binding| _ = declarations.insert(binding.id, global));
+    }
     let mut diagnostics = Vec::new();
 
     for initializer in hir.global_initializers() {
@@ -722,7 +724,7 @@ fn validate_global_initializers(
             continue;
         }
 
-        let Some(global) = declarations.get(&initializer.value) else {
+        let Some(global) = declarations.get(&initializer.binding.value) else {
             continue;
         };
         let initializer_span = hir
@@ -1447,13 +1449,27 @@ impl LocalBindingCollector {
 }
 
 impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
+    fn visit_parameter(&mut self, parameter: &'ast ast::Parameter) {
+        parameter.binding.visit_bindings(&mut |binding| {
+            self.push(
+                binding.id,
+                &binding.name,
+                binding.name_span,
+                LocalBindingKind::Parameter,
+            );
+        });
+        visit::walk_parameter(self, parameter);
+    }
+
     fn visit_variable(&mut self, variable: &'ast ast::VariableDecl) {
-        self.push(
-            variable.id,
-            &variable.name,
-            variable.name_span,
-            LocalBindingKind::Variable,
-        );
+        variable.binding.visit_bindings(&mut |binding| {
+            self.push(
+                binding.id,
+                &binding.name,
+                binding.name_span,
+                LocalBindingKind::Variable,
+            );
+        });
         visit::walk_variable(self, variable);
     }
 
@@ -1470,12 +1486,14 @@ impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
     }
 
     fn visit_for_binding(&mut self, binding: &'ast ast::ForBinding) {
-        self.push(
-            binding.id,
-            &binding.name,
-            binding.span,
-            LocalBindingKind::Loop,
-        );
+        binding.binding.visit_bindings(&mut |binding| {
+            self.push(
+                binding.id,
+                &binding.name,
+                binding.name_span,
+                LocalBindingKind::Loop,
+            );
+        });
     }
 
     fn visit_pattern(&mut self, pattern: &'ast ast::MatchPattern) {
@@ -1532,12 +1550,14 @@ fn validate_unused_bindings(
             if function.method_of.is_some() && index == 0 && parameter.name == "self" {
                 continue;
             }
-            collector.push(
-                parameter.id,
-                &parameter.name,
-                parameter.name_span,
-                LocalBindingKind::Parameter,
-            );
+            parameter.binding.visit_bindings(&mut |binding| {
+                collector.push(
+                    binding.id,
+                    &binding.name,
+                    binding.name_span,
+                    LocalBindingKind::Parameter,
+                );
+            });
         }
         collector.visit_block(&function.body);
     }
@@ -1548,7 +1568,13 @@ fn validate_unused_bindings(
         .bindings
         .iter()
         .map(|binding| binding.name.clone())
-        .chain(syntax.globals.iter().map(|global| global.name.clone()))
+        .chain(syntax.globals.iter().flat_map(|global| {
+            let mut names = Vec::new();
+            global
+                .binding
+                .visit_bindings(&mut |binding| names.push(binding.name.clone()));
+            names
+        }))
         .collect::<HashSet<_>>();
 
     let mut usage = LocalUsageCollector::default();
@@ -1705,17 +1731,19 @@ impl TypedVisitor for LocalUsageCollector {
         }
 
         match &statement.kind {
-            TypedStatementKind::Variable { value, .. } => {
-                self.declarations.insert(
-                    *value,
-                    ErasableLocalDeclaration {
-                        profiles: self.active_profiles,
-                        insertion: ast::Span {
-                            start: statement.span.start,
-                            end: statement.span.start,
+            TypedStatementKind::Variable { binding, .. } => {
+                binding.pattern.pattern.visit_bindings(&mut |binding| {
+                    self.declarations.insert(
+                        binding.id,
+                        ErasableLocalDeclaration {
+                            profiles: self.active_profiles,
+                            insertion: ast::Span {
+                                start: statement.span.start,
+                                end: statement.span.start,
+                            },
                         },
-                    },
-                );
+                    );
+                });
             }
             TypedStatementKind::Suspend {
                 binding: Some(value),
@@ -2109,14 +2137,25 @@ fn validate_unused_declarations(
     semantics: &SemanticModel,
     capabilities: &CapabilityAnalysis,
 ) -> UnusedDeclarationValidation {
-    let globals = syntax
-        .globals
-        .iter()
-        .map(|global| (global.id, global))
-        .collect::<HashMap<_, _>>();
+    let mut globals = HashMap::new();
+    for global in &syntax.globals {
+        global.binding.visit_bindings(&mut |binding| {
+            globals.insert(binding.id, global);
+        });
+    }
     let initializers = hir
         .global_initializers()
-        .map(|initializer| (initializer.value, initializer.expression))
+        .flat_map(|initializer| {
+            let mut bindings = Vec::new();
+            initializer
+                .binding
+                .pattern
+                .pattern
+                .visit_bindings(&mut |binding| bindings.push(binding.id));
+            bindings
+                .into_iter()
+                .map(move |binding| (binding, initializer.expression))
+        })
         .collect::<HashMap<_, _>>();
     let functions = hir
         .function_bodies()
@@ -2411,55 +2450,60 @@ fn validate_unused_declarations(
             );
         }
     }
-    for global in globals.values() {
-        if global.name.starts_with('_') {
-            continue;
-        }
-        let profiles = reachable
-            .get(&DeclarationWorkItem::Global(global.id))
-            .copied();
-        if profiles.is_none() {
-            diagnostics.push(
-                Diagnostic::warning(
-                    DiagnosticCode::UnusedDeclaration,
-                    format!("unused global `{}`", global.name),
-                    global.name_span,
-                )
-                .with_primary_label("this global is never read from reachable code")
-                .with_note("prefix the name with `_` to indicate that this is intentional"),
-            );
-        } else if !global.debug_only
-            && profiles.is_some_and(|profiles| {
-                profiles.contains(UseProfiles::DEBUG) && !profiles.contains(UseProfiles::RELEASE)
-            })
-        {
-            let release_write = declaration_writes
-                .get(&global.id)
-                .is_some_and(|profiles| profiles.contains(UseProfiles::RELEASE));
-            let mut diagnostic = Diagnostic::warning(
-                DiagnosticCode::DebugOnlyUse,
-                format!("global `{}` is only read by debug code", global.name),
-                global.name_span,
-            )
-            .with_primary_label("this global is retained in release builds")
-            .with_note(
-                "mark declarations used exclusively for diagnostics as `debug` so release builds can erase them",
-            );
-            if release_write {
-                diagnostic = diagnostic.with_note(
-                    "this global is also assigned by release-visible code, so the compiler cannot safely apply that change",
-                );
-            } else {
-                diagnostic = diagnostic.with_machine_applicable_fix(
-                    format!("mark `{}` as debug-only", global.name),
-                    ast::Span {
-                        start: global.span.start,
-                        end: global.span.start,
-                    },
-                    "debug ",
-                );
+    for global in &syntax.globals {
+        let mut bindings = Vec::new();
+        global.binding.visit_bindings(&mut |binding| {
+            bindings.push((binding.id, binding.name.clone(), binding.name_span));
+        });
+        for (id, name, name_span) in bindings {
+            if name.starts_with('_') {
+                continue;
             }
-            diagnostics.push(diagnostic);
+            let profiles = reachable.get(&DeclarationWorkItem::Global(id)).copied();
+            if profiles.is_none() {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        DiagnosticCode::UnusedDeclaration,
+                        format!("unused global `{name}`"),
+                        name_span,
+                    )
+                    .with_primary_label("this global is never read from reachable code")
+                    .with_note("prefix the name with `_` to indicate that this is intentional"),
+                );
+            } else if !global.debug_only
+                && profiles.is_some_and(|profiles| {
+                    profiles.contains(UseProfiles::DEBUG)
+                        && !profiles.contains(UseProfiles::RELEASE)
+                })
+            {
+                let release_write = declaration_writes
+                    .get(&id)
+                    .is_some_and(|profiles| profiles.contains(UseProfiles::RELEASE));
+                let mut diagnostic = Diagnostic::warning(
+                    DiagnosticCode::DebugOnlyUse,
+                    format!("global `{name}` is only read by debug code"),
+                    name_span,
+                )
+                .with_primary_label("this global is retained in release builds")
+                .with_note(
+                    "mark declarations used exclusively for diagnostics as `debug` so release builds can erase them",
+                );
+                if release_write {
+                    diagnostic = diagnostic.with_note(
+                        "this global is also assigned by release-visible code, so the compiler cannot safely apply that change",
+                    );
+                } else {
+                    diagnostic = diagnostic.with_machine_applicable_fix(
+                        format!("mark `{name}` as debug-only"),
+                        ast::Span {
+                            start: global.span.start,
+                            end: global.span.start,
+                        },
+                        "debug ",
+                    );
+                }
+                diagnostics.push(diagnostic);
+            }
         }
     }
     for function in syntax

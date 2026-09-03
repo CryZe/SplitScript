@@ -425,52 +425,59 @@ pub(super) fn encode(inputs: Inputs<'_>) -> GlobalPlan {
         variables.insert(value, global);
         variable_types.insert(value, ty);
     }
-    for variable in program
-        .globals
-        .iter()
-        .filter(|variable| wasm_ir.contains_global(variable.id))
-    {
-        let ty = value_type(variable.id, semantics);
-        if !ty.has_runtime_value() {
-            variables.insert(variable.id, u32::MAX);
-            variable_types.insert(variable.id, ty);
-            continue;
-        }
-        let index = section.len();
-        let mut val_type = gc.val_type(ty);
-        let runtime_initialized = variable
-            .value
-            .as_ref()
-            .is_some_and(|value| !is_wasm_global_constant(value.id, wasm_ir));
-        if (variable.value.is_none() || runtime_initialized)
-            && let ValType::Ref(reference) = &mut val_type
+    for variable in &program.globals {
+        let mut bindings = Vec::new();
+        variable
+            .binding
+            .visit_bindings(&mut |binding| bindings.push(binding.id));
+        let simple = variable.binding.simple_binding().is_some();
+        for binding in bindings
+            .into_iter()
+            .filter(|binding| wasm_ir.contains_global(*binding))
         {
-            // The source value is non-null whenever user code may observe it,
-            // but Wasm storage needs a null placeholder before module-start or
-            // lifecycle initialization has populated the value.
-            reference.nullable = true;
+            let ty = value_type(binding, semantics);
+            if !ty.has_runtime_value() {
+                variables.insert(binding, u32::MAX);
+                variable_types.insert(binding, ty);
+                continue;
+            }
+            let index = section.len();
+            let mut val_type = gc.val_type(ty);
+            let runtime_initialized = variable
+                .value
+                .as_ref()
+                .is_some_and(|value| !simple || !is_wasm_global_constant(value.id, wasm_ir));
+            if (variable.value.is_none() || runtime_initialized)
+                && let ValType::Ref(reference) = &mut val_type
+            {
+                // The source value is non-null whenever user code may observe it,
+                // but Wasm storage needs a null placeholder before module-start or
+                // lifecycle initialization has populated the value.
+                reference.nullable = true;
+            }
+            let global_type = GlobalType {
+                val_type,
+                mutable: variable.mutable,
+                shared: false,
+            };
+            if let Type::Option(option) = ty {
+                section.global(
+                    global_type,
+                    &ConstExpr::ref_null(HeapType::Concrete(gc.index(Type::Option(option)))),
+                );
+            } else if let ValType::Ref(reference) = gc.val_type(ty) {
+                section.global(global_type, &ConstExpr::ref_null(reference.heap_type));
+            } else if simple
+                && let Some(value) = &variable.value
+                && is_wasm_global_constant(value.id, wasm_ir)
+            {
+                section.global(global_type, &constant(value.id, wasm_ir, ty));
+            } else {
+                section.global(global_type, &default_const_expr(gc.val_type(ty)));
+            }
+            variables.insert(binding, index);
+            variable_types.insert(binding, ty);
         }
-        let global_type = GlobalType {
-            val_type,
-            mutable: variable.mutable,
-            shared: false,
-        };
-        if let Type::Option(option) = ty {
-            section.global(
-                global_type,
-                &ConstExpr::ref_null(HeapType::Concrete(gc.index(Type::Option(option)))),
-            );
-        } else if let ValType::Ref(reference) = gc.val_type(ty) {
-            section.global(global_type, &ConstExpr::ref_null(reference.heap_type));
-        } else if let Some(value) = &variable.value
-            && is_wasm_global_constant(value.id, wasm_ir)
-        {
-            section.global(global_type, &constant(value.id, wasm_ir, ty));
-        } else {
-            section.global(global_type, &default_const_expr(gc.val_type(ty)));
-        }
-        variables.insert(variable.id, index);
-        variable_types.insert(variable.id, ty);
     }
 
     let mut settings = HashMap::new();

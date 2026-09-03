@@ -724,7 +724,11 @@ fn syntax_for_binding(
 
     impl<'ast> crate::visit::Visitor<'ast> for Finder<'ast> {
         fn visit_for_binding(&mut self, binding: &'ast crate::ast::ForBinding) {
-            if binding.id == self.value {
+            let mut contains = false;
+            binding
+                .binding
+                .visit_bindings(&mut |leaf| contains |= leaf.id == self.value);
+            if contains {
                 self.found = Some(binding);
             }
         }
@@ -746,7 +750,11 @@ fn syntax_parameter(
 
     impl<'ast> crate::visit::Visitor<'ast> for Finder<'ast> {
         fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
-            if parameter.id == self.value {
+            let mut contains = false;
+            parameter
+                .binding
+                .visit_bindings(&mut |binding| contains |= binding.id == self.value);
+            if contains {
                 self.found = Some(parameter);
             }
         }
@@ -925,7 +933,13 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                     "Read-only memory layout selected for the attached game build."
                 };
                 (format!("{name}: {ty}"), description.to_owned())
-            } else if let Some(global) = syntax.globals.iter().find(|global| global.id == value) {
+            } else if let Some(global) = syntax.globals.iter().find(|global| {
+                let mut contains = false;
+                global
+                    .binding
+                    .visit_bindings(&mut |binding| contains |= binding.id == value);
+                contains
+            }) {
                 let scoped = context
                     .snapshot
                     .checked()
@@ -2096,6 +2110,40 @@ fn inspect(value: u32?) {
             .rename_at(declaration + 1, "present")
             .expect("conditional bindings should be ordinary rename identities");
         assert_eq!(rename.edits.len(), 3, "{rename:#?}");
+    }
+
+    #[test]
+    fn destructured_declarations_have_leaf_hover_navigation_and_rename_identity() {
+        let source = r#"
+struct Point { x: i32, y: i32 }
+state "game.exe" {}
+setup {
+    let Point { x: horizontal, y: vertical } = Point { x: 3, y: 4 }
+    print(horizontal + vertical)
+}
+"#;
+        let declaration = source.find("horizontal,").unwrap();
+        let usage = source.rfind("horizontal").unwrap();
+        let mut database = CompilerDatabase::new(source);
+
+        let hover = database
+            .hover(declaration + 1)
+            .unwrap()
+            .expect("binding hover");
+        assert!(
+            hover.markdown.contains("let horizontal: i32"),
+            "{}",
+            hover.markdown
+        );
+        assert!(matches!(
+            database.definition_at(usage + 1).unwrap(),
+            Some(crate::database::DefinitionTarget::Source(definition))
+                if definition.span.start == declaration
+        ));
+        let references = database.references_at(declaration + 1, true).unwrap();
+        assert_eq!(references.len(), 2, "{references:#?}");
+        let rename = database.rename_at(declaration + 1, "left").unwrap();
+        assert_eq!(rename.edits.len(), 2, "{rename:#?}");
     }
 
     #[test]

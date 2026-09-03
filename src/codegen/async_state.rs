@@ -32,9 +32,9 @@ use super::{
     expression::{
         BareReturn, ExprContext, IntrinsicCapture, LocalStorage, LoopControl, MatchLayout,
         compile_assignment, compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
-        compile_for_has_next, compile_for_init, compile_receiver, compile_statement_pattern,
-        compile_temporary_set, emit_failure_return, emit_managed_binding_field,
-        error_may_have_effects, store_match_binding,
+        compile_for_has_next, compile_for_init, compile_irrefutable_pattern, compile_receiver,
+        compile_statement_pattern, compile_temporary_set, emit_failure_return,
+        emit_managed_binding_field, error_may_have_effects, store_match_binding,
     },
     imports::Abi,
     memarg, plan_wasm_locals, resolved_intrinsic, semantic_type, unity_layout,
@@ -473,6 +473,7 @@ fn compile_async_body(
             ),
             AsyncState::ForHeader {
                 binding,
+                pattern,
                 iterable_value,
                 index_value,
                 version_value,
@@ -498,6 +499,7 @@ fn compile_async_body(
                     version_value,
                     &context,
                 );
+                compile_irrefutable_pattern(&mut function, pattern, binding, &context);
                 compile_async_flow(
                     &mut function,
                     body,
@@ -3379,6 +3381,7 @@ enum AsyncState<'a> {
     },
     ForHeader {
         binding: ValueId,
+        pattern: &'a wasm_ir::LoweredPattern,
         iterable_value: ValueId,
         index_value: ValueId,
         version_value: ValueId,
@@ -3450,6 +3453,7 @@ fn collect_async_states<'a>(
                 collect_async_states(body, states, loop_targets)
             }
             wasm_ir::Statement::Store { .. }
+            | wasm_ir::Statement::BindPattern { .. }
             | wasm_ir::Statement::StateStore { .. }
             | wasm_ir::Statement::DebugLocation(_)
             | wasm_ir::Statement::StoreTemporary { .. }
@@ -3536,6 +3540,7 @@ fn collect_async_states<'a>(
         }
         wasm_ir::Terminator::AsyncFor {
             binding,
+            pattern,
             iterable_value,
             index_value,
             version_value,
@@ -3552,6 +3557,7 @@ fn collect_async_states<'a>(
             };
             states[header_state.index() as usize] = Some(AsyncState::ForHeader {
                 binding: *binding,
+                pattern,
                 iterable_value: *iterable_value,
                 index_value: *index_value,
                 version_value: *version_value,
@@ -3624,6 +3630,9 @@ fn compile_async_flow(
                     *value,
                     context,
                 );
+            }
+            wasm_ir::Statement::BindPattern { value, pattern } => {
+                compile_irrefutable_pattern(function, pattern, *value, context);
             }
             wasm_ir::Statement::StateStore {
                 target,
@@ -3795,6 +3804,7 @@ fn compile_async_flow(
             }
             wasm_ir::Statement::For {
                 binding,
+                pattern,
                 iterable_value,
                 index_value,
                 version_value,
@@ -3832,6 +3842,7 @@ fn compile_async_flow(
                     *version_value,
                     context,
                 );
+                compile_irrefutable_pattern(function, pattern, *binding, context);
                 compile_async_flow(
                     function,
                     body,

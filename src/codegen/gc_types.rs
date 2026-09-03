@@ -243,14 +243,18 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                             element_type: StorageType::Val(ValType::I32),
                             mutable: false,
                         })
-                        .chain(enumeration.variants.iter().map(|variant| {
-                            FieldType {
-                                element_type: enum_variant_payload(variant.id, semantics)
-                                    .map_or(StorageType::Val(ValType::I32), |ty| {
+                        .chain(enumeration.variants.iter().map(|variant| FieldType {
+                            element_type: enum_variant_payload(variant.id, semantics).map_or(
+                                StorageType::Val(ValType::I32),
+                                |ty| {
+                                    if ty.has_runtime_value() {
                                         layout.storage_type(ty)
-                                    }),
-                                mutable: false,
-                            }
+                                    } else {
+                                        StorageType::Val(ValType::I32)
+                                    }
+                                },
+                            ),
+                            mutable: false,
                         }))
                         .collect(),
                     }),

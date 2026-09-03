@@ -577,9 +577,18 @@ impl Parser<'_> {
         self.expect(TokenKind::LParen, "expected `(` after the function name")?;
         let mut params = method_of.map_or_else(Vec::new, |ty| {
             vec![Parameter {
-                id: self.new_value_id(),
-                name: "self".to_owned(),
-                name_span: first_span,
+                binding: {
+                    let pattern = crate::ast::PatternNode {
+                        id: self.new_pattern_id(),
+                        kind: crate::ast::MatchPattern::Binding(crate::ast::PatternBinding {
+                            id: self.new_value_id(),
+                            name: "self".to_owned(),
+                            name_span: first_span,
+                        }),
+                        span: first_span,
+                    };
+                    self.binding_pattern(pattern)
+                },
                 annotation: Some(ty),
                 span: first_span,
             }]
@@ -601,20 +610,17 @@ impl Parser<'_> {
             }
             let item_start = self.cursor.position();
             let parsed = (|| {
-                let (param_name, param_start) =
-                    self.expect_declared_ident("expected a parameter name")?;
+                let pattern = self.match_pattern(true)?;
                 let (annotation, type_span) = if self.eat(&TokenKind::Colon).is_some() {
                     let (ty, span) = self.parse_type("expected a parameter type")?;
                     (Some(ty), span)
                 } else {
-                    (None, param_start)
+                    (None, pattern.span)
                 };
                 let parameter = Parameter {
-                    id: self.new_value_id(),
-                    name: param_name,
-                    name_span: param_start,
+                    span: pattern.span.join(type_span),
+                    binding: self.binding_pattern(pattern),
                     annotation,
-                    span: param_start.join(type_span),
                 };
                 if self.eat(&TokenKind::Comma).is_none()
                     && !self.at(&TokenKind::RParen)

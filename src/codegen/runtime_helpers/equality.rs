@@ -14,7 +14,7 @@ use crate::{
 use super::super::{
     EqualityFunctions, GcLayout, RuntimeHelperPlan, Type, array_value, emit_array_get,
     emit_typed_struct_get, enum_variant_payload, option_value_type, result_value_type,
-    standard_field_type, struct_field_type, try_array_element_type,
+    semantic_type, standard_field_type, struct_field_type, try_array_element_type,
 };
 #[allow(clippy::too_many_arguments)]
 pub(in crate::codegen) fn compile_equality(
@@ -339,7 +339,10 @@ fn compile_enum_equality(
             .instruction(&Instruction::I32Const(variant_index as i32))
             .instruction(&Instruction::I32Eq)
             .instruction(&Instruction::If(BlockType::Empty));
-        if variant.ty.is_some() {
+        if variant
+            .ty
+            .is_some_and(|ty| semantic_type(ty, semantics).has_runtime_value())
+        {
             let StructuralMemberId::EnumVariant(variant_id) = variant.source else {
                 unreachable!()
             };

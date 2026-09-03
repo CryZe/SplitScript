@@ -92,6 +92,7 @@ fn global_initializers_reject_transitive_global_and_runtime_dependencies() {
 fn global_initializers_reject_settings_timer_process_and_global_writes() {
     let diagnostics = splitscript::compile(
         r#"
+            struct Pair { x: i32, y: i32 }
             state "game.exe" {}
 
             settings {
@@ -109,6 +110,10 @@ fn global_initializers_reject_settings_timer_process_and_global_writes() {
             let timerAtLoad = timer.state()
             let processAtLoad = process.name()
             let writtenAtLoad = overwriteDestination()
+            let Pair { x: printedX, y: printedY } = {
+                print("initializing a destructured global")
+                Pair { x: 1, y: 2 }
+            }
         "#,
     )
     .expect_err("global initializers must not depend on runtime context or mutate globals");
@@ -120,7 +125,7 @@ fn global_initializers_reject_settings_timer_process_and_global_writes() {
                 .contains("must be closed, synchronous, and pure")
         })
         .collect::<Vec<_>>();
-    assert_eq!(initializer_diagnostics.len(), 4, "{diagnostics:#?}");
+    assert_eq!(initializer_diagnostics.len(), 5, "{diagnostics:#?}");
     assert!(initializer_diagnostics.iter().any(|diagnostic| {
         diagnostic
             .notes

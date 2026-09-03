@@ -278,11 +278,14 @@ fn render_typed_block(
     let indent = "  ".repeat(depth);
     for statement in &block.statements {
         match &statement.kind {
-            TypedStatementKind::Variable { value, initializer } => {
+            TypedStatementKind::Variable {
+                binding,
+                initializer,
+            } => {
                 writeln!(
                     output,
                     "{indent}let v{} = e{}",
-                    value.index(),
+                    binding.value.index(),
                     initializer.index()
                 )
                 .unwrap();
@@ -359,7 +362,7 @@ fn render_typed_block(
                 writeln!(
                     output,
                     "{indent}for v{} in e{} storage=v{} index=v{} version=v{}:",
-                    binding.index(),
+                    binding.value.index(),
                     iterable.index(),
                     iterable_value.index(),
                     index_value.index(),

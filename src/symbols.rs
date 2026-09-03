@@ -100,14 +100,18 @@ pub fn document_symbols(document: &SourceDocument, program: &Program) -> Vec<Doc
         });
     }
 
-    symbols.extend(program.globals.iter().map(|global| DocumentSymbol {
-        name: global.name.clone(),
-        detail: Some("global".to_owned()),
-        kind: DocumentSymbolKind::Variable,
-        range: global.span,
-        selection_range: identifier_in(document, global.span, &global.name).unwrap_or(global.span),
-        children: Vec::new(),
-    }));
+    for global in &program.globals {
+        global.binding.visit_bindings(&mut |binding| {
+            symbols.push(DocumentSymbol {
+                name: binding.name.clone(),
+                detail: Some("global".to_owned()),
+                kind: DocumentSymbolKind::Variable,
+                range: global.span,
+                selection_range: binding.name_span,
+                children: Vec::new(),
+            });
+        });
+    }
 
     symbols.extend(program.structs.iter().map(|structure| {
         DocumentSymbol {

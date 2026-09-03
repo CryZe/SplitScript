@@ -18,7 +18,7 @@ expressions:
   e1: Event = path event resolve=ValuePath { root: Some(Variable(ValueId(1))), members: [] }
   e2: i32? = path point.x resolve=ValuePath { root: Some(Variable(ValueId(2))), members: [StructField(StructFieldId(0))] } convert=LiftOption i32 -> i32?
   e3: i32? = None convert=NoneToOptional None -> i32?
-  e4: i32? = match e1 arms=[p1 Enum { enumeration: Source(EnumId(0)), variant: "Moved", payload: Some(TypedPatternNode { pattern: Binding(PatternBinding { id: ValueId(2), name: "point" }), resolution: ResolvedPattern { id: PatternId(0), variant: None, wrapper: None, span: Span { start: 316, end: 321 } } }) } guard=None value=e2, p2 Enum { enumeration: Source(EnumId(0)), variant: "Idle", payload: None } guard=None value=e3]
+  e4: i32? = match e1 arms=[p2 Enum { enumeration: Source(EnumId(0)), variant: "Moved", payload: Some(TypedPatternNode { pattern: Binding(PatternBinding { id: ValueId(2), name: "point" }), resolution: ResolvedPattern { id: PatternId(1), variant: None, wrapper: None, span: Span { start: 316, end: 321 } } }) } guard=None value=e2, p3 Enum { enumeration: Source(EnumId(0)), variant: "Idle", payload: None } guard=None value=e3]
   e5: Never = return Some(ExprId(4))
   e6: i32 = int 3 suffix=None
   e7: i32 = int 4 suffix=None

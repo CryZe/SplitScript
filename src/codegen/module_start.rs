@@ -50,7 +50,8 @@ pub(super) fn compile_start(
         .filter(|initializer| {
             let ty = value_type(initializer.value, semantics);
             ty.has_runtime_value()
-                && !is_wasm_global_constant(initializer.expression, emission.wasm_ir)
+                && (initializer.destructures
+                    || !is_wasm_global_constant(initializer.expression, emission.wasm_ir))
         })
     {
         plan_wasm_locals(
@@ -179,7 +180,8 @@ fn emit_runtime_global_initializers(
     for initializer in lowering.wasm_ir.global_initializer_plans() {
         let ty = value_type(initializer.value, lowering.semantics);
         if !ty.has_runtime_value()
-            || is_wasm_global_constant(initializer.expression, lowering.wasm_ir)
+            || (!initializer.destructures
+                && is_wasm_global_constant(initializer.expression, lowering.wasm_ir))
         {
             continue;
         }

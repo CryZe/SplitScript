@@ -1366,11 +1366,16 @@ fn add_source_declarations(
         ));
     }
     for global in &syntax.globals {
-        builder.add(simple_completion(
-            &global.name,
-            CompletionKind::Variable,
-            "global variable",
-        ));
+        let mut names = std::collections::HashSet::new();
+        global.binding.visit_bindings(&mut |binding| {
+            if names.insert(binding.name.clone()) {
+                builder.add(simple_completion(
+                    &binding.name,
+                    CompletionKind::Variable,
+                    "global variable",
+                ));
+            }
+        });
     }
     for function in &syntax.functions {
         if function.method_of.is_some() {
@@ -1441,7 +1446,7 @@ fn add_visible_bindings(builder: &mut CompletionBuilder, syntax: &Program, offse
         .find(|function| contains_offset(function.body.span, offset))
     {
         for parameter in &function.params {
-            add_scoped_variable(builder, &parameter.name, "parameter");
+            add_binding_pattern(builder, &parameter.binding, "parameter");
         }
         add_block_bindings(builder, &function.body, offset);
         return;
@@ -1473,7 +1478,7 @@ fn add_completed_statement_binding(builder: &mut CompletionBuilder, statement: &
     match statement {
         Stmt::Debug { statement, .. } => add_completed_statement_binding(builder, statement),
         Stmt::Variable(variable) => {
-            add_scoped_variable(builder, &variable.name, "local variable");
+            add_binding_pattern(builder, &variable.binding, "local variable");
         }
         Stmt::Suspend {
             binding: Some(binding),
@@ -1550,7 +1555,7 @@ fn add_statement_inner_bindings(builder: &mut CompletionBuilder, statement: &Stm
             if contains_offset(iterable.span, offset) {
                 add_expression_bindings(builder, iterable, offset);
             } else if contains_offset(body.span, offset) {
-                add_scoped_variable(builder, &binding.name, "loop binding");
+                add_binding_pattern(builder, &binding.binding, "loop binding");
                 add_block_bindings(builder, body, offset);
             }
         }
@@ -1664,7 +1669,7 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
         }
         ExprKind::Closure { params, body, .. } => {
             for parameter in params {
-                add_scoped_variable(builder, &parameter.name, "closure parameter");
+                add_binding_pattern(builder, &parameter.binding, "closure parameter");
             }
             add_expression_bindings(builder, body, offset);
         }
@@ -1697,6 +1702,16 @@ fn add_child_expression_bindings(
 fn add_pattern_binding(builder: &mut CompletionBuilder, pattern: &MatchPattern) {
     pattern.visit_bindings(&mut |binding| {
         add_scoped_variable(builder, &binding.name, "pattern binding");
+    });
+}
+
+fn add_binding_pattern(
+    builder: &mut CompletionBuilder,
+    binding: &crate::ast::BindingPattern,
+    detail: &str,
+) {
+    binding.visit_bindings(&mut |leaf| {
+        add_scoped_variable(builder, &leaf.name, detail);
     });
 }
 
@@ -3696,6 +3711,32 @@ fn smaller(value, other) {
         assert!(completions.contains(&"clamp".to_owned()));
         assert!(!completions.contains(&"toString".to_owned()));
         assert!(!completions.contains(&"length".to_owned()));
+    }
+
+    #[test]
+    fn destructured_bindings_are_completed_by_their_leaf_names() {
+        let source = r#"
+struct Point { x: i32, y: i32 }
+let Point { x: globalX, y: globalY } = Point { x: 1, y: 2 }
+state "game.exe" {}
+fn inspect(Point { x, y }: Point) {
+    let Point { x: localX, y: localY } = Point { x, y }
+    for Point { x: itemX, y: itemY } in [Point { x, y }] {
+
+    }
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let completions = labels(&mut database, "] {\n");
+        for leaf in [
+            "globalX", "globalY", "x", "y", "localX", "localY", "itemX", "itemY",
+        ] {
+            assert!(
+                completions.contains(&leaf.to_owned()),
+                "{leaf}: {completions:#?}"
+            );
+        }
+        assert!(!completions.iter().any(|label| label.contains("Point {")));
     }
 
     #[test]

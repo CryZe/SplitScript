@@ -1869,6 +1869,27 @@ whileAttached {
     }
 
     #[test]
+    fn formats_irrefutable_patterns_at_every_binding_site() {
+        let source = r#"struct Point{x:i32,y:i32}
+let Point{x:globalX,y:globalY}=Point{x:1,y:2}
+state "game.exe"{}
+fn sum(Point{x,y}:Point)->i32{return x+y}
+whileAttached{let Point{x:localX,y:localY}=Point{x:globalX,y:globalY};let add=(Point{x,y}:Point)=>x+y;for Point{x:itemX,y:_} in [Point{x:localX,y:localY}]{print(add(Point{x:itemX,y:0}))}}"#;
+        let formatted = format_source(source).expect("binding patterns should format");
+        for fragment in [
+            "x: globalX, y: globalY",
+            "x, y",
+            "}: Point) -> i32",
+            "}: Point) => x + y",
+            "x: itemX, y: _",
+        ] {
+            assert!(formatted.contains(fragment), "{fragment}:\n{formatted}");
+        }
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        crate::compile(&formatted).expect("formatted binding patterns should compile");
+    }
+
+    #[test]
     fn formats_value_loops_and_break_values() {
         let source = r#"state "game.exe"{}
 fn choose(flag:bool)->i32{return loop{if flag{break 7}else{break -1}}}"#;

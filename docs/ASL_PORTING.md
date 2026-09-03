@@ -55,6 +55,13 @@ language or provider pages. Keep the review record beside the maintained port;
 generated full-script candidates are evidence to inspect, not fixtures to
 preserve.
 
+When one ASL expression establishes several related locals, an irrefutable
+[`binding pattern`] can unpack a struct, fixed array, or uniquely possible enum
+variant directly in an initialized [`let`], function parameter, closure
+parameter, or runtime [`for`] binding. The compiler rejects a pattern whenever
+another runtime shape is possible and points to [`is`] or [`match`] instead;
+this keeps destructuring from silently skipping an update.
+
 ## Attachment state declarations
 
 Every SplitScript file is one executable autosplitter and declares exactly one

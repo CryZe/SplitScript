@@ -1862,6 +1862,39 @@ fn document_symbols_preserve_source_order_and_domain_hierarchy() {
 }
 
 #[test]
+fn document_symbols_expose_each_destructured_global_binding() {
+    use splitscript::tooling::database::CompilerDatabase;
+
+    let source = r#"
+        struct Point { x: i32, y: i32 }
+        let Point { x: globalX, y: globalY } = Point { x: 1, y: 2 }
+        state "game.exe" {}
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    let symbols = database.document_symbols().unwrap();
+    let names = symbols
+        .iter()
+        .map(|symbol| symbol.name.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(names, ["Point", "globalX", "globalY", "state"]);
+
+    let lowered = database.lower().unwrap();
+    let declarations = lowered
+        .hir()
+        .declarations()
+        .filter_map(|declaration| {
+            matches!(
+                declaration.id,
+                splitscript::compiler::hir::DeclarationId::Global(_)
+            )
+            .then_some(declaration.name.as_str())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(declarations, ["globalX", "globalY"]);
+}
+
+#[test]
 fn compiler_database_preserves_semantics_around_type_errors() {
     use std::sync::Arc;
 

@@ -20,6 +20,14 @@ are mutable unless the surrounding value is read-only. Types are normally
 inferred in both directions; annotate process-memory boundaries when the
 target layout does not already determine the type.
 
+Use an irrefutable [`binding pattern`] when a known struct or fixed shape
+should introduce several names at once. Binding patterns work in initialized
+[`let`] declarations, function and closure parameters, and runtime [`for`]
+bindings. Unlike a C# deconstruction assignment, the pattern declares new
+names and must match every value of the incoming type; use [`is`] or [`match`]
+when the test can fail. An annotation after the pattern applies to the complete
+incoming value.
+
 C# names map to explicit widths: `byte` becomes [`u8`], `int` becomes [`i32`],
 `long` becomes [`i64`], and their unsigned counterparts retain the same width.
 Use [`f32`] or [`f64`], [`String`], and [`Duration`] instead of `float`, `double`,

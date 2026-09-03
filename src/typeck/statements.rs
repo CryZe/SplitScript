@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{ActionKind, Block, Expr, ExprKind, Span, Stmt, SuspensionMode, VariableDecl},
+    ast::{
+        ActionKind, BindingPattern, Block, Expr, ExprKind, Span, Stmt, SuspensionMode, VariableDecl,
+    },
     inference::{Requirements, Type},
 };
 
@@ -14,6 +16,112 @@ use super::{
 };
 
 impl Checker {
+    pub(super) fn bind_irrefutable_pattern(
+        &mut self,
+        declaration: &BindingPattern,
+        ty: Type,
+        mutable: bool,
+        debug_only: bool,
+        site: &str,
+    ) {
+        let bindings = self.check_irrefutable_pattern(declaration, ty, mutable, debug_only, site);
+        for (name, binding) in bindings {
+            let duplicate = self
+                .scopes
+                .iter()
+                .rev()
+                .any(|scope| scope.contains_key(&name))
+                || (!self.is_library_function() && self.declarations.globals.contains_key(&name))
+                || self.is_provider_value_name(&name);
+            if duplicate {
+                self.error(
+                    format!("variable `{name}` is already declared"),
+                    binding.declaration_span.unwrap_or(declaration.pattern.span),
+                );
+            } else {
+                self.scopes.last_mut().unwrap().insert(name, binding);
+            }
+        }
+    }
+
+    pub(super) fn bind_irrefutable_parameter(
+        &mut self,
+        declaration: &BindingPattern,
+        ty: Type,
+        debug_only: bool,
+        site: &str,
+        duplicate_kind: &str,
+    ) {
+        let bindings = self.check_irrefutable_pattern(declaration, ty, true, debug_only, site);
+        for (name, binding) in bindings {
+            if self.is_provider_value_name(&name) {
+                self.error(
+                    format!("`{name}` is reserved by the state provider"),
+                    binding.declaration_span.unwrap_or(declaration.pattern.span),
+                );
+                continue;
+            }
+            if self
+                .scopes
+                .last_mut()
+                .unwrap()
+                .insert(name.clone(), binding)
+                .is_some()
+            {
+                self.error(
+                    format!("duplicate {duplicate_kind} parameter `{name}`"),
+                    binding.declaration_span.unwrap_or(declaration.pattern.span),
+                );
+            }
+        }
+    }
+
+    pub(super) fn check_irrefutable_pattern(
+        &mut self,
+        declaration: &BindingPattern,
+        ty: Type,
+        mutable: bool,
+        debug_only: bool,
+        site: &str,
+    ) -> HashMap<String, Binding> {
+        if let Some(previous) = self.semantics.pending_value_type(declaration.id) {
+            self.unify(previous, ty, declaration.pattern.span);
+        } else {
+            self.semantics.resolve_value_type(declaration.id, ty);
+        }
+        self.scopes.push(HashMap::new());
+        let checked = self.check_pattern(
+            &declaration.pattern.kind,
+            declaration.pattern.id,
+            ty,
+            declaration.pattern.span,
+        );
+        let mut bindings = self.scopes.pop().expect("a binding pattern owns a scope");
+
+        let missing = self.missing_patterns(std::slice::from_ref(&checked.coverage), ty);
+        if !missing.is_empty() {
+            let witnesses = missing
+                .iter()
+                .map(|pattern| format!("`{}`", pattern.display()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.errors.push(
+                crate::Diagnostic::type_error(
+                    format!("refutable pattern in {site}"),
+                    declaration.pattern.span,
+                )
+                .with_primary_label(format!("this pattern does not match {witnesses}"))
+                .with_note("use `is` or `match` when the value may have another shape"),
+            );
+        }
+
+        for binding in bindings.values_mut() {
+            binding.mutable = mutable;
+            binding.debug_only = debug_only;
+        }
+        bindings
+    }
+
     pub(super) fn block(&mut self, block: &Block, nested: bool) {
         if nested {
             self.scopes.push(HashMap::new());
@@ -415,32 +523,13 @@ impl Checker {
                     *version_value,
                     self.core_type(crate::stdlib::CoreTypeId::U32),
                 );
-                self.semantics.resolve_value_type(binding.id, element_ty);
-
-                let duplicate = self
-                    .scopes
-                    .iter()
-                    .rev()
-                    .any(|scope| scope.contains_key(&binding.name))
-                    || (!self.is_library_function()
-                        && self.declarations.globals.contains_key(&binding.name))
-                    || self.is_provider_value_name(&binding.name);
-                if duplicate {
-                    self.error(
-                        format!("variable `{}` is already declared", binding.name),
-                        binding.span,
-                    );
-                }
                 self.scopes.push(HashMap::new());
-                self.scopes.last_mut().unwrap().insert(
-                    binding.name.clone(),
-                    Binding {
-                        id: Some(binding.id),
-                        ty: element_ty,
-                        mutable: false,
-                        debug_only: self.debug_context.is_debug(),
-                        declaration_span: Some(binding.span),
-                    },
+                self.bind_irrefutable_pattern(
+                    &binding.binding,
+                    element_ty,
+                    false,
+                    self.debug_context.is_debug(),
+                    "`for` binding",
                 );
                 self.with_loop(|checker| checker.block(body, false));
                 self.scopes.pop();
@@ -628,31 +717,22 @@ impl Checker {
             .value
             .as_ref()
             .expect("local variables have initializers");
-        let duplicate = self
-            .scopes
-            .iter()
-            .rev()
-            .any(|scope| scope.contains_key(&variable.name));
-        if duplicate
-            || (!self.is_library_function()
-                && self.declarations.globals.contains_key(&variable.name))
-            || self.is_provider_value_name(&variable.name)
-        {
-            self.error(
-                format!("variable `{}` is already declared", variable.name),
-                variable.span,
-            );
-        }
         let expected = variable.annotation.map(|ty| self.syntax_type(ty));
         let inferred = if let Some(expected) = expected {
             let expected_name = self.type_name(expected);
+            let label = variable.binding.simple_binding().map_or_else(
+                || format!("binding pattern is declared as `{expected_name}`"),
+                |binding| {
+                    format!(
+                        "variable `{}` is declared as `{expected_name}`",
+                        binding.name
+                    )
+                },
+            );
             self.with_expected_type_source(
                 super::ExpectedTypeSource {
                     span: variable.name_span,
-                    label: format!(
-                        "variable `{}` is declared as `{expected_name}`",
-                        variable.name
-                    ),
+                    label,
                 },
                 |checker| checker.expr(value, Some(expected)),
             )
@@ -675,16 +755,12 @@ impl Checker {
             );
             ty = self.error_type();
         }
-        self.semantics.resolve_value_type(variable.id, ty);
-        self.scopes.last_mut().unwrap().insert(
-            variable.name.clone(),
-            Binding {
-                id: Some(variable.id),
-                ty,
-                mutable: variable.mutable,
-                debug_only: self.debug_context.is_debug() || variable.debug_only,
-                declaration_span: Some(variable.name_span),
-            },
+        self.bind_irrefutable_pattern(
+            &variable.binding,
+            ty,
+            variable.mutable,
+            self.debug_context.is_debug() || variable.debug_only,
+            "variable declaration",
         );
     }
 

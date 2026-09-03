@@ -1,6 +1,6 @@
 //! Recursive pattern usefulness, reachability, and exhaustiveness.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::{inference::Type, semantic::ResolvedEnumVariantId, stdlib::StdlibTypeId};
 
@@ -155,6 +155,12 @@ enum PatternConstructor {
     ResultError,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum Inhabitedness {
+    Visiting,
+    Known(bool),
+}
+
 impl PatternConstructor {
     fn of(pattern: &PatternCoverage) -> Option<Self> {
         match pattern {
@@ -192,9 +198,70 @@ impl PatternConstructor {
 }
 
 impl Checker {
+    /// Computes the least fixed point of source-value construction. Encountering
+    /// a recursive type again does not by itself prove a value exists: a cycle
+    /// becomes inhabited only when another path reaches a concrete constructor
+    /// such as an empty enum variant, `None`, or an empty collection.
+    fn type_is_inhabited(&mut self, ty: Type) -> bool {
+        fn visit(
+            checker: &mut Checker,
+            ty: Type,
+            states: &mut HashMap<Type, Inhabitedness>,
+        ) -> bool {
+            let ty = checker.shallow_type(ty);
+            match states.get(&ty).copied() {
+                Some(Inhabitedness::Visiting) => return false,
+                Some(Inhabitedness::Known(value)) => return value,
+                None => {}
+            }
+            states.insert(ty, Inhabitedness::Visiting);
+
+            let inhabited = if checker.is_never_type(ty) {
+                false
+            } else if let Type::Array(array) = ty {
+                match checker.inference.array_length(array) {
+                    Some(0) | None => true,
+                    Some(_) => visit(checker, checker.inference.array_element(array), states),
+                }
+            } else if let Some(structure) = checker.source_struct_id(ty) {
+                let fields = checker
+                    .declarations
+                    .structs
+                    .iter()
+                    .find(|declaration| declaration.id == structure)
+                    .map(|declaration| {
+                        declaration
+                            .fields
+                            .iter()
+                            .map(|field| checker.syntax_type(field.ty))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                fields
+                    .into_iter()
+                    .all(|field| visit(checker, field, states))
+            } else if let Some((_, enumeration)) = checker.enum_info_for_type(ty) {
+                enumeration.variants.into_iter().any(|variant| {
+                    variant
+                        .payload
+                        .is_none_or(|payload| visit(checker, payload, states))
+                })
+            } else {
+                // Options, results, iterator steps, growable containers, scalar
+                // values, functions, futures, and unresolved recovery types all
+                // have at least one concrete runtime representation.
+                true
+            };
+            states.insert(ty, Inhabitedness::Known(inhabited));
+            inhabited
+        }
+
+        visit(self, ty, &mut HashMap::new())
+    }
+
     fn pattern_constructors(&mut self, ty: Type) -> Option<Vec<PatternConstructor>> {
         let ty = self.shallow_type(ty);
-        if self.is_never_type(ty) {
+        if !self.type_is_inhabited(ty) {
             return Some(Vec::new());
         }
         if ty == self.core_type(crate::stdlib::CoreTypeId::Bool) {
@@ -805,10 +872,23 @@ impl Checker {
         candidate: &[PatternCoverage],
         types: &[Type],
     ) -> Option<Vec<PatternCoverage>> {
+        // A row of wildcards covers the complete product represented by this
+        // matrix. Besides avoiding needless constructor expansion, this is
+        // essential for recursive product types: expanding `Node { next: _ }`
+        // back into `Node` can otherwise recurse forever even though the
+        // existing row has already proved that every value is covered.
+        if matrix.iter().any(|row| {
+            row.len() == candidate.len() && row.iter().all(PatternCoverage::is_irrefutable)
+        }) {
+            return None;
+        }
         let Some((head, tail)) = candidate.split_first() else {
             return matrix.is_empty().then(Vec::new);
         };
         let (&ty, remaining_types) = types.split_first()?;
+        if !self.type_is_inhabited(ty) {
+            return None;
+        }
         if let PatternCoverage::Alternation(alternatives) = head {
             for alternative in alternatives {
                 let mut branch = vec![alternative.clone()];
@@ -910,6 +990,9 @@ impl Checker {
             .map(|pattern| vec![pattern])
             .collect::<Vec<_>>();
         let ty = self.shallow_type(ty);
+        if !self.type_is_inhabited(ty) {
+            return Vec::new();
+        }
         if let Some(constructors) = self.pattern_constructors(ty) {
             constructors
                 .into_iter()

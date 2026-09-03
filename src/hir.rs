@@ -4,7 +4,7 @@
 //! typed expressions and blocks own body shape, child identities, types, and
 //! type-directed resolutions without attaching them to syntax nodes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     ast::{
@@ -93,12 +93,17 @@ impl DeclarationIndex {
             }
         }
         for global in &syntax.globals {
-            program.push(
-                DeclarationId::Global(global.id),
-                None,
-                &global.name,
-                global.span,
-            );
+            let mut seen = HashSet::new();
+            global.binding.visit_bindings(&mut |binding| {
+                if seen.insert(binding.id) {
+                    program.push(
+                        DeclarationId::Global(binding.id),
+                        None,
+                        &binding.name,
+                        binding.name_span,
+                    );
+                }
+            });
         }
         for structure in &syntax.structs {
             program.push(
@@ -279,6 +284,13 @@ pub struct TypedPatternNode {
 }
 
 #[derive(Debug, Clone)]
+pub struct TypedBindingPattern {
+    /// The single incoming value supplied by the declaration site.
+    pub value: ValueId,
+    pub pattern: TypedPatternNode,
+}
+
+#[derive(Debug, Clone)]
 pub struct TypedStructPatternField {
     pub field: crate::ast::StructFieldId,
     pub pattern: TypedPatternNode,
@@ -327,6 +339,47 @@ pub enum TypedPattern {
     Alternation(Vec<TypedPatternNode>),
     Binding(PatternBinding),
     Wildcard,
+}
+
+impl TypedPattern {
+    pub fn visit_bindings(&self, visitor: &mut impl FnMut(&PatternBinding)) {
+        match self {
+            Self::Struct { fields, .. } => {
+                for field in fields {
+                    field.pattern.pattern.visit_bindings(visitor);
+                }
+            }
+            Self::Enum {
+                payload: Some(payload),
+                ..
+            }
+            | Self::OptionSome(payload)
+            | Self::IteratorItem(payload)
+            | Self::ResultSuccess(payload)
+            | Self::ResultError(payload) => payload.pattern.visit_bindings(visitor),
+            Self::Array { prefix, suffix, .. } => {
+                for element in prefix.iter().chain(suffix) {
+                    element.pattern.visit_bindings(visitor);
+                }
+            }
+            Self::Alternation(alternatives) => {
+                for alternative in alternatives {
+                    alternative.pattern.visit_bindings(visitor);
+                }
+            }
+            Self::Binding(binding) => visitor(binding),
+            Self::Enum { payload: None, .. }
+            | Self::Bool(_)
+            | Self::Char(_)
+            | Self::String(_)
+            | Self::Int { .. }
+            | Self::IntRange { .. }
+            | Self::FileVersion(_)
+            | Self::None
+            | Self::IteratorEnd
+            | Self::Wildcard => {}
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -433,7 +486,7 @@ pub enum TypedExpressionKind {
         arguments: Vec<ExprId>,
     },
     Closure {
-        parameters: Vec<ValueId>,
+        parameters: Vec<TypedBindingPattern>,
         body: ExprId,
     },
 }
@@ -493,7 +546,7 @@ pub struct ResolvedPattern {
 #[derive(Debug, Clone)]
 pub enum TypedStatementKind {
     Variable {
-        value: ValueId,
+        binding: TypedBindingPattern,
         initializer: ExprId,
     },
     Assign {
@@ -523,7 +576,7 @@ pub enum TypedStatementKind {
         body: TypedBlock,
     },
     For {
-        binding: ValueId,
+        binding: TypedBindingPattern,
         iterable_value: ValueId,
         index_value: ValueId,
         version_value: ValueId,
@@ -556,6 +609,7 @@ pub struct TypedBlock {
 pub struct FunctionBody {
     pub function: FunctionInstance,
     pub debug_only: bool,
+    pub parameters: Vec<TypedBindingPattern>,
     pub body: TypedBlock,
 }
 
@@ -565,9 +619,9 @@ pub struct ActionBody {
     pub body: TypedBlock,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct GlobalInitializer {
-    pub value: ValueId,
+    pub binding: TypedBindingPattern,
     pub expression: ExprId,
     pub debug_only: bool,
 }
@@ -651,7 +705,20 @@ impl TypedProgram {
             .map(|function| FunctionBody {
                 function: FunctionInstance::monomorphic(function.id),
                 debug_only: function.debug_only,
-                body: lower_block(&function.body, semantics),
+                parameters: function
+                    .params
+                    .iter()
+                    .map(|parameter| TypedBindingPattern {
+                        value: parameter.id,
+                        pattern: lower_pattern_node(
+                            &parameter.binding.pattern,
+                            semantics,
+                            syntax,
+                            &standard_library,
+                        ),
+                    })
+                    .collect(),
+                body: lower_block(&function.body, semantics, syntax, &standard_library),
             })
             .collect();
         let action_bodies = syntax
@@ -659,7 +726,7 @@ impl TypedProgram {
             .iter()
             .map(|action| ActionBody {
                 action: action.kind,
-                body: lower_block(&action.body, semantics),
+                body: lower_block(&action.body, semantics, syntax, &standard_library),
             })
             .collect();
         let global_initializers = syntax
@@ -667,7 +734,15 @@ impl TypedProgram {
             .iter()
             .filter_map(|global| {
                 global.value.as_ref().map(|value| GlobalInitializer {
-                    value: global.id,
+                    binding: TypedBindingPattern {
+                        value: global.id,
+                        pattern: lower_pattern_node(
+                            &global.binding.pattern,
+                            semantics,
+                            syntax,
+                            &standard_library,
+                        ),
+                    },
                     expression: value.id,
                     debug_only: global.debug_only,
                 })
@@ -918,8 +993,8 @@ impl TypedProgram {
         self.action_bodies.iter()
     }
 
-    pub fn global_initializers(&self) -> impl Iterator<Item = GlobalInitializer> + '_ {
-        self.global_initializers.iter().copied()
+    pub fn global_initializers(&self) -> impl Iterator<Item = &GlobalInitializer> + '_ {
+        self.global_initializers.iter()
     }
 
     /// Globals whose storage is initialized by a successful `onAttach` run
@@ -1001,6 +1076,33 @@ impl TypedBodyBuilder<'_> {
 }
 
 impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
+    fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
+        self.insert_pattern(
+            &parameter.binding.pattern.kind,
+            parameter.binding.pattern.id,
+            parameter.binding.pattern.span,
+        );
+        visit::walk_parameter(self, parameter);
+    }
+
+    fn visit_variable(&mut self, variable: &'ast crate::ast::VariableDecl) {
+        self.insert_pattern(
+            &variable.binding.pattern.kind,
+            variable.binding.pattern.id,
+            variable.binding.pattern.span,
+        );
+        visit::walk_variable(self, variable);
+    }
+
+    fn visit_for_binding(&mut self, binding: &'ast crate::ast::ForBinding) {
+        self.insert_pattern(
+            &binding.binding.pattern.kind,
+            binding.binding.pattern.id,
+            binding.binding.pattern.span,
+        );
+        visit::Visitor::visit_pattern(self, &binding.binding.pattern.kind);
+    }
+
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
         if let Stmt::Assign { id, span, .. } | Stmt::StateAssign { id, span, .. } = statement {
             self.assignments.insert(
@@ -1654,12 +1756,12 @@ fn lower_expression_kind(
                 trailing_semicolon: None,
             };
             TypedExpressionKind::Block {
-                statements: lower_block(&statements, semantics),
+                statements: lower_block(&statements, semantics, syntax, standard_library),
                 value,
             }
         }
         ExprKind::Loop(block) => TypedExpressionKind::Loop {
-            body: lower_block(block, semantics),
+            body: lower_block(block, semantics, syntax, standard_library),
         },
         ExprKind::Struct { fields, .. } => TypedExpressionKind::Struct {
             structure: semantics
@@ -1777,7 +1879,18 @@ fn lower_expression_kind(
             arguments: args.iter().map(|argument| argument.id).collect(),
         },
         ExprKind::Closure { params, body, .. } => TypedExpressionKind::Closure {
-            parameters: params.iter().map(|parameter| parameter.id).collect(),
+            parameters: params
+                .iter()
+                .map(|parameter| TypedBindingPattern {
+                    value: parameter.id,
+                    pattern: lower_pattern_node(
+                        &parameter.binding.pattern,
+                        semantics,
+                        syntax,
+                        standard_library,
+                    ),
+                })
+                .collect(),
             body: body.id,
         },
     }
@@ -1807,7 +1920,12 @@ fn enum_type_for_variant(
     }
 }
 
-fn lower_block(block: &Block, semantics: &SemanticModel) -> TypedBlock {
+fn lower_block(
+    block: &Block,
+    semantics: &SemanticModel,
+    syntax: &SyntaxProgram,
+    standard_library: &StandardLibrary,
+) -> TypedBlock {
     TypedBlock {
         statements: block
             .statements
@@ -1841,7 +1959,15 @@ fn lower_block(block: &Block, semantics: &SemanticModel) -> TypedBlock {
                             )
                         }
                         Stmt::Variable(variable) => TypedStatementKind::Variable {
-                            value: variable.id,
+                            binding: TypedBindingPattern {
+                                value: variable.id,
+                                pattern: lower_pattern_node(
+                                    &variable.binding.pattern,
+                                    semantics,
+                                    syntax,
+                                    standard_library,
+                                ),
+                            },
                             initializer: variable
                                 .value
                                 .as_ref()
@@ -1911,16 +2037,21 @@ fn lower_block(block: &Block, semantics: &SemanticModel) -> TypedBlock {
                             ..
                         } => TypedStatementKind::If {
                             condition: condition.id,
-                            then_block: lower_block(then_block, semantics),
-                            else_block: else_block
-                                .as_ref()
-                                .map(|block| lower_block(block, semantics)),
+                            then_block: lower_block(
+                                then_block,
+                                semantics,
+                                syntax,
+                                standard_library,
+                            ),
+                            else_block: else_block.as_ref().map(|block| {
+                                lower_block(block, semantics, syntax, standard_library)
+                            }),
                         },
                         Stmt::While {
                             condition, body, ..
                         } => TypedStatementKind::While {
                             condition: condition.id,
-                            body: lower_block(body, semantics),
+                            body: lower_block(body, semantics, syntax, standard_library),
                         },
                         Stmt::For {
                             binding,
@@ -1931,12 +2062,20 @@ fn lower_block(block: &Block, semantics: &SemanticModel) -> TypedBlock {
                             body,
                             ..
                         } => TypedStatementKind::For {
-                            binding: binding.id,
+                            binding: TypedBindingPattern {
+                                value: binding.id,
+                                pattern: lower_pattern_node(
+                                    &binding.binding.pattern,
+                                    semantics,
+                                    syntax,
+                                    standard_library,
+                                ),
+                            },
                             iterable_value: *iterable_value,
                             index_value: *index_value,
                             version_value: *version_value,
                             iterable: iterable.id,
-                            body: lower_block(body, semantics),
+                            body: lower_block(body, semantics, syntax, standard_library),
                         },
                         Stmt::Suspend {
                             mode,

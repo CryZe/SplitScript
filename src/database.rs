@@ -1311,8 +1311,18 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
     }
 
     fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
-        self.insert_value(parameter.id, &parameter.name, parameter.name_span);
-        if parameter.name != "self"
+        parameter.binding.visit_bindings(&mut |binding| {
+            self.insert_value(binding.id, &binding.name, binding.name_span);
+        });
+        self.add_pattern_references(
+            &parameter.binding.pattern.kind,
+            parameter.binding.pattern.id,
+            parameter.binding.pattern.span,
+        );
+        if parameter
+            .binding
+            .simple_binding()
+            .is_none_or(|binding| binding.name != "self")
             && let Some(annotation) = parameter.annotation
         {
             self.add_type_after_colon(annotation, parameter.span);
@@ -1321,7 +1331,14 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
     }
 
     fn visit_variable(&mut self, variable: &'ast crate::ast::VariableDecl) {
-        self.insert_value(variable.id, &variable.name, variable.span);
+        variable.binding.visit_bindings(&mut |binding| {
+            self.insert_value(binding.id, &binding.name, binding.name_span);
+        });
+        self.add_pattern_references(
+            &variable.binding.pattern.kind,
+            variable.binding.pattern.id,
+            variable.binding.pattern.span,
+        );
         if let Some(annotation) = variable.annotation {
             let initializer_start = variable
                 .value
@@ -1347,7 +1364,14 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
     }
 
     fn visit_for_binding(&mut self, binding: &'ast crate::ast::ForBinding) {
-        self.insert_value(binding.id, &binding.name, binding.span);
+        binding.binding.visit_bindings(&mut |binding| {
+            self.insert_value(binding.id, &binding.name, binding.name_span);
+        });
+        self.add_pattern_references(
+            &binding.binding.pattern.kind,
+            binding.binding.pattern.id,
+            binding.binding.pattern.span,
+        );
     }
 
     fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {

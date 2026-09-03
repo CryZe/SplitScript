@@ -129,20 +129,6 @@ fn check_state_provider_configuration(checker: &mut Checker, program: &Program) 
 fn check_global_initializers(checker: &mut Checker, program: &Program) {
     let inferred_options = globals_inferred_as_options(program);
     for global in &program.globals {
-        if checker.is_provider_value_name(&global.name) {
-            checker.error(
-                format!("`{}` is reserved by the state provider", global.name),
-                global.span,
-            );
-            continue;
-        }
-        if checker.declarations.globals.contains_key(&global.name) {
-            checker.error(
-                format!("duplicate global variable `{}`", global.name),
-                global.span,
-            );
-            continue;
-        }
         let inferred = if let Some(value) = &global.value {
             checker.with_debug_context(
                 DebugContext::from_declaration(global.debug_only),
@@ -164,13 +150,19 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
                         && let Some(expected) = expected
                     {
                         let expected_name = checker.type_name(expected);
+                        let label = global.binding.simple_binding().map_or_else(
+                            || format!("global binding pattern is declared as `{expected_name}`"),
+                            |binding| {
+                                format!(
+                                    "global variable `{}` is declared as `{expected_name}`",
+                                    binding.name
+                                )
+                            },
+                        );
                         checker.with_expected_type_source(
                             super::ExpectedTypeSource {
                                 span: global.name_span,
-                                label: format!(
-                                    "global variable `{}` is declared as `{expected_name}`",
-                                    global.name,
-                                ),
+                                label,
                             },
                             |checker| checker.expr(value, Some(expected)),
                         )
@@ -189,42 +181,66 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
                     }),
             )
         };
-        let mut ty = inferred.unwrap_or_else(|| checker.error_type());
-        let unsupported_standard = checker.standard_type_id(ty).is_some_and(|standard| {
-            standard != StdlibTypeId::String
-                && !checker
-                    .standard_library
-                    .type_decl(standard)
-                    .value_usage
-                    .global_variable
-        });
-        if let Some(value) = &global.value
-            && (unsupported_standard
-                || matches!(ty, Type::Result(_))
-                || matches!(ty, Type::Option(_))
-                    && !matches!(value.kind, crate::ast::ExprKind::None))
-        {
-            let name = checker.type_name(ty);
-            checker.error(
-                format!("global variables cannot currently store `{name}`"),
-                global.span,
-            );
-            ty = checker.error_type();
-        }
-        checker.semantics.resolve_value_type(global.id, ty);
+        let ty = inferred.unwrap_or_else(|| checker.error_type());
+        let bindings = checker.check_irrefutable_pattern(
+            &global.binding,
+            ty,
+            global.mutable,
+            global.debug_only,
+            "global variable declaration",
+        );
         if global.value.is_none() {
             checker.declarations.bare_globals.insert(global.id);
         }
-        checker.declarations.globals.insert(
-            global.name.clone(),
-            Binding {
-                id: Some(global.id),
-                ty,
-                mutable: global.mutable,
-                debug_only: global.debug_only,
-                declaration_span: Some(global.name_span),
-            },
-        );
+        for (name, mut binding) in bindings {
+            let mut binding_ty = binding.ty;
+            let unsupported_standard =
+                checker
+                    .standard_type_id(binding_ty)
+                    .is_some_and(|standard| {
+                        standard != StdlibTypeId::String
+                            && !checker
+                                .standard_library
+                                .type_decl(standard)
+                                .value_usage
+                                .global_variable
+                    });
+            let initialized = global.value.is_some();
+            let unsupported_option = matches!(binding_ty, Type::Option(_))
+                && global.binding.simple_binding().is_some()
+                && !global
+                    .value
+                    .as_ref()
+                    .is_some_and(|value| matches!(value.kind, crate::ast::ExprKind::None));
+            if initialized
+                && (unsupported_standard
+                    || matches!(binding_ty, Type::Result(_))
+                    || unsupported_option)
+            {
+                let ty_name = checker.type_name(binding_ty);
+                checker.error(
+                    format!("global variables cannot currently store `{ty_name}`"),
+                    binding.declaration_span.unwrap_or(global.span),
+                );
+                binding_ty = checker.error_type();
+                binding.ty = binding_ty;
+            }
+            if checker.is_provider_value_name(&name) {
+                checker.error(
+                    format!("`{name}` is reserved by the state provider"),
+                    binding.declaration_span.unwrap_or(global.span),
+                );
+                continue;
+            }
+            if checker.declarations.globals.contains_key(&name) {
+                checker.error(
+                    format!("duplicate global variable `{name}`"),
+                    binding.declaration_span.unwrap_or(global.span),
+                );
+                continue;
+            }
+            checker.declarations.globals.insert(name, binding);
+        }
     }
 }
 
@@ -243,7 +259,12 @@ fn globals_inferred_as_options(program: &Program) -> HashSet<String> {
                     .as_ref()
                     .is_some_and(|value| matches!(value.kind, ExprKind::None))
         })
-        .map(|global| global.name.clone())
+        .filter_map(|global| {
+            global
+                .binding
+                .simple_binding()
+                .map(|binding| binding.name.clone())
+        })
         .collect::<HashSet<_>>();
 
     struct AssignmentCollector<'a> {
@@ -716,30 +737,13 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
                     for (parameter, ty) in
                         function.params.iter().zip(signature.params.iter().copied())
                     {
-                        if checker.is_provider_value_name(&parameter.name) {
-                            checker.error(
-                                format!("`{}` is reserved by the state provider", parameter.name),
-                                parameter.span,
-                            );
-                        }
-                        let duplicate = checker.scopes[0]
-                            .insert(
-                                parameter.name.clone(),
-                                Binding {
-                                    id: Some(parameter.id),
-                                    ty,
-                                    mutable: true,
-                                    debug_only: checker.debug_context.is_debug(),
-                                    declaration_span: Some(parameter.span),
-                                },
-                            )
-                            .is_some();
-                        if duplicate {
-                            checker.error(
-                                format!("duplicate parameter `{}`", parameter.name),
-                                parameter.span,
-                            );
-                        }
+                        checker.bind_irrefutable_parameter(
+                            &parameter.binding,
+                            ty,
+                            checker.debug_context.is_debug(),
+                            "function parameter",
+                            "function",
+                        );
                     }
                     checker.block(&function.body, false);
                     if signature.completion != checker.core_type(crate::stdlib::CoreTypeId::None)

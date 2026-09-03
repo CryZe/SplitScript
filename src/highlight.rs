@@ -296,20 +296,24 @@ impl<'ast> Visitor<'ast> for ValueKindCollector {
     }
 
     fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
-        self.kinds.insert(
-            parameter.id,
-            if parameter.name == "self" {
-                language_identifier_kind("self", LanguageTokenContext::Source)
-                    .expect("`self` has a canonical language role")
-            } else {
-                SemanticTokenKind::Parameter
-            },
-        );
+        parameter.binding.visit_bindings(&mut |binding| {
+            self.kinds.insert(
+                binding.id,
+                if binding.name == "self" {
+                    language_identifier_kind("self", LanguageTokenContext::Source)
+                        .expect("`self` has a canonical language role")
+                } else {
+                    SemanticTokenKind::Parameter
+                },
+            );
+        });
         visit::walk_parameter(self, parameter);
     }
 
     fn visit_variable(&mut self, variable: &'ast VariableDecl) {
-        self.kinds.insert(variable.id, SemanticTokenKind::Variable);
+        variable.binding.visit_bindings(&mut |binding| {
+            self.kinds.insert(binding.id, SemanticTokenKind::Variable);
+        });
         if variable.debug_only {
             self.debug_ranges.push(variable.span);
         }
@@ -324,7 +328,9 @@ impl<'ast> Visitor<'ast> for ValueKindCollector {
     }
 
     fn visit_for_binding(&mut self, binding: &'ast crate::ast::ForBinding) {
-        self.kinds.insert(binding.id, SemanticTokenKind::Variable);
+        binding.binding.visit_bindings(&mut |leaf| {
+            self.kinds.insert(leaf.id, SemanticTokenKind::Variable);
+        });
     }
 
     fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
@@ -857,14 +863,14 @@ impl HighlightCollector<'_> {
             .unwrap_or(SemanticTokenKind::Variable)
     }
 
-    fn mark_pattern(&mut self, pattern: &MatchPattern, span: Span) {
+    fn mark_pattern(&mut self, pattern: &MatchPattern, span: Span, binding_modifiers: u32) {
         match pattern {
             MatchPattern::Struct {
                 name_span, fields, ..
             } => {
                 self.insert(*name_span, SemanticTokenKind::Struct, 0);
                 for field in fields {
-                    self.mark_pattern(&field.pattern.kind, field.pattern.span);
+                    self.mark_pattern(&field.pattern.kind, field.pattern.span, binding_modifiers);
                     self.insert(
                         field.name_span,
                         SemanticTokenKind::Property,
@@ -892,29 +898,32 @@ impl HighlightCollector<'_> {
                 }
                 self.mark_ident(span, variant, SemanticTokenKind::EnumMember, 0);
                 if let Some(payload) = payload {
-                    self.mark_pattern(&payload.kind, payload.span);
+                    self.mark_pattern(&payload.kind, payload.span, binding_modifiers);
                 }
             }
             MatchPattern::Binding(binding) => self.mark_ident(
                 span,
                 &binding.name,
-                SemanticTokenKind::Variable,
-                MODIFIER_DECLARATION,
+                self.value_kinds
+                    .get(&binding.id)
+                    .copied()
+                    .unwrap_or(SemanticTokenKind::Variable),
+                MODIFIER_DECLARATION | binding_modifiers,
             ),
             MatchPattern::OptionSome(payload)
             | MatchPattern::IteratorItem(payload)
             | MatchPattern::ResultSuccess(payload)
             | MatchPattern::ResultError(payload) => {
-                self.mark_pattern(&payload.kind, payload.span);
+                self.mark_pattern(&payload.kind, payload.span, binding_modifiers);
             }
             MatchPattern::Array(array) => {
                 for element in array.elements() {
-                    self.mark_pattern(&element.kind, element.span);
+                    self.mark_pattern(&element.kind, element.span, binding_modifiers);
                 }
             }
             MatchPattern::Alternation(elements) => {
                 for element in elements {
-                    self.mark_pattern(&element.kind, element.span);
+                    self.mark_pattern(&element.kind, element.span, binding_modifiers);
                 }
             }
             _ => {}
@@ -1231,16 +1240,10 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 
     fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
-        self.mark_ident(
-            parameter.name_span,
-            &parameter.name,
-            if parameter.name == "self" {
-                language_identifier_kind("self", LanguageTokenContext::Source)
-                    .expect("`self` has a canonical language role")
-            } else {
-                SemanticTokenKind::Parameter
-            },
-            MODIFIER_DECLARATION,
+        self.mark_pattern(
+            &parameter.binding.pattern.kind,
+            parameter.binding.pattern.span,
+            0,
         );
         if let Some(annotation) = parameter.annotation {
             self.mark_none_type(parameter.span, annotation);
@@ -1258,14 +1261,10 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             .value
             .as_ref()
             .map_or(variable.span.end, |value| value.span.start);
-        self.mark_ident(
-            Span {
-                start: variable.span.start,
-                end: initializer_start,
-            },
-            &variable.name,
-            SemanticTokenKind::Variable,
-            MODIFIER_DECLARATION,
+        self.mark_pattern(
+            &variable.binding.pattern.kind,
+            variable.binding.pattern.span,
+            0,
         );
         if let Some(annotation) = variable.annotation {
             self.mark_none_type(
@@ -1293,11 +1292,10 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 
     fn visit_for_binding(&mut self, binding: &'ast crate::ast::ForBinding) {
-        self.mark_ident(
-            binding.span,
-            &binding.name,
-            SemanticTokenKind::Variable,
-            MODIFIER_DECLARATION | MODIFIER_READONLY,
+        self.mark_pattern(
+            &binding.binding.pattern.kind,
+            binding.binding.pattern.span,
+            MODIFIER_READONLY,
         );
     }
 
@@ -1309,7 +1307,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 
     fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
-        self.mark_pattern(&arm.pattern, arm.span);
+        self.mark_pattern(&arm.pattern, arm.span, 0);
         visit::walk_match_arm(self, arm);
     }
 
@@ -1321,7 +1319,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 ..
             } => {
                 self.insert_language_token(*keyword_span, "is", 0);
-                self.mark_pattern(&pattern.kind, pattern.span);
+                self.mark_pattern(&pattern.kind, pattern.span, 0);
             }
             ExprKind::Path(names) => self.mark_path(expression, names, false),
             ExprKind::Member { name_span, .. } => {
@@ -1505,6 +1503,34 @@ fn Position.value() -> i32 {
             kind_at(&highlights, source.find("self.x").unwrap()),
             Some(SemanticTokenKind::Keyword)
         );
+    }
+
+    #[test]
+    fn destructured_binding_leaves_keep_their_binding_site_roles() {
+        let source = r#"
+struct Point { x: i32, y: i32 }
+state "game.exe" {}
+fn inspect(Point { x: parameterX, y: parameterY }: Point) {
+    let Point { x: localX, y: localY } = Point { x: parameterX, y: parameterY }
+    for Point { x: itemX, y: itemY } in [Point { x: localX, y: localY }] {}
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let highlights = database.semantic_highlights().unwrap();
+        for name in ["parameterX", "parameterY"] {
+            let offset = source.find(name).unwrap();
+            assert_eq!(
+                kind_at(&highlights, offset),
+                Some(SemanticTokenKind::Parameter)
+            );
+        }
+        for name in ["localX", "localY", "itemX", "itemY"] {
+            let offset = source.find(name).unwrap();
+            assert_eq!(
+                kind_at(&highlights, offset),
+                Some(SemanticTokenKind::Variable)
+            );
+        }
     }
 
     #[test]

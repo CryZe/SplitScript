@@ -69,6 +69,20 @@ pub(super) enum LocalStorage<'a> {
 }
 
 impl LocalStorage<'_> {
+    pub(super) fn value(self, value: ValueId) -> Option<(u32, Type)> {
+        match self {
+            Self::Wasm { values, .. } => values.get(&value).copied(),
+            Self::Hybrid {
+                wasm_values,
+                frame_values,
+                ..
+            } => wasm_values
+                .get(&value)
+                .or_else(|| frame_values.get(&value))
+                .copied(),
+        }
+    }
+
     pub(super) fn continuation_frame(self) -> Option<AsyncFrameRef> {
         match self {
             Self::Hybrid { frame, .. } => Some(frame),
@@ -425,6 +439,9 @@ fn compile_block_with_loop(
                     context,
                 );
             }
+            wasm_ir::Statement::BindPattern { value, pattern } => {
+                compile_irrefutable_pattern(function, pattern, *value, context);
+            }
             wasm_ir::Statement::StateStore {
                 target,
                 operation,
@@ -532,6 +549,7 @@ fn compile_block_with_loop(
             }
             wasm_ir::Statement::For {
                 binding,
+                pattern,
                 iterable_value,
                 index_value,
                 version_value,
@@ -569,6 +587,7 @@ fn compile_block_with_loop(
                     *version_value,
                     context,
                 );
+                compile_irrefutable_pattern(function, pattern, *binding, context);
                 compile_block_with_loop(
                     function,
                     body,
@@ -1210,6 +1229,28 @@ pub(super) fn store_match_binding(
     compile_value_set(function, binding.value, context, |function| {
         binding.source.emit(function, context);
     });
+}
+
+pub(super) fn compile_irrefutable_pattern(
+    function: &mut Function,
+    pattern: &wasm_ir::LoweredPattern,
+    value: ValueId,
+    context: &ExprContext<'_>,
+) {
+    let (value_local, value_type) = context
+        .locals
+        .value(value)
+        .expect("irrefutable pattern roots have planned local storage");
+    let bindings = compile_statement_pattern(function, pattern, value_local, value_type, context);
+    if bindings.is_empty() {
+        function.instruction(&Instruction::Drop);
+        return;
+    }
+    function.instruction(&Instruction::If(BlockType::Empty));
+    for binding in bindings {
+        store_match_binding(function, binding, context);
+    }
+    function.instruction(&Instruction::End);
 }
 
 fn compile_match_statement(
@@ -1969,7 +2010,9 @@ pub(super) fn compile_resolved_path(
                         ty
                     }
                     _ => {
-                        let ty = context.global_types[&value];
+                        let ty = *context.global_types.get(&value).unwrap_or_else(|| {
+                            panic!("resolved value {value:?} has neither local nor global storage")
+                        });
                         if ty.has_runtime_value() {
                             function.instruction(&Instruction::GlobalGet(context.globals[&value]));
                             if context.wasm_ir.is_scoped_global(value)
@@ -2142,7 +2185,19 @@ fn compile_raw_value_set(
             debug_assert_ne!(values[&value].0, u32::MAX);
             function.instruction(&Instruction::LocalSet(values[&value].0));
         }
-        _ => unreachable!("compiler-owned for-loop values are local"),
+        _ if context.globals.contains_key(&value) => {
+            let ty = context.global_types[&value];
+            if !ty.has_runtime_value() {
+                emit_value(function);
+                if ty == Type::None {
+                    function.instruction(&Instruction::Drop);
+                }
+                return;
+            }
+            emit_value(function);
+            function.instruction(&Instruction::GlobalSet(context.globals[&value]));
+        }
+        _ => unreachable!("pattern bindings have planned local or global storage"),
     }
 }
 
@@ -3399,7 +3454,11 @@ fn compile_expr_unconverted(
                         } else if let Some(payload_type) =
                             enum_variant_payload(declared.id, context.semantics)
                         {
-                            emit_default(function, payload_type, context.gc);
+                            if payload_type.has_runtime_value() {
+                                emit_default(function, payload_type, context.gc);
+                            } else {
+                                function.instruction(&Instruction::I32Const(0));
+                            }
                         } else {
                             function.instruction(&Instruction::I32Const(0));
                         }

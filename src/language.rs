@@ -680,6 +680,48 @@ const LET_EXAMPLE: &[Example] = &[
         "enum Side { Left(u32), Right(u32), Idle }\nstate \"game.exe\" {}\nfn unwrap(side: Side) -> u32 {\n    return match side {\n        Side.Left(value) | Side.Right(value) => value,\n        Side.Idle => 0,\n    }\n}",
     ),
 ];
+const BINDING_PATTERN_SOURCE: &str = r#"struct Point {
+    x: u32,
+    y: u32,
+}
+
+struct Impossible {
+    value: Never,
+}
+
+enum PointOrNever {
+    Point(Point),
+    Impossible(Impossible),
+}
+
+let Point { x: originX, y: originY } = Point { x: 0, y: 0 }
+
+state "game.exe" {}
+
+fn sum(PointOrNever.Point(Point { x, y }): PointOrNever) -> u32 {
+    return x + y
+}
+
+whileAttached {
+    let Point { x, y }: Point = Point { x: originX, y: originY }
+    let add = (Point { x: left, y: right }: Point) => left + right
+    for Point { x: item, y: _ } in [Point { x, y }] {
+        print(sum(PointOrNever.Point(Point { x: add(Point { x: item, y: 1 }), y: 0 })))
+    }
+}"#;
+
+const BINDING_PATTERN_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Destructure a struct once",
+        "let Point { x, y }: Point = point",
+        BINDING_PATTERN_SOURCE,
+    ),
+    Example::checked(
+        "Destructure parameters and iterator items",
+        "fn sum(Point { x, y }: Point) -> u32 {\n    return x + y\n}\n\nfor Point { x, y: _ } in points {\n    print(x)\n}",
+        BINDING_PATTERN_SOURCE,
+    ),
+];
 focused_example!(
     FUNCTION_EXAMPLE,
     "Declare a helper",
@@ -1282,9 +1324,9 @@ define_language_catalog! {
         Let,
         "let",
         LanguageItemKind::Keyword,
-        "let name = expression or let name",
+        "let pattern = expression or let name",
         "Declares an inferred variable.",
-        "Bindings are mutable and their types are inferred bidirectionally from initializers, assignments, and uses. An initialized top-level binding is module state: its initializer runs exactly once, before [`setup`]. It may allocate and call synchronous pure helpers, but it must be closed: it cannot read or write another global, observe settings, timer, process, or state context, or suspend. A bare top-level [`let`] instead gets its lifetime from its direct lifecycle initializer: [`onAttach`] creates attachment-scoped state that is cleared on detach, while [`onStart`] creates attempt-scoped (or run-scoped) state that is cleared after [`onReset`]. The lifecycle initializer must assign it on every completing path.",
+        "Bindings are mutable and their types are inferred bidirectionally from initializers, assignments, and uses. An initialized local or top-level declaration may use an irrefutable [`binding pattern`] to project several names from its value; the initializer is evaluated once and an annotation after the pattern describes that complete incoming value. An initialized top-level binding is module state: its initializer runs exactly once, before [`setup`]. It may allocate and call synchronous pure helpers, but it must be closed: it cannot read or write another global, observe settings, timer, process, or state context, or suspend. A bare top-level [`let`] remains a single name and instead gets its lifetime from its direct lifecycle initializer: [`onAttach`] creates attachment-scoped state that is cleared on detach, while [`onStart`] creates attempt-scoped (or run-scoped) state that is cleared after [`onReset`]. The lifecycle initializer must assign it on every completing path.",
         LET_EXAMPLE
     ),
     language_item!(
@@ -1293,7 +1335,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "fn name(parameters) { ... }",
         "Declares a function or method.",
-        "Parameter and result annotations are optional when constraints from the body and call sites determine them.",
+        "Each parameter may be an irrefutable [`binding pattern`]. It still consumes exactly one argument; an annotation applies to that complete argument while the projected names receive their field or payload types. Parameter and result annotations are optional when constraints from the body and call sites determine them.",
         FUNCTION_EXAMPLE
     ),
     language_item!(
@@ -1302,8 +1344,17 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "value => expression | (left: T, right: U) -> Result => { ... }",
         "Creates a callable value with lexical captures.",
-        "Parameter and result types are inferred bidirectionally from the body, invocation sites, and any expected [`callable type`]. A single inferred parameter may omit parentheses; zero or multiple parameters use parentheses. An explicit result uses `(parameters) -> Result => body`; write [`async`] `T` as the result when the closure itself is explicitly asynchronous. The body is any expression, including a [`value block`], and may use [`await`] or [`retry`] to infer an [`async`] result. Calling such a closure creates a typed future; creating the closure itself does not execute or poll its body. Captured immutable values are retained in the closure environment. A mutable local is captured by reference through one shared cell, so assignments in the closure and its declaring scope observe each other even after the closure is returned or stored across [`await`]. [`return`] exits the closure itself; [`break`] and [`continue`] cannot escape into an outer loop.",
+        "Each parenthesized parameter may be an irrefutable [`binding pattern`] and still consumes one argument. Parameter and result types are inferred bidirectionally from the body, invocation sites, and any expected [`callable type`]. A single inferred name may omit parentheses; zero, multiple, annotated, or destructured parameters use parentheses. An explicit result uses `(parameters) -> Result => body`; write [`async`] `T` as the result when the closure itself is explicitly asynchronous. The body is any expression, including a [`value block`], and may use [`await`] or [`retry`] to infer an [`async`] result. Calling such a closure creates a typed future; creating the closure itself does not execute or poll its body. Captured immutable values are retained in the closure environment. A mutable local is captured by reference through one shared cell, so assignments in the closure and its declaring scope observe each other even after the closure is returned or stored across [`await`]. [`return`] exits the closure itself; [`break`] and [`continue`] cannot escape into an outer loop.",
         CLOSURE_EXAMPLES
+    ),
+    language_item!(
+        BindingPattern,
+        "binding pattern",
+        LanguageItemKind::Syntax,
+        "let Pattern = value | fn name(Pattern: Type) | for Pattern in values",
+        "Destructures one value into local names where a declaration cannot fail.",
+        "Initialized [`let`] declarations, named [`fn`] parameters, parenthesized [`closure`] parameters, and runtime [`for`] bindings accept the same recursive struct, enum, wrapper, array, wildcard, and alternative pattern grammar as [`match`] and [`is`]. The incoming initializer, argument, or iterator item is evaluated exactly once and remains one ABI value; each binding leaf receives its projected type. A type annotation after the pattern constrains the complete incoming value, not an individual leaf. Such a pattern must be irrefutable: it must cover every value its type can actually contain. [`Never`] is uninhabited recursively, so an enum variant carrying [`Never`], a struct containing it, or a nonempty fixed array of it cannot occur and need not be covered. For an ordinary optional or multi-variant value, use [`is`] to test one case or an exhaustive [`match`] instead. Uninitialized attachment- and attempt-scoped globals deliberately remain single names because lifecycle code initializes their storage later.",
+        BINDING_PATTERN_EXAMPLES
     ),
     language_item!(
         CallableType,
@@ -1608,7 +1659,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "for value in iterable { ... }",
         "Iterates over an array, set, or integer range.",
-        "The iterable expression is evaluated exactly once. The read-only element binding is lexically scoped to the body and inferred from [`[T]`], [`[T; N]`], [`Set`], or an integer [`range`]. [`break`] and [`continue`] target the nearest loop. In [`onAttach`], a body containing [`await`] or [`retry`] preserves the iterable and current binding across suspension. Inside [`settings`], an inclusive range expands a [`settings family`] at compile time instead of creating a runtime loop.",
+        "The iterable expression is evaluated exactly once. The read-only element may be an irrefutable [`binding pattern`] lexically scoped to the body and inferred from [`[T]`], [`[T; N]`], [`Set`], or an integer [`range`]. [`break`] and [`continue`] target the nearest loop. In [`onAttach`], a body containing [`await`] or [`retry`] preserves the iterable and all projected bindings across suspension. Inside [`settings`], an inclusive range expands a [`settings family`] at compile time instead of creating a runtime loop.",
         FOR_EXAMPLES
     ),
     language_item!(

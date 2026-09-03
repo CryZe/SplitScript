@@ -129,16 +129,14 @@ impl Parser<'_> {
         }
         if self.eat_ident("for").is_some() {
             let start = self.previous().span.start;
-            let (name, name_span) = self.expect_declared_ident("expected a binding after `for`")?;
+            let pattern = self.match_pattern(true)?;
             let in_span = self.expect_ident("in")?;
             let iterable = self.root_expression_before_block();
             let body = self.block()?;
             let end = body.span.end;
             return Ok(Stmt::For {
                 binding: ForBinding {
-                    id: self.new_value_id(),
-                    name,
-                    span: name_span,
+                    binding: self.binding_pattern(pattern),
                 },
                 in_span,
                 iterable_value: self.new_value_id(),
@@ -304,7 +302,10 @@ impl Parser<'_> {
             );
             self.bump();
         }
-        let (name, name_span) = self.expect_declared_ident("expected a variable name")?;
+        if self.at(&TokenKind::Assign) {
+            return Err(self.error("expected a variable name"));
+        }
+        let pattern = self.match_pattern(true)?;
         let annotation = if self.eat(&TokenKind::Colon).is_some() {
             Some(self.parse_type_before_assignment("expected a type name")?.0)
         } else {
@@ -320,17 +321,24 @@ impl Parser<'_> {
         let end = value
             .as_ref()
             .map_or(self.previous().span.end, |value| value.span.end);
+        if value.is_none() && !matches!(pattern.kind, crate::ast::MatchPattern::Binding(_)) {
+            return Err(Diagnostic::new(
+                "an uninitialized attachment-scoped global must have a single name",
+                pattern.span,
+            )
+            .with_primary_label("there is no value to destructure here")
+            .with_note("initialize the pattern with `= value`, or declare each attachment-scoped global separately"));
+        }
+        let pattern_span = pattern.span;
         Ok(VariableDecl {
-            id: self.new_value_id(),
-            name,
-            name_span,
+            binding: self.binding_pattern(pattern),
             documentation: None,
             mutable: true,
             debug_only: false,
             annotation,
             span: Span {
                 start: keyword.span.start,
-                end: end.max(name_span.end),
+                end: end.max(pattern_span.end),
             },
             value,
         })

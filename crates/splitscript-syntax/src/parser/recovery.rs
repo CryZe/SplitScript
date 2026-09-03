@@ -191,7 +191,12 @@ impl Parser<'_> {
         message: &'static str,
     ) -> Result<(String, Span), Diagnostic> {
         let (name, span) = self.expect_any_ident(message)?;
-        if is_reserved_declared_identifier(&name) {
+        self.record_declared_ident_diagnostic(&name, span);
+        Ok((name, span))
+    }
+
+    pub(super) fn record_declared_ident_diagnostic(&mut self, name: &str, span: Span) {
+        if is_reserved_declared_identifier(name) {
             let replacement = format!("{name}_");
             self.diagnostics.push(
                 Diagnostic::new(
@@ -206,7 +211,6 @@ impl Parser<'_> {
                 ),
             );
         }
-        Ok((name, span))
     }
 
     pub(super) fn expect(

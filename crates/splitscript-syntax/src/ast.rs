@@ -883,9 +883,7 @@ pub struct FunctionDecl {
 
 #[derive(Debug, Clone)]
 pub struct Parameter {
-    pub id: ValueId,
-    pub name: String,
-    pub name_span: Span,
+    pub binding: BindingPattern,
     pub annotation: Option<TypeRef>,
     pub span: Span,
 }
@@ -1311,9 +1309,7 @@ pub enum SettingFileFilter {
 
 #[derive(Debug, Clone)]
 pub struct VariableDecl {
-    pub id: ValueId,
-    pub name: String,
-    pub name_span: Span,
+    pub binding: BindingPattern,
     pub documentation: Option<String>,
     pub mutable: bool,
     pub debug_only: bool,
@@ -1484,9 +1480,7 @@ pub struct SuspensionBinding {
 
 #[derive(Debug, Clone)]
 pub struct ForBinding {
-    pub id: ValueId,
-    pub name: String,
-    pub span: Span,
+    pub binding: BindingPattern,
 }
 
 #[derive(Debug, Clone)]
@@ -1691,6 +1685,66 @@ pub struct PatternNode {
     pub id: PatternId,
     pub kind: MatchPattern,
     pub span: Span,
+}
+
+/// One value introduced into executable code through an irrefutable pattern.
+///
+/// `value` is the single incoming ABI/local/global value. Binding leaves in
+/// `pattern` own the source-visible `ValueId`s produced by destructuring. For
+/// a bare identifier both identities are the same, preserving the direct
+/// representation without giving aggregate patterns a synthetic source name.
+#[derive(Debug, Clone)]
+pub struct BindingPattern {
+    /// The one incoming value before any projections are evaluated.
+    pub id: ValueId,
+    /// Source spelling of the complete pattern, used in signatures and
+    /// declaration-level diagnostics. This is an identifier for the common
+    /// non-destructuring case, but is not itself a declared name.
+    pub name: String,
+    pub name_span: Span,
+    pub span: Span,
+    pub pattern: PatternNode,
+}
+
+impl BindingPattern {
+    pub fn simple_binding(&self) -> Option<&PatternBinding> {
+        match &self.pattern.kind {
+            MatchPattern::Binding(binding) => Some(binding),
+            _ => None,
+        }
+    }
+
+    pub fn visit_bindings(&self, visitor: &mut impl FnMut(&PatternBinding)) {
+        self.pattern.kind.visit_bindings(visitor);
+    }
+
+    pub fn visit_bindings_mut(&mut self, visitor: &mut impl FnMut(&mut PatternBinding)) {
+        self.pattern.kind.visit_bindings_mut(visitor);
+    }
+}
+
+impl std::ops::Deref for Parameter {
+    type Target = BindingPattern;
+
+    fn deref(&self) -> &Self::Target {
+        &self.binding
+    }
+}
+
+impl std::ops::Deref for VariableDecl {
+    type Target = BindingPattern;
+
+    fn deref(&self) -> &Self::Target {
+        &self.binding
+    }
+}
+
+impl std::ops::Deref for ForBinding {
+    type Target = BindingPattern;
+
+    fn deref(&self) -> &Self::Target {
+        &self.binding
+    }
 }
 
 /// One named field inspected by a struct pattern.

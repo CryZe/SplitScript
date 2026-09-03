@@ -236,6 +236,7 @@ impl<'ast> Visitor<'ast> for SpanCollector {
 
     fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
         self.push(parameter.span);
+        self.collect_pattern_node(&parameter.binding.pattern);
         visit::walk_parameter(self, parameter);
     }
 
@@ -246,7 +247,13 @@ impl<'ast> Visitor<'ast> for SpanCollector {
 
     fn visit_variable(&mut self, variable: &'ast VariableDecl) {
         self.push(variable.span);
+        self.collect_pattern_node(&variable.binding.pattern);
         visit::walk_variable(self, variable);
+    }
+
+    fn visit_for_binding(&mut self, binding: &'ast crate::ast::ForBinding) {
+        self.push(binding.span);
+        self.collect_pattern_node(&binding.binding.pattern);
     }
 
     fn visit_block(&mut self, block: &'ast Block) {

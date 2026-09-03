@@ -638,6 +638,23 @@ impl EnumResolver<'_> {
 }
 
 impl<'ast> Visitor<'ast> for EnumResolver<'_> {
+    fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
+        self.resolve_pattern(
+            &parameter.binding.pattern.kind,
+            parameter.binding.pattern.id,
+        );
+        visit::walk_parameter(self, parameter);
+    }
+
+    fn visit_variable(&mut self, variable: &'ast crate::ast::VariableDecl) {
+        self.resolve_pattern(&variable.binding.pattern.kind, variable.binding.pattern.id);
+        visit::walk_variable(self, variable);
+    }
+
+    fn visit_for_binding(&mut self, binding: &'ast crate::ast::ForBinding) {
+        self.resolve_pattern(&binding.binding.pattern.kind, binding.binding.pattern.id);
+    }
+
     fn visit_setting(&mut self, setting: &'ast crate::ast::SettingDecl) {
         if let SettingKind::Choice { enumeration, .. } = &setting.kind
             && let Some(enumeration) = self.resolve_reference(enumeration, true)

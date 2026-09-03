@@ -61,7 +61,7 @@ pub fn walk_statement(
     program: &Program,
 ) {
     match statement {
-        Statement::DebugLocation(_) => {}
+        Statement::DebugLocation(_) | Statement::BindPattern { .. } => {}
         Statement::Store { value, .. }
         | Statement::StateStore { value, .. }
         | Statement::StoreTemporary { value, .. }

@@ -16,7 +16,7 @@ use crate::{
 use super::{
     DisplayFunctions, GcLayout, RuntimeHelperPlan, Type, array_value, emit_array_get,
     emit_string_literal, emit_typed_struct_get, enum_variant_payload,
-    function_plan::UserFunctionPlan, struct_field_type, try_array_element_type,
+    function_plan::UserFunctionPlan, semantic_type, struct_field_type, try_array_element_type,
 };
 
 pub(super) struct DisplayInputs<'a> {
@@ -129,7 +129,10 @@ fn compile_enum(enumeration: &StructuralType, inputs: &DisplayInputs<'_>) -> Fun
             .instruction(&Instruction::I32Const(variant_index as i32))
             .instruction(&Instruction::I32Eq)
             .instruction(&Instruction::If(BlockType::Empty));
-        if let Some(payload_type) = variant.ty {
+        if let Some(payload_type) = variant
+            .ty
+            .filter(|ty| semantic_type(*ty, inputs.semantics).has_runtime_value())
+        {
             emit_string_literal(
                 &mut function,
                 &format!("{}.{}(\n    ", enumeration.name, variant.name),

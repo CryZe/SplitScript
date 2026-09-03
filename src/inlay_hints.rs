@@ -2,7 +2,8 @@
 
 use crate::{
     ast::{
-        Expr, ExprKind, ForBinding, FunctionDecl, Span, StateField, SuspensionBinding, VariableDecl,
+        BindingPattern, Expr, ExprKind, ForBinding, FunctionDecl, Span, StateField,
+        SuspensionBinding, VariableDecl,
     },
     database::SemanticSnapshot,
     lexer::{Token, TokenKind},
@@ -42,6 +43,19 @@ struct InlayHintCollector<'a> {
 }
 
 impl InlayHintCollector<'_> {
+    fn add_inferred_pattern(&mut self, pattern: &BindingPattern) {
+        let Some(ty) = self.snapshot.semantics().value_type(pattern.id) else {
+            return;
+        };
+        if self.snapshot.semantics().types().contains_error(ty) {
+            return;
+        }
+        self.add_hint(
+            pattern.name_span.end,
+            format!(": {}", display_type(ty, self.snapshot)),
+        );
+    }
+
     fn add_hint(&mut self, position: usize, label: String) {
         if position < self.requested_range.start || position > self.requested_range.end {
             return;
@@ -153,14 +167,14 @@ impl<'ast> Visitor<'ast> for InlayHintCollector<'_> {
 
     fn visit_parameter(&mut self, parameter: &'ast crate::ast::Parameter) {
         if parameter.annotation.is_none() {
-            self.add_inferred_value(parameter.id, &parameter.name, parameter.name_span);
+            self.add_inferred_pattern(&parameter.binding);
         }
         visit::walk_parameter(self, parameter);
     }
 
     fn visit_variable(&mut self, variable: &'ast VariableDecl) {
         if variable.annotation.is_none() {
-            self.add_inferred_value(variable.id, &variable.name, variable.span);
+            self.add_inferred_pattern(&variable.binding);
         }
         visit::walk_variable(self, variable);
     }
@@ -175,7 +189,7 @@ impl<'ast> Visitor<'ast> for InlayHintCollector<'_> {
     }
 
     fn visit_for_binding(&mut self, binding: &'ast ForBinding) {
-        self.add_inferred_value(binding.id, &binding.name, binding.span);
+        self.add_inferred_pattern(&binding.binding);
     }
 
     fn visit_expr(&mut self, expression: &'ast Expr) {
@@ -408,5 +422,39 @@ whileAttached {
         );
         assert!(hints.iter().any(|hint| hint.label == ": i32"), "{hints:#?}");
         assert!(hints.iter().any(|hint| hint.label == ": f64"), "{hints:#?}");
+    }
+
+    #[test]
+    fn inferred_annotations_apply_to_the_complete_binding_pattern() {
+        let source = r#"
+struct Point { x: i32, y: i32 }
+state "game.exe" {}
+fn inspect(Point { x, y }) {
+    let Point { x: localX, y: localY } = Point { x, y }
+    for Point { x: itemX, y: itemY } in [Point { x, y }] {}
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let snapshot = database.semantic_snapshot().unwrap();
+        let hints = inferred_type_hints(
+            &snapshot,
+            Span {
+                start: 0,
+                end: source.len(),
+            },
+        );
+        for pattern in [
+            "Point { x, y }",
+            "Point { x: localX, y: localY }",
+            "Point { x: itemX, y: itemY }",
+        ] {
+            let position = source.find(pattern).unwrap() + pattern.len();
+            assert!(
+                hints
+                    .iter()
+                    .any(|hint| hint.position == position && hint.label == ": Point"),
+                "{pattern}: {hints:#?}"
+            );
+        }
     }
 }

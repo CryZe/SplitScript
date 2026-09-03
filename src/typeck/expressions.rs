@@ -23,9 +23,9 @@ use super::{
     Checker, context::NonePolicy, declarations::Binding, pattern_usefulness::PatternCoverage,
 };
 
-struct CheckedPattern {
-    coverage: PatternCoverage,
-    layout_variants: Option<HashSet<crate::ast::EnumVariantId>>,
+pub(super) struct CheckedPattern {
+    pub(super) coverage: PatternCoverage,
+    pub(super) layout_variants: Option<HashSet<crate::ast::EnumVariantId>>,
 }
 
 impl CheckedPattern {
@@ -1381,23 +1381,13 @@ impl Checker {
 
                 self.scopes.push(HashMap::new());
                 for (parameter, ty) in params.iter().zip(parameter_types.iter().copied()) {
-                    self.semantics.resolve_value_type(parameter.id, ty);
-                    let duplicate = self.scopes.last_mut().unwrap().insert(
-                        parameter.name.clone(),
-                        Binding {
-                            id: Some(parameter.id),
-                            ty,
-                            mutable: true,
-                            debug_only: self.debug_context.is_debug(),
-                            declaration_span: Some(parameter.name_span),
-                        },
+                    self.bind_irrefutable_parameter(
+                        &parameter.binding,
+                        ty,
+                        self.debug_context.is_debug(),
+                        "closure parameter",
+                        "closure",
                     );
-                    if duplicate.is_some() {
-                        self.error(
-                            format!("duplicate closure parameter `{}`", parameter.name),
-                            parameter.name_span,
-                        );
-                    }
                 }
                 let failure = match self.shallow_type(completion) {
                     result @ Type::Result(_) => super::context::FailureContext::boundary(result),
@@ -1828,7 +1818,7 @@ impl Checker {
         }
     }
 
-    fn check_pattern(
+    pub(super) fn check_pattern(
         &mut self,
         pattern: &MatchPattern,
         pattern_id: crate::ast::PatternId,

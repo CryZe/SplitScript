@@ -842,6 +842,61 @@ fn unused_bindings_warn_by_identity_and_support_intentional_underscores() {
 }
 
 #[test]
+fn unused_analysis_tracks_each_destructured_leaf() {
+    let source = r#"
+        struct Point { x: i32, y: i32 }
+        let Point { x: usedGlobal, y: unusedGlobal } = Point { x: 1, y: 2 }
+        state "game.exe" {}
+
+        fn inspect(Point { x: usedParameter, y: unusedParameter }: Point) {
+            print(usedParameter + usedGlobal)
+        }
+
+        setup {
+            inspect(Point { x: 3, y: 4 })
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("unused destructured leaves should remain warnings");
+    let unused = checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                diagnostic.code,
+                splitscript::DiagnosticCode::UnusedBinding
+                    | splitscript::DiagnosticCode::UnusedDeclaration
+            )
+        })
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        unused
+            .iter()
+            .any(|message| message.contains("`unusedParameter`")),
+        "{unused:#?}"
+    );
+    assert!(
+        unused
+            .iter()
+            .any(|message| message.contains("`unusedGlobal`")),
+        "{unused:#?}"
+    );
+    assert!(
+        !unused
+            .iter()
+            .any(|message| message.contains("`usedParameter`")),
+        "{unused:#?}"
+    );
+    assert!(
+        !unused
+            .iter()
+            .any(|message| message.contains("`usedGlobal`")),
+        "{unused:#?}"
+    );
+}
+
+#[test]
 fn unused_declarations_follow_reachable_calls_and_global_reads() {
     let source = r#"
         enum LiveKind {

@@ -17,6 +17,14 @@ Use [`let`] for mutable locals and globals and [`fn`] for functions. There is no
 `const`/[`let`] split, no `var`, and no implicit coercion. Typed [`==`] and [`!=`]
 replace `===` and `!==`; logical and bitwise operators remain distinct.
 
+SplitScript supports irrefutable [`binding pattern`]s in initialized [`let`]
+declarations, function and closure parameters, and runtime [`for`] bindings.
+Named structs keep their type in the pattern—`let Position { x, y } = value`—
+rather than using JavaScript's untyped `{ x, y }` object destructuring. The
+pattern must match every possible incoming value; use [`is`] or [`match`] for a
+conditional shape. An annotation after the pattern describes the complete
+incoming value.
+
 ```splitscript
 # state "game.exe" {}
 fn scoreText(player: String, score: u32) -> String {

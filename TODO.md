@@ -1096,6 +1096,37 @@ remaining work is product hardening and distribution.
     binding patterns with an always-matches warning, and allow binding-free
     `is` tests in static layout predicates while rejecting declarations that
     have no executable lexical scope.
+- [x] Generalize patterns into irrefutable binding declarations everywhere
+  executable code introduces values. Local and initialized global `let`
+  declarations, named-function parameters, closure parameters, and `for`
+  bindings should accept the same recursive pattern grammar as `match` and
+  `is`; schema fields and uninitialized attachment-scoped globals remain named
+  declarations. A declaration consumes one value, evaluates it once, and
+  projects every leaf binding without flattening function or closure ABI
+  parameters.
+  - [x] Replace declaration-specific name slots with one shared syntax and
+    checked-pattern representation. Keep a compiler-owned root value for the
+    incoming aggregate, preserve one `ValueId` per source binding, and reuse
+    the existing resolved field/variant/wrapper projections rather than adding
+    destructuring-only resolution tables.
+  - [x] Require declaration patterns to be semantically irrefutable. Use the
+    recursive usefulness engine to prove that no inhabited value is missing,
+    and centralize cycle-safe inhabitedness so `Never` removes impossible enum
+    variants, wrapper cases, struct values, and nonempty fixed arrays. Produce
+    concrete missing-pattern diagnostics for genuinely refutable declarations.
+  - [x] Lower locals, globals, parameters, closures, synchronous and async
+    `for` loops through one binding-plan emitter. Evaluate each initializer,
+    argument, or iterator item once; preserve source mutability, captures,
+    suspension liveness, unused analysis, debug identities, and global
+    initialization ordering for every projected leaf.
+  - [x] Generalize formatting, completion, hover, navigation, references,
+    rename, semantic highlighting, selection ranges, symbols, and inlay hints
+    to declaration patterns. Annotate the whole incoming parameter/value while
+    exposing the projected type and declaration identity on each leaf binding.
+  - [x] Document declaration destructuring, its differences from refutable
+    `is` / `match`, the whole-value meaning of type annotations, exact supported
+    binding sites, and `Never`-aware irrefutability. Add parser, diagnostic,
+    inference, runtime, async, global, tooling, and documentation coverage.
 - [x] Add shorthand struct field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename

@@ -101,7 +101,9 @@ pub trait Visitor<'ast>: Sized {
         }
     }
 
-    fn visit_for_binding(&mut self, _binding: &'ast ForBinding) {}
+    fn visit_for_binding(&mut self, binding: &'ast ForBinding) {
+        self.visit_pattern(&binding.binding.pattern.kind);
+    }
 
     fn visit_block(&mut self, block: &'ast Block) {
         walk_block(self, block);
@@ -303,12 +305,14 @@ pub fn walk_function<'ast, V: Visitor<'ast>>(visitor: &mut V, function: &'ast Fu
 }
 
 pub fn walk_parameter<'ast, V: Visitor<'ast>>(visitor: &mut V, parameter: &'ast Parameter) {
+    visitor.visit_pattern(&parameter.binding.pattern.kind);
     if let Some(annotation) = &parameter.annotation {
         visitor.visit_type_ref(annotation);
     }
 }
 
 pub fn walk_variable<'ast, V: Visitor<'ast>>(visitor: &mut V, variable: &'ast VariableDecl) {
+    visitor.visit_pattern(&variable.binding.pattern.kind);
     if let Some(annotation) = &variable.annotation {
         visitor.visit_type_ref(annotation);
     }
@@ -623,7 +627,9 @@ pub trait Folder: Sized {
         }
     }
 
-    fn fold_for_binding(&mut self, _binding: &mut ForBinding) {}
+    fn fold_for_binding(&mut self, binding: &mut ForBinding) {
+        self.fold_pattern(&mut binding.binding.pattern.kind);
+    }
 
     fn fold_block(&mut self, block: &mut Block) {
         walk_block_mut(self, block);
@@ -803,12 +809,14 @@ pub fn walk_function_mut<F: Folder>(folder: &mut F, function: &mut FunctionDecl)
 }
 
 pub fn walk_parameter_mut<F: Folder>(folder: &mut F, parameter: &mut Parameter) {
+    folder.fold_pattern(&mut parameter.binding.pattern.kind);
     if let Some(annotation) = &mut parameter.annotation {
         folder.fold_type_ref(annotation);
     }
 }
 
 pub fn walk_variable_mut<F: Folder>(folder: &mut F, variable: &mut VariableDecl) {
+    folder.fold_pattern(&mut variable.binding.pattern.kind);
     if let Some(annotation) = &mut variable.annotation {
         folder.fold_type_ref(annotation);
     }

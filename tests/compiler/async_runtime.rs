@@ -79,6 +79,34 @@ fn conditional_pattern_bindings_survive_async_continuations() {
 }
 
 #[test]
+fn destructured_bindings_survive_async_continuations() {
+    let source = r#"
+        struct Point { x: u32, y: u32 }
+        state "game.exe" {}
+
+        fn inspect(Point { x, y }: Point) -> async u32 {
+            let Point { x: localX, y: localY } = Point { x, y }
+            await nextTick()
+            for Point { x: itemX, y: itemY } in [Point { x: localX, y: localY }] {
+                await nextTick()
+                return itemX + itemY
+            }
+            return 0
+        }
+
+        onAttach {
+            print(await inspect(Point { x: 3, y: 4 }))
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("destructured leaves should remain live across suspension");
+    wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("destructured continuation locals should validate");
+}
+
+#[test]
 fn ordinary_values_do_not_flow_into_never() {
     let diagnostics = splitscript::compile(
         r#"
@@ -968,6 +996,137 @@ fn struct_patterns_match_selected_fields_and_bind_recursively() {
 
     let (store, _) = execute_with_mock_host(source);
     assert_eq!(store.data().messages, ["7", "3", "10"]);
+}
+
+#[test]
+fn irrefutable_patterns_destructure_declarations_parameters_closures_and_loops() {
+    let source = r#"
+        struct Point {
+            x: u32,
+            y: u32,
+        }
+
+        enum Possible {
+            Value(Point),
+            Impossible(Never),
+        }
+
+        struct ImpossiblePayload {
+            value: Never,
+        }
+
+        enum NestedPossible {
+            Value(Point),
+            Impossible(ImpossiblePayload),
+        }
+
+        enum Either {
+            Left(u32),
+            Right(u32),
+        }
+
+        let Point { x: globalX, y: globalY } = Point { x: 2, y: 3 }
+
+        state "game.exe" {}
+
+        fn sum(Point { x, y }: Point) -> u32 {
+            return x + y
+        }
+
+        fn unwrap(Possible.Value(Point { x, y }): Possible) -> u32 {
+            return x + y
+        }
+
+        fn unwrapNested(NestedPossible.Value(Point { x, y }): NestedPossible) -> u32 {
+            return x + y
+        }
+
+        fn unwrapEither(Either.Left(value) | Either.Right(value): Either) -> u32 {
+            return value
+        }
+
+        setup {
+            let Point { x, y }: Point = Point { x: globalX, y: globalY }
+            let add = (Point { x: left, y: right }: Point) -> u32 => left + right
+            let total = sum(Point { x, y }) + add(Point { x: 5, y: 7 })
+            for Point { x: item, y: _ } in [Point { x: 11, y: 13 }] {
+                print(total + item)
+            }
+            print(unwrap(Possible.Value(Point { x: 17, y: 19 })))
+            print(unwrapNested(NestedPossible.Value(Point { x: 23, y: 29 })))
+            globalX += 1
+            y += 1
+            print(globalX)
+            print(y)
+            print(unwrapEither(Either.Left(31)))
+            print(unwrapEither(Either.Right(37)))
+        }
+    "#;
+
+    let (store, _) = execute_with_mock_host(source);
+    assert_eq!(
+        store.data().messages,
+        ["28", "36", "52", "3", "4", "31", "37"]
+    );
+}
+
+#[test]
+fn refutable_declaration_patterns_report_a_concrete_missing_shape() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn unwrap(Some(value): u32?) -> u32 {
+                return value
+            }
+        "#,
+    )
+    .expect_err("an ordinary optional parameter can be None");
+
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic
+                .message
+                .contains("refutable pattern in function parameter")
+        })
+        .expect("the binding site should explain why the pattern is refutable");
+    assert!(
+        diagnostic.labels.iter().any(|label| label
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("`None`"))),
+        "{diagnostic:#?}"
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("`is` or `match`")),
+        "{diagnostic:#?}"
+    );
+}
+
+#[test]
+fn recursively_uninhabited_types_make_binding_patterns_irrefutable() {
+    let source = r#"
+        struct RecursiveVoid {
+            next: RecursiveVoid,
+        }
+
+        fn unwrapRecursive(RecursiveVoid { next }: RecursiveVoid) -> Never {
+            return unwrapRecursive(next)
+        }
+
+        fn unwrapArray([value]: [Never; 1]) -> Never {
+            return value
+        }
+
+        state "game.exe" {}
+    "#;
+
+    splitscript::compile(source)
+        .expect("recursive and fixed-array Never shapes have no counterexample value");
 }
 
 #[test]

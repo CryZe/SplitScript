@@ -20,6 +20,14 @@ reported as capability bounds such as [`Numeric`], [`Display`], or
 [`MemoryReadable`], which play a trait-like role but are currently declared by
 the standard library rather than user programs.
 
+Irrefutable [`binding pattern`]s destructure values in initialized [`let`]
+declarations, function and closure parameters, and runtime [`for`] bindings.
+This is close to Rust's irrefutable binding sites, including the fact that a
+variant pattern becomes irrefutable when every alternative carries [`Never`].
+SplitScript has no `let ... else`; use [`is`] or [`match`] when another shape
+can actually occur. A type annotation after the pattern describes the one
+incoming value, not each name introduced by the pattern.
+
 User code does not need an `impl Display for Type` block. Structs and enums
 derive a multiline [`Display`] representation automatically. Define
 `fn Type.toString() -> String` only to override it; the result type may be

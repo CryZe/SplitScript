@@ -324,10 +324,17 @@ impl Parser<'_> {
             let (name, name_span) =
                 self.expect_declared_ident("expected a closure parameter name")?;
             let arrow_span = self.bump().span;
+            let pattern = super::PatternNode {
+                id: self.new_pattern_id(),
+                kind: super::MatchPattern::Binding(super::PatternBinding {
+                    id: self.new_value_id(),
+                    name,
+                    name_span,
+                }),
+                span: name_span,
+            };
             let parameter = super::Parameter {
-                id: self.new_value_id(),
-                name,
-                name_span,
+                binding: self.binding_pattern(pattern),
                 annotation: None,
                 span: name_span,
             };
@@ -348,20 +355,17 @@ impl Parser<'_> {
             let start = self.expect(TokenKind::LParen, "expected `(`")?;
             let mut params = Vec::new();
             while !self.at(&TokenKind::RParen) {
-                let (name, name_span) =
-                    self.expect_declared_ident("expected a closure parameter name")?;
+                let pattern = self.match_pattern(true)?;
                 let (annotation, end) = if self.eat(&TokenKind::Colon).is_some() {
                     let (ty, span) = self.parse_type("expected a closure parameter type")?;
                     (Some(ty), span)
                 } else {
-                    (None, name_span)
+                    (None, pattern.span)
                 };
                 params.push(super::Parameter {
-                    id: self.new_value_id(),
-                    name,
-                    name_span,
+                    span: pattern.span.join(end),
+                    binding: self.binding_pattern(pattern),
                     annotation,
-                    span: name_span.join(end),
                 });
                 if self.eat(&TokenKind::Comma).is_none() {
                     break;
@@ -1235,7 +1239,7 @@ impl Parser<'_> {
         Ok(arm)
     }
 
-    fn match_pattern(&mut self, allow_binding: bool) -> Result<PatternNode, Diagnostic> {
+    pub(super) fn match_pattern(&mut self, allow_binding: bool) -> Result<PatternNode, Diagnostic> {
         let first = self.match_range_pattern(allow_binding)?;
         if self.eat(&TokenKind::Or).is_none() {
             return Ok(first);
@@ -1475,6 +1479,7 @@ impl Parser<'_> {
                         payload,
                     }
                 } else if allow_binding {
+                    self.record_declared_ident_diagnostic(&enum_name, pattern_start);
                     MatchPattern::Binding(PatternBinding {
                         id: self.new_value_id(),
                         name: enum_name,

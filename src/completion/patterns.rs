@@ -55,12 +55,8 @@ fn complete_pattern_from_snapshot(
     library: &StandardLibrary,
     snapshot: &SemanticSnapshot,
 ) -> Option<CompletionList> {
-    let (segment, value) = pattern_context(
-        snapshot.syntax(),
-        &request.tokens,
-        request.replacement.start,
-    )?;
-    let expected = snapshot.semantics().expression_type(value.id)?;
+    let (segment, expected) =
+        pattern_context(snapshot, &request.tokens, request.replacement.start)?;
     let site = analyze_pattern_prefix(&segment, expected, snapshot)?;
 
     let prefix = request.source[request.replacement.start..request.offset].to_owned();
@@ -86,17 +82,65 @@ fn complete_pattern_from_snapshot(
     Some(builder.finish())
 }
 
-fn pattern_context<'ast, 'tokens>(
-    syntax: &'ast crate::ast::Program,
+fn pattern_context<'tokens>(
+    snapshot: &SemanticSnapshot,
     tokens: &'tokens [&'tokens Token],
     offset: usize,
-) -> Option<(Vec<&'tokens Token>, &'ast Expr)> {
+) -> Option<(Vec<&'tokens Token>, TypeId)> {
+    let syntax = snapshot.syntax();
     if let Some((open, value)) = enclosing_match(syntax, tokens, offset)
         && let Some(segment) = current_pattern_segment(tokens, open, offset)
     {
-        return Some((segment.to_vec(), value));
+        return Some((
+            segment.to_vec(),
+            snapshot.semantics().expression_type(value.id)?,
+        ));
     }
-    enclosing_is(syntax, tokens, offset)
+    if let Some((segment, value)) = enclosing_is(syntax, tokens, offset) {
+        return Some((segment, snapshot.semantics().expression_type(value.id)?));
+    }
+    let (segment, binding) = enclosing_binding_pattern(syntax, tokens, offset)?;
+    Some((segment, snapshot.semantics().value_type(binding.id)?))
+}
+
+fn enclosing_binding_pattern<'ast, 'tokens>(
+    syntax: &'ast crate::ast::Program,
+    tokens: &'tokens [&'tokens Token],
+    offset: usize,
+) -> Option<(Vec<&'tokens Token>, &'ast crate::ast::BindingPattern)> {
+    struct Finder<'ast> {
+        offset: usize,
+        found: Option<&'ast crate::ast::BindingPattern>,
+    }
+
+    impl<'ast> Visitor<'ast> for Finder<'ast> {
+        fn visit_binding_pattern(&mut self, binding: &'ast crate::ast::BindingPattern) {
+            let span = binding.pattern.span;
+            if span.start <= self.offset
+                && self.offset <= span.end
+                && self.found.is_none_or(|previous| {
+                    span.end - span.start < previous.pattern.span.end - previous.pattern.span.start
+                })
+            {
+                self.found = Some(binding);
+            }
+        }
+    }
+
+    let mut finder = Finder {
+        offset,
+        found: None,
+    };
+    finder.visit_program(syntax);
+    let binding = finder.found?;
+    let cursor = tokens
+        .iter()
+        .position(|token| token.span.start >= offset)
+        .unwrap_or(tokens.len());
+    let start = tokens[..cursor]
+        .iter()
+        .position(|token| token.span.start >= binding.pattern.span.start)?;
+    Some((tokens[start..cursor].to_vec(), binding))
 }
 
 fn enclosing_is<'ast, 'tokens>(
@@ -1064,6 +1108,74 @@ fn inspect(position: Position) {
         let labels = labels(&field);
         assert!(labels.contains(&"true".to_owned()), "{labels:#?}");
         assert!(labels.contains(&"false".to_owned()), "{labels:#?}");
+    }
+
+    #[test]
+    fn declaration_destructuring_uses_type_directed_pattern_completion() {
+        let parameter = r#"
+struct Position { x: u16, y: u16 }
+state "game.exe" {}
+fn inspect(Position { x, <|> }: Position) -> u16 {
+    return x
+}
+"#;
+        let completion = completions(parameter);
+        assert_eq!(
+            completion
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>(),
+            ["y"]
+        );
+        assert_eq!(completion.items[0].insert_text, "y: ${1:_}");
+
+        let inferred_parameter = parameter.replace(": Position) -> u16", ") -> u16");
+        let completion = completions(&inferred_parameter);
+        assert_eq!(
+            completion
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>(),
+            ["y"]
+        );
+
+        for declaration in [
+            r#"
+struct Position { x: u16, y: u16 }
+state "game.exe" {}
+fn inspect(position: Position) -> u16 {
+    let Position { x, <|> } = position
+    return x
+}
+"#,
+            r#"
+struct Position { x: u16, y: u16 }
+state "game.exe" {}
+fn inspect(positions: [Position]) {
+    for Position { x, <|> } in positions { print(x) }
+}
+"#,
+            r#"
+struct Position { x: u16, y: u16 }
+state "game.exe" {}
+fn inspect(position: Position) -> u16 {
+    let read = (Position { x, <|> }: Position) => x
+    return read(position)
+}
+"#,
+        ] {
+            let completion = completions(declaration);
+            assert_eq!(
+                completion
+                    .items
+                    .iter()
+                    .map(|item| item.label.as_str())
+                    .collect::<Vec<_>>(),
+                ["y"]
+            );
+        }
     }
 
     #[test]

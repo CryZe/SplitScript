@@ -1407,52 +1407,21 @@ impl Parser<'_> {
                     _ => unreachable!(),
                 }
             }
+            TokenKind::LBrace => {
+                self.bump();
+                MatchPattern::Struct {
+                    name: None,
+                    name_span: None,
+                    fields: self.struct_pattern_fields()?,
+                }
+            }
             TokenKind::Ident(enum_name) => {
                 self.bump();
                 if self.eat(&TokenKind::LBrace).is_some() {
-                    let mut fields = Vec::new();
-                    while !self.at(&TokenKind::RBrace) {
-                        let (field_name, field_span) =
-                            self.expect_any_ident("expected a struct pattern field name")?;
-                        let (pattern, shorthand) = if self.eat(&TokenKind::Colon).is_some() {
-                            (self.match_pattern(true)?, false)
-                        } else if self.at(&TokenKind::Comma) || self.at(&TokenKind::RBrace) {
-                            (
-                                PatternNode {
-                                    id: self.new_pattern_id(),
-                                    kind: MatchPattern::Binding(PatternBinding {
-                                        id: self.new_value_id(),
-                                        name: field_name.clone(),
-                                        name_span: field_span,
-                                    }),
-                                    span: field_span,
-                                },
-                                true,
-                            )
-                        } else {
-                            return Err(Diagnostic::new(
-                                "expected `:`, `,`, or `}` after the struct pattern field name",
-                                self.current().span,
-                            ));
-                        };
-                        fields.push(StructPatternField {
-                            name: field_name,
-                            name_span: field_span,
-                            pattern,
-                            shorthand,
-                        });
-                        if self.eat(&TokenKind::Comma).is_some() {
-                            continue;
-                        }
-                        if !self.at(&TokenKind::RBrace) {
-                            return Err(self.error("expected `,` between struct pattern fields"));
-                        }
-                    }
-                    self.expect(TokenKind::RBrace, "expected `}` after the struct pattern")?;
                     MatchPattern::Struct {
-                        name: enum_name,
-                        name_span: pattern_start,
-                        fields,
+                        name: Some(enum_name),
+                        name_span: Some(pattern_start),
+                        fields: self.struct_pattern_fields()?,
                     }
                 } else if self.eat(&TokenKind::Dot).is_some() {
                     let (mut segment, _) = self.expect_any_ident("expected a variant name")?;
@@ -1577,6 +1546,49 @@ impl Parser<'_> {
             kind,
             span,
         })
+    }
+
+    fn struct_pattern_fields(&mut self) -> Result<Vec<StructPatternField>, Diagnostic> {
+        let mut fields = Vec::new();
+        while !self.at(&TokenKind::RBrace) {
+            let (field_name, field_span) =
+                self.expect_any_ident("expected a struct pattern field name")?;
+            let (pattern, shorthand) = if self.eat(&TokenKind::Colon).is_some() {
+                (self.match_pattern(true)?, false)
+            } else if self.at(&TokenKind::Comma) || self.at(&TokenKind::RBrace) {
+                (
+                    PatternNode {
+                        id: self.new_pattern_id(),
+                        kind: MatchPattern::Binding(PatternBinding {
+                            id: self.new_value_id(),
+                            name: field_name.clone(),
+                            name_span: field_span,
+                        }),
+                        span: field_span,
+                    },
+                    true,
+                )
+            } else {
+                return Err(Diagnostic::new(
+                    "expected `:`, `,`, or `}` after the struct pattern field name",
+                    self.current().span,
+                ));
+            };
+            fields.push(StructPatternField {
+                name: field_name,
+                name_span: field_span,
+                pattern,
+                shorthand,
+            });
+            if self.eat(&TokenKind::Comma).is_some() {
+                continue;
+            }
+            if !self.at(&TokenKind::RBrace) {
+                return Err(self.error("expected `,` between struct pattern fields"));
+            }
+        }
+        self.expect(TokenKind::RBrace, "expected `}` after the struct pattern")?;
+        Ok(fields)
     }
 
     fn statement_match_arm_diagnostic(&self, start: usize, parsed_end: usize) -> Diagnostic {

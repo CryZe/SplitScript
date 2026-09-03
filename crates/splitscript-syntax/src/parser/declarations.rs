@@ -600,7 +600,13 @@ impl Parser<'_> {
                 missing_closing_parenthesis = true;
                 break;
             }
-            if self.at(&TokenKind::LBrace) || self.at(&TokenKind::Minus) {
+            // A leading `{` is an anonymous struct pattern. A `{` after a
+            // complete parameter, however, is still the function body and
+            // therefore recovers a missing closing `)` as before.
+            if (self.at(&TokenKind::LBrace)
+                && !matches!(self.previous().kind, TokenKind::LParen | TokenKind::Comma))
+                || self.at(&TokenKind::Minus)
+            {
                 self.record_missing(Diagnostic::new(
                     "expected `)` after the parameters",
                     self.current().span,

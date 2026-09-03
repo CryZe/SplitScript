@@ -13,6 +13,7 @@ use super::{
     Checker,
     context::{CallableContext, DebugContext, ExpressionMode, NonePolicy},
     declarations::Binding,
+    pattern_usefulness::PatternCoverage,
 };
 
 impl Checker {
@@ -98,7 +99,11 @@ impl Checker {
         );
         let mut bindings = self.scopes.pop().expect("a binding pattern owns a scope");
 
-        let missing = self.missing_patterns(std::slice::from_ref(&checked.coverage), ty);
+        let missing = if matches!(checked.coverage, PatternCoverage::Invalid(_)) {
+            Vec::new()
+        } else {
+            self.missing_patterns(std::slice::from_ref(&checked.coverage), ty)
+        };
         if !missing.is_empty() {
             let witnesses = missing
                 .iter()

@@ -868,7 +868,9 @@ impl HighlightCollector<'_> {
             MatchPattern::Struct {
                 name_span, fields, ..
             } => {
-                self.insert(*name_span, SemanticTokenKind::Struct, 0);
+                if let Some(name_span) = name_span {
+                    self.insert(*name_span, SemanticTokenKind::Struct, 0);
+                }
                 for field in fields {
                     self.mark_pattern(&field.pattern.kind, field.pattern.span, binding_modifiers);
                     self.insert(

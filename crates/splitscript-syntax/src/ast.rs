@@ -1787,8 +1787,10 @@ impl ArrayPattern {
 #[derive(Debug, Clone)]
 pub enum MatchPattern {
     Struct {
-        name: String,
-        name_span: Span,
+        /// An explicit nominal type, or `None` when the surrounding value
+        /// type supplies the struct identity for `{ field }` shorthand.
+        name: Option<String>,
+        name_span: Option<Span>,
         fields: Vec<StructPatternField>,
     },
     Enum {

@@ -694,18 +694,18 @@ enum PointOrNever {
     Impossible(Impossible),
 }
 
-let Point { x: originX, y: originY } = Point { x: 0, y: 0 }
+let { x: originX, y: originY } = Point { x: 0, y: 0 }
 
 state "game.exe" {}
 
-fn sum(PointOrNever.Point(Point { x, y }): PointOrNever) -> u32 {
+fn sum(PointOrNever.Point({ x, y }): PointOrNever) -> u32 {
     return x + y
 }
 
 whileAttached {
-    let Point { x, y }: Point = Point { x: originX, y: originY }
-    let add = (Point { x: left, y: right }: Point) => left + right
-    for Point { x: item, y: _ } in [Point { x, y }] {
+    let { x, y }: Point = Point { x: originX, y: originY }
+    let add = ({ x: left, y: right }: Point) => left + right
+    for { x: item, y: _ } in [Point { x, y }] {
         print(sum(PointOrNever.Point(Point { x: add(Point { x: item, y: 1 }), y: 0 })))
     }
 }"#;
@@ -713,12 +713,12 @@ whileAttached {
 const BINDING_PATTERN_EXAMPLES: &[Example] = &[
     Example::checked(
         "Destructure a struct once",
-        "let Point { x, y }: Point = point",
+        "let { x, y }: Point = point",
         BINDING_PATTERN_SOURCE,
     ),
     Example::checked(
         "Destructure parameters and iterator items",
-        "fn sum(Point { x, y }: Point) -> u32 {\n    return x + y\n}\n\nfor Point { x, y: _ } in points {\n    print(x)\n}",
+        "fn sum({ x, y }: Point) -> u32 {\n    return x + y\n}\n\nfor { x, y: _ } in points {\n    print(x)\n}",
         BINDING_PATTERN_SOURCE,
     ),
 ];
@@ -1353,7 +1353,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "let Pattern = value | fn name(Pattern: Type) | for Pattern in values",
         "Destructures one value into local names where a declaration cannot fail.",
-        "Initialized [`let`] declarations, named [`fn`] parameters, parenthesized [`closure`] parameters, and runtime [`for`] bindings accept the same recursive struct, enum, wrapper, array, wildcard, and alternative pattern grammar as [`match`] and [`is`]. The incoming initializer, argument, or iterator item is evaluated exactly once and remains one ABI value; each binding leaf receives its projected type. A type annotation after the pattern constrains the complete incoming value, not an individual leaf. Such a pattern must be irrefutable: it must cover every value its type can actually contain. [`Never`] is uninhabited recursively, so an enum variant carrying [`Never`], a struct containing it, or a nonempty fixed array of it cannot occur and need not be covered. For an ordinary optional or multi-variant value, use [`is`] to test one case or an exhaustive [`match`] instead. Uninitialized attachment- and attempt-scoped globals deliberately remain single names because lifecycle code initializes their storage later.",
+        "Initialized [`let`] declarations, named [`fn`] parameters, parenthesized [`closure`] parameters, and runtime [`for`] bindings accept the same recursive struct, enum, wrapper, array, wildcard, and alternative pattern grammar as [`match`] and [`is`]. The incoming initializer, argument, or iterator item is evaluated exactly once and remains one ABI value; each binding leaf receives its projected type. A type annotation after the pattern constrains the complete incoming value, not an individual leaf. When that context already identifies one concrete struct, `{ field, other: pattern }` may omit its nominal type name; `Name { ... }` remains available explicitly and field names alone never infer a structural type. Such a pattern must be irrefutable: it must cover every value its type can actually contain. [`Never`] is uninhabited recursively, so an enum variant carrying [`Never`], a struct containing it, or a nonempty fixed array of it cannot occur and need not be covered. For an ordinary optional or multi-variant value, use [`is`] to test one case or an exhaustive [`match`] instead. Uninitialized attachment- and attempt-scoped globals deliberately remain single names because lifecycle code initializes their storage later.",
         BINDING_PATTERN_EXAMPLES
     ),
     language_item!(
@@ -1371,7 +1371,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "struct Name { field: Type }",
         "Declares an immutable nominal structure.",
-        "Structs provide named fields, structural equality when their fields support it, and fixed process-memory layouts when every field is readable. In a literal, `Name { field }` is shorthand for `Name { field: field }`; an explicit repeated initializer receives a safe shorthand fix, and renaming either identity expands the shorthand when needed. In [`match`], `Name { field, other: pattern }` binds `field`, recursively tests `other`, and ignores omitted fields without requiring a `..` marker.",
+        "Structs provide named fields, structural equality when their fields support it, and fixed process-memory layouts when every field is readable. In a literal, `Name { field }` is shorthand for `Name { field: field }`; an explicit repeated initializer receives a safe shorthand fix, and renaming either identity expands the shorthand when needed. In [`match`] and [`binding pattern`] positions, `Name { field, other: pattern }` binds `field`, recursively tests `other`, and ignores omitted fields without requiring a `..` marker. The name may be omitted as `{ field, other: pattern }` when the surrounding value already has one concrete struct type; this remains nominal matching rather than structural inference.",
         RECORD_EXAMPLE
     ),
     language_item!(
@@ -1713,7 +1713,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "match value { pattern => expression }",
         "Exhaustively matches a value.",
-        "[`match`] supports enum payloads, partial field-based [`struct`] patterns, optional [`None`]/[`Some`]`(value)` patterns, iterator [`End`]/[`Item`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, recursive exact and [`array rest pattern`]s, string, character, integer, boolean, and file-version literals, closed integer [`range`] patterns, guards, a wildcard, and recursive `left | right` alternatives. A struct pattern ignores omitted fields; `Name { field }` binds that field, while `Name { field: pattern }` recursively tests it. Alternatives are tried left to right and contribute their union to exhaustiveness. Every alternative in one arm must bind exactly the same names with compatible types; those occurrences form one logical binding for the guard and body. Array elements can bind values or contain any other pattern. A [`[T; N]`] exact pattern must have exactly `N` elements; `..` instead permits an omitted middle, including in growable [`[T]`] patterns. String patterns compare contents, not WebAssembly GC identities. Enum, wrapper, and array matches are checked recursively for exhaustiveness; guarded arms do not establish coverage.",
+        "[`match`] supports enum payloads, partial field-based [`struct`] patterns, optional [`None`]/[`Some`]`(value)` patterns, iterator [`End`]/[`Item`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, recursive exact and [`array rest pattern`]s, string, character, integer, boolean, and file-version literals, closed integer [`range`] patterns, guards, a wildcard, and recursive `left | right` alternatives. A struct pattern ignores omitted fields; `Name { field }` binds that field, while `Name { field: pattern }` recursively tests it. Because a match scrutinee supplies a concrete type, the same patterns may usually be shortened to `{ field }` and `{ field: pattern }`; they are still nominal and never select a struct merely by its field names. Alternatives are tried left to right and contribute their union to exhaustiveness. Every alternative in one arm must bind exactly the same names with compatible types; those occurrences form one logical binding for the guard and body. Array elements can bind values or contain any other pattern. A [`[T; N]`] exact pattern must have exactly `N` elements; `..` instead permits an omitted middle, including in growable [`[T]`] patterns. String patterns compare contents, not WebAssembly GC identities. Enum, wrapper, and array matches are checked recursively for exhaustiveness; guarded arms do not establish coverage.",
         MATCH_EXAMPLES
     ),
     language_item!(

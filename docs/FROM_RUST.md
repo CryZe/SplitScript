@@ -28,6 +28,11 @@ SplitScript has no `let ... else`; use [`is`] or [`match`] when another shape
 can actually occur. A type annotation after the pattern describes the one
 incoming value, not each name introduced by the pattern.
 
+As in Rust, a concrete expected struct type permits `{ x, y }` without writing
+the struct name. This is contextual nominal shorthand, not structural typing;
+an otherwise unconstrained parameter still needs an annotation or an explicit
+`Position { x, y }` pattern.
+
 User code does not need an `impl Display for Type` block. Structs and enums
 derive a multiline [`Display`] representation automatically. Define
 `fn Type.toString() -> String` only to override it; the result type may be

@@ -19,11 +19,13 @@ replace `===` and `!==`; logical and bitwise operators remain distinct.
 
 SplitScript supports irrefutable [`binding pattern`]s in initialized [`let`]
 declarations, function and closure parameters, and runtime [`for`] bindings.
-Named structs keep their type in the pattern—`let Position { x, y } = value`—
-rather than using JavaScript's untyped `{ x, y }` object destructuring. The
-pattern must match every possible incoming value; use [`is`] or [`match`] for a
-conditional shape. An annotation after the pattern describes the complete
-incoming value.
+When the initializer or an annotation already supplies one concrete struct
+type, familiar `{ x, y }` destructuring works directly. Unlike JavaScript, this
+is still nominal: field names alone do not infer an object shape, so an
+unconstrained parameter needs `{ x, y }: Position` or the explicit
+`Position { x, y }` pattern. The pattern must match every possible incoming
+value; use [`is`] or [`match`] for a conditional shape. An annotation after the
+pattern describes the complete incoming value.
 
 ```splitscript
 # state "game.exe" {}

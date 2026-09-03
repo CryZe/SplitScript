@@ -973,8 +973,10 @@ impl DefinitionCollector<'_> {
             MatchPattern::Struct {
                 name_span, fields, ..
             } => {
-                if let Some(structure) = self.semantics.struct_pattern(pattern_id) {
-                    self.add_reference(SourceDefinitionId::Struct(structure), *name_span);
+                if let Some((structure, name_span)) =
+                    self.semantics.struct_pattern(pattern_id).zip(*name_span)
+                {
+                    self.add_reference(SourceDefinitionId::Struct(structure), name_span);
                 }
                 let resolved = self
                     .semantics

@@ -28,6 +28,11 @@ names and must match every value of the incoming type; use [`is`] or [`match`]
 when the test can fail. An annotation after the pattern applies to the complete
 incoming value.
 
+The struct name may be omitted when the surrounding value or annotation is
+already a concrete struct: `let { x, y } = position` and
+`fn length({ x, y }: Position)` remain nominal rather than matching any value
+that happens to have those fields.
+
 C# names map to explicit widths: `byte` becomes [`u8`], `int` becomes [`i32`],
 `long` becomes [`i64`], and their unsigned counterparts retain the same width.
 Use [`f32`] or [`f64`], [`String`], and [`Duration`] instead of `float`, `double`,

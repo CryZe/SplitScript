@@ -1627,6 +1627,67 @@ fn struct_pattern_tooling_preserves_field_and_binding_identities() {
 }
 
 #[test]
+fn anonymous_struct_pattern_tooling_resolves_contextual_field_identities() {
+    use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
+
+    let source = r#"
+        struct Point { x: u32, y: u32 }
+        state "game.exe" {}
+        fn inspect({ x, y: _ }: Point) -> u32 {
+            return x
+        }
+    "#;
+    let pattern = source.rfind("{ x, y: _ }").unwrap();
+    let shorthand = pattern + "{ ".len();
+    let explicit_field = pattern + "{ x, ".len();
+    let field_declaration = source.find("x: u32").unwrap();
+
+    let mut database = CompilerDatabase::new(source);
+    assert!(matches!(
+        database.definition_at(shorthand).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if matches!(definition.id, SourceDefinitionId::StructField(_))
+    ));
+    assert!(matches!(
+        database.definition_at(explicit_field).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if matches!(definition.id, SourceDefinitionId::StructField(_))
+    ));
+
+    let hover = database
+        .hover(shorthand)
+        .unwrap()
+        .expect("contextual shorthand should expose both identities");
+    assert!(
+        hover.markdown.contains("Point.x: u32"),
+        "{}",
+        hover.markdown
+    );
+    assert!(hover.markdown.contains("x: u32"), "{}", hover.markdown);
+
+    let rename_binding = database
+        .rename_at(shorthand, "coordinate")
+        .expect("anonymous shorthand retains its binding identity");
+    assert!(
+        rename_binding
+            .edits
+            .iter()
+            .any(|edit| { edit.span.start == shorthand && edit.replacement == "x: coordinate" })
+    );
+
+    let mut database = CompilerDatabase::new(source);
+    let rename_field = database
+        .rename_at(field_declaration, "horizontal")
+        .expect("anonymous shorthand retains its field identity");
+    assert!(
+        rename_field
+            .edits
+            .iter()
+            .any(|edit| { edit.span.start == shorthand && edit.replacement == "horizontal: x" })
+    );
+}
+
+#[test]
 fn binding_pattern_shorthand_renames_expand_at_every_declaration_site() {
     use splitscript::tooling::database::CompilerDatabase;
 

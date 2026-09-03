@@ -65,12 +65,26 @@ fn complete_pattern_from_snapshot(
         PatternSite::Value {
             expected,
             qualified_enum,
-        } => add_value_patterns(&mut builder, expected, qualified_enum, snapshot, library),
+        } => add_value_patterns(
+            &mut builder,
+            expected,
+            qualified_enum,
+            binding_pattern,
+            snapshot,
+            library,
+        ),
         PatternSite::ArrayElement {
             expected,
             rest_available,
         } => {
-            add_value_patterns(&mut builder, expected, false, snapshot, library);
+            add_value_patterns(
+                &mut builder,
+                expected,
+                false,
+                binding_pattern,
+                snapshot,
+                library,
+            );
             if rest_available {
                 add_array_rest_pattern(&mut builder, "array rest", "..");
             }
@@ -376,12 +390,13 @@ fn analyze_pattern_prefix(
                 .structs
                 .iter()
                 .find(|candidate| candidate.id == *structure)?;
-            let Some(TokenKind::Ident(name)) = tokens[..open].last().map(|token| &token.kind)
-            else {
-                return None;
-            };
-            if name.as_str() != declaration.name.as_str() {
-                return None;
+            if let Some(token) = tokens[..open].last() {
+                let TokenKind::Ident(name) = &token.kind else {
+                    return None;
+                };
+                if name.as_str() != declaration.name.as_str() {
+                    return None;
+                }
             }
 
             let contents = &tokens[open + 1..];
@@ -542,6 +557,7 @@ fn add_value_patterns(
     builder: &mut CompletionBuilder,
     expected: TypeId,
     qualified_enum: bool,
+    binding_pattern: bool,
     snapshot: &SemanticSnapshot,
     library: &StandardLibrary,
 ) {
@@ -679,22 +695,45 @@ fn add_value_patterns(
             else {
                 return;
             };
-            let insert = if declaration.fields.is_empty() {
+            let fields = declaration
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(index, field)| {
+                    if binding_pattern {
+                        field.name.clone()
+                    } else {
+                        format!("{}: ${{{}:_}}", field.name, index + 1)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let anonymous_insert = if declaration.fields.is_empty() {
+                "{}".to_owned()
+            } else {
+                format!("{{ {fields} }}")
+            };
+            builder.add(pattern_item(
+                "struct fields",
+                &anonymous_insert,
+                !binding_pattern && !declaration.fields.is_empty(),
+                &detail,
+                Some(format!(
+                    "Destructures `{}` using the struct type supplied by this context.",
+                    declaration.name
+                )),
+                None,
+            ));
+
+            let named_insert = if declaration.fields.is_empty() {
                 format!("{} {{}}", declaration.name)
             } else {
-                let fields = declaration
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .map(|(index, field)| format!("{}: ${{{}:_}}", field.name, index + 1))
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 format!("{} {{ {fields} }}", declaration.name)
             };
             builder.add(pattern_item(
                 &declaration.name,
-                &insert,
-                !declaration.fields.is_empty(),
+                &named_insert,
+                !binding_pattern && !declaration.fields.is_empty(),
                 &detail,
                 declaration.documentation.clone(),
                 None,
@@ -1119,6 +1158,20 @@ fn inspect(position: Position) {
         let labels = labels(&field);
         assert!(labels.contains(&"true".to_owned()), "{labels:#?}");
         assert!(labels.contains(&"false".to_owned()), "{labels:#?}");
+
+        let anonymous = source.replace(
+            "Position { visible: _, <|>grounded: _ }",
+            "{ visible: _, <|>grounded: _ }",
+        );
+        let completion = completions(&anonymous);
+        assert_eq!(
+            completion
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>(),
+            ["grounded"]
+        );
     }
 
     #[test]
@@ -1126,7 +1179,7 @@ fn inspect(position: Position) {
         let parameter = r#"
 struct Position { x: u16, y: u16 }
 state "game.exe" {}
-fn inspect(Position { x, <|> }: Position) -> u16 {
+fn inspect({ x, <|> }: Position) -> u16 {
     return x
 }
 "#;
@@ -1142,7 +1195,9 @@ fn inspect(Position { x, <|> }: Position) -> u16 {
         assert_eq!(completion.items[0].insert_text, "y");
         assert!(!completion.items[0].is_snippet);
 
-        let inferred_parameter = parameter.replace(": Position) -> u16", ") -> u16");
+        let inferred_parameter = parameter
+            .replace("{ x, <|> }", "Position { x, <|> }")
+            .replace(": Position) -> u16", ") -> u16");
         let completion = completions(&inferred_parameter);
         assert_eq!(
             completion
@@ -1158,7 +1213,7 @@ fn inspect(Position { x, <|> }: Position) -> u16 {
 struct Position { x: u16, y: u16 }
 state "game.exe" {}
 fn inspect(position: Position) -> u16 {
-    let Position { x, <|> } = position
+    let { x, <|> } = position
     return x
 }
 "#,
@@ -1166,14 +1221,14 @@ fn inspect(position: Position) -> u16 {
 struct Position { x: u16, y: u16 }
 state "game.exe" {}
 fn inspect(positions: [Position]) {
-    for Position { x, <|> } in positions { print(x) }
+    for { x, <|> } in positions { print(x) }
 }
 "#,
             r#"
 struct Position { x: u16, y: u16 }
 state "game.exe" {}
 fn inspect(position: Position) -> u16 {
-    let read = (Position { x, <|> }: Position) => x
+    let read = ({ x, <|> }: Position) => x
     return read(position)
 }
 "#,
@@ -1188,6 +1243,29 @@ fn inspect(position: Position) -> u16 {
                 ["y"]
             );
         }
+    }
+
+    #[test]
+    fn contextual_struct_completion_offers_anonymous_and_named_shapes() {
+        let completion = completions(
+            r#"
+struct Position { x: u16, y: u16 }
+state "game.exe" {}
+fn inspect(position: Position) -> u16 {
+    return match position {
+        <|>
+    }
+}
+"#,
+        );
+        let anonymous = completion
+            .items
+            .iter()
+            .find(|item| item.label == "struct fields")
+            .expect("contextual struct pattern completion exists");
+        assert_eq!(anonymous.insert_text, "{ x: ${1:_}, y: ${2:_} }");
+        assert!(anonymous.is_snippet);
+        assert!(completion.items.iter().any(|item| item.label == "Position"));
     }
 
     #[test]

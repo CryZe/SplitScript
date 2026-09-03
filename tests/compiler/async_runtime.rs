@@ -1025,19 +1025,19 @@ fn irrefutable_patterns_destructure_declarations_parameters_closures_and_loops()
             Right(u32),
         }
 
-        let Point { x: globalX, y: globalY } = Point { x: 2, y: 3 }
+        let { x: globalX, y: globalY } = Point { x: 2, y: 3 }
 
         state "game.exe" {}
 
-        fn sum(Point { x, y }: Point) -> u32 {
+        fn sum({ x, y }: Point) -> u32 {
             return x + y
         }
 
-        fn unwrap(Possible.Value(Point { x, y }): Possible) -> u32 {
+        fn unwrap(Possible.Value({ x, y }): Possible) -> u32 {
             return x + y
         }
 
-        fn unwrapNested(NestedPossible.Value(Point { x, y }): NestedPossible) -> u32 {
+        fn unwrapNested(NestedPossible.Value({ x, y }): NestedPossible) -> u32 {
             return x + y
         }
 
@@ -1046,11 +1046,20 @@ fn irrefutable_patterns_destructure_declarations_parameters_closures_and_loops()
         }
 
         setup {
-            let Point { x, y }: Point = Point { x: globalX, y: globalY }
-            let add = (Point { x: left, y: right }: Point) -> u32 => left + right
+            let { x, y }: Point = Point { x: globalX, y: globalY }
+            let add = ({ x: left, y: right }: Point) -> u32 => left + right
             let total = sum(Point { x, y }) + add(Point { x: 5, y: 7 })
-            for Point { x: item, y: _ } in [Point { x: 11, y: 13 }] {
+            for { x: item, y: _ } in [Point { x: 11, y: 13 }] {
                 print(total + item)
+            }
+            let matched = Point { x: 41, y: 43 }
+            print(match matched {
+                { x: 41, y } => y,
+                _ => 0,
+            })
+            let tested = Point { x: 47, y: 53 }
+            if tested is { x: 47, y } {
+                print(y)
             }
             print(unwrap(Possible.Value(Point { x: 17, y: 19 })))
             print(unwrapNested(NestedPossible.Value(Point { x: 23, y: 29 })))
@@ -1066,8 +1075,37 @@ fn irrefutable_patterns_destructure_declarations_parameters_closures_and_loops()
     let (store, _) = execute_with_mock_host(source);
     assert_eq!(
         store.data().messages,
-        ["28", "36", "52", "3", "4", "31", "37"]
+        ["28", "43", "53", "36", "52", "3", "4", "31", "37"]
     );
+}
+
+#[test]
+fn anonymous_struct_patterns_require_a_concrete_contextual_struct_type() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn ambiguous({ x, y }) {
+                print(x)
+                print(y)
+            }
+        "#,
+    )
+    .expect_err("field names alone must not infer a structural parameter type");
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "anonymous struct pattern needs a known struct type"
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("{ x, y }: Pos"))
+    );
+    assert!(diagnostic.notes.iter().any(|note| note.contains("nominal")));
 }
 
 #[test]

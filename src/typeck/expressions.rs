@@ -1827,17 +1827,78 @@ impl Checker {
     ) -> CheckedPattern {
         match pattern {
             MatchPattern::Struct { name, fields, .. } => {
-                let Some(declaration) = self
-                    .declarations
-                    .structs
-                    .iter()
-                    .find(|declaration| declaration.name == *name)
-                    .cloned()
-                else {
-                    self.error(format!("unknown struct type `{name}`"), span);
-                    return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
+                let declaration = if let Some(name) = name {
+                    let Some(declaration) = self
+                        .declarations
+                        .structs
+                        .iter()
+                        .find(|declaration| declaration.name == *name)
+                        .cloned()
+                    else {
+                        self.error(format!("unknown struct type `{name}`"), span);
+                        self.check_invalid_struct_pattern_fields(fields);
+                        return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
+                    };
+                    self.unify(value_type, self.struct_type(declaration.id), span);
+                    declaration
+                } else {
+                    let contextual = self.shallow_type(value_type);
+                    let structure = match contextual {
+                        Type::Known(id) => match self.inference.type_store().kind(id) {
+                            TypeKind::Struct(structure) => Some(*structure),
+                            TypeKind::Error => None,
+                            _ => {
+                                let actual = self.type_name(contextual);
+                                self.errors.push(
+                                    Diagnostic::type_error(
+                                        format!(
+                                            "cannot destructure `{actual}` with an anonymous struct pattern"
+                                        ),
+                                        span,
+                                    )
+                                    .with_primary_label("this context does not contain a struct value")
+                                    .with_note(
+                                        "anonymous `{ field }` patterns remain nominal and require one concrete struct type",
+                                    ),
+                                );
+                                None
+                            }
+                        },
+                        _ => {
+                            let field_names = fields
+                                .iter()
+                                .map(|field| field.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            self.errors.push(
+                                Diagnostic::type_error(
+                                    "anonymous struct pattern needs a known struct type",
+                                    span,
+                                )
+                                .with_primary_label(
+                                    "the surrounding context does not identify a concrete struct",
+                                )
+                                .with_note(format!(
+                                    "add an annotation such as `{{ {field_names} }}: Pos`, or write `Pos {{ {field_names} }}`"
+                                ))
+                                .with_note(
+                                    "anonymous struct patterns are nominal; field names alone never infer a struct type",
+                                ),
+                            );
+                            None
+                        }
+                    };
+                    let Some(structure) = structure else {
+                        self.check_invalid_struct_pattern_fields(fields);
+                        return CheckedPattern::new(PatternCoverage::Invalid(pattern_id));
+                    };
+                    self.declarations
+                        .structs
+                        .iter()
+                        .find(|declaration| declaration.id == structure)
+                        .cloned()
+                        .expect("contextual source struct types have declarations")
                 };
-                self.unify(value_type, self.struct_type(declaration.id), span);
                 self.semantics
                     .resolve_struct_pattern(pattern_id, declaration.id);
                 let mut seen = HashSet::new();
@@ -2135,6 +2196,18 @@ impl Checker {
                 CheckedPattern::new(PatternCoverage::Irrefutable)
             }
             MatchPattern::Wildcard => CheckedPattern::new(PatternCoverage::Irrefutable),
+        }
+    }
+
+    fn check_invalid_struct_pattern_fields(&mut self, fields: &[crate::ast::StructPatternField]) {
+        let error = self.error_type();
+        for field in fields {
+            self.check_pattern(
+                &field.pattern.kind,
+                field.pattern.id,
+                error,
+                field.pattern.span,
+            );
         }
     }
 

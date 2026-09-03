@@ -1055,6 +1055,43 @@ fn stage(level) {
 }
 ```
 
+### Binding patterns
+
+An initialized `let`, function or parenthesized closure parameter, and `for`
+binding may destructure one incoming value. The initializer, argument, or
+iterator item is evaluated once, and an annotation after the pattern describes
+that complete value:
+
+```text
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+let { x, y } = Point { x: 1, y: 2 }
+
+fn sum({ x, y }: Point) -> i32 {
+    return x + y
+}
+
+for { x, y: _ } in points {
+    print(x)
+}
+```
+
+The anonymous `{ x, y }` form is available only when the surrounding context
+already supplies one concrete struct type. It is nominal shorthand, not a
+structural pattern: `fn inspect({ x, y }) {}` is ambiguous and needs either
+`{ x, y }: Point` or the explicit `Point { x, y }` spelling. The same rule
+applies recursively inside wrapper and enum payloads, `match`, and `is`.
+
+A declaration pattern must be irrefutable: every possible value of its type
+must match. Bindings and wildcards are irrefutable, and variants whose payload
+contains `Never` do not make a possible counterexample. Use `is` or `match`
+when another inhabited shape can occur. Uninitialized attachment- and
+attempt-scoped globals remain single-name declarations because lifecycle code
+assigns their storage later.
+
 Functions are independent of a particular action snapshot. Values from
 `current` or `old` are passed explicitly, keeping helpers reusable and making
 their dependencies visible. Suspending functions return [`async`] values and
@@ -1322,7 +1359,8 @@ value.
 Struct patterns name only the fields that matter. Omitted fields are ignored;
 there is no separate `..` marker. A bare field is a binding shorthand, while an
 explicit `field: pattern` can contain a literal, wildcard, nested struct,
-wrapper, array, enum, or alternative:
+wrapper, array, enum, or alternative. Because `match` already knows the
+scrutinee's concrete type, its struct name may be omitted:
 
 ```text
 struct Point {
@@ -1333,15 +1371,18 @@ struct Point {
 
 fn horizontal(point: Point) -> i32 {
     return match point {
-        Point { label: "start", x } => x,
-        Point { x: 0 | 1 } => 0,
+        { label: "start", x } => x,
+        { x: 0 | 1 } => 0,
         _ => -1,
     }
 }
 ```
 
 A struct pattern containing only bindings and wildcards is irrefutable even if
-it omits fields, so `Point { x } => x` can be the sole arm. A literal or other
+it omits fields, so `{ x } => x` can be the sole arm for a `Point`. The
+anonymous spelling remains nominal: the concrete contextual type determines
+the struct, never the field names. `Point { x }` remains available when an
+explicit type name improves clarity or supplies otherwise-missing context. A literal or other
 condition normally needs later coverage, but several arms may jointly cover a
 finite field: `Point { flag: true }` and `Point { flag: false }` cover every
 `Point`. Unknown and duplicate fields are errors, and every nested pattern is

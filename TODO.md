@@ -1127,6 +1127,12 @@ remaining work is product hardening and distribution.
     `is` / `match`, the whole-value meaning of type annotations, exact supported
     binding sites, and `Never`-aware irrefutability. Add parser, diagnostic,
     inference, runtime, async, global, tooling, and documentation coverage.
+  - [x] Permit contextual anonymous struct patterns. `{ x, y }` resolves to the
+    one concrete nominal struct supplied by an initializer, scrutinee, iterator
+    item, wrapper payload, or explicit whole-value annotation; it never infers
+    a structural type from field names. Preserve explicit `Point { x, y }`,
+    reject unconstrained uses with one focused diagnostic, and share field
+    completion, hover, navigation, highlighting, and safe shorthand rename.
 - [x] Add shorthand struct field initializers: `Point { x }` means
   `Point { x: x }`. When an explicit initializer repeats the exact field name,
   emit a warning with a machine-applicable rewrite to the shorthand. Rename

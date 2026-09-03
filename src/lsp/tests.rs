@@ -2596,10 +2596,10 @@ fn struct_field_shorthand_fixes_and_renames_preserve_both_identities() {
     let pattern_source = concat!(
         "struct Pos { x: u16, y: u16 }\n",
         "state \"game.exe\" {}\n",
-        "fn use(Pos { x, y }: Pos) -> u16 { return x + y }\n"
+        "fn use(Pos { x, y: y }) -> u16 { return x + y }\n"
     );
     let pattern_uri = "file:///binding-pattern-shorthand-rename.split";
-    server.handle(notification(
+    let diagnostics = server.handle(notification(
         "textDocument/didOpen",
         json!({
             "textDocument": {
@@ -2609,11 +2609,38 @@ fn struct_field_shorthand_fixes_and_renames_preserve_both_identities() {
             }
         }),
     ));
+    let shorthand = diagnostics[0]["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "SS1010")
+        .expect("the repeated pattern binding should publish shorthand guidance");
+    let actions = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 27,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": pattern_uri },
+            "range": shorthand["range"],
+            "context": {
+                "diagnostics": [shorthand],
+                "only": ["quickfix"]
+            }
+        }
+    }));
+    let quick_fixes = actions[0]["result"].as_array().unwrap();
+    assert_eq!(quick_fixes[0]["title"], "shorten to `y`");
+    assert_eq!(quick_fixes[0]["isPreferred"], true);
+    assert_eq!(
+        quick_fixes[0]["edit"]["changes"][pattern_uri][0]["newText"],
+        ""
+    );
+
     let field = pattern_source.find("x: u16").unwrap();
     let (line, character) = position_parts(pattern_source, field);
     let renamed = server.handle(json!({
         "jsonrpc": "2.0",
-        "id": 27,
+        "id": 28,
         "method": "textDocument/rename",
         "params": {
             "textDocument": { "uri": pattern_uri },

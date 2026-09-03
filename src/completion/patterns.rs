@@ -55,7 +55,7 @@ fn complete_pattern_from_snapshot(
     library: &StandardLibrary,
     snapshot: &SemanticSnapshot,
 ) -> Option<CompletionList> {
-    let (segment, expected) =
+    let (segment, expected, binding_pattern) =
         pattern_context(snapshot, &request.tokens, request.replacement.start)?;
     let site = analyze_pattern_prefix(&segment, expected, snapshot)?;
 
@@ -76,7 +76,7 @@ fn complete_pattern_from_snapshot(
             }
         }
         PatternSite::StructFields { structure, used } => {
-            add_struct_fields(&mut builder, structure, &used, snapshot)
+            add_struct_fields(&mut builder, structure, &used, binding_pattern, snapshot)
         }
     }
     Some(builder.finish())
@@ -86,7 +86,7 @@ fn pattern_context<'tokens>(
     snapshot: &SemanticSnapshot,
     tokens: &'tokens [&'tokens Token],
     offset: usize,
-) -> Option<(Vec<&'tokens Token>, TypeId)> {
+) -> Option<(Vec<&'tokens Token>, TypeId, bool)> {
     let syntax = snapshot.syntax();
     if let Some((open, value)) = enclosing_match(syntax, tokens, offset)
         && let Some(segment) = current_pattern_segment(tokens, open, offset)
@@ -94,13 +94,18 @@ fn pattern_context<'tokens>(
         return Some((
             segment.to_vec(),
             snapshot.semantics().expression_type(value.id)?,
+            false,
         ));
     }
     if let Some((segment, value)) = enclosing_is(syntax, tokens, offset) {
-        return Some((segment, snapshot.semantics().expression_type(value.id)?));
+        return Some((
+            segment,
+            snapshot.semantics().expression_type(value.id)?,
+            false,
+        ));
     }
     let (segment, binding) = enclosing_binding_pattern(syntax, tokens, offset)?;
-    Some((segment, snapshot.semantics().value_type(binding.id)?))
+    Some((segment, snapshot.semantics().value_type(binding.id)?, true))
 }
 
 fn enclosing_binding_pattern<'ast, 'tokens>(
@@ -737,6 +742,7 @@ fn add_struct_fields(
     builder: &mut CompletionBuilder,
     structure: StructId,
     used: &BTreeSet<String>,
+    binding_pattern: bool,
     snapshot: &SemanticSnapshot,
 ) {
     let Some(declaration) = snapshot
@@ -756,10 +762,15 @@ fn add_struct_fields(
             .struct_field_type(field.id)
             .map(|ty| format!("{}: {}", field.name, display_type(ty, snapshot)))
             .unwrap_or_else(|| format!("{} field", declaration.name));
+        let insert = if binding_pattern {
+            field.name.clone()
+        } else {
+            format!("{}: ${{1:_}}", field.name)
+        };
         builder.add(pattern_item(
             &field.name,
-            &format!("{}: ${{1:_}}", field.name),
-            true,
+            &insert,
+            !binding_pattern,
             &detail,
             field.documentation.clone(),
             None,
@@ -1128,7 +1139,8 @@ fn inspect(Position { x, <|> }: Position) -> u16 {
                 .collect::<Vec<_>>(),
             ["y"]
         );
-        assert_eq!(completion.items[0].insert_text, "y: ${1:_}");
+        assert_eq!(completion.items[0].insert_text, "y");
+        assert!(!completion.items[0].is_snippet);
 
         let inferred_parameter = parameter.replace(": Position) -> u16", ") -> u16");
         let completion = completions(&inferred_parameter);

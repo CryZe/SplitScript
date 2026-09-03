@@ -1800,6 +1800,34 @@ fn struct_field_shorthand_compiles_formats_and_guides_repeated_initializers() {
 }
 
 #[test]
+fn struct_pattern_shorthand_guides_repeated_bindings() {
+    let source = r#"
+        struct Pos { x: u16, y: u16 }
+        state "game.exe" {}
+        fn use(Pos { x, y: y }) -> u16 {
+            return x + y
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("repeated pattern-binding guidance is a warning");
+    let warning = checked
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::StructFieldShorthand)
+        .expect("an exact `y: y` pattern should suggest shorthand");
+    assert_eq!(warning.fixes.len(), 1, "{warning:#?}");
+    assert_eq!(
+        warning.fixes[0].applicability,
+        splitscript::FixApplicability::MachineApplicable
+    );
+    assert_eq!(warning.fixes[0].edits[0].replacement, "");
+    assert_eq!(
+        &source[warning.fixes[0].edits[0].span.start..warning.fixes[0].edits[0].span.end],
+        ": y"
+    );
+}
+
+#[test]
 fn struct_shorthand_does_not_consume_control_flow_blocks() {
     let source = r#"
         struct Point { x: u32 }

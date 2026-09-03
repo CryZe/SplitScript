@@ -625,35 +625,66 @@ fn validate_struct_field_shorthand(syntax: &Program) -> Vec<Diagnostic> {
                     {
                         continue;
                     }
-                    let span = field.name_span.join(field.value.span);
-                    self.diagnostics.push(
-                        Diagnostic::warning(
-                            DiagnosticCode::StructFieldShorthand,
-                            format!("struct field `{}` repeats its initializer name", field.name),
-                            span,
-                        )
-                        .with_primary_label("use the shorthand field initializer")
-                        .with_fix(DiagnosticFix {
-                            title: format!("shorten to `{}`", field.name),
-                            applicability: FixApplicability::MachineApplicable,
-                            edits: vec![TextEdit {
-                                span: ast::Span {
-                                    start: field.name_span.end,
-                                    end: field.value.span.end,
-                                },
-                                replacement: String::new(),
-                            }],
-                        }),
-                    );
+                    self.diagnostics.push(struct_field_shorthand_diagnostic(
+                        &field.name,
+                        field.name_span,
+                        field.value.span,
+                        "initializer",
+                    ));
                 }
             }
             visit::walk_expr(self, expression);
+        }
+
+        fn visit_pattern(&mut self, pattern: &'ast ast::MatchPattern) {
+            if let ast::MatchPattern::Struct { fields, .. } = pattern {
+                for field in fields {
+                    let ast::MatchPattern::Binding(binding) = &field.pattern.kind else {
+                        continue;
+                    };
+                    if field.shorthand || field.name != binding.name {
+                        continue;
+                    }
+                    self.diagnostics.push(struct_field_shorthand_diagnostic(
+                        &field.name,
+                        field.name_span,
+                        field.pattern.span,
+                        "binding",
+                    ));
+                }
+            }
+            visit::walk_pattern(self, pattern);
         }
     }
 
     let mut collector = Collector::default();
     collector.visit_program(syntax);
     collector.diagnostics
+}
+
+fn struct_field_shorthand_diagnostic(
+    name: &str,
+    name_span: ast::Span,
+    repeated_span: ast::Span,
+    repeated_role: &str,
+) -> Diagnostic {
+    Diagnostic::warning(
+        DiagnosticCode::StructFieldShorthand,
+        format!("struct field `{name}` repeats its {repeated_role} name"),
+        name_span.join(repeated_span),
+    )
+    .with_primary_label("use the shorthand field syntax")
+    .with_fix(DiagnosticFix {
+        title: format!("shorten to `{name}`"),
+        applicability: FixApplicability::MachineApplicable,
+        edits: vec![TextEdit {
+            span: ast::Span {
+                start: name_span.end,
+                end: repeated_span.end,
+            },
+            replacement: String::new(),
+        }],
+    })
 }
 
 fn validate_empty_future_races(hir: &TypedProgram) -> Vec<Diagnostic> {

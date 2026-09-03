@@ -1756,10 +1756,7 @@ fn struct_field_shorthand_compiles_formats_and_guides_repeated_initializers() {
     splitscript::compile(source).expect("shorthand fields should initialize like `x: x`");
 
     let formatted = splitscript::format_source(source).expect("shorthand fields should format");
-    assert!(
-        formatted.contains("return Point {\n        x, y\n    }"),
-        "{formatted}"
-    );
+    assert!(formatted.contains("return Point { x, y }"), "{formatted}");
     splitscript::compile(&formatted).expect("formatted shorthand should remain valid");
 
     let repeated = r#"

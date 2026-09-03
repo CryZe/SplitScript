@@ -67,7 +67,9 @@ pub use diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticFix, DiagnosticFixes, DiagnosticLabel,
     DiagnosticLabelStyle, DiagnosticSeverity, FixApplicability, TextEdit,
 };
-pub use formatter::format_source;
+pub use formatter::{
+    DEFAULT_MAX_LINE_WIDTH, FormatOptions, format_source, format_source_with_options,
+};
 
 /// Controls profile-sensitive semantic lowering and WebAssembly generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]

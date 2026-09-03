@@ -16,6 +16,27 @@ use crate::{
 };
 
 const INDENT: &str = "    ";
+pub const DEFAULT_MAX_LINE_WIDTH: usize = 100;
+
+/// Stable formatter policy shared by the CLI and editor frontends.
+///
+/// The default remains compiler-owned. Exposing the policy as a value keeps a
+/// future workspace or editor setting from requiring a second formatting
+/// implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FormatOptions {
+    /// Preferred maximum number of Unicode scalar values on one line.
+    /// Unbreakable tokens may still exceed it.
+    pub max_line_width: usize,
+}
+
+impl Default for FormatOptions {
+    fn default() -> Self {
+        Self {
+            max_line_width: DEFAULT_MAX_LINE_WIDTH,
+        }
+    }
+}
 
 /// Formats a syntactically valid SplitScript source file.
 ///
@@ -23,12 +44,25 @@ const INDENT: &str = "    ";
 /// second, potentially divergent grammar. Invalid source is returned as the
 /// same structured syntax diagnostics produced by [`crate::parse`].
 pub fn format_source(source: &str) -> Result<String, Vec<Diagnostic>> {
+    format_source_with_options(source, FormatOptions::default())
+}
+
+/// Formats a source file with an explicit presentation policy.
+pub fn format_source_with_options(
+    source: &str,
+    options: FormatOptions,
+) -> Result<String, Vec<Diagnostic>> {
     let parsed = crate::parse(source)?;
-    Ok(format_parsed(&parsed))
+    Ok(format_parsed_with_options(&parsed, options))
 }
 
 pub(crate) fn format_parsed(parsed: &crate::ParsedProgram) -> String {
-    Formatter::new(parsed.source_document(), parsed.syntax()).finish()
+    format_parsed_with_options(parsed, FormatOptions::default())
+}
+
+fn format_parsed_with_options(parsed: &crate::ParsedProgram, options: FormatOptions) -> String {
+    let formatted = Formatter::new(parsed.source_document(), parsed.syntax()).finish();
+    wrap_long_lines(formatted, options)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,6 +192,8 @@ struct SyntaxLayoutCollector<'a> {
     continuations: Vec<ContinuationRange>,
     join_before: HashSet<usize>,
     break_after: HashSet<usize>,
+    compact_brace_opens: HashSet<usize>,
+    compact_brace_closes: HashSet<usize>,
     generic_opens: HashSet<usize>,
     generic_closes: HashSet<usize>,
     fallible_type_suffixes: HashSet<usize>,
@@ -165,6 +201,65 @@ struct SyntaxLayoutCollector<'a> {
 }
 
 impl SyntaxLayoutCollector<'_> {
+    fn collect<'a>(document: &'a SourceDocument, syntax: &Program) -> SyntaxLayoutCollector<'a> {
+        let mut layout = SyntaxLayoutCollector {
+            document,
+            continuations: Vec::new(),
+            join_before: HashSet::new(),
+            break_after: HashSet::new(),
+            compact_brace_opens: HashSet::new(),
+            compact_brace_closes: HashSet::new(),
+            generic_opens: HashSet::new(),
+            generic_closes: HashSet::new(),
+            fallible_type_suffixes: syntax
+                .result_types
+                .iter()
+                .flat_map(|result| result.occurrences.iter().map(|span| span.start))
+                .collect(),
+            index_opens: HashSet::new(),
+        };
+        layout.visit_program(syntax);
+        layout
+    }
+
+    /// Marks braces that delimit value-shaped syntax rather than executable
+    /// or declaration blocks. The formatter may preserve these braces on one
+    /// line when the author did so; ordinary blocks remain vertical.
+    fn mark_compact_braces(&mut self, start: usize, end: usize) {
+        for token in self
+            .document
+            .tokens()
+            .filter(|token| start <= token.span.start && token.span.end <= end)
+        {
+            match token.kind {
+                TokenKind::LBrace => {
+                    self.compact_brace_opens.insert(token.span.start);
+                }
+                TokenKind::RBrace => {
+                    self.compact_brace_closes.insert(token.span.start);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn mark_outer_compact_braces(&mut self, start: usize, end: usize) {
+        let tokens = self
+            .document
+            .tokens()
+            .filter(|token| start <= token.span.start && token.span.end <= end)
+            .collect::<Vec<_>>();
+        if let Some(opening) = tokens.iter().find(|token| token.kind == TokenKind::LBrace)
+            && let Some(closing) = tokens
+                .iter()
+                .rev()
+                .find(|token| token.kind == TokenKind::RBrace)
+        {
+            self.compact_brace_opens.insert(opening.span.start);
+            self.compact_brace_closes.insert(closing.span.start);
+        }
+    }
+
     fn continuation(&mut self, start: usize, end: usize) {
         if line_breaks(&self.document.source()[start..end]) > 0 {
             self.continuations.push(ContinuationRange { start, end });
@@ -454,6 +549,12 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
     }
 
     fn visit_expr(&mut self, expression: &'ast Expr) {
+        if matches!(expression.kind, ExprKind::Struct { .. }) {
+            self.mark_outer_compact_braces(expression.span.start, expression.span.end);
+        }
+        if let ExprKind::Is { pattern, .. } = &expression.kind {
+            self.mark_compact_braces(pattern.span.start, pattern.span.end);
+        }
         if let ExprKind::Match { value, .. } = &expression.kind
             && let Some(opening) = self.document.tokens().find(|token| {
                 value.span.end <= token.span.start
@@ -500,11 +601,31 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
     }
 
     fn visit_match_arm(&mut self, arm: &'ast MatchArm) {
+        let pattern_end = arm.guard.as_ref().map_or_else(
+            || {
+                self.document
+                    .tokens()
+                    .filter(|token| {
+                        arm.span.start <= token.span.start
+                            && token.span.end <= arm.value.span.start
+                            && token.kind == TokenKind::FatArrow
+                    })
+                    .last()
+                    .map_or(arm.value.span.start, |token| token.span.start)
+            },
+            |guard| guard.span.start,
+        );
+        self.mark_compact_braces(arm.span.start, pattern_end);
         if let Some(guard) = &arm.guard {
             self.continuation_before_block(guard.span.start, guard.span.end);
         }
         self.continuation_before_block(arm.value.span.start, arm.value.span.end);
         visit::walk_match_arm(self, arm);
+    }
+
+    fn visit_binding_pattern(&mut self, binding: &'ast crate::ast::BindingPattern) {
+        self.mark_compact_braces(binding.pattern.span.start, binding.pattern.span.end);
+        visit::walk_binding_pattern(self, binding);
     }
 }
 
@@ -546,6 +667,8 @@ struct Formatter<'a> {
     delimiters: Vec<DelimiterRange>,
     break_after: HashSet<usize>,
     join_before: HashSet<usize>,
+    compact_brace_opens: HashSet<usize>,
+    compact_brace_closes: HashSet<usize>,
     trailing_comma_before: HashSet<usize>,
     trailing_semicolon_before: HashSet<usize>,
     omitted_commas: HashSet<usize>,
@@ -563,21 +686,7 @@ impl<'a> Formatter<'a> {
             .into_iter()
             .filter(|range| line_breaks(&document.source()[range.start..range.opening_brace]) > 0)
             .collect();
-        let mut layout = SyntaxLayoutCollector {
-            document,
-            continuations: Vec::new(),
-            join_before: HashSet::new(),
-            break_after: HashSet::new(),
-            generic_opens: HashSet::new(),
-            generic_closes: HashSet::new(),
-            fallible_type_suffixes: syntax
-                .result_types
-                .iter()
-                .flat_map(|result| result.occurrences.iter().map(|span| span.start))
-                .collect(),
-            index_opens: HashSet::new(),
-        };
-        layout.visit_program(syntax);
+        let layout = SyntaxLayoutCollector::collect(document, syntax);
         let lexemes = formatting_lexemes(
             document,
             &layout.generic_closes,
@@ -620,6 +729,8 @@ impl<'a> Formatter<'a> {
             delimiters,
             join_before: layout.join_before,
             break_after: layout.break_after,
+            compact_brace_opens: layout.compact_brace_opens,
+            compact_brace_closes: layout.compact_brace_closes,
             trailing_comma_before: trailing_punctuation.commas,
             trailing_semicolon_before: trailing_punctuation.semicolons,
             omitted_commas: trailing_punctuation.omitted_commas,
@@ -792,6 +903,26 @@ impl<'a> Formatter<'a> {
             return Separation::Newline;
         }
         if matches!(current_token, Some(TokenKind::RBrace))
+            && self.compact_brace_closes.contains(&current.span().start)
+            && !matches!(previous_token, Some(TokenKind::LBrace))
+        {
+            return if self.gap_line_breaks > 0 {
+                preserved_break
+            } else {
+                Separation::Space
+            };
+        }
+        if matches!(previous_token, Some(TokenKind::LBrace))
+            && self.compact_brace_opens.contains(&previous.span().start)
+            && !matches!(current_token, Some(TokenKind::RBrace))
+        {
+            return if self.gap_line_breaks > 0 {
+                preserved_break
+            } else {
+                Separation::Space
+            };
+        }
+        if matches!(current_token, Some(TokenKind::RBrace))
             && !matches!(previous_token, Some(TokenKind::LBrace))
         {
             return Separation::Newline;
@@ -936,6 +1067,241 @@ impl<'a> Formatter<'a> {
                     && line_breaks(&self.document.source()[range.start..offset]) > 0
             })
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SourceLine {
+    start: usize,
+    end: usize,
+    cutoff: usize,
+}
+
+/// Applies width-driven breaks as a syntax-aware refinement of canonical
+/// formatting. Each refinement inserts only legal soft breaks and then runs
+/// the ordinary formatter again, so indentation, comments, delimiters, and
+/// trailing punctuation continue to have one implementation.
+fn wrap_long_lines(mut source: String, options: FormatOptions) -> String {
+    let max_width = options.max_line_width.max(1);
+    for _ in 0..128 {
+        let overlong = overlong_lines(&source, max_width);
+        if overlong.is_empty() {
+            return source;
+        }
+        let Ok(parsed) = crate::parse(&source) else {
+            return source;
+        };
+        let document = parsed.source_document();
+        let layout = SyntaxLayoutCollector::collect(document, parsed.syntax());
+        let compact_braces = compact_brace_ranges(document, &layout);
+        let insertions = width_break_insertions(document, &overlong, &compact_braces);
+        if insertions.is_empty() {
+            return source;
+        }
+
+        for offset in insertions.into_iter().rev() {
+            source.insert(offset, '\n');
+        }
+        let Ok(parsed) = crate::parse(&source) else {
+            return source;
+        };
+        source = Formatter::new(parsed.source_document(), parsed.syntax()).finish();
+    }
+    source
+}
+
+fn overlong_lines(source: &str, max_width: usize) -> Vec<SourceLine> {
+    let mut lines = Vec::new();
+    let mut start = 0usize;
+    for line in source.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        if content.chars().count() > max_width {
+            let cutoff = content
+                .char_indices()
+                .nth(max_width)
+                .map_or(start + content.len(), |(offset, _)| start + offset);
+            lines.push(SourceLine {
+                start,
+                end: start + content.len(),
+                cutoff,
+            });
+        }
+        start += line.len();
+    }
+    lines
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CompactBraceRange {
+    opening: usize,
+    closing: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct WidthBreak {
+    offset: usize,
+    priority: u8,
+}
+
+fn compact_brace_ranges(
+    document: &SourceDocument,
+    layout: &SyntaxLayoutCollector<'_>,
+) -> Vec<CompactBraceRange> {
+    let mut stack = Vec::new();
+    let mut ranges = Vec::new();
+    for token in document.tokens() {
+        match token.kind {
+            TokenKind::LBrace => stack.push(token.span.start),
+            TokenKind::RBrace => {
+                let Some(opening) = stack.pop() else {
+                    continue;
+                };
+                if layout.compact_brace_opens.contains(&opening)
+                    && layout.compact_brace_closes.contains(&token.span.start)
+                {
+                    ranges.push(CompactBraceRange {
+                        opening,
+                        closing: token.span.start,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    ranges
+}
+
+fn width_break_insertions(
+    document: &SourceDocument,
+    lines: &[SourceLine],
+    compact_braces: &[CompactBraceRange],
+) -> Vec<usize> {
+    let mut insertions = HashSet::new();
+    for line in lines {
+        let mut candidates = compact_braces
+            .iter()
+            .copied()
+            .filter(|range| line.start <= range.opening && range.closing <= line.end)
+            .collect::<Vec<_>>();
+        candidates.sort_by_key(|range| range.opening);
+        let compact = candidates
+            .iter()
+            .copied()
+            .find(|range| range.opening <= line.cutoff && line.cutoff <= range.closing)
+            .or_else(|| candidates.last().copied());
+        if let Some(compact) = compact
+            && expand_compact_brace(document, compact, &mut insertions)
+        {
+            continue;
+        }
+
+        let candidates = general_width_breaks(document, *line);
+        if let Some(candidate) = candidates
+            .iter()
+            .copied()
+            .filter(|candidate| candidate.offset <= line.cutoff)
+            .max_by_key(|candidate| (candidate.priority, candidate.offset))
+            .or_else(|| {
+                candidates.iter().copied().max_by_key(|candidate| {
+                    (candidate.priority, std::cmp::Reverse(candidate.offset))
+                })
+            })
+        {
+            insertions.insert(candidate.offset);
+        }
+    }
+    let mut insertions = insertions.into_iter().collect::<Vec<_>>();
+    insertions.sort_unstable();
+    insertions
+}
+
+fn expand_compact_brace(
+    document: &SourceDocument,
+    range: CompactBraceRange,
+    insertions: &mut HashSet<usize>,
+) -> bool {
+    let tokens = document
+        .tokens()
+        .filter(|token| range.opening <= token.span.start && token.span.start <= range.closing)
+        .collect::<Vec<_>>();
+    if tokens.len() <= 2 {
+        return false;
+    }
+
+    let mut parentheses = 0usize;
+    let mut brackets = 0usize;
+    let mut braces = 0usize;
+    insertions.insert(tokens[0].span.end);
+    insertions.insert(range.closing);
+    for token in tokens.iter().skip(1).take(tokens.len().saturating_sub(2)) {
+        match token.kind {
+            TokenKind::LParen => parentheses += 1,
+            TokenKind::RParen => parentheses = parentheses.saturating_sub(1),
+            TokenKind::LBracket => brackets += 1,
+            TokenKind::RBracket => brackets = brackets.saturating_sub(1),
+            TokenKind::LBrace => braces += 1,
+            TokenKind::RBrace => braces = braces.saturating_sub(1),
+            TokenKind::Comma if parentheses == 0 && brackets == 0 && braces == 0 => {
+                insertions.insert(token.span.end);
+            }
+            _ => {}
+        }
+    }
+    true
+}
+
+fn general_width_breaks(document: &SourceDocument, line: SourceLine) -> Vec<WidthBreak> {
+    let mut candidates = Vec::new();
+    for token in document
+        .tokens()
+        .filter(|token| line.start < token.span.start && token.span.end <= line.end)
+    {
+        let candidate = match &token.kind {
+            TokenKind::Comma | TokenKind::Assign => Some(WidthBreak {
+                offset: token.span.end,
+                priority: 5,
+            }),
+            TokenKind::OrOr | TokenKind::AndAnd => Some(WidthBreak {
+                offset: token.span.start,
+                priority: 4,
+            }),
+            TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::Star
+            | TokenKind::Slash
+            | TokenKind::Percent
+            | TokenKind::EqEq
+            | TokenKind::BangEq
+            | TokenKind::Lt
+            | TokenKind::Le
+            | TokenKind::Gt
+            | TokenKind::Ge
+            | TokenKind::Or
+            | TokenKind::Caret
+            | TokenKind::And
+            | TokenKind::Shl
+            | TokenKind::Shr => Some(WidthBreak {
+                offset: token.span.start,
+                priority: 3,
+            }),
+            TokenKind::Dot => Some(WidthBreak {
+                offset: token.span.start,
+                priority: 1,
+            }),
+            TokenKind::Ident(name) if name == "else" => Some(WidthBreak {
+                offset: token.span.start,
+                priority: 6,
+            }),
+            TokenKind::Ident(name) if matches!(name.as_str(), "as" | "is") => Some(WidthBreak {
+                offset: token.span.start,
+                priority: 4,
+            }),
+            _ => None,
+        };
+        if let Some(candidate) = candidate {
+            candidates.push(candidate);
+        }
+    }
+    candidates
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1417,7 +1783,7 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
                 self.mark_comma_for_items(
                     expression.span,
                     fields.iter().map(|field| field.value.span),
-                    true,
+                    false,
                 );
             }
             ExprKind::Match { arms, .. } if !arms.is_empty() => {
@@ -1813,9 +2179,7 @@ state "game.exe" {
     }
 }
 onAttach {
-    return Layout {
-        edition: Edition.Base,
-    }
+    return Layout { edition: Edition.Base }
 }
 image "Assembly-CSharp" {
     namespace Game {
@@ -2361,11 +2725,7 @@ fn inspect(point:Point)->u32{return match point{Point{x:0,y}|Point{x:1,y:y}=>y,_
 state "game.exe" {}
 fn inspect(point: Point) -> u32 {
     return match point {
-        Point {
-            x: 0, y
-        } | Point {
-            x: 1, y: y
-        } => y,
+        Point { x: 0, y } | Point { x: 1, y: y } => y,
         _ => 0,
     }
 }
@@ -2373,6 +2733,103 @@ fn inspect(point: Point) -> u32 {
         let formatted = format_source(source).unwrap();
         assert_eq!(formatted, expected);
         assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn keeps_short_struct_values_and_patterns_inline() {
+        let source = r#"struct Pos{x:u16,y:u16}
+state "game.exe"{}
+fn inspect(value:Pos)->u16{let Pos{x,y}=Pos{x:1,y:2}
+let{x:left,y:right}=value
+return x+y+left+right}"#;
+        let expected = r#"struct Pos {
+    x: u16,
+    y: u16,
+}
+state "game.exe" {}
+fn inspect(value: Pos) -> u16 {
+    let Pos { x, y } = Pos { x: 1, y: 2 }
+    let { x: left, y: right } = value
+    return x + y + left + right
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn preserves_authored_multiline_struct_values_and_patterns() {
+        let source = r#"struct Pos {
+    x: u16,
+    y: u16,
+}
+state "game.exe" {}
+fn inspect(value: Pos) -> u16 {
+    let Pos {
+        x,
+        y,
+    } = Pos {
+        x: 1,
+        y: 2,
+    }
+    return x + y
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, source);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn expands_struct_values_that_exceed_the_default_width() {
+        let source = r#"struct PositionSnapshot{horizontalCoordinate:u32,verticalCoordinate:u32,descriptiveLabel:String}
+state "game.exe"{}
+fn snapshot(){let value=PositionSnapshot{horizontalCoordinate:123,verticalCoordinate:456,descriptiveLabel:"ready"}}"#;
+        let expected = r#"struct PositionSnapshot {
+    horizontalCoordinate: u32,
+    verticalCoordinate: u32,
+    descriptiveLabel: String,
+}
+state "game.exe" {}
+fn snapshot() {
+    let value = PositionSnapshot {
+        horizontalCoordinate: 123,
+        verticalCoordinate: 456,
+        descriptiveLabel: "ready",
+    }
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert!(
+            formatted
+                .lines()
+                .all(|line| line.chars().count() <= DEFAULT_MAX_LINE_WIDTH)
+        );
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn wraps_other_expressions_with_a_configurable_width() {
+        let source = r#"state "game.exe"{}
+fn sum(){return alpha+beta+gamma+delta+epsilon+zeta+eta+theta}"#;
+        let options = FormatOptions { max_line_width: 40 };
+        let formatted = format_source_with_options(source, options).unwrap();
+
+        assert!(formatted.contains("\n        +"));
+        assert!(
+            formatted
+                .lines()
+                .all(|line| line.chars().count() <= options.max_line_width)
+        );
+        assert_eq!(
+            format_source_with_options(&formatted, options).unwrap(),
+            formatted
+        );
     }
 
     #[test]
@@ -2460,7 +2917,9 @@ engine}}"#;
         let expected = r#"state "game.exe" {}
 fn engineModule() {
     return retry {
-        let engine = process.loadedModule("EngineWin64s.dll") else process.loadedModule("EngineWin64sv.dll") else throw "engine module is not loaded yet"
+        let engine = process.loadedModule("EngineWin64s.dll")
+            else process.loadedModule("EngineWin64sv.dll")
+            else throw "engine module is not loaded yet"
         engine
     }
 }

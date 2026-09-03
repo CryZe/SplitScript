@@ -722,7 +722,10 @@ impl Checker {
             .value
             .as_ref()
             .expect("local variables have initializers");
-        let expected = variable.annotation.map(|ty| self.syntax_type(ty));
+        let expected = variable.annotation.map(|ty| {
+            let ty = self.syntax_type(ty);
+            self.inference.freshen_omitted_array_shapes(ty)
+        });
         let inferred = if let Some(expected) = expected {
             let expected_name = self.type_name(expected);
             let label = variable.binding.simple_binding().map_or_else(

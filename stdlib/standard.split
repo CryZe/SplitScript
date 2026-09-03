@@ -3232,9 +3232,12 @@ capability MemoryReadable<T> {}
 
 /// Stores an indexed sequence of values.
 ///
-/// [`[T]`] accepts any length, while [`[T; N]`] carries an exact length and can
-/// provide a fixed process-memory layout. Both forms use WebAssembly GC storage
-/// and expose the same generic length, access, and mutation operations.
+/// [`[T]`] creates growable values, while [`[T; N]`] carries an exact length and
+/// can provide a fixed process-memory layout. An omitted shape in a helper
+/// parameter is inferred, so read-only helpers accept both forms without
+/// erasing an exact length. Structural mutation constrains the receiver to a
+/// growable array. Both forms use WebAssembly GC storage and expose the same
+/// length, indexed access, element replacement, search, and iteration APIs.
 ///
 /// # Example
 ///

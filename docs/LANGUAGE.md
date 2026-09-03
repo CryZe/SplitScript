@@ -1475,11 +1475,30 @@ receiver; calls otherwise behave like global helpers.
 
 ## Arrays
 
-Arrays are mutable values. `[T]` is the general array type: each
-value keeps its creation-time length, but that length is not part of the type.
-`[T; N]` additionally records an exact compile-time element count. A sized
-array can be passed anywhere `[T]` is expected, while a general `[T]` cannot be
-narrowed to a particular length without proof.
+Arrays are mutable values. `[T]` omits an exact length and newly constructed
+values of that type are growable. `[T; N]` records an exact compile-time
+element count. An omitted shape in a local or function annotation is inferred:
+it does not erase an exact shape already known for the value. Consequently a
+read-only helper taking `[T]` accepts both forms, while a helper that calls
+`push`, `pop`, `extend`, `remove`, `removeAt`, or `clear` is inferred to require
+a growable array. Passing `[T; N]` to that helper is rejected at the call rather
+than silently invalidating the exact-length type.
+
+The same shape relationship is preserved through aliases, forwarded calls,
+closures, and return values. For example, an identity helper returning its
+`[T]` parameter returns `[T; N]` when called with `[T; N]`; the result cannot
+then be structurally mutated. A general growable `[T]` cannot be narrowed to a
+particular length without proof.
+
+```text
+fn first(values: [u8]) -> u8 {
+    return values[0] // accepts `[u8]` and `[u8; N]`
+}
+
+fn append(values: [u8], value: u8) {
+    values.push(value) // `values` must be growable
+}
+```
 
 Non-empty literals infer their element type. An expected `[T; N]` also checks
 the literal's exact element count. An empty literal keeps an unresolved element

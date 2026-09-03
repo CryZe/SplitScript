@@ -1994,3 +1994,118 @@ fn growable_arrays_support_length_mutation_but_fixed_arrays_reject_it() {
             && error.message.contains("growable `[T]`")
     }));
 }
+
+#[test]
+fn array_shape_inference_crosses_function_boundaries_without_erasing_exact_lengths() {
+    let read_only = r#"
+        state "game.exe" {}
+
+        fn first(values: [u8]) -> u8 {
+            return values[0]
+        }
+
+        fn identity(values: [u8]) -> [u8] {
+            return values
+        }
+
+        fn inferredFirst(values) {
+            return values[0]
+        }
+
+        whileAttached {
+            let fixed: [u8; 3] = [1, 2, 3]
+            let growable: [u8] = [4, 5]
+            print(first(fixed))
+            print(first(growable))
+            print(inferredFirst(fixed))
+            print(inferredFirst(growable))
+            let stillFixed = identity(fixed)
+            print(stillFixed.length())
+        }
+    "#;
+    let wasm = splitscript::compile(read_only)
+        .expect("read-only array parameters should be polymorphic over array shape");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("shape-polymorphic array functions should produce valid Wasm");
+
+    let direct = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn append(values: [u8]) {
+                values.push(0x12)
+            }
+
+            whileAttached {
+                let fixed: [u8; 3] = [1, 2, 3]
+                append(fixed)
+            }
+        "#,
+    )
+    .expect_err("a fixed array cannot satisfy a growable parameter inferred from push");
+    assert!(direct.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("expected `[u8]`, found `[u8; 3]`")
+            || diagnostic
+                .message
+                .contains("expected `[u8; 3]`, found `[u8]`")
+    }));
+    assert!(
+        direct
+            .iter()
+            .flat_map(|diagnostic| &diagnostic.labels)
+            .any(|label| label
+                .message
+                .as_deref()
+                .is_some_and(|message| { message.contains("requires growable `[u8]`") }))
+    );
+
+    let escaped = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn identity(values: [u8]) -> [u8] {
+                return values
+            }
+
+            whileAttached {
+                let fixed: [u8; 3] = [1, 2, 3]
+                identity(fixed).push(4)
+            }
+        "#,
+    )
+    .expect_err("returning an array must preserve its inferred fixed shape");
+    assert!(escaped.iter().any(|diagnostic| {
+        diagnostic.message.contains("fixed array") && diagnostic.message.contains("`push`")
+    }));
+
+    let forwarded = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn append(values: [u8]) {
+                values.push(0x12)
+            }
+
+            fn forward(values: [u8]) {
+                append(values)
+            }
+
+            whileAttached {
+                let fixed: [u8; 3] = [1, 2, 3]
+                forward(fixed)
+            }
+        "#,
+    )
+    .expect_err("growability requirements must propagate through forwarding functions");
+    assert!(forwarded.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("expected `[u8]`, found `[u8; 3]`")
+            || diagnostic
+                .message
+                .contains("expected `[u8; 3]`, found `[u8]`")
+    }));
+}

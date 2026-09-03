@@ -878,7 +878,12 @@ fn generalize_component(checker: &mut Checker, functions: &[FunctionId]) {
                 .map(|binding| binding.ty),
         )
         .collect::<Vec<_>>();
-    let environment = checker.inference.unbound_variables_in(environment_types);
+    let environment = checker
+        .inference
+        .unbound_variables_in(environment_types.iter().copied());
+    let environment_array_shapes = checker
+        .inference
+        .unbound_array_shapes_in(environment_types.iter().copied());
     let mut recursive_arguments = HashMap::new();
 
     for function in functions {
@@ -889,6 +894,12 @@ fn generalize_component(checker: &mut Checker, functions: &[FunctionId]) {
             .into_iter()
             .filter(|variable| !environment.contains(variable))
             .collect::<Vec<_>>();
+        let generalized_array_shapes = checker
+            .inference
+            .unbound_array_shapes_in(signature.params.iter().copied().chain([signature.result]))
+            .into_iter()
+            .filter(|shape| !environment_array_shapes.contains(shape))
+            .collect();
         let mut associated_projections = Vec::new();
         loop {
             let projections = checker.inference.associated_projections_for(&generalized);
@@ -915,9 +926,12 @@ fn generalize_component(checker: &mut Checker, functions: &[FunctionId]) {
             *function,
             generalized.iter().copied().map(Type::Variable).collect(),
         );
-        checker
-            .declarations
-            .set_function_generics(*function, generalized, associated_projections);
+        checker.declarations.set_function_generics(
+            *function,
+            generalized,
+            generalized_array_shapes,
+            associated_projections,
+        );
     }
     checker
         .semantics

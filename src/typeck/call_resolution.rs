@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     Diagnostic,
     ast::{ActionKind, ArrayTypeId, Expr, ExprId, ExprKind, Span},
-    inference::{InferenceError, Requirements, Type, type_may_have_capability},
+    inference::{ArrayShape, InferenceError, Requirements, Type, type_may_have_capability},
     intrinsic_registry::FailureChannelPolicy,
     migration::{
         ASL_SETTINGS_ADD_DIAGNOSTIC, ASL_SETTINGS_LOOKUP_DIAGNOSTIC, ForeignSpellingContext,
@@ -1182,6 +1182,14 @@ impl Checker {
                         capabilities.join("` + `")
                     )
                 }
+            } else if let Type::Array(array) = expected
+                && self.inference.array_shape(array) == ArrayShape::Growable
+            {
+                let expected_name = self.type_name(expected);
+                format!(
+                    "parameter `{}` requires growable `{expected_name}`",
+                    declaration.name
+                )
             } else {
                 let expected_name = self.type_name(expected);
                 format!(
@@ -1464,8 +1472,12 @@ impl Checker {
                     | StdlibItemId::ArrayPop
                     | StdlibItemId::ArrayClear
             ) && let Type::Array(array) = self.shallow_type(receiver.ty)
-                && let Some(length) = self.inference.array_length(array)
+                && self.inference.require_growable_array(array).is_err()
             {
+                let fixed = self.inference.array_length(array).map_or_else(
+                    || "fixed array".to_owned(),
+                    |length| format!("fixed array `[T; {length}]`"),
+                );
                 let method = match item.id {
                     StdlibItemId::ArrayPush => "push",
                     StdlibItemId::ArrayExtend => "extend",
@@ -1476,9 +1488,7 @@ impl Checker {
                     _ => unreachable!(),
                 };
                 self.error(
-                    format!(
-                        "cannot change the length of fixed array `[T; {length}]`; `{method}` is only available on growable `[T]`"
-                    ),
+                    format!("cannot change the length of {fixed}; `{method}` is only available on growable `[T]`"),
                     span,
                 );
                 return None;
@@ -1812,7 +1822,7 @@ impl Checker {
         };
         let value = *value;
         if constructor == StdlibTypeConstructorId::Array {
-            Type::Array(self.array_type_id(value))
+            Type::Array(self.inference.inferred_array_type(value))
         } else if constructor == StdlibTypeConstructorId::Option {
             Type::Option(self.inference.option_type(value))
         } else if constructor == StdlibTypeConstructorId::Result {

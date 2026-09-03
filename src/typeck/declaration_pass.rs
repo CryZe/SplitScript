@@ -827,7 +827,8 @@ fn collect_function_signatures(checker: &mut Checker, program: &Program) {
             .iter()
             .map(|parameter| {
                 let ty = if let Some(annotation) = parameter.annotation {
-                    checker.syntax_type(annotation)
+                    let ty = checker.syntax_type(annotation);
+                    checker.inference.freshen_omitted_array_shapes(ty)
                 } else {
                     checker.fresh_inference(Requirements::none(), None)
                 };
@@ -835,9 +836,10 @@ fn collect_function_signatures(checker: &mut Checker, program: &Program) {
                 ty
             })
             .collect::<Vec<_>>();
-        let annotated = function
-            .return_annotation
-            .map(|annotation| checker.syntax_type(annotation));
+        let annotated = function.return_annotation.map(|annotation| {
+            let ty = checker.syntax_type(annotation);
+            checker.inference.freshen_omitted_array_shapes(ty)
+        });
         let completion = if let Some(Type::Async(future)) = annotated {
             checker.inference.async_value(future)
         } else if let Some(annotation) = annotated {
@@ -881,6 +883,7 @@ fn collect_function_signatures(checker: &mut Checker, program: &Program) {
             result,
             completion,
             generalized: Vec::new(),
+            generalized_array_shapes: Vec::new(),
             associated_projections: Vec::new(),
         };
         checker

@@ -3,8 +3,9 @@
 use crate::{
     ast::Program,
     inference::{
-        ApplicationLayout, ArrayLayout, AsyncLayout, CallableLayout, ConstructedLayouts,
-        InferenceContext, OptionLayout, RangeLayout, Requirements, ResultLayout, SetLayout, Type,
+        ApplicationLayout, ArrayLayout, ArrayShape, AsyncLayout, CallableLayout,
+        ConstructedLayouts, InferenceContext, OptionLayout, RangeLayout, Requirements,
+        ResultLayout, SetLayout, Type,
     },
     resolution::ProgramResolutions,
     semantic::SemanticBuilder,
@@ -53,7 +54,7 @@ fn initialize_checker(
         .map(|array| ArrayLayout {
             id: array.id,
             element: syntax_type(array.element, &semantic_types, resolutions),
-            length: array.length,
+            shape: array.length.map_or(ArrayShape::Growable, ArrayShape::Exact),
         })
         .collect::<Vec<_>>();
     let option_types = program

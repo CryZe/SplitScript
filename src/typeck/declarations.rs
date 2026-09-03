@@ -67,6 +67,9 @@ pub(super) struct FunctionSignature {
     /// Unbound inference roots generalized after this function's dependency
     /// component has been solved. Monomorphic functions leave this empty.
     pub(super) generalized: Vec<u32>,
+    /// Inferred exact-versus-growable array refinements generalized alongside
+    /// ordinary type variables. These are erased before semantic publication.
+    pub(super) generalized_array_shapes: Vec<u32>,
     /// Associated outputs inferred from generic parameters used in the body,
     /// such as the item yielded by an `Iterable` parameter.
     pub(super) associated_projections: Vec<crate::inference::AssociatedProjection>,
@@ -102,21 +105,38 @@ impl FunctionSignature {
         inference: &mut crate::inference::InferenceContext,
     ) -> InstantiatedFunctionSignature {
         let mut substitutions = HashMap::new();
+        let mut shape_substitutions = HashMap::new();
         let params = self
             .params
             .iter()
-            .map(|ty| inference.instantiate_type(*ty, &self.generalized, &mut substitutions))
+            .map(|ty| {
+                inference.instantiate_type_with_array_shapes(
+                    *ty,
+                    &self.generalized,
+                    &self.generalized_array_shapes,
+                    &mut substitutions,
+                    &mut shape_substitutions,
+                )
+            })
             .collect();
-        let result = inference.instantiate_type(self.result, &self.generalized, &mut substitutions);
+        let result = inference.instantiate_type_with_array_shapes(
+            self.result,
+            &self.generalized,
+            &self.generalized_array_shapes,
+            &mut substitutions,
+            &mut shape_substitutions,
+        );
         for projection in &self.associated_projections {
             let receiver = substitutions
                 .get(&projection.receiver)
                 .copied()
                 .unwrap_or_else(|| {
-                    inference.instantiate_type(
+                    inference.instantiate_type_with_array_shapes(
                         Type::Variable(projection.receiver),
                         &self.generalized,
+                        &self.generalized_array_shapes,
                         &mut substitutions,
+                        &mut shape_substitutions,
                     )
                 });
             let projected =
@@ -125,10 +145,12 @@ impl FunctionSignature {
             // to a concrete type while leaving `T` generic over all matching
             // iterable shapes. Instantiate the original output either way,
             // then preserve the associated-type equality at this call site.
-            let expected = inference.instantiate_type(
+            let expected = inference.instantiate_type_with_array_shapes(
                 Type::Variable(projection.output),
                 &self.generalized,
+                &self.generalized_array_shapes,
                 &mut substitutions,
+                &mut shape_substitutions,
             );
             inference
                 .unify_deferred(expected, projected)
@@ -159,15 +181,21 @@ impl DeclarationEnvironment {
         &mut self,
         function: FunctionId,
         generalized: Vec<u32>,
+        generalized_array_shapes: Vec<u32>,
         associated_projections: Vec<crate::inference::AssociatedProjection>,
     ) {
         self.function_signatures
             .get_mut(&function)
             .expect("collected functions have canonical signatures")
             .generalized = generalized.clone();
+        self.function_signatures
+            .get_mut(&function)
+            .expect("collected functions have canonical signatures")
+            .generalized_array_shapes = generalized_array_shapes.clone();
         for signature in self.functions.values_mut().chain(self.methods.values_mut()) {
             if signature.id == function {
                 signature.generalized = generalized.clone();
+                signature.generalized_array_shapes = generalized_array_shapes.clone();
                 signature.associated_projections = associated_projections.clone();
             }
         }

@@ -273,7 +273,19 @@ impl Checker {
                         .map(|array| (id, array.element)),
                     _ => None,
                 });
-                let (id, element_type) = if let Some((id, element)) = hinted {
+                let (id, element_type) = if let Some((expected_id, element)) = hinted {
+                    let id = if matches!(
+                        self.inference.array_shape(expected_id),
+                        crate::inference::ArrayShape::Variable(_)
+                    ) {
+                        // A literal creates growable storage unless an exact
+                        // contextual length says otherwise. Do not let an
+                        // omitted annotation borrow the shape variable as if
+                        // construction itself were shape-neutral.
+                        self.array_type_id(element)
+                    } else {
+                        expected_id
+                    };
                     (id, element)
                 } else {
                     let element = self.fresh_inference(Requirements::none(), None);
@@ -1329,7 +1341,10 @@ impl Checker {
                     .iter()
                     .enumerate()
                     .map(|(index, parameter)| {
-                        let annotation = parameter.annotation.map(|ty| self.syntax_type(ty));
+                        let annotation = parameter.annotation.map(|ty| {
+                            let ty = self.syntax_type(ty);
+                            self.inference.freshen_omitted_array_shapes(ty)
+                        });
                         let contextual = hinted.as_ref().map(|(parameters, _)| parameters[index]);
                         match (annotation, contextual) {
                             (Some(annotation), Some(contextual)) => self
@@ -1341,7 +1356,10 @@ impl Checker {
                         }
                     })
                     .collect::<Vec<_>>();
-                let annotated_result = return_annotation.map(|ty| self.syntax_type(ty));
+                let annotated_result = return_annotation.map(|ty| {
+                    let ty = self.syntax_type(ty);
+                    self.inference.freshen_omitted_array_shapes(ty)
+                });
                 let annotated_completion =
                     annotated_result.map(|result| match self.shallow_type(result) {
                         Type::Async(future) => self.inference.async_value(future),
@@ -2517,7 +2535,7 @@ impl Checker {
                 if self.inference.variable_requirements(variable).is_empty() =>
             {
                 let element = self.fresh_inference(Requirements::none(), None);
-                let array = Type::Array(self.array_type_id(element));
+                let array = Type::Array(self.inference.inferred_array_type(element));
                 self.unify(receiver_ty, array, receiver.span)?;
                 element
             }

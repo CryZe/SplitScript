@@ -72,7 +72,13 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
         .map(|array| ResolvedArrayType {
             id: array.id,
             element: array.element.to_ref(checker.inference.type_store()),
-            length: array.length,
+            length: match array.shape {
+                crate::inference::ArrayShape::Exact(length) => Some(length),
+                crate::inference::ArrayShape::Growable => None,
+                crate::inference::ArrayShape::Variable(_) => {
+                    unreachable!("array shapes are concrete after finalization")
+                }
+            },
         })
         .collect::<Vec<_>>();
     let option_types = checker

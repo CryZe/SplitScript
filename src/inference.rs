@@ -202,7 +202,25 @@ impl LiteralDefault {
 pub(crate) struct ArrayLayout {
     pub(crate) id: ArrayTypeId,
     pub(crate) element: Type,
-    pub(crate) length: Option<u32>,
+    pub(crate) shape: ArrayShape,
+}
+
+/// The statically known shape of an array value.
+///
+/// Shape variables are deliberately separate from ordinary type variables:
+/// an array can have a fully known element type while its exact-length versus
+/// growable refinement is still being inferred through a function signature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ArrayShape {
+    Growable,
+    Exact(u32),
+    Variable(u32),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ArrayShapeVariable {
+    parent: u32,
+    binding: Option<ArrayShape>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -268,6 +286,7 @@ pub(crate) struct InferenceContext {
     standard_library: StandardLibrary,
     types: TypeStore,
     variables: Vec<Variable>,
+    array_shape_variables: Vec<ArrayShapeVariable>,
     associated_projections: Vec<AssociatedProjection>,
     arrays: Vec<ArrayLayout>,
     options: Vec<OptionLayout>,
@@ -326,14 +345,14 @@ impl InferenceContext {
         for set in &mut sets {
             let backing = arrays
                 .iter()
-                .find(|array| array.element == set.element && array.length.is_none())
+                .find(|array| array.element == set.element && array.shape == ArrayShape::Growable)
                 .map(|array| array.id)
                 .unwrap_or_else(|| {
                     let id = constructed_type_ids.array();
                     arrays.push(ArrayLayout {
                         id,
                         element: set.element,
-                        length: None,
+                        shape: ArrayShape::Growable,
                     });
                     id
                 });
@@ -343,6 +362,7 @@ impl InferenceContext {
             standard_library,
             types,
             variables: Vec::new(),
+            array_shape_variables: Vec::new(),
             associated_projections: Vec::new(),
             arrays,
             options,
@@ -762,7 +782,10 @@ impl InferenceContext {
         };
         let value = *value;
         match constructor {
-            StdlibTypeConstructorId::Array => Type::Array(self.array_type(value)),
+            // Standard-library array operations are shape-polymorphic by
+            // default. Structural mutators add the growable constraint during
+            // call resolution; read-only operations remain usable on `[T; N]`.
+            StdlibTypeConstructorId::Array => Type::Array(self.inferred_array_type(value)),
             StdlibTypeConstructorId::Option => Type::Option(self.option_type(value)),
             StdlibTypeConstructorId::Result => Type::Result(self.result_type(value)),
             StdlibTypeConstructorId::Set => Type::Set(self.set_type(value)),
@@ -782,11 +805,29 @@ impl InferenceContext {
     /// `substitutions` across all parameters and the result preserves equality
     /// relationships such as `(T, T) -> T`, including when `T` is nested in a
     /// constructed GC type.
+    #[cfg(test)]
     pub(crate) fn instantiate_type(
         &mut self,
         ty: Type,
         generalized: &[u32],
         substitutions: &mut HashMap<u32, Type>,
+    ) -> Type {
+        self.instantiate_type_with_array_shapes(
+            ty,
+            generalized,
+            &[],
+            substitutions,
+            &mut HashMap::new(),
+        )
+    }
+
+    pub(crate) fn instantiate_type_with_array_shapes(
+        &mut self,
+        ty: Type,
+        generalized: &[u32],
+        generalized_shapes: &[u32],
+        substitutions: &mut HashMap<u32, Type>,
+        shape_substitutions: &mut HashMap<u32, ArrayShape>,
     ) -> Type {
         match self.shallow(ty) {
             Type::Variable(variable) if generalized.contains(&variable) => {
@@ -806,16 +847,37 @@ impl InferenceContext {
             variable @ Type::Variable(_) => variable,
             Type::Array(array) => {
                 let element = self.array_element(array);
-                let instantiated = self.instantiate_type(element, generalized, substitutions);
-                if instantiated == element {
+                let instantiated = self.instantiate_type_with_array_shapes(
+                    element,
+                    generalized,
+                    generalized_shapes,
+                    substitutions,
+                    shape_substitutions,
+                );
+                let shape = self.array_shape(array);
+                let instantiated_shape = match shape {
+                    ArrayShape::Variable(variable) if generalized_shapes.contains(&variable) => {
+                        *shape_substitutions
+                            .entry(variable)
+                            .or_insert_with(|| self.fresh_array_shape())
+                    }
+                    shape => shape,
+                };
+                if instantiated == element && instantiated_shape == shape {
                     Type::Array(array)
                 } else {
-                    Type::Array(self.array_type_with_length(instantiated, self.array_length(array)))
+                    Type::Array(self.array_type_with_shape(instantiated, instantiated_shape))
                 }
             }
             Type::Set(set) => {
                 let element = self.set_element(set);
-                let instantiated = self.instantiate_type(element, generalized, substitutions);
+                let instantiated = self.instantiate_type_with_array_shapes(
+                    element,
+                    generalized,
+                    generalized_shapes,
+                    substitutions,
+                    shape_substitutions,
+                );
                 if instantiated == element {
                     Type::Set(set)
                 } else {
@@ -827,7 +889,15 @@ impl InferenceContext {
                 let arguments = self.application_arguments(application).to_vec();
                 let instantiated = arguments
                     .iter()
-                    .map(|argument| self.instantiate_type(*argument, generalized, substitutions))
+                    .map(|argument| {
+                        self.instantiate_type_with_array_shapes(
+                            *argument,
+                            generalized,
+                            generalized_shapes,
+                            substitutions,
+                            shape_substitutions,
+                        )
+                    })
                     .collect::<Vec<_>>();
                 if instantiated == arguments {
                     Type::Application(application)
@@ -837,7 +907,13 @@ impl InferenceContext {
             }
             Type::Option(option) => {
                 let value = self.option_value(option);
-                let instantiated = self.instantiate_type(value, generalized, substitutions);
+                let instantiated = self.instantiate_type_with_array_shapes(
+                    value,
+                    generalized,
+                    generalized_shapes,
+                    substitutions,
+                    shape_substitutions,
+                );
                 if instantiated == value {
                     Type::Option(option)
                 } else {
@@ -846,7 +922,13 @@ impl InferenceContext {
             }
             Type::Result(result) => {
                 let value = self.result_value(result);
-                let instantiated = self.instantiate_type(value, generalized, substitutions);
+                let instantiated = self.instantiate_type_with_array_shapes(
+                    value,
+                    generalized,
+                    generalized_shapes,
+                    substitutions,
+                    shape_substitutions,
+                );
                 if instantiated == value {
                     Type::Result(result)
                 } else {
@@ -855,7 +937,13 @@ impl InferenceContext {
             }
             Type::Async(future) => {
                 let value = self.async_value(future);
-                let instantiated = self.instantiate_type(value, generalized, substitutions);
+                let instantiated = self.instantiate_type_with_array_shapes(
+                    value,
+                    generalized,
+                    generalized_shapes,
+                    substitutions,
+                    shape_substitutions,
+                );
                 if instantiated == value {
                     Type::Async(future)
                 } else {
@@ -867,9 +955,23 @@ impl InferenceContext {
                 let result = self.callable_result(callable);
                 let instantiated_parameters = parameters
                     .iter()
-                    .map(|parameter| self.instantiate_type(*parameter, generalized, substitutions))
+                    .map(|parameter| {
+                        self.instantiate_type_with_array_shapes(
+                            *parameter,
+                            generalized,
+                            generalized_shapes,
+                            substitutions,
+                            shape_substitutions,
+                        )
+                    })
                     .collect::<Vec<_>>();
-                let instantiated_result = self.instantiate_type(result, generalized, substitutions);
+                let instantiated_result = self.instantiate_type_with_array_shapes(
+                    result,
+                    generalized,
+                    generalized_shapes,
+                    substitutions,
+                    shape_substitutions,
+                );
                 if instantiated_parameters == parameters && instantiated_result == result {
                     Type::Callable(callable)
                 } else {
@@ -878,7 +980,13 @@ impl InferenceContext {
             }
             Type::Range(range) => {
                 let bound = self.range_bound(range);
-                let instantiated = self.instantiate_type(bound, generalized, substitutions);
+                let instantiated = self.instantiate_type_with_array_shapes(
+                    bound,
+                    generalized,
+                    generalized_shapes,
+                    substitutions,
+                    shape_substitutions,
+                );
                 if instantiated == bound {
                     Type::Range(range)
                 } else {
@@ -929,6 +1037,112 @@ impl InferenceContext {
             }
             Type::Range(range) => self.collect_unbound_variables(self.range_bound(range), output),
             Type::Known(_) => {}
+        }
+    }
+
+    pub(crate) fn unbound_array_shapes_in(
+        &mut self,
+        types: impl IntoIterator<Item = Type>,
+    ) -> Vec<u32> {
+        let mut shapes = Vec::new();
+        for ty in types {
+            self.collect_unbound_array_shapes(ty, &mut shapes);
+        }
+        shapes
+    }
+
+    fn collect_unbound_array_shapes(&mut self, ty: Type, output: &mut Vec<u32>) {
+        match self.shallow(ty) {
+            Type::Array(array) => {
+                if let ArrayShape::Variable(variable) = self.array_shape(array)
+                    && !output.contains(&variable)
+                {
+                    output.push(variable);
+                }
+                self.collect_unbound_array_shapes(self.array_element(array), output);
+            }
+            Type::Set(set) => self.collect_unbound_array_shapes(self.set_element(set), output),
+            Type::Application(application) => {
+                for argument in self.application_arguments(application).to_vec() {
+                    self.collect_unbound_array_shapes(argument, output);
+                }
+            }
+            Type::Option(option) => {
+                self.collect_unbound_array_shapes(self.option_value(option), output)
+            }
+            Type::Result(result) => {
+                self.collect_unbound_array_shapes(self.result_value(result), output)
+            }
+            Type::Async(future) => {
+                self.collect_unbound_array_shapes(self.async_value(future), output)
+            }
+            Type::Callable(callable) => {
+                for parameter in self.callable_parameters(callable).to_vec() {
+                    self.collect_unbound_array_shapes(parameter, output);
+                }
+                self.collect_unbound_array_shapes(self.callable_result(callable), output);
+            }
+            Type::Range(range) => {
+                self.collect_unbound_array_shapes(self.range_bound(range), output)
+            }
+            Type::Known(_) | Type::Variable(_) => {}
+        }
+    }
+
+    /// Replaces every omitted array shape nested in a source annotation with
+    /// a fresh shape variable. The parser interns source type syntax, so this
+    /// elaboration step is what prevents unrelated annotations from sharing a
+    /// single inference decision.
+    pub(crate) fn freshen_omitted_array_shapes(&mut self, ty: Type) -> Type {
+        match self.shallow(ty) {
+            Type::Array(array) => {
+                let element = self.freshen_omitted_array_shapes(self.array_element(array));
+                let shape = match self.array_shape(array) {
+                    ArrayShape::Growable => self.fresh_array_shape(),
+                    shape => shape,
+                };
+                Type::Array(self.array_type_with_shape(element, shape))
+            }
+            Type::Option(option) => {
+                let value = self.freshen_omitted_array_shapes(self.option_value(option));
+                Type::Option(self.option_type(value))
+            }
+            Type::Result(result) => {
+                let value = self.freshen_omitted_array_shapes(self.result_value(result));
+                Type::Result(self.result_type(value))
+            }
+            Type::Async(future) => {
+                let value = self.freshen_omitted_array_shapes(self.async_value(future));
+                Type::Async(self.async_type(value))
+            }
+            Type::Callable(callable) => {
+                let parameters = self.callable_parameters(callable).to_vec();
+                let result = self.callable_result(callable);
+                let parameters = parameters
+                    .into_iter()
+                    .map(|parameter| self.freshen_omitted_array_shapes(parameter))
+                    .collect();
+                let result = self.freshen_omitted_array_shapes(result);
+                Type::Callable(self.callable_type(parameters, result))
+            }
+            Type::Set(set) => {
+                let element = self.freshen_omitted_array_shapes(self.set_element(set));
+                Type::Set(self.set_type(element))
+            }
+            Type::Range(range) => {
+                let bound = self.freshen_omitted_array_shapes(self.range_bound(range));
+                Type::Range(self.range_type(bound, self.range_kind(range)))
+            }
+            Type::Application(application) => {
+                let constructor = self.application_constructor(application);
+                let arguments = self.application_arguments(application).to_vec();
+                let arguments = arguments
+                    .into_iter()
+                    .map(|argument| self.freshen_omitted_array_shapes(argument))
+                    .collect();
+                Type::Application(self.application_type(constructor, arguments))
+            }
+            ty @ (Type::Known(_) | Type::Variable(_)) => ty,
         }
     }
 
@@ -1009,10 +1223,10 @@ impl InferenceContext {
                 self.bind(variable, ty)
             }
             (Type::Array(left), Type::Array(right)) => {
-                if matches!(
-                    (self.array_length(left), self.array_length(right)),
-                    (Some(left), Some(right)) if left != right
-                ) {
+                if self
+                    .unify_array_shapes(self.array_shape(left), self.array_shape(right))
+                    .is_err()
+                {
                     return Err(InferenceError::TypeMismatch {
                         left: Type::Array(left),
                         right: Type::Array(right),
@@ -1352,7 +1566,12 @@ impl InferenceContext {
     }
 
     pub(crate) fn array_type(&mut self, element: Type) -> ArrayTypeId {
-        self.array_type_with_length(element, None)
+        self.array_type_with_shape(element, ArrayShape::Growable)
+    }
+
+    pub(crate) fn inferred_array_type(&mut self, element: Type) -> ArrayTypeId {
+        let shape = self.fresh_array_shape();
+        self.array_type_with_shape(element, shape)
     }
 
     pub(crate) fn array_type_with_length(
@@ -1360,19 +1579,22 @@ impl InferenceContext {
         element: Type,
         length: Option<u32>,
     ) -> ArrayTypeId {
+        self.array_type_with_shape(
+            element,
+            length.map_or(ArrayShape::Growable, ArrayShape::Exact),
+        )
+    }
+
+    fn array_type_with_shape(&mut self, element: Type, shape: ArrayShape) -> ArrayTypeId {
         if let Some(array) = self
             .arrays
             .iter()
-            .find(|array| array.element == element && array.length == length)
+            .find(|array| array.element == element && array.shape == shape)
         {
             return array.id;
         }
         let id = self.constructed_type_ids.array();
-        self.arrays.push(ArrayLayout {
-            id,
-            element,
-            length,
-        });
+        self.arrays.push(ArrayLayout { id, element, shape });
         id
     }
 
@@ -1385,11 +1607,74 @@ impl InferenceContext {
     }
 
     pub(crate) fn array_length(&self, id: ArrayTypeId) -> Option<u32> {
-        self.arrays
+        match self.array_shape(id) {
+            ArrayShape::Exact(length) => Some(length),
+            ArrayShape::Growable | ArrayShape::Variable(_) => None,
+        }
+    }
+
+    pub(crate) fn array_shape(&self, id: ArrayTypeId) -> ArrayShape {
+        let shape = self
+            .arrays
             .iter()
             .find(|array| array.id == id)
             .expect("checked array type has a layout")
-            .length
+            .shape;
+        self.shallow_array_shape(shape)
+    }
+
+    pub(crate) fn require_growable_array(&mut self, id: ArrayTypeId) -> Result<(), ()> {
+        self.unify_array_shapes(self.array_shape(id), ArrayShape::Growable)
+    }
+
+    fn fresh_array_shape(&mut self) -> ArrayShape {
+        let id = self.array_shape_variables.len() as u32;
+        self.array_shape_variables.push(ArrayShapeVariable {
+            parent: id,
+            binding: None,
+        });
+        ArrayShape::Variable(id)
+    }
+
+    fn array_shape_root(&self, mut variable: u32) -> u32 {
+        loop {
+            let parent = self.array_shape_variables[variable as usize].parent;
+            if parent == variable {
+                return variable;
+            }
+            variable = parent;
+        }
+    }
+
+    fn shallow_array_shape(&self, shape: ArrayShape) -> ArrayShape {
+        let ArrayShape::Variable(variable) = shape else {
+            return shape;
+        };
+        let root = self.array_shape_root(variable);
+        self.array_shape_variables[root as usize]
+            .binding
+            .map_or(ArrayShape::Variable(root), |binding| {
+                self.shallow_array_shape(binding)
+            })
+    }
+
+    fn unify_array_shapes(&mut self, left: ArrayShape, right: ArrayShape) -> Result<(), ()> {
+        let left = self.shallow_array_shape(left);
+        let right = self.shallow_array_shape(right);
+        match (left, right) {
+            (ArrayShape::Variable(left), ArrayShape::Variable(right)) if left == right => Ok(()),
+            (ArrayShape::Variable(left), ArrayShape::Variable(right)) => {
+                self.array_shape_variables[right as usize].parent = left;
+                Ok(())
+            }
+            (ArrayShape::Variable(variable), shape) | (shape, ArrayShape::Variable(variable)) => {
+                self.array_shape_variables[variable as usize].binding = Some(shape);
+                Ok(())
+            }
+            (ArrayShape::Growable, ArrayShape::Growable) => Ok(()),
+            (ArrayShape::Exact(left), ArrayShape::Exact(right)) if left == right => Ok(()),
+            _ => Err(()),
+        }
     }
 
     pub(crate) fn option_value(&self, id: OptionTypeId) -> Type {
@@ -1579,6 +1864,25 @@ impl InferenceContext {
     }
 
     pub(crate) fn finalize_arrays(&mut self) {
+        // Shape-polymorphic signatures have served their purpose once every
+        // call has been checked. The semantic product and backend only need a
+        // concrete representation; an unconstrained omitted shape defaults to
+        // the ordinary growable array representation.
+        for id in 0..self.array_shape_variables.len() as u32 {
+            let root = self.array_shape_root(id);
+            if root == id && self.array_shape_variables[root as usize].binding.is_none() {
+                self.array_shape_variables[root as usize].binding = Some(ArrayShape::Growable);
+            }
+        }
+        let shapes = self
+            .arrays
+            .iter()
+            .map(|array| self.shallow_array_shape(array.shape))
+            .collect::<Vec<_>>();
+        for (array, shape) in self.arrays.iter_mut().zip(shapes) {
+            array.shape = shape;
+        }
+
         let unresolved = self
             .arrays
             .iter()
@@ -1600,7 +1904,7 @@ impl InferenceContext {
         loop {
             let previous = self.canonical_arrays.clone();
             self.canonical_arrays.clear();
-            let mut representatives = Vec::<(Type, Option<u32>, ArrayTypeId)>::new();
+            let mut representatives = Vec::<(Type, ArrayShape, ArrayTypeId)>::new();
             for array in &self.arrays {
                 let element = canonical_constructed_type(
                     array.element,
@@ -1612,11 +1916,11 @@ impl InferenceContext {
                 );
                 let canonical = representatives
                     .iter()
-                    .find_map(|(candidate, length, id)| {
-                        (*candidate == element && *length == array.length).then_some(*id)
+                    .find_map(|(candidate, shape, id)| {
+                        (*candidate == element && *shape == array.shape).then_some(*id)
                     })
                     .unwrap_or_else(|| {
-                        representatives.push((element, array.length, array.id));
+                        representatives.push((element, array.shape, array.id));
                         array.id
                     });
                 self.canonical_arrays.insert(array.id, canonical);
@@ -2606,7 +2910,7 @@ mod tests {
                 arrays: vec![ArrayLayout {
                     id: array,
                     element: u32_type,
-                    length: None,
+                    shape: ArrayShape::Growable,
                 }],
                 options: vec![OptionLayout {
                     id: option,

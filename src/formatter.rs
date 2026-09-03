@@ -1929,11 +1929,15 @@ fn needs_space(
     {
         return false;
     }
-    // A block opening is always separated from its header. This must take
-    // precedence over prefix-operator tracking because `!` is also the postfix
-    // Result marker in a return type.
+    // A block opening is separated from its header, but a brace nested directly
+    // inside another delimiter is its operand rather than a new header. This
+    // covers ordinary block expressions and anonymous struct patterns such as
+    // `Possible.Value({ x, y })` without weakening `if value { ... }`.
     if matches!(current, TokenKind::LBrace) {
-        return true;
+        return !matches!(
+            previous,
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::TemplateExprStart
+        );
     }
     if previous_was_prefix {
         return false;
@@ -2251,6 +2255,32 @@ whileAttached{let Point{x:localX,y:localY}=Point{x:globalX,y:globalY};let add=(P
         }
         assert_eq!(format_source(&formatted).unwrap(), formatted);
         crate::compile(&formatted).expect("formatted binding patterns should compile");
+    }
+
+    #[test]
+    fn joins_anonymous_struct_patterns_to_their_wrapper_delimiter() {
+        let source = r#"struct Pos{x:u16,y:u16}
+enum Possible{Value(Pos),Impossible(Never)}
+state "game.exe"{}
+fn unwrap(Possible.Value( { x,y } ):Possible)->u16{return x+y}"#;
+        let expected = r#"struct Pos {
+    x: u16,
+    y: u16,
+}
+enum Possible {
+    Value(Pos),
+    Impossible(Never),
+}
+state "game.exe" {}
+fn unwrap(Possible.Value({ x, y }): Possible) -> u16 {
+    return x + y
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        crate::compile(&formatted).expect("the formatted wrapper pattern should compile");
     }
 
     #[test]

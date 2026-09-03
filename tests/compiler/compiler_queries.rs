@@ -1627,6 +1627,66 @@ fn struct_pattern_tooling_preserves_field_and_binding_identities() {
 }
 
 #[test]
+fn binding_pattern_shorthand_renames_expand_at_every_declaration_site() {
+    use splitscript::tooling::database::CompilerDatabase;
+
+    let source = r#"
+        struct Pos { x: u16, y: u16 }
+        state "game.exe" {}
+        fn parameter(Pos { x, y }: Pos) -> u16 { return x + y }
+        fn local(pos: Pos) -> u16 {
+            let Pos { x, y } = pos
+            return x + y
+        }
+        fn iterate() {
+            for Pos { x, y } in [Pos { x: 1, y: 2 }] {
+                print(x + y)
+            }
+        }
+        fn closure(value: Pos) -> u16 {
+            let sum = (Pos { x, y }: Pos) => x + y
+            return sum(value)
+        }
+        fn literal(x: u16, y: u16) -> Pos { return Pos { x, y } }
+    "#;
+    let field_declaration = source.find("x: u16").unwrap();
+    let parameter_shorthand =
+        source.find("fn parameter(Pos { x, y }").unwrap() + "fn parameter(Pos { ".len();
+    let local_pattern = source.find("let Pos { x, y }").unwrap() + "let Pos { ".len();
+    let for_pattern = source.find("for Pos { x, y }").unwrap() + "for Pos { ".len();
+    let closure_pattern = source.find("(Pos { x, y }: Pos) =>").unwrap() + "(Pos { ".len();
+    let literal_shorthand = source.find("return Pos { x, y }").unwrap() + "return Pos { ".len();
+
+    let mut database = CompilerDatabase::new(source);
+    let rename = database
+        .rename_at(field_declaration, "horizontal")
+        .expect("renaming a struct field should expand every binding shorthand");
+    for shorthand in [
+        parameter_shorthand,
+        local_pattern,
+        for_pattern,
+        closure_pattern,
+        literal_shorthand,
+    ] {
+        assert!(
+            rename
+                .edits
+                .iter()
+                .any(|edit| edit.span.start == shorthand && edit.replacement == "horizontal: x"),
+            "missing shorthand expansion at {shorthand}: {rename:#?}"
+        );
+    }
+
+    let mut database = CompilerDatabase::new(source);
+    let rename = database
+        .rename_at(parameter_shorthand, "horizontal")
+        .expect("renaming the parameter binding should split its shorthand");
+    assert!(rename.edits.iter().any(|edit| {
+        edit.span.start == parameter_shorthand && edit.replacement == "x: horizontal"
+    }));
+}
+
+#[test]
 fn unrelated_renames_preserve_both_identities_of_unchanged_struct_shorthand() {
     use splitscript::tooling::database::CompilerDatabase;
 

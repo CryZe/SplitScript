@@ -425,6 +425,10 @@ struct StructShorthandCollector<'a> {
 }
 
 impl<'ast> Visitor<'ast> for StructShorthandCollector<'_> {
+    fn visit_binding_pattern(&mut self, binding: &'ast crate::ast::BindingPattern) {
+        self.collect_pattern(&binding.pattern.kind, binding.pattern.id);
+    }
+
     fn visit_expr(&mut self, expression: &'ast Expr) {
         match &expression.kind {
             ExprKind::Struct { fields, .. } => {

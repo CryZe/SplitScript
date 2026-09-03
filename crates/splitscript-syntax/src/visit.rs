@@ -87,6 +87,12 @@ pub trait Visitor<'ast>: Sized {
         walk_parameter(self, parameter);
     }
 
+    /// Visits the shared destructuring pattern used by executable binding
+    /// sites such as parameters, variables, and `for` loops.
+    fn visit_binding_pattern(&mut self, binding: &'ast BindingPattern) {
+        walk_binding_pattern(self, binding);
+    }
+
     fn visit_action(&mut self, action: &'ast Action) {
         self.visit_block(&action.body);
     }
@@ -102,7 +108,7 @@ pub trait Visitor<'ast>: Sized {
     }
 
     fn visit_for_binding(&mut self, binding: &'ast ForBinding) {
-        self.visit_pattern(&binding.binding.pattern.kind);
+        self.visit_binding_pattern(&binding.binding);
     }
 
     fn visit_block(&mut self, block: &'ast Block) {
@@ -305,20 +311,27 @@ pub fn walk_function<'ast, V: Visitor<'ast>>(visitor: &mut V, function: &'ast Fu
 }
 
 pub fn walk_parameter<'ast, V: Visitor<'ast>>(visitor: &mut V, parameter: &'ast Parameter) {
-    visitor.visit_pattern(&parameter.binding.pattern.kind);
+    visitor.visit_binding_pattern(&parameter.binding);
     if let Some(annotation) = &parameter.annotation {
         visitor.visit_type_ref(annotation);
     }
 }
 
 pub fn walk_variable<'ast, V: Visitor<'ast>>(visitor: &mut V, variable: &'ast VariableDecl) {
-    visitor.visit_pattern(&variable.binding.pattern.kind);
+    visitor.visit_binding_pattern(&variable.binding);
     if let Some(annotation) = &variable.annotation {
         visitor.visit_type_ref(annotation);
     }
     if let Some(value) = &variable.value {
         visitor.visit_expr(value);
     }
+}
+
+pub fn walk_binding_pattern<'ast, V: Visitor<'ast>>(
+    visitor: &mut V,
+    binding: &'ast BindingPattern,
+) {
+    visitor.visit_pattern(&binding.pattern.kind);
 }
 
 pub fn walk_block<'ast, V: Visitor<'ast>>(visitor: &mut V, block: &'ast Block) {

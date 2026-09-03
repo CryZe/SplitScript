@@ -2592,4 +2592,37 @@ fn struct_field_shorthand_fixes_and_renames_preserve_both_identities() {
         .as_array()
         .expect("field rename edits");
     assert!(edits.iter().any(|edit| edit["newText"] == "horizontal: x"));
+
+    let pattern_source = concat!(
+        "struct Pos { x: u16, y: u16 }\n",
+        "state \"game.exe\" {}\n",
+        "fn use(Pos { x, y }: Pos) -> u16 { return x + y }\n"
+    );
+    let pattern_uri = "file:///binding-pattern-shorthand-rename.split";
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": pattern_uri,
+                "version": 1,
+                "text": pattern_source
+            }
+        }),
+    ));
+    let field = pattern_source.find("x: u16").unwrap();
+    let (line, character) = position_parts(pattern_source, field);
+    let renamed = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 27,
+        "method": "textDocument/rename",
+        "params": {
+            "textDocument": { "uri": pattern_uri },
+            "position": { "line": line, "character": character },
+            "newName": "horizontal"
+        }
+    }));
+    let edits = renamed[0]["result"]["changes"][pattern_uri]
+        .as_array()
+        .expect("binding-pattern field rename edits");
+    assert!(edits.iter().any(|edit| edit["newText"] == "horizontal: x"));
 }

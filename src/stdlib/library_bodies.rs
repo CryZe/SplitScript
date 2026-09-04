@@ -28,6 +28,12 @@ struct SelectedProviderContext {
     function_name: &'static str,
 }
 
+#[derive(Debug)]
+pub(super) struct RenderedLibraryBodies {
+    pub(super) source: String,
+    pub(super) body_ranges: Vec<(std::ops::Range<usize>, &'static str)>,
+}
+
 fn body_source(
     item: &StdlibItem,
     signature: Signature,
@@ -96,39 +102,27 @@ pub(crate) fn augment_program_with_library_bodies(
     user_program: &Program,
     library: &StandardLibrary,
 ) -> Result<Option<Program>, Vec<Diagnostic>> {
-    let mut combined = String::new();
-    let mut body_ranges = Vec::new();
-    for item in library.all_items() {
-        let bodies = match item.implementation {
-            Implementation::Intrinsic(_) | Implementation::CapabilityRequirement => Vec::new(),
-            Implementation::LibraryBody {
-                function_name,
-                body,
-            } => vec![(item.signature, function_name, body)],
-            Implementation::LibraryOverloads { cases, .. } => cases
-                .iter()
-                .map(|case| (case.signature, case.function_name, case.body))
-                .collect(),
-        };
-        for (signature, function_name, body) in bodies {
-            let source = body_source(item, signature, function_name, body, library);
-            if combined.is_empty() {
-                combined.reserve(user_source.len() + source.len() + 2);
-                combined.push_str(user_source);
-                combined.push('\n');
-            }
-            let start = combined.len();
-            combined.push_str(&source);
-            body_ranges.push((start..combined.len(), item.qualified_name));
-            combined.push('\n');
-        }
+    let rendered = library.rendered_library_bodies();
+    let mut combined = String::with_capacity(user_source.len() + rendered.source.len() + 2);
+    combined.push_str(user_source);
+    combined.push('\n');
+    let library_start = combined.len();
+    combined.push_str(&rendered.source);
+    let mut body_ranges = rendered
+        .body_ranges
+        .iter()
+        .map(|(range, name)| {
+            (
+                library_start + range.start..library_start + range.end,
+                *name,
+            )
+        })
+        .collect::<Vec<_>>();
+    if !rendered.source.is_empty() {
+        combined.push('\n');
     }
+    let has_library_bodies = !rendered.source.is_empty();
     if let Some(selected) = selected_provider_preparation(user_source, user_program, library) {
-        if combined.is_empty() {
-            combined.reserve(user_source.len() + selected.function_name.len() + 128);
-            combined.push_str(user_source);
-            combined.push('\n');
-        }
         let source = managed_preparation_source(
             user_program,
             selected.function_name,
@@ -143,10 +137,49 @@ pub(crate) fn augment_program_with_library_bodies(
             "the selected state-provider preparation",
         ));
         combined.push('\n');
-    }
-    if combined.is_empty() {
+    } else if !has_library_bodies {
         return Ok(None);
     }
+    parse_augmented_program(user_source, combined, body_ranges)
+}
+
+pub(super) fn render_library_bodies(library: &StandardLibrary) -> RenderedLibraryBodies {
+    let mut source = String::new();
+    let mut body_ranges = Vec::new();
+    for item in library.all_items() {
+        let bodies = match item.implementation {
+            Implementation::Intrinsic(_) | Implementation::CapabilityRequirement => Vec::new(),
+            Implementation::LibraryBody {
+                function_name,
+                body,
+            } => vec![(item.signature, function_name, body)],
+            Implementation::LibraryOverloads { cases, .. } => cases
+                .iter()
+                .map(|case| (case.signature, case.function_name, case.body))
+                .collect(),
+        };
+        for (signature, function_name, body) in bodies {
+            let body = body_source(item, signature, function_name, body, library);
+            let start = source.len();
+            source.push_str(&body);
+            body_ranges.push((start..source.len(), item.qualified_name));
+            source.push('\n');
+        }
+    }
+    if source.ends_with('\n') {
+        source.pop();
+    }
+    RenderedLibraryBodies {
+        source,
+        body_ranges,
+    }
+}
+
+fn parse_augmented_program(
+    user_source: &str,
+    combined: String,
+    body_ranges: Vec<(std::ops::Range<usize>, &'static str)>,
+) -> Result<Option<Program>, Vec<Diagnostic>> {
     let lexed = lexer::lex_lossless(&combined).map_err(|error| vec![error])?;
     let output = parser::parse_recovering(&combined, lexed.tokens().cloned().collect());
     if !output

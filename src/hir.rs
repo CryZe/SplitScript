@@ -797,6 +797,11 @@ impl TypedProgram {
             }
         }
 
+        let functions_by_name = syntax
+            .functions
+            .iter()
+            .map(|function| (function.name.as_str(), function.id))
+            .collect::<HashMap<_, _>>();
         let library_functions = standard_library
             .all_items()
             .iter()
@@ -813,18 +818,14 @@ impl TypedProgram {
                 let functions = function_names
                     .into_iter()
                     .map(|function_name| {
-                        let declaration = syntax
-                            .functions
-                            .iter()
-                            .find(|function| function.name == function_name);
+                        let declaration = functions_by_name.get(function_name).copied();
                         if library_bodies_expected {
                             Some(
                                 declaration
-                                    .expect("injected library bodies have parsed declarations")
-                                    .id,
+                                    .expect("injected library bodies have parsed declarations"),
                             )
                         } else {
-                            declaration.map(|function| function.id)
+                            declaration
                         }
                     })
                     .collect::<Option<Vec<_>>>()?;

@@ -670,46 +670,18 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
         DebugContext::from_declaration(function.debug_only),
         |checker| {
             let signature = checker.declarations.function_signatures[&function.id].clone();
-            if let Some(item) = checker
+            let library_item = checker
                 .standard_library
-                .all_items()
-                .iter()
-                .find(|item| match item.implementation {
-                    crate::stdlib::Implementation::LibraryBody { function_name, .. } => {
-                        function_name == function.name
-                    }
-                    crate::stdlib::Implementation::LibraryOverloads { cases, .. } => cases
-                        .iter()
-                        .any(|case| case.function_name == function.name),
-                    _ => false,
-                })
-                .copied()
-            {
-                seed_library_body_signature(checker, item, &signature, function.span);
+                .source_body_item_by_function_name(&function.name);
+            if let Some(item) = library_item {
+                seed_library_body_signature(checker, *item, &signature, function.span);
             }
             let failure = match checker.shallow_type(signature.completion) {
                 result @ Type::Result(_) => FailureContext::boundary(result),
                 _ => FailureContext::None,
             };
-            let callable = checker
-                .standard_library
-                .all_items()
-                .iter()
-                .find_map(|item| match item.implementation {
-                    crate::stdlib::Implementation::LibraryBody { function_name, .. }
-                        if function_name == function.name =>
-                    {
-                        Some(CallableContext::LibraryFunction(item.id))
-                    }
-                    crate::stdlib::Implementation::LibraryOverloads { cases, .. }
-                        if cases
-                            .iter()
-                            .any(|case| case.function_name == function.name) =>
-                    {
-                        Some(CallableContext::LibraryFunction(item.id))
-                    }
-                    _ => None,
-                })
+            let callable = library_item
+                .map(|item| CallableContext::LibraryFunction(item.id))
                 .unwrap_or_else(|| {
                     if function
                         .name

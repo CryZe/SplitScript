@@ -188,6 +188,12 @@ impl StandardLibrary {
         });
     }
 
+    fn rendered_library_bodies(&self) -> &library_bodies::RenderedLibraryBodies {
+        self.graph
+            .rendered_library_bodies
+            .get_or_init(|| library_bodies::render_library_bodies(self))
+    }
+
     pub(crate) fn source_body_operations_are_initialized(&self) -> bool {
         self.graph.source_body_operations_are_initialized()
     }
@@ -675,6 +681,16 @@ impl StandardLibrary {
         qualified_name: &str,
     ) -> Option<&'static StdlibItem> {
         self.graph.all_items_by_name.get(qualified_name).copied()
+    }
+
+    pub(crate) fn source_body_item_by_function_name(
+        &self,
+        function_name: &str,
+    ) -> Option<&'static StdlibItem> {
+        self.graph
+            .source_body_items_by_function_name
+            .get(function_name)
+            .copied()
     }
 
     pub(crate) fn method_items_named_including_private(

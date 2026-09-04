@@ -25,7 +25,8 @@ fn main() {
         .unwrap_or(DEFAULT_ITERATIONS);
     assert!(iterations > 0, "iteration count must be positive");
 
-    println!("profile=release");
+    println!("rust_harness_profile=release");
+    println!("splitscript_profile=release");
     println!(
         "platform={}-{} logical_cpus={}",
         std::env::consts::OS,
@@ -62,7 +63,14 @@ fn main() {
 }
 
 fn compile(source: &str) -> Vec<u8> {
-    splitscript::compile(source).unwrap_or_else(|diagnostics| {
+    splitscript::compile_with_options(
+        source,
+        splitscript::CompilerOptions {
+            profile: splitscript::BuildProfile::Release,
+            ..splitscript::CompilerOptions::default()
+        },
+    )
+    .unwrap_or_else(|diagnostics| {
         panic!(
             "baseline fixture failed to compile: {}",
             diagnostics

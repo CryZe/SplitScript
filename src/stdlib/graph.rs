@@ -6,17 +6,18 @@ use std::{
 };
 
 use super::{
-    CoreType, CoreTypeId, FieldVisibility, ItemKind, ItemVisibility, OperationMetadata,
-    StandardBinaryOperator, StandardUnaryOperator, StdlibCapability, StdlibCapabilityId,
-    StdlibField, StdlibFieldId, StdlibItem, StdlibItemId, StdlibNamespace, StdlibNamespaceId,
-    StdlibOwner, StdlibStateProvider, StdlibStateProviderId, StdlibSymbolId, StdlibType,
-    StdlibTypeConstructor, StdlibTypeConstructorId, StdlibTypeId, StdlibVariant, StdlibVariantId,
-    TypeRef, TypeVisibility,
+    CoreType, CoreTypeId, FieldVisibility, Implementation, ItemKind, ItemVisibility,
+    OperationMetadata, StandardBinaryOperator, StandardUnaryOperator, StdlibCapability,
+    StdlibCapabilityId, StdlibField, StdlibFieldId, StdlibItem, StdlibItemId, StdlibNamespace,
+    StdlibNamespaceId, StdlibOwner, StdlibStateProvider, StdlibStateProviderId, StdlibSymbolId,
+    StdlibType, StdlibTypeConstructor, StdlibTypeConstructorId, StdlibTypeId, StdlibVariant,
+    StdlibVariantId, TypeRef, TypeVisibility,
     catalog::{
         CAPABILITIES, FIELDS, ITEMS, NAMESPACES, STATE_PROVIDERS, TYPE_CONSTRUCTORS, TYPES,
         VARIANTS,
     },
     declarations::CORE_TYPES,
+    library_bodies::RenderedLibraryBodies,
 };
 
 /// Structurally validated storage behind the public `StandardLibrary` handle.
@@ -43,12 +44,14 @@ pub(super) struct StandardLibraryGraph {
     pub(super) items: HashMap<StdlibItemId, &'static StdlibItem>,
     pub(super) items_by_name: HashMap<&'static str, &'static StdlibItem>,
     pub(super) all_items_by_name: HashMap<&'static str, &'static StdlibItem>,
+    pub(super) source_body_items_by_function_name: HashMap<&'static str, &'static StdlibItem>,
     pub(super) methods: Vec<&'static StdlibItem>,
     pub(super) methods_by_name: HashMap<&'static str, Vec<&'static StdlibItem>>,
     pub(super) all_methods_by_name: HashMap<&'static str, Vec<&'static StdlibItem>>,
     pub(super) binary_operators: HashMap<StandardBinaryOperator, Vec<&'static StdlibItem>>,
     pub(super) unary_operators: HashMap<StandardUnaryOperator, Vec<&'static StdlibItem>>,
     pub(super) children_by_owner: HashMap<StdlibOwner, Vec<StdlibSymbolId>>,
+    pub(super) rendered_library_bodies: OnceLock<RenderedLibraryBodies>,
     source_body_operations: OnceLock<HashMap<StdlibItemId, OperationMetadata>>,
 }
 
@@ -153,6 +156,35 @@ impl StandardLibraryGraph {
             "public standard item name",
             &mut errors,
         );
+        let mut source_body_items_by_function_name = HashMap::new();
+        for item in ITEMS {
+            match item.implementation {
+                Implementation::LibraryBody { function_name, .. } => {
+                    if source_body_items_by_function_name
+                        .insert(function_name, item)
+                        .is_some()
+                    {
+                        errors.push(format!(
+                            "duplicate standard-library source function name `{function_name}`"
+                        ));
+                    }
+                }
+                Implementation::LibraryOverloads { cases, .. } => {
+                    for case in cases {
+                        if source_body_items_by_function_name
+                            .insert(case.function_name, item)
+                            .is_some()
+                        {
+                            errors.push(format!(
+                                "duplicate standard-library source function name `{}`",
+                                case.function_name
+                            ));
+                        }
+                    }
+                }
+                Implementation::Intrinsic(_) | Implementation::CapabilityRequirement => {}
+            }
+        }
 
         let fields_by_owner = group(FIELDS, |field| field.owner);
         let variants_by_owner = group(VARIANTS, |variant| variant.owner);
@@ -275,12 +307,14 @@ impl StandardLibraryGraph {
             items,
             items_by_name,
             all_items_by_name,
+            source_body_items_by_function_name,
             methods,
             methods_by_name,
             all_methods_by_name,
             binary_operators,
             unary_operators,
             children_by_owner: HashMap::new(),
+            rendered_library_bodies: OnceLock::new(),
             source_body_operations: OnceLock::new(),
         };
         graph.validate_references_and_index_ownership(&mut errors);

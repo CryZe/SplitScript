@@ -39,10 +39,10 @@ Validation: the full `cargo xtask check` passed for this batch, including the ne
 cache/type/local regression tests, editor/browser workers, Wasm validation, and
 host-runtime fixtures. Repeated Lunistice and Minish Cap builds are byte-identical.
 
-Still open: detailed stage instrumentation, lazy release debug-name construction,
-shared stage ownership, parsed standard-library reuse,
-and the larger backend/optimizer work. The suggested delivery order remains a
-guide to those remaining slices, not a list of fully completed milestones.
+Still open: detailed stage instrumentation, shared stage ownership, parsed
+standard-library reuse, and the larger backend/optimizer work. The suggested
+delivery order remains a guide to those remaining slices, not a list of fully
+completed milestones.
 
 ## Set-operation implementation batch
 
@@ -122,6 +122,35 @@ bytes for the measured workloads.
 Validation: all 53 targeted completion tests and the full `cargo xtask check`
 passed, including 410 library tests, 605 compiler integration tests, documentation,
 editor/browser checks, and Wasm/runtime fixtures.
+
+## Lazy release debug-name implementation batch
+
+Implemented the remaining debug-name item from order 2 on 2026-09-04. Function
+declaration accepts lazy name builders; release planning does not format or
+store names for helpers, specialized source functions, async pollers, closures,
+or function-value adapters. Names shared by an async initializer/poller are
+still rendered once in debug mode.
+
+Function indices and body counts now derive from the function section itself.
+They no longer depend on a debug-name vector existing. A 129-declaration
+regression checks identical encoded declarations in both profiles, zero release
+name-builder calls, and matching body counts. Existing profile tests cover
+debug names and DWARF locations.
+
+Release outputs for seven representative sources are byte-identical, including
+Lunistice, Minish Cap, sets, async loops, postfix calls, debug-only code, and a
+closure/function-value fixture. Some debug `.debug_info` sections vary between
+processes; repeat runs of the unchanged before compiler reproduce that behavior.
+The other sections, including executable code and names, are identical. This
+existing debug reproducibility issue is separate follow-up work.
+
+See [baselines](docs/BASELINES.md) for timing results and validation. This removes
+compiler bookkeeping work; it does not reduce emitted release-module sizes.
+The paired compiler timings do not establish an overall compile-time improvement.
+
+Validation: the focused declaration test, all 24 profile codegen tests, and the
+full `cargo xtask check` passed, including 411 library tests, 605 compiler
+integration tests, documentation, editor/browser checks, and Wasm/runtime fixtures.
 
 ## Evidence and scope
 
@@ -230,6 +259,9 @@ samples after warmup. Do not benchmark while the full test suite is running.
 Use counters and semantic assertions in tests, not wall-clock thresholds.
 
 ## 2. Remove small, repeated compiler work
+
+These items are implemented in the batches above. The following is the original
+review rationale and acceptance criteria.
 
 - [codegen::compile](src/codegen.rs) calls `validate_intrinsic_effects()` and
   `unity_layout::validate()` for every module. The former walks the complete

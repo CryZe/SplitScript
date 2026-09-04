@@ -290,6 +290,40 @@ All 53 targeted completion tests and the full `cargo xtask check` passed:
 editor/browser workers and web host, Wasm validation, and runtime fixtures.
 The full-check log is `target/performance-review/root-effects-check.log`.
 
+## 2026-09-04 lazy release debug names
+
+Before: `9ec7b63`. After: the lazy debug-name construction change. Both
+compiler runners used the Rust release profile, 20 warmups, and 200 measured
+iterations on the same fixtures. The runs were sequential, without concurrent
+builds or tests.
+
+| Fixture | Before median | After median | Before p95 | After p95 | Release Wasm bytes (both) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| minimal | 86.26 ms | 84.83 ms | 93.38 ms | 96.59 ms | 1,006 |
+| Lunistice | 100.37 ms | 100.76 ms | 110.11 ms | 111.46 ms | 34,526 |
+| cancellation | 86.25 ms | 87.61 ms | 95.26 ms | 97.74 ms | 2,795 |
+| settings | 89.91 ms | 90.10 ms | 103.04 ms | 100.24 ms | 8,044 |
+
+These timings do not establish an overall compile-time improvement. The change
+removes debug-name formatting and allocation in release builds; a focused test
+verifies that release never invokes the name builders while preserving function
+indices and counts across 129 declarations. Standard-library parsing/checking
+remains a much larger fixed cost.
+
+Before/after release modules were byte-identical for Lunistice, Minish Cap,
+`set_runtime`, `async_loop`, `postfix_calls`, `debug_profile`, and a callable
+probe containing both a captured closure and a generic function-value adapter.
+All seven outputs in both profiles passed Wasm validation. Debug modules were
+also byte-identical except for `.debug_info` in `set_runtime`, `postfix_calls`,
+and `debug_profile`. Repeating those builds with the unchanged before compiler
+reproduced the `.debug_info` variation. All other sections, including code and
+names, matched. This existing debug reproducibility issue is separate from the
+release optimization.
+
+The focused declaration test, all 24 profile codegen integration tests, and the
+full `cargo xtask check` passed, including 411 compiler library tests, 605 compiler
+integration tests, documentation, editor/browser checks, and Wasm/runtime fixtures.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

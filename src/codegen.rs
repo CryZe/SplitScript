@@ -565,7 +565,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         .then(debug_artifacts::DebugRecorder::default);
     let mut codes = code_bodies::CodeBodies::new(
         imported_functions,
-        function_debug_names.len(),
+        functions.len() as usize,
         debug_recorder.as_ref(),
     );
     let lowering = EmissionContext {

@@ -69,20 +69,6 @@ pub(super) enum LocalStorage<'a> {
 }
 
 impl LocalStorage<'_> {
-    pub(super) fn value(self, value: ValueId) -> Option<(u32, Type)> {
-        match self {
-            Self::Wasm { values, .. } => values.get(&value).copied(),
-            Self::Hybrid {
-                wasm_values,
-                frame_values,
-                ..
-            } => wasm_values
-                .get(&value)
-                .or_else(|| frame_values.get(&value))
-                .copied(),
-        }
-    }
-
     pub(super) fn continuation_frame(self) -> Option<AsyncFrameRef> {
         match self {
             Self::Hybrid { frame, .. } => Some(frame),
@@ -782,9 +768,18 @@ pub(super) struct MatchPatternBinding {
 
 #[derive(Clone)]
 struct PatternValue {
-    root_local: u32,
+    root: PatternRoot,
     ty: Type,
     projections: Vec<PatternProjection>,
+}
+
+#[derive(Clone, Copy)]
+enum PatternRoot {
+    /// Refutable match subjects are materialized once in a dedicated Wasm local.
+    Local(u32),
+    /// Irrefutable binding sources retain their planned storage, including an
+    /// async frame field when the value must survive a suspension.
+    Value(ValueId),
 }
 
 #[derive(Clone)]
@@ -807,9 +802,17 @@ enum PatternProjection {
 }
 
 impl PatternValue {
-    fn root(local: u32, ty: Type) -> Self {
+    fn local(local: u32, ty: Type) -> Self {
         Self {
-            root_local: local,
+            root: PatternRoot::Local(local),
+            ty,
+            projections: Vec::new(),
+        }
+    }
+
+    fn value(value: ValueId, ty: Type) -> Self {
+        Self {
+            root: PatternRoot::Value(value),
             ty,
             projections: Vec::new(),
         }
@@ -861,7 +864,14 @@ impl PatternValue {
         context: &ExprContext<'_>,
         projection_count: usize,
     ) {
-        function.instruction(&Instruction::LocalGet(self.root_local));
+        match self.root {
+            PatternRoot::Local(local) => {
+                function.instruction(&Instruction::LocalGet(local));
+            }
+            PatternRoot::Value(value) => {
+                compile_value_get(function, value, context);
+            }
+        }
         for (projection_index, projection) in
             self.projections[..projection_count].iter().enumerate()
         {
@@ -1216,7 +1226,7 @@ pub(super) fn compile_statement_pattern(
     compile_projected_pattern(
         function,
         pattern,
-        &PatternValue::root(value_local, value_type),
+        &PatternValue::local(value_local, value_type),
         context,
     )
 }
@@ -1237,11 +1247,13 @@ pub(super) fn compile_irrefutable_pattern(
     value: ValueId,
     context: &ExprContext<'_>,
 ) {
-    let (value_local, value_type) = context
-        .locals
-        .value(value)
-        .expect("irrefutable pattern roots have planned local storage");
-    let bindings = compile_statement_pattern(function, pattern, value_local, value_type, context);
+    let value_type = stored_value_type(value, context);
+    let bindings = compile_projected_pattern(
+        function,
+        pattern,
+        &PatternValue::value(value, value_type),
+        context,
+    );
     if bindings.is_empty() {
         function.instruction(&Instruction::Drop);
         return;

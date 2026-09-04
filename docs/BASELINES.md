@@ -230,6 +230,66 @@ All 49 targeted completion tests and the full `cargo xtask check` passed:
 editor/browser workers and web host, Wasm validation, and runtime fixtures.
 The full-check log is `target/performance-review/direct-completion-check.log`.
 
+## 2026-09-04 root completion availability caching
+
+The focused root-completion workload is reproducible with:
+
+```console
+cargo run --release --example tooling_baseline -- 500 30 --root-effects
+```
+
+It measures 500 pure helper functions plus state-dependent functions, completing
+`hel` in `onDetach`. The valid case completes inside `helper0(0)`, the partial
+case contains an unknown `hel` expression that repair can fix, and the failed
+case adds another unknown expression that repair cannot fix. Each case measures
+both appended-comment edits and repeated requests at the unchanged identifier.
+
+Compared `e5c1a8a` plus this benchmark mode against the implementation using
+saved/rebuilt release harnesses, the same toolchain and source bytes, 20 warmups,
+and 30 measured samples. Runs were sequential without repository builds or
+tests in parallel.
+
+| Repeated root completion | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Valid source | 5.37 ms | 5.35 ms | 5.88 ms | 5.67 ms |
+| Partial identifier, successful repair | 138.13 ms | 5.40 ms | 147.03 ms | 5.84 ms |
+| Failed repair | 217.87 ms | 4.77 ms | 232.52 ms | 5.07 ms |
+
+Successful and failed repeated repairs improve by 96.1% and 97.8% respectively.
+The valid case already reused semantic analysis and remains approximately
+unchanged: constructing/filtering hundreds of candidates still costs time.
+
+| First root completion after edit | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Valid source | 78.77 ms | 81.14 ms | 147.52 ms | 238.63 ms |
+| Partial identifier | 352.61 ms | 355.47 ms | 374.09 ms | 372.83 ms |
+| Failed repair | 436.46 ms | 436.74 ms | 457.07 ms | 481.82 ms |
+
+No first-request improvement is established. Edit medians are close, while
+tail latency, especially in the valid case, varies substantially. The cache
+invalidates on every edit; repeated standard-library work and strict/recovered
+analysis are still the major cold-query targets.
+
+The cache stores source-function availability IDs, not complete effect analyses
+or repaired compiler databases. Retained heap after one request rises by 120
+bytes (valid), 216 (successful repair), and 96 (failed repair). Repeated-query
+peak allocation deltas drop from 361,675 to 293,491 bytes, 16,652,453 to 293,491,
+and 19,002,751 to 131,072 respectively. Initial-query peak usage is unchanged.
+
+Separately, counter tests verify that top-level completion, fully available
+lifecycle contexts, and sources without standalone functions skip availability
+analysis. These cases are not timed by the focused table above. Other tests
+verify transitive restrictions, per-context filtering, caret reuse, source-edit
+invalidation, distinct repair keys, and eviction from the four-entry cache.
+
+Logs are under ignored `target/performance-review/root-effects-before.txt` and
+`root-effects-after.txt`.
+
+All 53 targeted completion tests and the full `cargo xtask check` passed:
+410 library tests, 605 compiler integration tests, documentation validation,
+editor/browser workers and web host, Wasm validation, and runtime fixtures.
+The full-check log is `target/performance-review/root-effects-check.log`.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

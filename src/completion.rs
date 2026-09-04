@@ -1,6 +1,9 @@
 //! Compiler-owned completion candidates shared by editor frontends.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 mod patterns;
 mod settings;
@@ -16,7 +19,7 @@ use types::{complete_explicit_type_argument, complete_type_position};
 
 use crate::{
     ast::{
-        Block, Expr, ExprKind, MatchPattern, Program, SettingKind, Span, Stmt,
+        Block, Expr, ExprKind, FunctionId, MatchPattern, Program, SettingKind, Span, Stmt,
         TypeRef as SyntaxTypeRef,
     },
     catalog::Documentation,
@@ -176,7 +179,13 @@ pub(crate) fn complete(
         let has_state_snapshots = action
             .map(action_has_state_snapshots)
             .unwrap_or(inside_function);
-        let effects = (!has_attached_process || !has_state_snapshots)
+        let needs_effects = !top_level
+            && (!has_attached_process || !has_state_snapshots)
+            && syntax
+                .functions
+                .iter()
+                .any(|function| function.method_of.is_none());
+        let effects = needs_effects
             .then(|| {
                 completion_operation_analysis(
                     database,
@@ -205,7 +214,7 @@ pub(crate) fn complete(
                 method_receiver: containing_function
                     .is_some_and(|function| function.method_of.is_some()),
             },
-            effects.as_ref(),
+            effects.as_deref(),
             top_level,
         ))
     }
@@ -451,18 +460,88 @@ fn matching_closing_brace(tokens: &[&crate::lexer::Token], open: usize) -> Optio
     None
 }
 
+/// Only source-function availability is needed by root completion. Retaining
+/// full operation analyses or repaired snapshots would keep unrelated call
+/// metadata or entire compiler databases alive.
+#[derive(Debug, Default)]
+struct CompletionEffects {
+    attached_process: BTreeSet<FunctionId>,
+    state_snapshots: BTreeSet<FunctionId>,
+}
+
+impl CompletionEffects {
+    fn from_analysis(syntax: &Program, analysis: &OperationAnalysis) -> Self {
+        let mut facts = Self::default();
+        for function in syntax
+            .functions
+            .iter()
+            .filter(|function| function.method_of.is_none())
+        {
+            let effects = analysis.function(function.id);
+            if effects.requires_attached_process {
+                facts.attached_process.insert(function.id);
+            }
+            if effects.requires_state_snapshots {
+                facts.state_snapshots.insert(function.id);
+            }
+        }
+        facts
+    }
+}
+
+/// The containing database invalidates all facts on source edits. Repair keys
+/// cover the complete identifier, so moving the caret inside it reuses facts.
+#[derive(Debug, Default)]
+pub(crate) struct CompletionEffectsCache {
+    direct: Option<Arc<CompletionEffects>>,
+    entries: std::collections::VecDeque<(Span, Option<Arc<CompletionEffects>>)>,
+    #[cfg(test)]
+    analyses: usize,
+    #[cfg(test)]
+    probes: usize,
+}
+
+impl CompletionEffectsCache {
+    const CAPACITY: usize = 4;
+
+    fn get(&mut self, key: Span) -> Option<Option<Arc<CompletionEffects>>> {
+        if let Some(direct) = &self.direct {
+            return Some(Some(Arc::clone(direct)));
+        }
+        let position = self.entries.iter().position(|(stored, _)| *stored == key)?;
+        let entry = self.entries.remove(position)?;
+        let facts = entry.1.clone();
+        self.entries.push_back(entry);
+        Some(facts)
+    }
+
+    fn insert(&mut self, key: Span, facts: Option<Arc<CompletionEffects>>) {
+        if self.entries.len() == Self::CAPACITY {
+            self.entries.pop_front();
+        }
+        self.entries.push_back((key, facts));
+    }
+}
+
 fn completion_operation_analysis(
     database: &mut CompilerDatabase,
     source: &str,
     replacement: Span,
     compiler_context: crate::CompilerContext,
-) -> Option<OperationAnalysis> {
-    if let Some(effects) = database
-        .semantic_snapshot()
-        .ok()
-        .and_then(|snapshot| snapshot.effects().cloned())
+) -> Option<Arc<CompletionEffects>> {
+    if let Some(cached) = database.completion_effects_cache().get(replacement) {
+        return cached;
+    }
+    #[cfg(test)]
     {
-        return Some(effects);
+        database.completion_effects_cache().analyses += 1;
+    }
+    if let Ok(snapshot) = database.semantic_snapshot()
+        && let Some(effects) = snapshot.effects()
+    {
+        let facts = Arc::new(CompletionEffects::from_analysis(snapshot.syntax(), effects));
+        database.completion_effects_cache().direct = Some(Arc::clone(&facts));
+        return Some(facts);
     }
 
     // A partially typed root identifier is normally an unknown expression and
@@ -472,10 +551,19 @@ fn completion_operation_analysis(
     let mut probe_source = source.to_owned();
     probe_source.replace_range(replacement.start..replacement.end, "None");
     let mut probe = CompilerDatabase::with_context(compiler_context, probe_source);
-    probe
-        .semantic_snapshot()
-        .ok()
-        .and_then(|snapshot| snapshot.effects().cloned())
+    #[cfg(test)]
+    {
+        database.completion_effects_cache().probes += 1;
+    }
+    let facts = probe.semantic_snapshot().ok().and_then(|snapshot| {
+        snapshot
+            .effects()
+            .map(|effects| Arc::new(CompletionEffects::from_analysis(snapshot.syntax(), effects)))
+    });
+    database
+        .completion_effects_cache()
+        .insert(replacement, facts.clone());
+    facts
 }
 
 fn complete_state_decoder(source: &str, offset: usize) -> Option<CompletionList> {
@@ -578,7 +666,7 @@ fn complete_root(
     offset: usize,
     standard_library: StandardLibrary,
     availability: ContextAvailability,
-    effects: Option<&OperationAnalysis>,
+    effects: Option<&CompletionEffects>,
     top_level: bool,
 ) -> CompletionList {
     let replacement = identifier_span(source, offset);
@@ -1352,7 +1440,7 @@ fn add_source_declarations(
     syntax: &Program,
     has_attached_process: bool,
     has_state_snapshots: bool,
-    effects: Option<&OperationAnalysis>,
+    effects: Option<&CompletionEffects>,
 ) {
     if syntax
         .state
@@ -1382,12 +1470,12 @@ fn add_source_declarations(
             continue;
         }
         if !has_attached_process
-            && effects.is_none_or(|effects| effects.function(function.id).requires_attached_process)
+            && effects.is_none_or(|effects| effects.attached_process.contains(&function.id))
         {
             continue;
         }
         if !has_state_snapshots
-            && effects.is_none_or(|effects| effects.function(function.id).requires_state_snapshots)
+            && effects.is_none_or(|effects| effects.state_snapshots.contains(&function.id))
         {
             continue;
         }
@@ -3063,6 +3151,97 @@ whileAttached {
         assert_eq!(first, labels(&mut database, "missing."));
         assert_eq!(database.completion_receiver_cache().probes, 1);
         assert!(database.completion_receiver_cache().entries[0].1.is_none());
+    }
+
+    const EFFECT_COMPLETION_DECLARATIONS: &str = r#"
+state "game.exe" { level: u32 at 0x100 }
+fn readsProcess() { let value = process.read<u32>(0x100) else return }
+fn readsState() { return current.level }
+fn relay() { readsProcess() }
+fn safe() { print("safe") }
+"#;
+
+    #[test]
+    fn root_effect_facts_are_shared_without_losing_context_filtering() {
+        let mut database = CompilerDatabase::new(format!(
+            "{EFFECT_COMPLETION_DECLARATIONS}\nsetup {{ safe() }}\nonAttach {{ safe() }}\nonDetach {{ safe() }}"
+        ));
+        for marker in ["setup { ", "onAttach { ", "onDetach { "] {
+            let candidates = labels(&mut database, marker);
+            assert!(candidates.contains(&"safe".to_owned()));
+            assert!(!candidates.contains(&"readsState".to_owned()));
+            for name in ["readsProcess", "relay"] {
+                assert_eq!(
+                    candidates.contains(&name.to_owned()),
+                    marker == "onAttach { "
+                );
+            }
+        }
+        let cache = database.completion_effects_cache();
+        assert_eq!(cache.analyses, 1);
+        assert_eq!(cache.probes, 0);
+        assert!(cache.direct.is_some());
+    }
+
+    #[test]
+    fn partial_root_effect_probes_are_reused_and_invalidated_by_edits() {
+        let source = format!("{EFFECT_COMPLETION_DECLARATIONS}\nonDetach {{ sa }}");
+        let mut database = CompilerDatabase::new(source.clone());
+        let candidates = labels(&mut database, "onDetach { ");
+        assert!(candidates.contains(&"safe".to_owned()));
+        for absent in ["readsProcess", "relay", "readsState"] {
+            assert!(!candidates.contains(&absent.to_owned()));
+        }
+        assert_eq!(labels(&mut database, "onDetach { sa"), vec!["safe"]);
+        assert_eq!(database.completion_effects_cache().probes, 1);
+        database.set_source(source.replace("print(\"safe\")", "readsProcess()"));
+        assert!(database.completion_effects_cache().entries.is_empty());
+        assert!(labels(&mut database, "onDetach { sa").is_empty());
+        assert_eq!(database.completion_effects_cache().probes, 1);
+    }
+
+    #[test]
+    fn failed_root_effect_probes_are_cached_separately_and_bounded() {
+        let source =
+            format!("{EFFECT_COMPLETION_DECLARATIONS}\nonDetach {{\nsa\nsa\nsa\nsa\nsa\n}}");
+        let offsets = source
+            .match_indices("sa\n")
+            .map(|(offset, _)| offset + 2)
+            .collect::<Vec<_>>();
+        let mut database = CompilerDatabase::new(source);
+        for &offset in &offsets {
+            assert!(database.completions(offset).unwrap().items.is_empty());
+            assert!(database.completions(offset).unwrap().items.is_empty());
+        }
+        let cache = database.completion_effects_cache();
+        assert_eq!(cache.probes, offsets.len());
+        assert_eq!(cache.entries.len(), CompletionEffectsCache::CAPACITY);
+        assert!(cache.entries.iter().all(|(_, facts)| facts.is_none()));
+        database.completions(offsets[0]).unwrap();
+        assert_eq!(
+            database.completion_effects_cache().probes,
+            offsets.len() + 1
+        );
+    }
+
+    #[test]
+    fn root_completion_skips_unused_effect_analysis() {
+        for (source, marker) in [
+            (format!("{EFFECT_COMPLETION_DECLARATIONS}\nwhi"), "\nwhi"),
+            (
+                "state \"game.exe\" {}\nonDetach { pri }".to_owned(),
+                "{ pri",
+            ),
+            (
+                format!("{EFFECT_COMPLETION_DECLARATIONS}\nwhileAttached {{ sa }}"),
+                "{ sa",
+            ),
+        ] {
+            let mut database = CompilerDatabase::new(source);
+            assert!(!labels(&mut database, marker).is_empty());
+            assert_eq!(database.completion_effects_cache().analyses, 0);
+            assert_eq!(database.completion_effects_cache().probes, 0);
+        }
     }
 
     #[test]

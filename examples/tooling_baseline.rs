@@ -1,6 +1,7 @@
 //! Repeatable compiler-query and in-process LSP latency/retained-heap baseline.
 //!
 //! Run with `cargo run --release --example tooling_baseline -- 500 100`.
+//! Append `--root-effects` to measure repeated root completion in detached contexts.
 
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -76,7 +77,11 @@ fn main() {
     let mut arguments = std::env::args().skip(1);
     let functions = parse_positive(arguments.next(), DEFAULT_FUNCTIONS, "function count");
     let iterations = parse_positive(arguments.next(), DEFAULT_ITERATIONS, "iteration count");
-    assert!(arguments.next().is_none(), "expected at most two arguments");
+    let root_effects = arguments.next().is_some_and(|argument| {
+        assert_eq!(argument, "--root-effects", "unknown benchmark mode");
+        true
+    });
+    assert!(arguments.next().is_none(), "unexpected extra arguments");
 
     let fixtures = [
         Fixture::new("small", small_source(), "current.position", "point.x"),
@@ -115,6 +120,11 @@ fn main() {
         "fixture\tsource_bytes\tquery\tmedian_us\tp95_us\tretained_delta_bytes\tpeak_delta_bytes"
     );
 
+    if root_effects {
+        run_root_effects(functions, iterations);
+        return;
+    }
+
     for fixture in &fixtures {
         run_fixture(fixture, iterations);
     }
@@ -122,6 +132,53 @@ fn main() {
     println!("retained fixture\tstate\tretained_bytes\tpeak_delta_bytes");
     for fixture in &fixtures {
         report_retained_states(fixture);
+    }
+}
+
+fn run_root_effects(functions: usize, iterations: usize) {
+    use std::fmt::Write;
+
+    let mut declarations = String::from(
+        "state \"game.exe\" { level: u32 at 0x100 }\n\
+         fn readsState() { return current.level }\n\
+         fn relay() { return readsState() }\n",
+    );
+    for index in 0..functions {
+        writeln!(
+            declarations,
+            "fn helper{index}(value: u32) {{ return value + {index} }}"
+        )
+        .unwrap();
+    }
+    for (name, suffix) in [
+        ("root_valid", "onDetach { helper0(0) }"),
+        ("root_partial", "onDetach { hel }"),
+        (
+            "root_failed_repair",
+            "fn broken() { missing }\nonDetach { hel }",
+        ),
+    ] {
+        let mut fixture = Fixture::new(name, format!("{declarations}{suffix}\n"), "hel", "hel");
+        fixture.root_offset = fixture.member_offset;
+        let query = |database: &mut CompilerDatabase, fixture: &Fixture| {
+            black_box(
+                database
+                    .completions(fixture.root_offset)
+                    .expect("root completion should recover"),
+            );
+        };
+        measure_database_edit(&fixture, "database_edit_root_effects", iterations, query);
+        let mut database = CompilerDatabase::new(fixture.source.clone());
+        measure(
+            &fixture,
+            "database_warm_root_effects",
+            iterations,
+            WARMUP_ITERATIONS,
+            || {
+                query(&mut database, &fixture);
+            },
+        );
+        report_retained_state(&fixture, "root_effects", query);
     }
 }
 

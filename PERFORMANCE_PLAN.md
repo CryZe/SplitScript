@@ -40,7 +40,7 @@ cache/type/local regression tests, editor/browser workers, Wasm validation, and
 host-runtime fixtures. Repeated Lunistice and Minish Cap builds are byte-identical.
 
 Still open: detailed stage instrumentation, lazy release debug-name construction,
-root-effect probe reuse, shared stage ownership, parsed standard-library reuse,
+shared stage ownership, parsed standard-library reuse,
 and the larger backend/optimizer work. The suggested delivery order remains a
 guide to those remaining slices, not a list of fully completed milestones.
 
@@ -78,8 +78,8 @@ result propagation, and generic constraints.
 Successful strict analysis avoids a repaired database at these sites even on
 the first request after an edit. Recovered or missing facts still use the
 existing bounded probe cache. Constructor-field substitutions without direct
-facts continue to use repair; root-effect completion is a separate remaining
-optimization.
+facts continue to use repair. Root-effect completion is addressed separately
+below.
 
 Regression tests count probes and check candidate types across path prefixes,
 call results, source edits, recovered members, and failed lookups. Updated
@@ -93,6 +93,35 @@ incomplete edit. Standard-library parsing/checking remains a major fixed cost.
 Validation: all 49 targeted completion tests and the full `cargo xtask check`
 passed, including 406 library tests, 605 compiler integration tests, documentation,
 editor/browser checks, and the Wasm/runtime fixtures.
+
+## Root completion availability implementation batch
+
+Implemented the root-effect portion of order 5 on 2026-09-04. Completion now
+keeps compact sets of source-function IDs requiring an attached process or state
+snapshots, instead of copying the complete operation analysis on every request.
+Direct facts are shared for the revision. Repaired results, including failures,
+use a four-entry LRU keyed by the identifier's replacement span; source edits
+invalidate the cache. Repaired compiler databases are not retained.
+
+Top-level completion, fully available lifecycle contexts, and files without
+standalone user functions do not request this availability analysis at all.
+Context filtering still applies at each request, including transitive process
+and state dependencies.
+
+Added a focused `tooling_baseline 500 30 --root-effects` mode for valid,
+partially typed, and unsuccessfully repaired root-completion sites. Regression
+tests check context-specific filtering, reuse across caret positions and
+contexts, source edits, failed results, and bounded eviction. Timings and
+validation are recorded in [baselines](docs/BASELINES.md).
+
+With 500 helpers, repeated partial-root completion improved from 138.13 to
+5.40 ms; repeated failed repair improved from 217.87 to 4.77 ms. First requests
+after edits remain approximately unchanged. Retained cache growth is 96–216
+bytes for the measured workloads.
+
+Validation: all 53 targeted completion tests and the full `cargo xtask check`
+passed, including 410 library tests, 605 compiler integration tests, documentation,
+editor/browser checks, and Wasm/runtime fixtures.
 
 ## Evidence and scope
 
@@ -301,9 +330,9 @@ with the same report before claiming this problem is widespread.
 
 ## 5. Stop rechecking a whole file for warm member completion
 
-The receiver cache and direct receiver selection are implemented in the batches
-above. The following is the original review; root-effect probe reuse remains
-open.
+The receiver cache, direct receiver selection, and root-effect probe reuse are
+implemented in the batches above. The following is the original review;
+receiver recovery and constructor-field substitution offer further work.
 
 In [completion::analyze_receiver_database](src/completion.rs), path receivers
 prefer a resolved method-call receiver. With a field such as `point.x`, there

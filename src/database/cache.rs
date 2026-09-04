@@ -12,6 +12,7 @@ use super::{DefinitionIndex, QueryResult, ReferenceIndex, SemanticSnapshot};
 #[derive(Debug, Default)]
 pub(super) struct QueryCache {
     pub completion_receivers: crate::completion::ReceiverCache,
+    pub completion_effects: crate::completion::CompletionEffectsCache,
     pub recovered: Option<QueryResult<RecoveredParse>>,
     pub recovering_lowered: Option<QueryResult<LoweredProgram>>,
     pub parsed: Option<QueryResult<ParsedProgram>>,

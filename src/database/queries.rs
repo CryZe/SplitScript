@@ -392,6 +392,12 @@ impl CompilerDatabase {
         &mut self.cache.completion_receivers
     }
 
+    pub(crate) fn completion_effects_cache(
+        &mut self,
+    ) -> &mut crate::completion::CompletionEffectsCache {
+        &mut self.cache.completion_effects
+    }
+
     pub fn hover(
         &mut self,
         offset: usize,

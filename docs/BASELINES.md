@@ -142,6 +142,47 @@ The full `cargo xtask check` passed for this batch: 403 library tests, 602 compi
 integration tests, syntax/stdlib-loader and CLI tests, editor and browser-worker
 checks, generated-module validation, and the maintained host-runtime fixtures.
 
+## 2026-09-04 set-operation pruning
+
+Compared a saved release compiler built at `dcfb1ec` with the set-operation
+implementation, using the same toolchain and machine. Every row compiles
+identical source before and after with the SplitScript release profile.
+
+| Fixture | Before bytes | After bytes | Reduction |
+| --- | ---: | ---: | ---: |
+| Set new/length-only probe | 1,943 | 1,534 | 409 (21.0%) |
+| Expanded set runtime, including numeric insert-only use | 3,808 | 3,597 | 211 (5.54%) |
+| Original set runtime from `dcfb1ec`, all operations used | 3,152 | 3,152 | 0 |
+| Lunistice | 34,526 | 34,526 | 0 |
+| Minish Cap | 48,773 | 48,773 | 0 |
+
+The focused probe is the source in section 4 of
+[`PERFORMANCE_PLAN.md`](../PERFORMANCE_PLAN.md). Its four unused operation bodies
+account for 387 removed bytes; body length prefixes save another six bytes,
+function declarations four, and ordinary function signatures twelve. The GC
+layouts and 160-byte compiler metadata section remain unchanged.
+
+The maintained `tests/set_runtime.split` now additionally inserts a numeric
+value twice without explicitly calling contains. Its harness verifies the
+results are `true,false`, exercising the internal insertion dependency. That
+fixture expansion is why its absolute size differs from the original runtime
+fixture; the 211-byte saving compares the expanded source against itself.
+
+The original runtime fixture uses all operations, so it has nothing to prune.
+Lunistice and Minish Cap do not use sets. This change removes unnecessary
+declarations/body generation for sparse set use; compiler or LSP latency was
+not remeasured for this batch, and no overall latency improvement is claimed.
+
+Both profiles pass the expanded Node set-runtime harness. All measured release
+modules pass Wasm validation. Regression tests cover operation selection for
+numeric, string, and structural array elements, iteration, generic instances,
+unreachable functions, and debug-only operations erased in release.
+
+The full `cargo xtask check` passed, including 403 library tests, 605 compiler
+integration tests, documentation validation, editor/browser workers and web host,
+generated-module validation, and the maintained host-runtime fixtures. The
+verification log is under ignored `target/performance-review/set-pruning-check.log`.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

@@ -1,11 +1,15 @@
 state "game.exe" {}
 
 let visited = Set.new<String>()
+let numbers = Set.new<u32>()
 let tick = 0
 
 whileAttached {
     tick += 1
     if tick == 1 {
+        let firstNumber = numbers.insert(7)
+        let duplicateNumber = numbers.insert(7)
+        setVariable("Set Insert Only", `{firstNumber},{duplicateNumber}`)
         let first = visited.insert("A")
         visited.insert("B")
         visited.insert("C")

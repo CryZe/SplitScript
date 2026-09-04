@@ -6,7 +6,7 @@ use crate::{
     ast::{ActionKind, EnumDecl, ManagedClassId, ManagedFieldId, Program},
     equality::EqualityCapabilities,
     semantic::{ClosureInstance, FunctionInstance, FunctionValueInstance, SemanticModel},
-    stdlib::{RuntimeRepresentation, StandardLibrary},
+    stdlib::{IntrinsicId, RuntimeRepresentation, StandardLibrary},
     structural::{StructuralTypeId, StructuralTypes},
     types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, ResolvedSetType},
 };
@@ -296,39 +296,46 @@ pub(super) fn encode<'a>(
     {
         let set_type = gc.val_type(Type::Set(set.id));
         let element_type = gc.val_type(set_element_type(set.id, semantics));
+        let mut declare_operation = |intrinsic, name, params, results| {
+            reachability
+                .requires_set_operation(set.id, intrinsic)
+                .then(|| {
+                    declare(
+                        super::debug_artifacts::set_function_name(set.id, name),
+                        params,
+                        results,
+                    )
+                })
+        };
         set_functions.insert(
             set.id,
             SetFunctionPlan {
-                new: declare(
-                    super::debug_artifacts::set_function_name(set.id, "new"),
-                    vec![],
-                    vec![set_type],
-                ),
-                length: declare(
-                    super::debug_artifacts::set_function_name(set.id, "length"),
+                new: declare_operation(IntrinsicId::SetNew, "new", vec![], vec![set_type]),
+                length: declare_operation(
+                    IntrinsicId::SetLength,
+                    "length",
                     vec![set_type],
                     vec![ValType::I32],
                 ),
-                contains: declare(
-                    super::debug_artifacts::set_function_name(set.id, "contains"),
+                contains: declare_operation(
+                    IntrinsicId::SetContains,
+                    "contains",
                     vec![set_type, element_type],
                     vec![ValType::I32],
                 ),
-                insert: declare(
-                    super::debug_artifacts::set_function_name(set.id, "insert"),
+                insert: declare_operation(
+                    IntrinsicId::SetInsert,
+                    "insert",
                     vec![set_type, element_type],
                     vec![ValType::I32],
                 ),
-                remove: declare(
-                    super::debug_artifacts::set_function_name(set.id, "remove"),
+                remove: declare_operation(
+                    IntrinsicId::SetRemove,
+                    "remove",
                     vec![set_type, element_type],
                     vec![ValType::I32],
                 ),
-                clear: declare(
-                    super::debug_artifacts::set_function_name(set.id, "clear"),
-                    vec![set_type],
-                    vec![],
-                ),
+                clear: declare_operation(IntrinsicId::SetClear, "clear", vec![set_type], vec![]),
             },
         );
     }

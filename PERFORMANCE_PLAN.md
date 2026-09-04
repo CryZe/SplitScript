@@ -40,10 +40,33 @@ cache/type/local regression tests, editor/browser workers, Wasm validation, and
 host-runtime fixtures. Repeated Lunistice and Minish Cap builds are byte-identical.
 
 Still open: detailed stage instrumentation, lazy release debug-name construction,
-set-operation reachability, direct receiver selection before the first probe,
+direct receiver selection before the first probe,
 root-effect probe reuse, shared stage ownership, parsed standard-library reuse,
 and the larger backend/optimizer work. The suggested delivery order remains a
 guide to those remaining slices, not a list of fully completed milestones.
+
+## Set-operation implementation batch
+
+Implemented order 4 on 2026-09-04. Reachability now records each demanded set
+operation per concrete element type, including generic specializations. Function
+declarations and bodies use that demand, retaining the internal `insert ->
+contains` dependency and comparison equality helpers. Set layouts remain
+independently reachable for storage, iteration, and signatures.
+
+The new/length-only release probe shrank from 1,943 to 1,534 bytes (409 bytes,
+21.0%) relative to `dcfb1ec`. The expanded runtime fixture, which also exercises
+insertion without an explicit contains call on a second set type, shrank from
+3,808 to 3,597 bytes on identical input. Lunistice and Minish Cap are unchanged.
+See [baselines](docs/BASELINES.md) for the fixture and comparison details.
+
+Regression coverage checks every operation for numeric, string, and array
+elements; iteration; generic constructors; unused functions; and removal of
+debug-only operation demand in release. The expanded host-runtime fixture
+checks duplicate insertion in both profiles.
+
+Validation: the full `cargo xtask check` passed, including 605 compiler
+integration tests, library tests, documentation, VS Code/browser checks, Wasm
+validation, and host-runtime fixtures.
 
 ## Evidence and scope
 
@@ -212,6 +235,9 @@ consumer. Report actual whole-module savings without adding overlapping size
 estimates together.
 
 ## 4. Emit only demanded set operations
+
+Implemented in the set-operation batch above. The following is the original
+review evidence and acceptance criteria.
 
 This is a confirmed **Set-specific gap**, not evidence that every runtime helper
 is emitted unconditionally. [function_plan](src/codegen/function_plan.rs) declares

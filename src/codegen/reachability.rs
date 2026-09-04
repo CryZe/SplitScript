@@ -42,6 +42,7 @@ pub(super) struct Reachability {
     gc_asyncs: BTreeSet<AsyncTypeId>,
     gc_callables: BTreeSet<CallableTypeId>,
     gc_sets: BTreeSet<TypeApplicationId>,
+    set_operations: BTreeSet<(TypeApplicationId, IntrinsicId)>,
     gc_applications: BTreeSet<TypeApplicationId>,
     display_functions: BTreeMap<TypeId, FunctionInstance>,
     debug_functions: BTreeMap<TypeId, FunctionInstance>,
@@ -272,18 +273,48 @@ impl Reachability {
                 }
                 if let wasm_ir::CallTarget::Intrinsic {
                     intrinsic:
-                        IntrinsicId::SetContains | IntrinsicId::SetInsert | IntrinsicId::SetRemove,
-                    receiver_type: Some(receiver),
+                        intrinsic @ (IntrinsicId::SetNew
+                        | IntrinsicId::SetLength
+                        | IntrinsicId::SetContains
+                        | IntrinsicId::SetInsert
+                        | IntrinsicId::SetRemove
+                        | IntrinsicId::SetClear),
+                    receiver_type,
                     ..
                 } = target
                 {
-                    let receiver = owner.as_ref().map_or(*receiver, |owner| {
-                        semantics.specialize_type(owner, *receiver)
-                    });
-                    let TypeKind::Set { element, .. } = semantics.types().kind(receiver) else {
-                        unreachable!("checked set methods have Set receivers")
+                    let set_type = if *intrinsic == IntrinsicId::SetNew {
+                        expression.ty
+                    } else {
+                        receiver_type.expect("checked set methods have receivers")
                     };
-                    reachable.require_equality(*element, semantics, standard_library, capabilities);
+                    let set_type = owner
+                        .as_ref()
+                        .map_or(set_type, |owner| semantics.specialize_type(owner, set_type));
+                    let TypeKind::Set {
+                        layout, element, ..
+                    } = semantics.types().kind(set_type)
+                    else {
+                        unreachable!("checked set operations use concrete Set types")
+                    };
+                    reachable.set_operations.insert((*layout, *intrinsic));
+                    if *intrinsic == IntrinsicId::SetInsert {
+                        // Insertion calls contains to reject duplicate elements.
+                        reachable
+                            .set_operations
+                            .insert((*layout, IntrinsicId::SetContains));
+                    }
+                    if matches!(
+                        intrinsic,
+                        IntrinsicId::SetContains | IntrinsicId::SetInsert | IntrinsicId::SetRemove
+                    ) {
+                        reachable.require_equality(
+                            *element,
+                            semantics,
+                            standard_library,
+                            capabilities,
+                        );
+                    }
                 }
                 if let wasm_ir::CallTarget::ManagedSnapshot { class, .. } = target {
                     reachable.managed_snapshots.insert(*class);
@@ -777,6 +808,10 @@ impl Reachability {
 
     pub fn contains_set_type(&self, set: TypeApplicationId) -> bool {
         self.gc_sets.contains(&set)
+    }
+
+    pub fn requires_set_operation(&self, set: TypeApplicationId, intrinsic: IntrinsicId) -> bool {
+        self.set_operations.contains(&(set, intrinsic))
     }
 
     pub fn contains_application_type(&self, application: TypeApplicationId) -> bool {

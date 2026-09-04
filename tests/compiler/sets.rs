@@ -1,6 +1,158 @@
 use splitscript::tooling::database::CompilerDatabase;
 use splitscript::tooling::highlight::SemanticTokenKind;
-use wasmparser::{Validator, WasmFeatures};
+use wasmparser::{Parser, Payload, Validator, WasmFeatures};
+
+fn set_operation_groups(wasm: &[u8]) -> Vec<Vec<String>> {
+    let mut groups = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for payload in Parser::new(0).parse_all(wasm) {
+        let Payload::CustomSection(section) = payload.unwrap() else {
+            continue;
+        };
+        let wasmparser::KnownCustom::Name(reader) = section.as_known() else {
+            continue;
+        };
+        for subsection in reader {
+            let wasmparser::Name::Function(names) = subsection.unwrap() else {
+                continue;
+            };
+            for name in names {
+                let name = name.unwrap();
+                if name.name.starts_with("__splitscript::set#") {
+                    let (set, operation) = name.name.rsplit_once("::").unwrap();
+                    groups
+                        .entry(set.to_owned())
+                        .or_default()
+                        .push(operation.to_owned());
+                }
+            }
+        }
+    }
+    let mut groups = groups.into_values().collect::<Vec<_>>();
+    for operations in &mut groups {
+        operations.sort();
+    }
+    groups.sort();
+    groups
+}
+
+#[test]
+fn sets_emit_only_demanded_operations_and_internal_dependencies() {
+    for (element, value) in [("u32", "7"), ("String", "\"room\""), ("[u8]", "[7u8]")] {
+        for (operation, expected) in [
+            (String::new(), vec!["new"]),
+            ("values.length()".to_owned(), vec!["length", "new"]),
+            ("values.isEmpty()".to_owned(), vec!["length", "new"]),
+            ("for value in values {}".to_owned(), vec!["new"]),
+            (format!("values.contains({value})"), vec!["contains", "new"]),
+            (
+                format!("values.insert({value})"),
+                vec!["contains", "insert", "new"],
+            ),
+            (format!("values.remove({value})"), vec!["new", "remove"]),
+            ("values.clear()".to_owned(), vec!["clear", "new"]),
+        ] {
+            let source = format!(
+                "state \"game.exe\" {{}}\nlet values = Set.new<{element}>()\nwhileAttached {{ {operation} }}"
+            );
+            for profile in [
+                splitscript::BuildProfile::Debug,
+                splitscript::BuildProfile::Release,
+            ] {
+                let wasm = splitscript::compile_with_options(
+                    &source,
+                    splitscript::CompilerOptions {
+                        profile,
+                        ..Default::default()
+                    },
+                )
+                .unwrap_or_else(|errors| panic!("{source}: {errors:?}"));
+                Validator::new_with_features(WasmFeatures::all())
+                    .validate_all(&wasm)
+                    .unwrap_or_else(|error| panic!("{source}: {error}"));
+                if profile == splitscript::BuildProfile::Debug {
+                    assert_eq!(
+                        set_operation_groups(&wasm),
+                        vec![expected.clone()],
+                        "{source}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn set_operation_demand_is_separate_for_generic_instances() {
+    let source = r#"
+        state "game.exe" {}
+        fn make(value) {
+            let values = Set.new()
+            values.insert(value)
+            return values
+        }
+        fn unused(values: Set<u32>) { values.clear() }
+        whileAttached {
+            let numbers = make(7u32)
+            let rooms = make("room")
+            numbers.length()
+            rooms.remove("room")
+        }
+    "#;
+    for profile in [
+        splitscript::BuildProfile::Debug,
+        splitscript::BuildProfile::Release,
+    ] {
+        let wasm = splitscript::compile_with_options(
+            source,
+            splitscript::CompilerOptions {
+                profile,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        Validator::new_with_features(WasmFeatures::all())
+            .validate_all(&wasm)
+            .unwrap();
+        if profile == splitscript::BuildProfile::Debug {
+            assert_eq!(
+                set_operation_groups(&wasm),
+                vec![
+                    vec!["contains", "insert", "length", "new"],
+                    vec!["contains", "insert", "new", "remove"],
+                ]
+            );
+        }
+    }
+}
+
+#[test]
+fn release_sets_do_not_retain_debug_only_operations() {
+    let source = r#"
+        state "game.exe" {}
+        let values = Set.new<u32>()
+        whileAttached {
+            debug values.insert(7)
+            values.length()
+        }
+    "#;
+    let debug = splitscript::compile(source).unwrap();
+    assert_eq!(
+        set_operation_groups(&debug),
+        vec![vec!["contains", "insert", "length", "new"]]
+    );
+    let options = splitscript::CompilerOptions {
+        profile: splitscript::BuildProfile::Release,
+        ..Default::default()
+    };
+    let release = splitscript::compile_with_options(source, options).unwrap();
+    let without_debug =
+        splitscript::compile_with_options(&source.replace("debug values.insert(7)", ""), options)
+            .unwrap();
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&release)
+        .unwrap();
+    assert_eq!(release, without_debug);
+}
 
 const SETS: &str = r#"
 let visited = Set.new<String>()

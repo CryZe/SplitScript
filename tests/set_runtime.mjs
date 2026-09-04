@@ -35,11 +35,13 @@ instance.exports.update();
 instance.exports.update();
 
 const observed = {
+    insertOnly: variables.get("Set Insert Only"),
     first: variables.get("Set First Tick"),
     second: variables.get("Set Second Tick"),
     messages,
 };
 const expected = {
+    insertOnly: "true,false",
     first: "true,false,5,true",
     second: "5,true,false,0,true",
     messages: ["A", "B", "D", "E"],

@@ -17,12 +17,12 @@ pub(super) const VERSION_FIELD: u32 = 2;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct SetFunctionPlan {
-    pub new: u32,
-    pub length: u32,
-    pub contains: u32,
-    pub insert: u32,
-    pub remove: u32,
-    pub clear: u32,
+    pub new: Option<u32>,
+    pub length: Option<u32>,
+    pub contains: Option<u32>,
+    pub insert: Option<u32>,
+    pub remove: Option<u32>,
+    pub clear: Option<u32>,
 }
 
 #[derive(Debug, Default)]
@@ -49,6 +49,7 @@ impl SetFunctions {
             IntrinsicId::SetClear => plan.clear,
             _ => unreachable!("only set intrinsics use the set-function plan"),
         }
+        .expect("reachable set operations have generated functions")
     }
 }
 
@@ -66,18 +67,34 @@ pub(super) fn compile(
             continue;
         };
         let element = set_element_type(set.id, semantics);
-        bodies.push(compile_new(set, gc));
-        bodies.push(compile_length(set, gc));
-        bodies.push(compile_contains(
-            set,
-            element,
-            equality,
-            string_equality,
-            gc,
-        ));
-        bodies.push(compile_insert(set, plan.contains, gc));
-        bodies.push(compile_remove(set, element, equality, string_equality, gc));
-        bodies.push(compile_clear(set, gc));
+        if plan.new.is_some() {
+            bodies.push(compile_new(set, gc));
+        }
+        if plan.length.is_some() {
+            bodies.push(compile_length(set, gc));
+        }
+        if plan.contains.is_some() {
+            bodies.push(compile_contains(
+                set,
+                element,
+                equality,
+                string_equality,
+                gc,
+            ));
+        }
+        if plan.insert.is_some() {
+            bodies.push(compile_insert(
+                set,
+                plan.contains.expect("set insertion requires contains"),
+                gc,
+            ));
+        }
+        if plan.remove.is_some() {
+            bodies.push(compile_remove(set, element, equality, string_equality, gc));
+        }
+        if plan.clear.is_some() {
+            bodies.push(compile_clear(set, gc));
+        }
     }
     bodies
 }

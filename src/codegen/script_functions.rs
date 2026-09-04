@@ -36,7 +36,7 @@ pub(super) fn compile_read(
                 include_values: true,
             },
         );
-        let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
+        let mut function = Function::new_with_locals_types(local_types);
         let locals = planned_locals;
         let context = ExprContext {
             standard_library: lowering.standard_library,
@@ -391,7 +391,7 @@ pub(super) fn compile_state_transform(
             include_values: true,
         },
     );
-    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
+    let mut function = Function::new_with_locals_types(local_types);
     let mut locals = planned_locals;
     locals.insert(transform.value, (0, field_type));
     let context = ExprContext {
@@ -798,7 +798,7 @@ pub(super) fn compile_user_function(
             }
         }
     }
-    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
+    let mut function = Function::new_with_locals_types(local_types);
     for (parameter, source_local, ty) in boxed_parameters {
         function
             .instruction(&Instruction::LocalGet(source_local))
@@ -979,7 +979,7 @@ pub(super) fn compile_closure(
             }
         }
     }
-    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
+    let mut function = Function::new_with_locals_types(local_types);
     for (parameter, source_local, ty) in boxed_parameters {
         function
             .instruction(&Instruction::LocalGet(source_local))
@@ -1213,7 +1213,7 @@ pub(super) fn compile_action(
             debug.register_variable(function_index, value, local, ty, false);
         }
     }
-    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
+    let mut function = Function::new_with_locals_types(local_types);
     let context = ExprContext {
         standard_library: lowering.standard_library,
         reachability: lowering.reachability,

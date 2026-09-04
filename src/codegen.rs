@@ -34,6 +34,7 @@ mod equality_plan;
 mod expression;
 mod failure_payload;
 mod function_plan;
+mod function_types;
 mod gc_layout;
 mod gc_types;
 mod global_plan;
@@ -311,18 +312,23 @@ impl std::ops::Deref for BackendProgram<'_> {
 }
 
 pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
-    let intrinsic_effect_errors = runtime_helper_registry::validate_intrinsic_effects();
-    assert!(
-        intrinsic_effect_errors.is_empty(),
-        "invalid trusted intrinsic implementation contracts: {}",
-        intrinsic_effect_errors.join("; ")
-    );
-    let unity_layout_errors = unity_layout::validate();
-    assert!(
-        unity_layout_errors.is_empty(),
-        "invalid trusted Unity/IL2CPP layout descriptors: {}",
-        unity_layout_errors.join("; ")
-    );
+    // These contracts describe immutable compiler-owned tables, independent of
+    // the source, profile, or injected standard-library graph.
+    static VALIDATED_CONTRACTS: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    VALIDATED_CONTRACTS.get_or_init(|| {
+        let intrinsic_effect_errors = runtime_helper_registry::validate_intrinsic_effects();
+        assert!(
+            intrinsic_effect_errors.is_empty(),
+            "invalid trusted intrinsic implementation contracts: {}",
+            intrinsic_effect_errors.join("; ")
+        );
+        let unity_layout_errors = unity_layout::validate();
+        assert!(
+            unity_layout_errors.is_empty(),
+            "invalid trusted Unity/IL2CPP layout descriptors: {}",
+            unity_layout_errors.join("; ")
+        );
+    });
     let BackendProgram {
         standard_library,
         program,
@@ -481,12 +487,12 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         range_types: &range_types,
         reachability: &reachability,
     });
+    let mut function_types = function_types::FunctionTypes::new(first_import_type);
     let imports::EncodedImports {
         section: imports,
         abi,
         function_count: imported_functions,
-        next_type_index,
-    } = imports::encode(&mut types, first_import_type, &dependencies);
+    } = imports::encode(&mut types, &mut function_types, &dependencies);
 
     let pointer_prefixes =
         pointer_prefixes::PointerPrefixPlan::build(program, semantics, &standard_library);
@@ -533,7 +539,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         debug_names: function_debug_names,
     } = function_plan::encode(
         &mut types,
-        next_type_index,
+        &mut function_types,
         imported_functions,
         function_plan::Inputs {
             standard_library: &standard_library,

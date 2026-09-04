@@ -4,6 +4,96 @@ use super::catalogs_types::TypedExpressionCounter;
 use super::*;
 
 #[test]
+fn ordinary_function_types_are_shared_after_the_gc_group() {
+    for profile in [
+        splitscript::BuildProfile::Debug,
+        splitscript::BuildProfile::Release,
+    ] {
+        let wasm = splitscript::compile_with_options(
+            EXAMPLE,
+            splitscript::CompilerOptions {
+                profile,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        Validator::new_with_features(WasmFeatures::all())
+            .validate_all(&wasm)
+            .unwrap();
+        let mut signatures = std::collections::HashSet::new();
+        for payload in Parser::new(0).parse_all(&wasm) {
+            if let Payload::TypeSection(section) = payload.unwrap() {
+                for group in section {
+                    let group = group.unwrap();
+                    if group.is_explicit_rec_group() {
+                        continue;
+                    }
+                    for ty in group.into_types() {
+                        if let wasmparser::CompositeInnerType::Func(function) =
+                            ty.composite_type.inner
+                        {
+                            assert!(
+                                signatures.insert((
+                                    function.params().to_vec(),
+                                    function.results().to_vec()
+                                )),
+                                "ordinary signatures should be interned across imports and defined functions"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert!(!signatures.is_empty());
+    }
+}
+
+#[test]
+fn script_locals_use_adjacent_type_groups() {
+    let wasm = splitscript::compile(
+        r#"
+        state "game.exe" {}
+        fn combine(input: i32) {
+            let first = input + 1
+            let second = input + 2
+            let third = input + 3
+            return first + second + third
+        }
+        setup { print(combine(1)) }
+    "#,
+    )
+    .unwrap();
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .unwrap();
+    let (_, names) = debug_function_names(&wasm).unwrap();
+    let index = names.iter().find(|(_, name)| name == "combine").unwrap().0;
+    let mut function_index = 0;
+    let mut found = false;
+    for payload in Parser::new(0).parse_all(&wasm) {
+        match payload.unwrap() {
+            Payload::ImportSection(section) => function_index = section.count(),
+            Payload::CodeSectionEntry(body) => {
+                if function_index == index {
+                    let locals = body
+                        .get_locals_reader()
+                        .unwrap()
+                        .into_iter()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap();
+                    assert!(locals.iter().map(|(count, _)| count).sum::<u32>() >= 3);
+                    assert!(locals.windows(2).all(|pair| pair[0].1 != pair[1].1));
+                    found = true;
+                }
+                function_index += 1;
+            }
+            _ => {}
+        }
+    }
+    assert!(found);
+}
+
+#[test]
 fn compiler_stages_expose_lowered_declarations_without_mutating_syntax() {
     let source = r#"
         state "game.exe" {

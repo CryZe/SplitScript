@@ -16,6 +16,7 @@ use super::{
     Type, action_result_val_type,
     async_frame::LeafFutureInstance,
     dependencies::BackendDependencies,
+    function_types::FunctionTypes,
     reachability, runtime_helper_registry, semantic_type, set_element_type,
     set_functions::{SetFunctionPlan, SetFunctions},
 };
@@ -76,7 +77,7 @@ pub(super) struct Inputs<'a> {
 
 pub(super) fn encode<'a>(
     types: &mut TypeSection,
-    mut next_type: u32,
+    signatures: &mut FunctionTypes,
     imported_functions: u32,
     inputs: Inputs<'a>,
 ) -> FunctionPlan<'a> {
@@ -104,9 +105,7 @@ pub(super) fn encode<'a>(
     let mut debug_names = Vec::new();
 
     let mut declare = |name: String, params: Vec<ValType>, results: Vec<ValType>| {
-        let type_index = next_type;
-        next_type += 1;
-        types.ty().function(params, results);
+        let type_index = signatures.intern(types, params, results);
         section.function(type_index);
         let function_index = next_function;
         next_function += 1;
@@ -378,12 +377,15 @@ pub(super) fn encode<'a>(
         );
     }
 
+    let functions_by_id = program
+        .functions
+        .iter()
+        .map(|function| (function.id, function))
+        .collect::<HashMap<_, _>>();
     let mut users = HashMap::new();
     for instance in reachability.functions() {
-        let function = program
-            .functions
-            .iter()
-            .find(|function| function.id == instance.function)
+        let function = functions_by_id
+            .get(&instance.function)
             .expect("reachable function instances have source declarations");
         let result = semantic_type(
             semantics.specialize_type(
@@ -610,10 +612,8 @@ pub(super) fn encode<'a>(
         section.function(gc.callable_function_index(*layout));
         let function_index = next_function;
         next_function += 1;
-        let function = program
-            .functions
-            .iter()
-            .find(|function| function.id == instance.function.function)
+        let function = functions_by_id
+            .get(&instance.function.function)
             .expect("reachable function values have source declarations");
         debug_names.push((
             function_index,

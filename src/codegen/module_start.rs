@@ -70,7 +70,7 @@ pub(super) fn compile_start(
             },
         );
     }
-    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
+    let mut function = Function::new_with_locals_types(local_types);
     let debug = emission.debug_emission(start_functions.start);
     emit_runtime_global_initializers(&mut function, emission, &locals, &matches, debug);
     emit_initial_state(&mut function, program, semantics, settings_context.gc);

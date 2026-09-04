@@ -214,7 +214,7 @@ pub(super) fn compile_leaf_future_poll(
             ValType::I32,
         ]);
     }
-    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
+    let mut function = Function::new_with_locals_types(local_types);
     let empty_values = HashMap::new();
     let empty_temporaries = HashMap::new();
     let context = ExprContext {
@@ -368,7 +368,7 @@ fn compile_async_body(
             include_values: true,
         },
     );
-    let mut function = Function::new(local_types.into_iter().map(|ty| (1, ty)));
+    let mut function = Function::new_with_locals_types(local_types);
     let context = ExprContext {
         standard_library: runtime.lowering.standard_library,
         reachability: runtime.lowering.reachability,

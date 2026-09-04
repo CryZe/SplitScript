@@ -66,6 +66,82 @@ the 2026-08-31 checkpoint; do not compare it directly to the July result below a
 evidence of a recent regression because the compiler and bundled standard
 library changed substantially in between.
 
+## 2026-09-04 first performance-plan implementation batch
+
+Compared `fd4db26` with the first implementation batch in
+[`PERFORMANCE_PLAN.md`](../PERFORMANCE_PLAN.md), using the same toolchain and
+machine as the preceding September baseline. The changes cache immutable
+backend validation, index declarations and Wasm bodies, group specialization
+work by function owner, reuse completion receiver facts, borrow semantic
+snapshots for highlights, group adjacent generated locals, and share ordinary
+Wasm function signatures.
+
+Fresh release-module inspection:
+
+| Fixture | Before bytes | After bytes | Reduction |
+| --- | ---: | ---: | ---: |
+| Lunistice | 34,830 | 34,526 | 304 (0.87%) |
+| Minish Cap | 49,307 | 48,773 | 534 (1.08%) |
+| Set runtime | 3,187 | 3,152 | 35 (1.10%) |
+
+Lunistice now has 62 ordinary function-type entries for 62 distinct signatures,
+down from 78 entries. Minish Cap has 54 for 54, down from 86. GC recursive groups
+and nominal layout identities are not merged. Adjacent script, async, and start
+function locals are grouped without reordering local indices; a few manually
+declared runtime-local groups remain uncombined. These are encoding savings,
+not set-operation pruning or general optimization passes. Release modules still
+contain their compiler identity metadata and omit debug sections.
+
+All three new modules pass `wasm-tools validate --features all`. Separate-process
+recompilations of Lunistice and Minish Cap produce byte-identical output.
+
+The receiver cache holds up to eight owned fact sets (including failed probes)
+per document revision, rather than retaining temporary compiler databases.
+Repeated requests for a cached receiver avoid semantic probing; the first
+request after an edit still uses the existing inference/recovery path. Fixed
+backend validation is cached per process, so fresh CLI processes still validate
+the contracts once. Neither change removes standard-library parsing/checking.
+
+Sequential before/after runs used saved release harness executables, with no
+repository build or test running during measurement. Each compiler row has 20
+warmups and 200 measured samples; each editor row has 20 warmups where the
+harness specifies them and 30 measured samples.
+
+| Compiler fixture | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| minimal | 48.42 ms | 48.35 ms | 50.98 ms | 50.51 ms |
+| Lunistice | 57.29 ms | 57.81 ms | 59.37 ms | 60.15 ms |
+| cancellation | 49.33 ms | 49.37 ms | 50.56 ms | 51.00 ms |
+| settings | 51.37 ms | 50.76 ms | 53.68 ms | 52.18 ms |
+
+These one-shot medians move by less than 1.2% in either direction, so the batch
+does not establish an overall compiler latency improvement. The dominant
+standard-library parse/check floor remains. The minimal/cancellation/settings
+release modules shrink from 1,009/2,817/8,119 to 1,006/2,795/8,044 bytes.
+
+| Editor fixture / query | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| small / warm multi-query sequence | 51.251 ms | 0.055 ms | 56.794 ms | 0.057 ms |
+| Lunistice / warm multi-query sequence | 97.012 ms | 0.092 ms | 100.196 ms | 0.095 ms |
+| generated 500 helpers / warm multi-query sequence | 129.132 ms | 11.716 ms | 133.433 ms | 12.575 ms |
+| small / edit to member completion | 98.420 ms | 97.131 ms | 101.448 ms | 101.137 ms |
+| Lunistice / edit to member completion | 153.894 ms | 151.415 ms | 159.880 ms | 156.459 ms |
+| generated 500 helpers / edit to member completion | 199.070 ms | 197.856 ms | 203.224 ms | 203.676 ms |
+
+The warm sequence is diagnostics, root completion, member completion, hover,
+and semantic tokens at unchanged source/positions. Its improvement is mostly
+eliminating repeated receiver-probe databases. It does not represent a speedup
+for every keystroke: edit-to-member-completion still pays the first semantic
+analysis/probe and remains approximately unchanged. The generated large warm
+sequence still has other source/query work to address. Each fixture retains
+352 additional bytes after the warm sequence, while its recorded retained-state
+peak is unchanged. New regression tests count successful and failed probes and
+verify reuse across caret positions and invalidation after a source edit.
+
+The full `cargo xtask check` passed for this batch: 403 library tests, 602 compiler
+integration tests, syntax/stdlib-loader and CLI tests, editor and browser-worker
+checks, generated-module validation, and the maintained host-runtime fixtures.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

@@ -10,9 +10,40 @@ lowest-risk output improvements are compact local declarations, shared ordinary
 function signatures, and operation-level reachability for sets. General
 optimization passes should follow those changes, rather than block them.
 
-This is an implementation plan, not a claim that the proposed optimizations
-have been applied. The existing caching/indexing work is included with this
-document; investigation artifacts are under ignored `target/performance-review`.
+The original review and measurements below are retained as the starting point.
+Implementation progress is tracked separately here; investigation artifacts
+are under ignored `target/performance-review`.
+
+## First implementation batch
+
+Implemented on 2026-09-04:
+
+- Cached immutable backend contract validation and indexed function declarations
+  and Wasm bodies, including the generic-template fallback (part of order 2).
+- Grouped adjacent script/async/start-function locals and interned ordinary
+  function signatures across imports and definitions (order 3). Existing
+  hand-written runtime local groups are unchanged.
+- Added an eight-entry LRU cache of owned completion receiver facts, including
+  failed probes, invalidated with the source revision (part of order 5). It
+  retains no temporary database. This removes repeated probes at unchanged
+  completion sites; the first request after an edit can still require a probe.
+- Grouped specialization expressions by owner with stable expression ordering
+  (order 6), and borrowed semantic snapshots when building highlights (the small
+  first step of order 7).
+
+Release sizes are now 34,526 bytes for Lunistice, 48,773 for Minish Cap, and
+3,152 for the set runtime fixture. See [baselines](docs/BASELINES.md) for the
+before/after results. These reductions do not include set-operation pruning.
+
+Validation: the full `cargo xtask check` passed for this batch, including the new
+cache/type/local regression tests, editor/browser workers, Wasm validation, and
+host-runtime fixtures. Repeated Lunistice and Minish Cap builds are byte-identical.
+
+Still open: detailed stage instrumentation, lazy release debug-name construction,
+set-operation reachability, direct receiver selection before the first probe,
+root-effect probe reuse, shared stage ownership, parsed standard-library reuse,
+and the larger backend/optimizer work. The suggested delivery order remains a
+guide to those remaining slices, not a list of fully completed milestones.
 
 ## Evidence and scope
 
@@ -393,8 +424,8 @@ The first milestone is orders 1–6: measurable reductions in repeated work and
 unneeded encoding, with no general optimizer or incremental inference framework.
 Use those results to scope immutable-product sharing and standard-library reuse.
 
-Review validation: `cargo xtask check` passed on the accompanying working-tree
+Initial review validation: `cargo xtask check` passed on the accompanying working-tree
 caching/indexing changes, including Rust, editor/browser-worker, Wasm validation,
 and runtime checks. The separate fresh release inspection above also validated
-its three fixture modules. No proposed optimization in this plan was implemented
-as part of the review.
+its three fixture modules. Implementation began after that review; see the
+progress section above.

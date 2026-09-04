@@ -2,7 +2,8 @@
 //!
 //! Bodies are authored in the privileged catalog source, but statements and
 //! expressions are parsed only after they have been appended to an ordinary
-//! compilation unit. This keeps one body grammar and one semantic pipeline.
+//! compilation unit. Static library tokens are cached per graph, but one parser
+//! still owns all syntax identities and constructed-type interning.
 
 use crate::{
     Diagnostic,
@@ -32,6 +33,7 @@ struct SelectedProviderContext {
 pub(super) struct RenderedLibraryBodies {
     pub(super) source: String,
     pub(super) body_ranges: Vec<(std::ops::Range<usize>, &'static str)>,
+    tokens: Result<Vec<lexer::Token>, Diagnostic>,
 }
 
 fn body_source(
@@ -140,7 +142,9 @@ pub(crate) fn augment_program_with_library_bodies(
     } else if !has_library_bodies {
         return Ok(None);
     }
-    parse_augmented_program(user_source, combined, body_ranges)
+    let tokens =
+        augmented_tokens(&combined, library_start, rendered).map_err(|error| vec![error])?;
+    parse_augmented_program(user_source, &combined, tokens, body_ranges)
 }
 
 pub(super) fn render_library_bodies(library: &StandardLibrary) -> RenderedLibraryBodies {
@@ -169,19 +173,64 @@ pub(super) fn render_library_bodies(library: &StandardLibrary) -> RenderedLibrar
     if source.ends_with('\n') {
         source.pop();
     }
+    let tokens = lex_tokens(&source);
     RenderedLibraryBodies {
         source,
         body_ranges,
+        tokens,
     }
+}
+
+fn lex_tokens(source: &str) -> Result<Vec<lexer::Token>, Diagnostic> {
+    Ok(lexer::lex_lossless(source)?
+        .into_lexemes()
+        .into_iter()
+        .filter_map(|lexeme| match lexeme {
+            lexer::Lexeme::Token(token) => Some(token),
+            lexer::Lexeme::Trivia(_) => None,
+        })
+        .collect())
+}
+
+fn augmented_tokens(
+    combined: &str,
+    library_start: usize,
+    rendered: &RenderedLibraryBodies,
+) -> Result<Vec<lexer::Token>, Diagnostic> {
+    let library_end = library_start + rendered.source.len();
+    // Normally both generated boundaries are separated by newlines and the
+    // user prefix has already passed strict parsing. Preserve whole-source
+    // lexical recovery/error behavior if any fragment cannot be lexed alone.
+    let (Ok(library), Ok(mut tokens), Ok(suffix)) = (
+        &rendered.tokens,
+        lex_tokens(&combined[..library_start]),
+        lex_tokens(&combined[library_end..]),
+    ) else {
+        return lex_tokens(combined);
+    };
+    tokens.pop(); // Only the suffix contributes the combined EOF.
+    tokens.reserve(library.len() - 1 + suffix.len());
+    tokens.extend(library[..library.len() - 1].iter().map(|token| {
+        let mut token = token.clone();
+        token.span.start += library_start;
+        token.span.end += library_start;
+        token
+    }));
+    tokens.extend(suffix.into_iter().map(|mut token| {
+        token.span.start += library_end;
+        token.span.end += library_end;
+        token
+    }));
+    Ok(tokens)
 }
 
 fn parse_augmented_program(
     user_source: &str,
-    combined: String,
+    combined: &str,
+    tokens: Vec<lexer::Token>,
     body_ranges: Vec<(std::ops::Range<usize>, &'static str)>,
 ) -> Result<Option<Program>, Vec<Diagnostic>> {
-    let lexed = lexer::lex_lossless(&combined).map_err(|error| vec![error])?;
-    let output = parser::parse_recovering(&combined, lexed.tokens().cloned().collect());
+    let output = parser::parse_recovering(combined, tokens);
     if !output
         .diagnostics
         .iter()
@@ -721,6 +770,141 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+
+    fn assert_augmented_tokens_match_source(
+        prefix: &str,
+        rendered: &RenderedLibraryBodies,
+        suffix: &str,
+    ) {
+        let combined = format!("{prefix}\n{}\n{suffix}", rendered.source);
+        let actual = augmented_tokens(&combined, prefix.len() + 1, rendered);
+        let expected = lex_tokens(&combined);
+        match (actual, expected) {
+            (Ok(actual), Ok(expected)) => assert_eq!(actual, expected),
+            (Err(actual), Err(expected)) => {
+                assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+            }
+            (actual, expected) => panic!("token assembly mismatch: {actual:?} vs {expected:?}"),
+        }
+    }
+
+    #[test]
+    fn cached_library_tokens_preserve_offsets_and_generated_provider_tokens() {
+        let library = StandardLibrary::new();
+        let isolated = StandardLibrary::isolated_bundled();
+        let sources = [
+            "",
+            "state \"game.exe\" {} // trailing comment",
+            "fn identity(value) { return value }\nfn array(value: [u32]) { return value }",
+            "// Unicode 🦊\r\nfn text() { return `héllo {1 + 2}` }",
+            "/// documentation at the boundary",
+            "fn partial(value: [u32]) {", // Parser recovery still sees the same stream.
+        ];
+        let managed_program = crate::parse(
+            r#"image "Assembly-CSharp" { class Player { u32 state; } }
+               state Unity ["game.exe"] {}"#,
+        )
+        .unwrap()
+        .into_syntax();
+        let provider = managed_preparation_source(
+            &managed_program,
+            "__prepare",
+            "",
+            None,
+            &[SelectedProviderContext {
+                index: 0,
+                ty: "UnityContext",
+                function_name: "__prepare_unity_context",
+            }],
+        );
+        for library in [&library, &isolated] {
+            let rendered = library.rendered_library_bodies();
+            for source in sources {
+                for suffix in ["", provider.as_str()] {
+                    assert_augmented_tokens_match_source(source, rendered, suffix);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn token_cache_preserves_empty_libraries_and_lexical_failure_behavior() {
+        for source in [
+            "",
+            "fn helper() {}",
+            "*/ fn helper() {}",
+            "/*",
+            "\"unfinished",
+        ] {
+            let rendered = RenderedLibraryBodies {
+                tokens: lex_tokens(source),
+                source: source.to_owned(),
+                body_ranges: Vec::new(),
+            };
+            for prefix in [
+                "",
+                "/*",
+                "fn f() { return `unfinished",
+                "\"unfinished",
+                "🦊",
+            ] {
+                for suffix in ["", "*/ fn after() {}", "\"unfinished", "🦊"] {
+                    assert_augmented_tokens_match_source(prefix, &rendered, suffix);
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "manual release benchmark; timings are not correctness thresholds"]
+    fn benchmark_library_token_assembly() {
+        use std::{hint::black_box, time::Instant};
+
+        let library = StandardLibrary::new();
+        let rendered = library.rendered_library_bodies();
+        let prefix = "state \"game.exe\" {}\n";
+        let combined = format!("{prefix}{}\n", rendered.source);
+        let mut samples = [Vec::new(), Vec::new()];
+        // Alternate order within each pair; exclude graph/cache initialization
+        // and token disposal from both paths. The reference is the original
+        // augmentation lexer, including its owned-token copy.
+        for iteration in 0..220 {
+            for branch in 0..2 {
+                let path = (iteration + branch) % 2;
+                let start = Instant::now();
+                let tokens = if path == 0 {
+                    lexer::lex_lossless(black_box(&combined))
+                        .unwrap()
+                        .tokens()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                } else {
+                    augmented_tokens(black_box(&combined), prefix.len(), rendered).unwrap()
+                };
+                let elapsed = start.elapsed().as_nanos();
+                if iteration >= 20 {
+                    samples[path].push(elapsed);
+                }
+                black_box(tokens);
+            }
+        }
+        println!(
+            "library_source_bytes={} cached_tokens={}",
+            rendered.source.len(),
+            rendered.tokens.as_ref().unwrap().len()
+        );
+        for (name, mut samples) in ["whole_source_lex", "cached_library_tokens"]
+            .into_iter()
+            .zip(samples)
+        {
+            samples.sort_unstable();
+            println!(
+                "{name}: median_us={:.1} p95_us={:.1}",
+                samples[100] as f64 / 1_000.0,
+                samples[189] as f64 / 1_000.0
+            );
+        }
+    }
 
     #[test]
     fn source_body_analysis_initializes_safely_from_parallel_callers() {

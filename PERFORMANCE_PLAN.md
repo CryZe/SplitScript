@@ -152,6 +152,38 @@ Validation: the focused declaration test, all 24 profile codegen tests, and the
 full `cargo xtask check` passed, including 411 library tests, 605 compiler
 integration tests, documentation, editor/browser checks, and Wasm/runtime fixtures.
 
+## Standard-library token reuse implementation batch
+
+Implemented a precursor to order 8 on 2026-09-04. Each standard-library graph
+now retains the tokens for its rendered source. Augmentation clones those
+tokens and rebases their spans, lexing only the user prefix and the generated
+provider suffix. Dynamic tokens move out of the lossless lexer result instead
+of cloning their owned text. Lexical failures fall back to whole-source lexing
+to preserve behavior at fragment boundaries.
+
+The combined source still passes through one parser, preserving syntax ID
+allocation, constructed-type interning, user-visible counts, and diagnostics.
+This does not reuse parsed ASTs or checked semantics, and it still reparses the
+user prefix. Parsed-template reuse needs a separate remapping design because
+constructed types are interned across all declarations in a compilation.
+
+Token-equivalence tests cover distinct graphs, empty libraries, generated managed
+provider preparation, Unicode, comments, incomplete syntax, and lexical errors.
+The existing parallel initialization and augmentation tests also pass. A new
+`compiler_baseline -- 200 --frontend` mode measures parse/augmentation/resolution
+separately from checking and code generation. See [baselines](docs/BASELINES.md)
+for the measured cost of token copying versus repeated lexing.
+
+The alternating token benchmark improved from 1.305 to 0.198 ms (84.8%). Full
+compilation medians improved by 0.1–1.6 ms in the paired run, while p95 values
+overlap. Nine representative release modules are byte-identical, including
+both managed-runtime backends. Parsed-template and semantic reuse remain open.
+
+Validation: all nine targeted library-injection tests and the full
+`cargo xtask check` passed, including 413 library tests (one manual benchmark
+ignored), 605 compiler integration tests, documentation, editor/browser checks,
+and Wasm/runtime fixtures. The manual release benchmark also passed separately.
+
 ## Evidence and scope
 
 There are three different performance concerns:
@@ -434,10 +466,11 @@ existing query/recovery tests and explicitly cover warning-policy changes.
 
 ## 8. Reuse standard-library templates across compilations
 
-The current working-tree change caches rendered source and name indexes. It
-does **not** cache parsing or checking. In
-[augment_program_with_library_bodies](src/stdlib/library_bodies.rs), each source
-is concatenated with every library body, lexed and parsed again, including the
+The initial working-tree change cached rendered source and name indexes. The
+token-reuse batch above also caches lexed library tokens, but still does **not**
+cache parsing or checking. In the original
+[augmentation path](src/stdlib/library_bodies.rs), each source was concatenated
+with every library body, lexed and parsed again, including the
 already-parsed user prefix. Checking then processes all injected functions;
 [validation](src/validation.rs) verifies their signatures/effects against the
 bootstrapped metadata again. [Wasm lowering](src/wasm_ir.rs) also lowers all

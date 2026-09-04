@@ -1,6 +1,8 @@
 //! Repeatable local compile-time and generated-Wasm-size baseline.
 //!
 //! Run with `cargo run --release --example compiler_baseline -- 200`.
+//! Append `--frontend` to measure parsing, library augmentation, and declaration
+//! resolution without type checking or Wasm generation (including result drop).
 
 use std::{hint::black_box, time::Instant};
 
@@ -15,8 +17,9 @@ const FIXTURES: [(&str, &str); 4] = [
 ];
 
 fn main() {
-    let iterations = std::env::args()
-        .nth(1)
+    let mut arguments = std::env::args().skip(1);
+    let iterations = arguments
+        .next()
         .map(|value| {
             value
                 .parse::<usize>()
@@ -24,9 +27,19 @@ fn main() {
         })
         .unwrap_or(DEFAULT_ITERATIONS);
     assert!(iterations > 0, "iteration count must be positive");
+    let frontend = match arguments.next().as_deref() {
+        None => false,
+        Some("--frontend") => true,
+        Some(other) => panic!("unknown baseline option: {other}"),
+    };
+    assert!(arguments.next().is_none(), "too many baseline arguments");
 
     println!("rust_harness_profile=release");
-    println!("splitscript_profile=release");
+    println!(
+        "splitscript_profile={}",
+        if frontend { "n/a" } else { "release" }
+    );
+    println!("pipeline={}", if frontend { "frontend" } else { "compile" });
     println!(
         "platform={}-{} logical_cpus={}",
         std::env::consts::OS,
@@ -38,14 +51,14 @@ fn main() {
 
     for (name, source) in FIXTURES {
         for _ in 0..WARMUP_ITERATIONS {
-            black_box(compile(source));
+            black_box(run(source, frontend));
         }
 
         let mut samples = Vec::with_capacity(iterations);
         let mut wasm_bytes = 0;
         for _ in 0..iterations {
             let start = Instant::now();
-            let wasm = compile(black_box(source));
+            let wasm = run(black_box(source), frontend);
             samples.push(start.elapsed().as_nanos());
             wasm_bytes = wasm.len();
             black_box(wasm);
@@ -54,15 +67,26 @@ fn main() {
         let median = samples[samples.len() / 2];
         let p95 = samples[(samples.len() * 95).div_ceil(100) - 1];
         println!(
-            "{name}\t{}\t{wasm_bytes}\t{}\t{}",
+            "{name}\t{}\t{}\t{}\t{}",
             source.len(),
+            if frontend {
+                "-".to_owned()
+            } else {
+                wasm_bytes.to_string()
+            },
             nanos_to_micros(median),
             nanos_to_micros(p95)
         );
     }
 }
 
-fn compile(source: &str) -> Vec<u8> {
+fn run(source: &str, frontend: bool) -> Vec<u8> {
+    if frontend {
+        black_box(splitscript::lower(
+            splitscript::parse(source).expect("baseline fixture should parse"),
+        ));
+        return Vec::new();
+    }
     splitscript::compile_with_options(
         source,
         splitscript::CompilerOptions {

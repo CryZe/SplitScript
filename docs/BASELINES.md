@@ -14,6 +14,18 @@ in-process with the SplitScript release profile; the numbers exclude building
 the Rust compiler executable, filesystem I/O, `wasm-tools` validation, and
 host-runtime execution.
 
+Append `--frontend` to isolate parsing, standard-library augmentation, and
+declaration resolution through the public `parse`/`lower` APIs:
+
+```console
+cargo run --release --example compiler_baseline -- 200 --frontend
+```
+
+This mode includes disposal of the resulting lowered program but does not run
+type checking or generate Wasm; its Wasm-size column is `-`. Warmups initialize
+the standard-library graph and its caches, so these are repeated in-process
+measurements, not process-startup measurements.
+
 Timing values are diagnostic baselines, not test thresholds. OS scheduling,
 CPU power state, Rust updates, and allocator changes can move them without a
 compiler regression. Generated Wasm byte counts are deterministic, but should
@@ -323,6 +335,76 @@ release optimization.
 The focused declaration test, all 24 profile codegen integration tests, and the
 full `cargo xtask check` passed, including 411 compiler library tests, 605 compiler
 integration tests, documentation, editor/browser checks, and Wasm/runtime fixtures.
+
+## 2026-09-04 standard-library token reuse
+
+Before: `13e805b`. After: cached library tokens and consuming extraction of
+dynamic tokens during augmentation. The cache belongs to the standard-library
+graph; it contains 13,626 tokens for 90,560 bytes of rendered source. Each
+compilation still copies the cached tokens, reparses the combined program, and
+checks its library functions. This is lexing reuse, not parsed-template reuse.
+
+A focused release benchmark alternates the original whole-source lexer and
+cached-token assembly within each pair, with 20 warmup pairs and 200 measured
+pairs. It uses the minimal source, excludes graph initialization and disposal
+of the resulting token vector, and includes the original lexer's owned-token
+copy. Run it with:
+
+```console
+cargo test --release --lib benchmark_library_token_assembly -- --ignored --nocapture
+```
+
+| Token assembly | Median | p95 |
+| --- | ---: | ---: |
+| original whole-source lexing | 1,305.1 µs | 1,491.6 µs |
+| cached library tokens | 197.8 µs | 227.2 µs |
+
+This isolates a 1.107 ms (84.8%) median reduction in token assembly. The cache
+retains tokens and their owned text once per graph in addition to the rendered
+source; compiler contexts sharing that graph share the cache. User source and
+provider-specific tokens are not retained there.
+
+Full release compilation used the same four fixtures, 20 warmups, and 100
+samples per row. Before/after executables ran sequentially without concurrent
+builds or tests:
+
+| Fixture | Before median | After median | Before p95 | After p95 | Release Wasm bytes (both) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| minimal | 84.59 ms | 83.22 ms | 92.84 ms | 92.59 ms | 1,006 |
+| Lunistice | 99.19 ms | 97.56 ms | 107.64 ms | 108.85 ms | 34,526 |
+| cancellation | 86.01 ms | 85.87 ms | 96.01 ms | 96.98 ms | 2,795 |
+| settings | 89.91 ms | 88.94 ms | 98.45 ms | 99.77 ms | 8,044 |
+
+These modest median changes are consistent with the isolated saving; overlapping
+p95 values do not establish a tail-latency improvement. The new `--frontend`
+runner also measured parse/augmentation/resolution, including disposal of the
+lowered result. A repeat with 20 warmups and 100 samples gave:
+
+| Fixture | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| minimal | 25.10 ms | 24.58 ms | 26.45 ms | 25.57 ms |
+| Lunistice | 51.79 ms | 51.79 ms | 56.78 ms | 60.90 ms |
+| cancellation | 43.55 ms | 42.05 ms | 48.94 ms | 47.56 ms |
+| settings | 45.56 ms | 44.34 ms | 54.82 ms | 51.91 ms |
+
+An initial 200-sample frontend run measured 41.46 → 26.38 ms for minimal, but
+the repeat did not reproduce that large difference. Do not attribute it to the
+cache. Parsing and declaration resolution remain much larger costs than lexing.
+
+All nine compared release modules were byte-identical: Lunistice, Minish Cap,
+both managed-instance runtime fixtures, set runtime, async loop, postfix calls,
+debug profile, and the captured-closure/generic-function-value probe. All 18
+outputs passed Wasm validation. Debug differences were limited to `.debug_info`
+in Lunistice, set runtime, and postfix calls; executable code, names, and all
+other sections matched. The preceding batch documents the existing debug-info
+reproducibility issue; repeating Lunistice with the unchanged before compiler
+also reproduced the variation during this batch.
+
+All nine targeted library-injection tests passed. The manual token benchmark
+is ignored during ordinary correctness checks and has no timing assertion.
+The full `cargo xtask check` passed, including 413 compiler library tests (one
+manual benchmark ignored), 605 compiler integration tests, documentation,
+editor/browser checks, and Wasm/runtime fixtures.
 
 ## 2026-07-28 historical baseline
 

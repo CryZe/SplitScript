@@ -2575,6 +2575,35 @@ struct ReceiverFacts {
     recovered: bool,
 }
 
+/// Owned facts only: retaining a repaired database would also retain its
+/// complete augmented syntax and semantic products. The surrounding query
+/// cache invalidates these entries whenever the source revision changes.
+#[derive(Debug, Default)]
+pub(crate) struct ReceiverCache {
+    entries: std::collections::VecDeque<((usize, usize), Option<ReceiverFacts>)>,
+    #[cfg(test)]
+    probes: usize,
+}
+
+impl ReceiverCache {
+    const CAPACITY: usize = 8;
+
+    fn get(&mut self, key: (usize, usize)) -> Option<Option<ReceiverFacts>> {
+        let position = self.entries.iter().position(|(stored, _)| *stored == key)?;
+        let entry = self.entries.remove(position)?;
+        let facts = entry.1.clone();
+        self.entries.push_back(entry);
+        Some(facts)
+    }
+
+    fn insert(&mut self, key: (usize, usize), facts: Option<ReceiverFacts>) {
+        if self.entries.len() == Self::CAPACITY {
+            self.entries.pop_front();
+        }
+        self.entries.push_back((key, facts));
+    }
+}
+
 fn infer_receiver(
     database: &mut CompilerDatabase,
     source: &str,
@@ -2582,6 +2611,12 @@ fn infer_receiver(
     context: &MemberContext,
     compiler_context: crate::CompilerContext,
 ) -> Option<ReceiverFacts> {
+    // Within one revision the dot and replacement end determine the receiver
+    // and repaired suffix, even while the caret moves inside the same member.
+    let key = (context.dot, context.replacement.end);
+    if let Some(cached) = database.completion_receiver_cache().get(key) {
+        return cached;
+    }
     let receiver_offset = context.receiver_offset;
     // When completing `receiver.method`, analysis at the end of `receiver`
     // can resolve the surrounding call. Its recorded receiver type is the
@@ -2595,6 +2630,9 @@ fn infer_receiver(
     // discover one receiver type.
     let direct = analyze_receiver_database(database, receiver_offset, use_resolved_call_receiver);
     if direct.as_ref().is_some_and(|facts| !facts.recovered) {
+        database
+            .completion_receiver_cache()
+            .insert(key, direct.clone());
         return direct;
     }
 
@@ -2602,7 +2640,16 @@ fn infer_receiver(
     probe_source.push_str(&source[..context.dot]);
     let suffix_start = completion_probe_suffix_end(tokens, context.replacement.end);
     probe_source.push_str(&source[suffix_start..]);
-    analyze_receiver_source(probe_source, receiver_offset, compiler_context, false).or(direct)
+    #[cfg(test)]
+    {
+        database.completion_receiver_cache().probes += 1;
+    }
+    let facts =
+        analyze_receiver_source(probe_source, receiver_offset, compiler_context, false).or(direct);
+    database
+        .completion_receiver_cache()
+        .insert(key, facts.clone());
+    facts
 }
 
 fn analyze_receiver_source(
@@ -2796,6 +2843,50 @@ mod tests {
             .into_iter()
             .map(|item| item.label)
             .collect()
+    }
+
+    #[test]
+    fn member_receiver_probes_are_reused_until_the_source_changes() {
+        let source = r#"
+struct Point { coordinate: i32 }
+state "game.exe" {}
+whileAttached {
+    let point = Point { coordinate: 1 }
+    print(point.coordinate)
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let first = labels(&mut database, "point.");
+        assert!(first.contains(&"coordinate".to_owned()));
+        assert_eq!(database.completion_receiver_cache().probes, 1);
+        assert_eq!(first, labels(&mut database, "point."));
+        assert_eq!(labels(&mut database, "point.coo"), vec!["coordinate"]);
+        assert_eq!(database.completion_receiver_cache().probes, 1);
+
+        database.set_source(
+            r#"
+state "game.exe" {}
+whileAttached {
+    let point = "text"
+    print(point.byteLength())
+}
+"#,
+        );
+        assert!(database.completion_receiver_cache().entries.is_empty());
+        let changed = labels(&mut database, "point.");
+        assert!(changed.contains(&"byteLength".to_owned()));
+        assert!(!changed.contains(&"coordinate".to_owned()));
+    }
+
+    #[test]
+    fn unresolved_member_receiver_probes_cache_failures() {
+        let mut database =
+            CompilerDatabase::new("state \"game.exe\" {}\nwhileAttached { missing.unknown }");
+        let first = labels(&mut database, "missing.");
+        assert_eq!(database.completion_receiver_cache().probes, 1);
+        assert_eq!(first, labels(&mut database, "missing."));
+        assert_eq!(database.completion_receiver_cache().probes, 1);
+        assert!(database.completion_receiver_cache().entries[0].1.is_none());
     }
 
     #[test]

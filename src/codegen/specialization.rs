@@ -52,11 +52,12 @@ pub(super) fn materialize(
         sets,
         applications,
     };
-    let owners = expression_owners(wasm);
+    let owners = expressions_by_owner(wasm);
     let mut pending = owners
-        .iter()
-        .filter(|(_, owner)| owner.is_none())
-        .filter_map(|(expression, _)| {
+        .get(&None)
+        .into_iter()
+        .flatten()
+        .filter_map(|expression| {
             called_function(
                 &wasm.expression(*expression)?.kind,
                 None,
@@ -79,10 +80,7 @@ pub(super) fn materialize(
         for local in &body.locals {
             materialize_type(semantics, &instance, local.ty, &mut ids, &mut constructed);
         }
-        for (expression, owner) in &owners {
-            if *owner != Some(instance.function) {
-                continue;
-            }
+        for expression in owners.get(&Some(instance.function)).into_iter().flatten() {
             let expression = wasm
                 .expression(*expression)
                 .expect("owned expressions belong to Wasm IR");
@@ -107,7 +105,9 @@ pub(super) fn materialize(
     }
 }
 
-fn expression_owners(wasm: &wasm_ir::Program) -> HashMap<ExprId, Option<crate::ast::FunctionId>> {
+fn expressions_by_owner(
+    wasm: &wasm_ir::Program,
+) -> HashMap<Option<crate::ast::FunctionId>, Vec<ExprId>> {
     struct Collector<'a> {
         owner: Option<crate::ast::FunctionId>,
         owners: &'a mut HashMap<ExprId, Option<crate::ast::FunctionId>>,
@@ -156,7 +156,16 @@ fn expression_owners(wasm: &wasm_ir::Program) -> HashMap<ExprId, Option<crate::a
         }
         .visit_block(&initializer.entry, wasm);
     }
-    owners
+    let mut grouped = HashMap::<_, Vec<_>>::new();
+    for (expression, owner) in owners {
+        grouped.entry(owner).or_default().push(expression);
+    }
+    // Type materialization allocates identities. Never let hash iteration
+    // determine the order in which a template's expressions are specialized.
+    for expressions in grouped.values_mut() {
+        expressions.sort_unstable_by_key(|expression| expression.index());
+    }
+    grouped
 }
 
 fn called_function(

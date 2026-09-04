@@ -645,13 +645,17 @@ fn state_field_declaration_span(field: &crate::ast::StateField) -> Span {
 }
 
 fn check_function_bodies(checker: &mut Checker, program: &Program) {
+    // Recovered declarations can leave gaps in parser-assigned IDs.
+    let functions = program
+        .functions
+        .iter()
+        .map(|function| (function.id, function))
+        .collect::<std::collections::HashMap<_, _>>();
     for component in super::function_graph::dependency_order(program) {
         checker.active_function_component = component.functions.iter().copied().collect();
         for function_id in &component.functions {
-            let function = program
-                .functions
-                .iter()
-                .find(|function| function.id == *function_id)
+            let function = functions
+                .get(function_id)
                 .expect("function graph identities belong to source declarations");
             check_function_body(checker, function);
         }

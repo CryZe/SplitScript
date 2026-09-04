@@ -771,6 +771,7 @@ pub struct Program {
     standard_library: StandardLibrary,
     profile: crate::BuildProfile,
     bodies: Vec<Body>,
+    body_indices: HashMap<BodyOwner, usize>,
     global_initializers: Vec<(hir::TypedBindingPattern, ExprId)>,
     global_initializer_plans: Vec<GlobalInitializerPlan>,
     attachment_globals: Vec<ValueId>,
@@ -847,6 +848,7 @@ impl Program {
             standard_library: typed_hir.standard_library().clone(),
             profile,
             bodies: Vec::new(),
+            body_indices: HashMap::new(),
             global_initializers,
             global_initializer_plans: Vec::new(),
             attachment_globals,
@@ -968,7 +970,7 @@ impl Program {
                 &mutated_values,
                 &mut program,
             );
-            program.bodies.push(body);
+            program.push_body(body);
         }
         for action in typed_hir.action_bodies() {
             let body = lower_body(
@@ -986,7 +988,7 @@ impl Program {
                 &mutated_values,
                 &mut program,
             );
-            program.bodies.push(body);
+            program.push_body(body);
         }
         let state_sources = typed_hir.state_sources().collect::<Vec<_>>();
         for (field, expression) in state_sources {
@@ -1161,20 +1163,28 @@ impl Program {
     }
 
     pub fn body(&self, owner: BodyOwner) -> Option<&Body> {
-        self.bodies
-            .iter()
-            .find(|body| body.owner == owner)
+        self.body_indices
+            .get(&owner)
             .or_else(|| match owner {
                 BodyOwner::Function(instance)
                     if !instance.type_arguments.is_empty() || !instance.signature.is_empty() =>
                 {
-                    self.bodies.iter().find(|body| {
-                        body.owner
-                            == BodyOwner::Function(FunctionInstance::monomorphic(instance.function))
-                    })
+                    self.body_indices
+                        .get(&BodyOwner::Function(FunctionInstance::monomorphic(
+                            instance.function,
+                        )))
                 }
                 BodyOwner::Function(_) | BodyOwner::Action(_) => None,
             })
+            .map(|index| &self.bodies[*index])
+    }
+
+    fn push_body(&mut self, body: Body) {
+        let previous = self
+            .body_indices
+            .insert(body.owner.clone(), self.bodies.len());
+        assert!(previous.is_none(), "Wasm body owners must be unique");
+        self.bodies.push(body);
     }
 
     pub fn state_expressions(&self) -> impl Iterator<Item = &StateExpression> {

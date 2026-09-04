@@ -178,15 +178,12 @@ impl CompilerDatabase {
 
     pub fn semantic_highlights(&mut self) -> QueryResult<SemanticHighlightIndex> {
         if self.cache.highlights.is_none() {
-            let semantics = self
-                .semantic_snapshot()
-                .ok()
-                .map(|snapshot| snapshot.semantics().clone());
+            let snapshot = self.semantic_snapshot().ok();
             self.cache.highlights = Some(match self.recovering_parse() {
                 Ok(parsed) => Ok(Arc::new(SemanticHighlightIndex::build(
                     parsed.source_document(),
                     parsed.syntax(),
-                    semantics.as_ref(),
+                    snapshot.as_ref().map(|snapshot| snapshot.semantics()),
                     self.context.standard_library(),
                 ))),
                 Err(errors) => Err(errors),
@@ -389,6 +386,10 @@ impl CompilerDatabase {
         offset: usize,
     ) -> SemanticQueryResult<crate::completion::CompletionList> {
         crate::completion::complete(self, offset)
+    }
+
+    pub(crate) fn completion_receiver_cache(&mut self) -> &mut crate::completion::ReceiverCache {
+        &mut self.cache.completion_receivers
     }
 
     pub fn hover(

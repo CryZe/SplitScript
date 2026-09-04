@@ -183,6 +183,53 @@ integration tests, documentation validation, editor/browser workers and web host
 generated-module validation, and the maintained host-runtime fixtures. The
 verification log is under ignored `target/performance-review/set-pruning-check.log`.
 
+## 2026-09-04 direct member receiver selection
+
+Compared a saved release tooling harness from `ae3e404` with direct receiver
+selection, using the same fixtures and runner (`tooling_baseline 500 30`):
+20 warmups where specified by the harness and 30 measured samples per row.
+Measurements ran sequentially without concurrent repository builds or tests.
+An intermediate run identified the remaining snapshot-prefix case; the after
+column below is the final implementation including that case.
+
+| Edit to member completion | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| small | 169.25 ms | 83.63 ms | 184.47 ms | 88.51 ms |
+| Lunistice | 253.78 ms | 93.74 ms | 263.73 ms | 107.62 ms |
+| generated 500 helpers | 381.03 ms | 146.93 ms | 404.47 ms | 167.98 ms |
+
+Median reductions are 50.6%, 63.1%, and 61.4%. Absolute timings are slower than
+the earlier September runs even for unchanged code, so compare this paired
+measurement rather than attributing differences from earlier sessions to this
+change. The measured sources and compiler/toolchain profiles are unchanged.
+
+These fixtures request completion inside valid field paths (`point.x` and
+`current.<field>`). The compiler now selects the receiver's typed path prefix
+from the existing semantic snapshot, avoiding a repaired database and another
+semantic pass. Completed calls and indexed expressions use their own result
+types; completion inside a method name uses its receiver type. Regression
+tests check both positive and negative candidates and count probes.
+
+Per-request peak allocation deltas for edit-to-member completion fall from
+6,991,226 to 3,996,238 bytes (small), 7,467,861 to 1,901,710 (Lunistice), and
+22,047,501 to 10,691,337 (generated large). This removes transient probe work;
+the existing bounded receiver cache is still used.
+
+This does not eliminate semantic analysis after each edit. Recovered or
+unavailable receiver facts still use the repair path, with successful and
+failed probes cached per revision. Constructor-field prefixes without known
+substitutions and root-effect completion remain separate opportunities. Warm
+cached queries were already fast; this batch targets the first request on a
+new revision rather than claiming a further general warm-query improvement.
+
+Logs are under ignored `target/performance-review/direct-before-tooling.txt`
+and `direct-final-tooling.txt`.
+
+All 49 targeted completion tests and the full `cargo xtask check` passed:
+406 library tests, 605 compiler integration tests, documentation validation,
+editor/browser workers and web host, Wasm validation, and runtime fixtures.
+The full-check log is `target/performance-review/direct-completion-check.log`.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

@@ -40,7 +40,6 @@ cache/type/local regression tests, editor/browser workers, Wasm validation, and
 host-runtime fixtures. Repeated Lunistice and Minish Cap builds are byte-identical.
 
 Still open: detailed stage instrumentation, lazy release debug-name construction,
-direct receiver selection before the first probe,
 root-effect probe reuse, shared stage ownership, parsed standard-library reuse,
 and the larger backend/optimizer work. The suggested delivery order remains a
 guide to those remaining slices, not a list of fully completed milestones.
@@ -67,6 +66,33 @@ checks duplicate insertion in both profiles.
 Validation: the full `cargo xtask check` passed, including 605 compiler
 integration tests, library tests, documentation, VS Code/browser checks, Wasm
 validation, and host-runtime fixtures.
+
+## Direct completion receiver implementation batch
+
+Implemented another part of order 5 on 2026-09-04. Member completion now uses
+the current semantic snapshot for a known receiver expression or the selected
+prefix of a resolved field/call path. It distinguishes a method's receiver from
+its result and handles source fields, snapshot/settings roots, indexed values,
+result propagation, and generic constraints.
+
+Successful strict analysis avoids a repaired database at these sites even on
+the first request after an edit. Recovered or missing facts still use the
+existing bounded probe cache. Constructor-field substitutions without direct
+facts continue to use repair; root-effect completion is a separate remaining
+optimization.
+
+Regression tests count probes and check candidate types across path prefixes,
+call results, source edits, recovered members, and failed lookups. Updated
+timings and validation are recorded in [baselines](docs/BASELINES.md).
+
+Paired edit-to-member-completion medians improved from 169.25 to 83.63 ms
+(small), 253.78 to 93.74 ms (Lunistice), and 381.03 to 146.93 ms (500 helpers).
+These are valid-source field-completion sites, not an estimate for every
+incomplete edit. Standard-library parsing/checking remains a major fixed cost.
+
+Validation: all 49 targeted completion tests and the full `cargo xtask check`
+passed, including 406 library tests, 605 compiler integration tests, documentation,
+editor/browser checks, and the Wasm/runtime fixtures.
 
 ## Evidence and scope
 
@@ -274,6 +300,10 @@ mutation/version, and existing set runtime coverage. Audit other helper families
 with the same report before claiming this problem is widespread.
 
 ## 5. Stop rechecking a whole file for warm member completion
+
+The receiver cache and direct receiver selection are implemented in the batches
+above. The following is the original review; root-effect probe reuse remains
+open.
 
 In [completion::analyze_receiver_database](src/completion.rs), path receivers
 prefer a resolved method-call receiver. With a field such as `point.x`, there

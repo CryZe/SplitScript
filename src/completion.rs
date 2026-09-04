@@ -28,7 +28,7 @@ use crate::{
         LanguageCatalog, LanguageCompletionSite, LanguageItem, LanguageItemId, LanguageItemKind,
     },
     lexer::TokenKind,
-    semantic::ResolvedCall,
+    semantic::{ResolvedCall, ResolvedMember, ResolvedValue, SemanticModel},
     stdlib::{
         ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibItemId, StdlibNamespace,
         StdlibSymbolId, StdlibTypeConstructorId, StdlibTypeId, TypeRef,
@@ -2618,17 +2618,11 @@ fn infer_receiver(
         return cached;
     }
     let receiver_offset = context.receiver_offset;
-    // When completing `receiver.method`, analysis at the end of `receiver`
-    // can resolve the surrounding call. Its recorded receiver type is the
-    // type whose methods we need. For `receiver.method().`, however, the
-    // completed call is itself the new receiver, so its result type is the
-    // correct one. Non-path receivers have no textual receiver segments.
-    let use_resolved_call_receiver = !context.receiver_path.is_empty();
     // Reuse the current revision before considering a repaired source. In LSP
     // use this database normally already contains the diagnostic pass, so a
     // second database used to repeat the complete semantic pipeline merely to
     // discover one receiver type.
-    let direct = analyze_receiver_database(database, receiver_offset, use_resolved_call_receiver);
+    let direct = analyze_receiver_database(database, receiver_offset, context.dot);
     if direct.as_ref().is_some_and(|facts| !facts.recovered) {
         database
             .completion_receiver_cache()
@@ -2645,7 +2639,8 @@ fn infer_receiver(
         database.completion_receiver_cache().probes += 1;
     }
     let facts =
-        analyze_receiver_source(probe_source, receiver_offset, compiler_context, false).or(direct);
+        analyze_receiver_source(probe_source, receiver_offset, compiler_context, context.dot)
+            .or(direct);
     database
         .completion_receiver_cache()
         .insert(key, facts.clone());
@@ -2656,35 +2651,22 @@ fn analyze_receiver_source(
     source: String,
     receiver_offset: usize,
     compiler_context: crate::CompilerContext,
-    use_resolved_call_receiver: bool,
+    dot: usize,
 ) -> Option<ReceiverFacts> {
     let mut database = CompilerDatabase::with_context(compiler_context, source);
-    analyze_receiver_database(&mut database, receiver_offset, use_resolved_call_receiver)
+    analyze_receiver_database(&mut database, receiver_offset, dot)
 }
 
 fn analyze_receiver_database(
     database: &mut CompilerDatabase,
     receiver_offset: usize,
-    use_resolved_call_receiver: bool,
+    dot: usize,
 ) -> Option<ReceiverFacts> {
     let analysis = database.analysis_at(receiver_offset).ok()??;
     let snapshot = database.semantic_snapshot().ok()?;
     let recovered = snapshot.checked().is_none();
-    let resolved_call_receiver = match &analysis.resolution {
-        Some(ExpressionResolution::Call(ResolvedCall::UserMethod { receiver_type, .. })) => {
-            Some(*receiver_type)
-        }
-        Some(ExpressionResolution::Call(ResolvedCall::StandardLibrary {
-            receiver_type: Some(receiver_type),
-            ..
-        })) => Some(*receiver_type),
-        _ => None,
-    };
-    let receiver_type = if use_resolved_call_receiver {
-        resolved_call_receiver?
-    } else {
-        analysis.ty
-    };
+    let receiver_type =
+        completion_receiver_type(&analysis, snapshot.semantics(), receiver_offset, dot)?;
     let constraints = snapshot
         .semantics()
         .generic_parameter_constraints(receiver_type)
@@ -2695,6 +2677,83 @@ fn analyze_receiver_database(
         constraints,
         recovered,
     })
+}
+
+fn completion_receiver_type(
+    analysis: &crate::database::PositionAnalysis,
+    semantics: &SemanticModel,
+    receiver_offset: usize,
+    dot: usize,
+) -> Option<crate::types::TypeId> {
+    // An expression ending before the dot is the receiver itself, including
+    // calls, indexing, propagation, and fields on expression receivers.
+    if analysis.span.end <= dot {
+        return Some(analysis.ty);
+    }
+    // Plain dotted paths are a single expression. Select the typed prefix at
+    // the completion dot instead of using the final field or call result.
+    let segment = analysis.segments.iter().position(|segment| {
+        segment.span.start <= receiver_offset && receiver_offset < segment.span.end
+    })?;
+    let (root, members, path_segments) = match analysis.resolution.as_ref()? {
+        ExpressionResolution::ValuePath { root, members } => {
+            ((*root)?, members.as_slice(), analysis.segments.len())
+        }
+        ExpressionResolution::Call(call) => {
+            let path_segments = analysis.segments.len().checked_sub(1)?;
+            if segment + 1 == path_segments {
+                match call {
+                    ResolvedCall::UserMethod { receiver_type, .. }
+                    | ResolvedCall::ManagedSnapshot { receiver_type, .. }
+                    | ResolvedCall::ManagedComponent { receiver_type, .. }
+                    | ResolvedCall::StandardLibrary {
+                        receiver_type: Some(receiver_type),
+                        ..
+                    } => {
+                        return Some(*receiver_type);
+                    }
+                    _ => {}
+                }
+            }
+            let (root, members) = call.receiver()?.path()?;
+            (root, members, path_segments)
+        }
+        _ => return None,
+    };
+    let root_segments = path_segments.checked_sub(members.len())?;
+    if segment == 0 {
+        match root {
+            ResolvedValue::CurrentState(_)
+            | ResolvedValue::OldState(_)
+            | ResolvedValue::CurrentSnapshot
+            | ResolvedValue::OldSnapshot => {
+                return Some(semantics.types().id_for_state_snapshot());
+            }
+            ResolvedValue::Setting(_)
+            | ResolvedValue::OldSetting(_)
+            | ResolvedValue::SettingsView
+            | ResolvedValue::OldSettingsView => {
+                return Some(semantics.types().id_for_settings_view());
+            }
+            _ => {}
+        }
+    }
+    if segment + 1 == root_segments {
+        return match root {
+            ResolvedValue::ManagedStatic { field, .. } => semantics.managed_field_value_type(field),
+            _ => semantics.value_type(root.source_value()?),
+        };
+    }
+    match members.get(segment.checked_sub(root_segments)?)? {
+        ResolvedMember::StateField(field) | ResolvedMember::SettingField(field) => {
+            semantics.value_type(*field)
+        }
+        ResolvedMember::StructField(field) => semantics.struct_field_type(*field),
+        ResolvedMember::ManagedField(field) => semantics.managed_field_value_type(*field),
+        // Constructor fields may depend on the concrete receiver's type
+        // arguments. Keep the repair path until those substitutions are known.
+        ResolvedMember::StandardField(_) => None,
+    }
 }
 
 /// Removes an already-written call and propagation suffix from a completion
@@ -2846,7 +2905,7 @@ mod tests {
     }
 
     #[test]
-    fn member_receiver_probes_are_reused_until_the_source_changes() {
+    fn valid_field_receivers_need_no_probe_and_invalidate_on_edits() {
         let source = r#"
 struct Point { coordinate: i32 }
 state "game.exe" {}
@@ -2858,10 +2917,10 @@ whileAttached {
         let mut database = CompilerDatabase::new(source);
         let first = labels(&mut database, "point.");
         assert!(first.contains(&"coordinate".to_owned()));
-        assert_eq!(database.completion_receiver_cache().probes, 1);
+        assert_eq!(database.completion_receiver_cache().probes, 0);
         assert_eq!(first, labels(&mut database, "point."));
         assert_eq!(labels(&mut database, "point.coo"), vec!["coordinate"]);
-        assert_eq!(database.completion_receiver_cache().probes, 1);
+        assert_eq!(database.completion_receiver_cache().probes, 0);
 
         database.set_source(
             r#"
@@ -2876,6 +2935,123 @@ whileAttached {
         let changed = labels(&mut database, "point.");
         assert!(changed.contains(&"byteLength".to_owned()));
         assert!(!changed.contains(&"coordinate".to_owned()));
+        assert_eq!(database.completion_receiver_cache().probes, 0);
+    }
+
+    #[test]
+    fn direct_receivers_select_path_prefixes_and_call_results() {
+        let declarations = r#"
+struct Leaf { count: i32 }
+struct Holder { leaf: Leaf }
+fn Leaf.label() { return "text" }
+fn make() { return Holder { leaf: Leaf { count: 1 } } }
+state "game.exe" { position: Holder = make() }
+"#;
+        for (expression, marker, expected, absent) in [
+            (
+                "current.position.leaf.count",
+                "current.",
+                "position",
+                "count",
+            ),
+            ("old.position.leaf.count", "old.", "position", "count"),
+            ("holder.leaf.count", "holder.", "leaf", "count"),
+            ("holder.leaf.count", "holder.leaf.", "count", "leaf"),
+            (
+                "current.position.leaf.count",
+                "current.position.",
+                "leaf",
+                "count",
+            ),
+            (
+                "current.position.leaf.count",
+                "current.position.leaf.",
+                "count",
+                "leaf",
+            ),
+            ("holder.leaf.label()", "holder.", "leaf", "label"),
+            ("holder.leaf.label()", "holder.leaf.", "label", "byteLength"),
+            (
+                "holder.leaf.label().byteLength()",
+                "holder.leaf.label().",
+                "byteLength",
+                "count",
+            ),
+            ("make().leaf.count", "make().", "leaf", "count"),
+            ("make().leaf.count", "make().leaf.", "count", "leaf"),
+            ("make().leaf.label()", "make().leaf.", "label", "byteLength"),
+            ("[1i32][0].min(2)", "[1i32][0].", "min", "length"),
+        ] {
+            let source = format!(
+                "{declarations}\nwhileAttached {{\nlet holder = make()\nprint({expression})\n}}"
+            );
+            let mut database = CompilerDatabase::new(source);
+            assert!(
+                database.semantic_snapshot().unwrap().checked().is_some(),
+                "{expression}"
+            );
+            let candidates = labels(&mut database, marker);
+            assert!(
+                candidates.contains(&expected.to_owned()),
+                "{marker}: {candidates:?}"
+            );
+            assert!(
+                !candidates.contains(&absent.to_owned()),
+                "{marker}: {candidates:?}"
+            );
+            assert_eq!(database.completion_receiver_cache().probes, 0, "{marker}");
+        }
+    }
+
+    #[test]
+    fn recovered_receiver_probes_are_still_reused() {
+        let source = r#"
+struct Point { coordinate: i32 }
+state "game.exe" {}
+whileAttached {
+    let point = Point { coordinate: 1 }
+    point.coo
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        assert_eq!(labels(&mut database, "point.coo"), vec!["coordinate"]);
+        assert_eq!(database.completion_receiver_cache().probes, 1);
+        assert_eq!(labels(&mut database, "point.co"), vec!["coordinate"]);
+        assert_eq!(database.completion_receiver_cache().probes, 1);
+    }
+
+    #[test]
+    fn direct_receivers_preserve_propagation_and_generic_constraints() {
+        for (source, marker) in [
+            (
+                "fn smaller(value: i32?) -> i32 { return (value else 0).min(3) }",
+                "(value else 0).",
+            ),
+            (
+                "fn smaller(value: i32!) -> i32! { return value?.min(3) }",
+                "value?.",
+            ),
+            (
+                "fn smaller(value, other) { return value.min(other) }",
+                "value.",
+            ),
+        ] {
+            let mut database = CompilerDatabase::new(format!("state \"game.exe\" {{}}\n{source}"));
+            assert!(
+                database.semantic_snapshot().unwrap().checked().is_some(),
+                "{source}"
+            );
+            let candidates = labels(&mut database, marker);
+            assert!(
+                candidates.contains(&"min".to_owned()),
+                "{source}: {candidates:?}"
+            );
+            assert!(
+                !candidates.contains(&"length".to_owned()),
+                "{source}: {candidates:?}"
+            );
+            assert_eq!(database.completion_receiver_cache().probes, 0, "{source}");
+        }
     }
 
     #[test]

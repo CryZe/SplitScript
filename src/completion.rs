@@ -1227,6 +1227,21 @@ fn language_completion(
     item: &LanguageItem,
     availability: ContextAvailability,
 ) -> Option<CompletionItem> {
+    // `settings` names both the top-level declaration and the live settings
+    // view. Top-level completion is handled before this expression-oriented
+    // path, so expose the value interpretation here instead of dropping it
+    // with declarations in general.
+    if item.id == LanguageItemId::Settings {
+        return Some(CompletionItem {
+            label: item.name.to_owned(),
+            kind: CompletionKind::Variable,
+            detail: Some("SettingsView".to_owned()),
+            documentation: Some(render_documentation(&item.documentation)),
+            documentation_uri: Some(language_item_uri(item.id)),
+            insert_text: item.name.to_owned(),
+            is_snippet: false,
+        });
+    }
     if matches!(
         item.id,
         LanguageItemId::NativeStringDecoder | LanguageItemId::NativeUtf16LeDecoder
@@ -4389,6 +4404,48 @@ fn relay() {
             "state \"game.exe\" {}\nstruct Point { x: i32 }\nfn Point.value() { sel }";
         let mut method_database = CompilerDatabase::new(method_source);
         assert!(labels(&mut method_database, "sel").contains(&"self".to_owned()));
+    }
+
+    #[test]
+    fn settings_completes_as_both_a_declaration_and_an_expression_value() {
+        let source = r#"state "game.exe" {}
+settings {
+    "User Name" => userName: "Player",
+}
+whileAttached {
+    setVariable("UserName", setti)
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let completions = database
+            .completions(source.find("setti)").unwrap() + "setti".len())
+            .expect("expression completion should succeed");
+        let settings = completions
+            .items
+            .iter()
+            .find(|item| item.label == "settings")
+            .expect("the current settings view should complete in expressions");
+        assert_eq!(settings.kind, CompletionKind::Variable);
+        assert_eq!(settings.detail.as_deref(), Some("SettingsView"));
+        assert_eq!(settings.insert_text, "settings");
+        assert!(!settings.is_snippet);
+        assert_eq!(
+            settings.documentation_uri.as_deref(),
+            Some("/language/settings.md")
+        );
+
+        let top_level = "state \"game.exe\" {}\nsetti";
+        let mut database = CompilerDatabase::new(top_level);
+        let completion = database
+            .completions(top_level.len())
+            .expect("top-level completion should succeed");
+        let declaration = completion
+            .items
+            .iter()
+            .find(|item| item.label == "settings")
+            .expect("the settings declaration should still complete at top level");
+        assert!(declaration.is_snippet);
+        assert!(declaration.insert_text.starts_with("settings {"));
     }
 
     #[test]

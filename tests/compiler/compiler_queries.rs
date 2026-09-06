@@ -2100,6 +2100,103 @@ fn compiler_database_preserves_semantics_around_type_errors() {
 }
 
 #[test]
+fn compiler_database_shares_lowering_before_and_after_semantic_errors() {
+    use std::sync::Arc;
+
+    use splitscript::tooling::database::CompilerDatabase;
+
+    let base = "// Unicode 🦊\nstate \"game.exe\" { level: u32 at 0x100 }\n";
+    for (suffix, valid) in [
+        ("whileAttached { print(current.level) }", true),
+        ("fn broken() { return missingName }", false),
+        ("onDetach { print(current.level) }", false),
+        ("fn broken(value: Mystery) {}", false),
+    ] {
+        let source = format!("{base}{suffix}");
+        for recovery_first in [false, true] {
+            let mut database = CompilerDatabase::with_source_name("sharing.split", &source);
+            let first = if recovery_first {
+                database.recovering_lower().unwrap()
+            } else {
+                database.lower().unwrap()
+            };
+            assert_eq!(first.source_name(), "sharing.split");
+            assert!(Arc::ptr_eq(&first, &database.lower().unwrap()));
+            assert!(Arc::ptr_eq(&first, &database.recovering_lower().unwrap()));
+            assert_eq!(database.check().is_ok(), valid, "{suffix}");
+            let recovered = database.recovering_check().unwrap();
+            assert!(Arc::ptr_eq(&first, &database.recovering_lower().unwrap()));
+            let direct = splitscript::check_recovering((*first).clone());
+            assert_eq!(
+                format!("{:?}", recovered.diagnostics()),
+                format!("{:?}", direct.diagnostics()),
+                "sharing must preserve diagnostic content, order, and offsets"
+            );
+        }
+    }
+}
+
+#[test]
+fn shared_lowering_survives_warning_policy_changes_but_not_source_edits() {
+    use std::sync::Arc;
+
+    use splitscript::{
+        DiagnosticCode, DiagnosticSeverity, WarningLevel, WarningPolicy,
+        tooling::database::CompilerDatabase,
+    };
+
+    let source = "state \"game.exe\" {} whileAttached { let unread = 1 }";
+    let mut database = CompilerDatabase::new(source);
+    let original = database.recovering_lower().unwrap();
+    let mut policy = WarningPolicy::default();
+    for level in [WarningLevel::Deny, WarningLevel::Allow] {
+        assert!(policy.set(DiagnosticCode::UnusedBinding, level));
+        assert!(database.set_warning_policy(policy));
+        let diagnostics = database.diagnostics();
+        if level == WarningLevel::Deny {
+            assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
+        } else {
+            assert!(diagnostics.is_empty());
+        }
+        assert!(database.check().is_ok());
+        assert!(Arc::ptr_eq(&original, &database.lower().unwrap()));
+        assert!(Arc::ptr_eq(
+            &original,
+            &database.recovering_lower().unwrap()
+        ));
+    }
+
+    assert!(
+        database.set_source("state \"game.exe\" {}\nfn retained() { return 7 }\nlet broken = +")
+    );
+    let errors = database.lower().unwrap_err();
+    let partial = database.recovering_lower().unwrap();
+    assert!(!Arc::ptr_eq(&original, &partial));
+    assert!(
+        partial
+            .hir()
+            .declarations_named("retained")
+            .next()
+            .is_some()
+    );
+    assert!(Arc::ptr_eq(&errors, &database.lower().unwrap_err()));
+    assert!(
+        database.check().is_err(),
+        "recovered syntax must stay out of strict checking"
+    );
+
+    assert!(database.set_source(source));
+    let repaired = database.lower().unwrap();
+    assert!(!Arc::ptr_eq(&original, &repaired));
+    assert!(!Arc::ptr_eq(&partial, &repaired));
+    assert!(Arc::ptr_eq(
+        &repaired,
+        &database.recovering_lower().unwrap()
+    ));
+    assert!(database.check().is_ok());
+}
+
+#[test]
 fn compiler_database_lowers_recovered_declarations_after_syntax_errors() {
     use std::sync::Arc;
 

@@ -184,6 +184,42 @@ Validation: all nine targeted library-injection tests and the full
 ignored), 605 compiler integration tests, documentation, editor/browser checks,
 and Wasm/runtime fixtures. The manual release benchmark also passed separately.
 
+## Shared strict/recovery lowering implementation batch
+
+Implemented another slice of order 7 on 2026-09-06. The editor database now
+shares one `Arc<LoweredProgram>` between strict and recovery queries whenever
+strict lowering succeeds. Type errors and later validation errors no longer
+cause recovery to repeat standard-library augmentation, parsing, and declaration
+resolution or retain a second copy of the lowered program. Sharing works with
+either query order and remains scoped to the source revision.
+
+Syntax errors and failed generated-source augmentation still use the recovered
+user tree. This fallback never enters the strict cache and does not retry the
+same failed augmentation. Warning-policy changes retain semantic products;
+source edits invalidate both lowering queries.
+
+All 47 targeted compiler-query tests passed, including new checks for query
+order, error classes, diagnostic offsets, warning policy, and valid/invalid
+revision transitions. The `tooling_baseline -- 500 30 --recovery` mode measures
+edit-to-diagnostics-plus-hover latency and retained/peak heap growth on valid,
+type-error, validation-error, and syntax-error inputs. See
+[baselines](docs/BASELINES.md) for the paired results.
+
+Measured error-path medians improved from 83.75 to 55.85 ms (small type error),
+131.61 to 94.72 ms (500 helpers), and 80.65 to 55.12 ms (validation error).
+Valid-source and syntax-error controls are approximately unchanged. Peak heap
+growth during the edit query fell from 5.45 to 3.56 MiB for the small error
+fixtures and from 16.36 to 11.36 MiB for the large one; the runner reported
+unchanged retained-state values. Seven release fixtures are byte-identical.
+
+Validation: the full `cargo xtask check` passed, including 414 library tests
+(one manual benchmark ignored), 608 compiler integration tests, documentation,
+editor/browser checks, and Wasm/runtime fixtures.
+
+This shares lowering only. Strict and recovering type inference can still run
+separately after a failed check; retaining partial inference results remains the
+next part of order 7. Cross-compilation parsed-library reuse remains separate.
+
 ## Evidence and scope
 
 There are three different performance concerns:

@@ -216,54 +216,40 @@ impl CompilerDatabase {
 
     pub fn recovering_lower(&mut self) -> QueryResult<LoweredProgram> {
         if self.cache.recovering_lowered.is_none() {
-            self.cache.recovering_lowered = Some(match self.recovering_parse() {
-                Ok(recovered) => {
-                    let syntax = recovered.syntax().clone();
-                    let mut compilation_syntax = syntax.clone();
-                    if !recovered
-                        .diagnostics()
-                        .iter()
-                        .any(|diagnostic| diagnostic.severity == crate::DiagnosticSeverity::Error)
-                    {
-                        // Editor recovery must remain available even if the
-                        // compiler-owned augmentation boundary itself fails.
-                        // Those generated diagnostics cannot be repaired in
-                        // the user's document, and strict compilation still
-                        // enforces the invariant in `lower`. Keeping the
-                        // already-recovered source syntax here lets lexical and
-                        // partial semantic tooling continue instead of taking
-                        // down every LSP feature through an `expect` panic.
-                        if let Ok(Some(augmented)) =
-                            crate::stdlib::augment_program_with_library_bodies(
-                                recovered.source_document().source(),
-                                &syntax,
-                                &recovered.context().standard_library(),
-                            )
-                        {
-                            compilation_syntax = augmented;
-                        }
+            // Successful strict lowering is also the recovery input, even when
+            // later type checking or validation rejects the program. Sharing
+            // it avoids parsing/resolving all library bodies a second time.
+            self.cache.recovering_lowered =
+                Some(self.lower().or_else(|_| match self.recovering_parse() {
+                    Ok(recovered) => {
+                        // Strict lowering failed on syntax or generated-library
+                        // augmentation. Retain the recovered user tree for editor
+                        // queries, without promoting it into the strict cache or
+                        // retrying the same failed augmentation.
+                        let syntax = recovered.syntax().clone();
+                        let compilation_syntax = syntax.clone();
+                        let mut resolution_diagnostics =
+                            recovered.resolution_diagnostics().to_vec();
+                        let mut resolutions = crate::resolution::ProgramResolutions::default();
+                        resolution_diagnostics.extend(crate::resolution::resolve_program(
+                            &compilation_syntax,
+                            &recovered.context().standard_library(),
+                            &mut resolutions,
+                        ));
+                        Ok(Arc::new(LoweredProgram {
+                            context: recovered.context(),
+                            source_name: recovered.source_name().to_owned(),
+                            document: recovered.source_document().clone(),
+                            hir: crate::hir::DeclarationIndex::lower(&syntax),
+                            compilation_syntax,
+                            syntax,
+                            resolutions,
+                            syntax_diagnostics: recovered.diagnostics().to_vec(),
+                            resolution_diagnostics,
+                        }))
                     }
-                    let mut resolution_diagnostics = recovered.resolution_diagnostics().to_vec();
-                    let mut resolutions = crate::resolution::ProgramResolutions::default();
-                    resolution_diagnostics.extend(crate::resolution::resolve_program(
-                        &compilation_syntax,
-                        &recovered.context().standard_library(),
-                        &mut resolutions,
-                    ));
-                    Ok(Arc::new(LoweredProgram {
-                        context: recovered.context(),
-                        source_name: recovered.source_name().to_owned(),
-                        document: recovered.source_document().clone(),
-                        hir: crate::hir::DeclarationIndex::lower(&syntax),
-                        compilation_syntax,
-                        syntax,
-                        resolutions,
-                        syntax_diagnostics: recovered.diagnostics().to_vec(),
-                        resolution_diagnostics,
-                    }))
-                }
-                Err(errors) => Err(errors),
-            });
+                    Err(errors) => Err(errors),
+                }));
         }
         self.cache.recovering_lowered.as_ref().unwrap().clone()
     }

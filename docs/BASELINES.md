@@ -406,6 +406,65 @@ The full `cargo xtask check` passed, including 413 compiler library tests (one
 manual benchmark ignored), 605 compiler integration tests, documentation,
 editor/browser checks, and Wasm/runtime fixtures.
 
+## 2026-09-06 shared strict/recovery lowering
+
+Before: `0a0c6c8`, including the intervening text-setting and settings-expression
+changes. After: sharing successful strict lowering with recovery in the editor
+database. Rust `1.98.1`, Windows x86-64, 32 logical CPUs, release harness, 20
+warmups, and 30 samples per row. Before and after runs were sequential without
+concurrent builds or tests.
+
+```console
+cargo run --release --example tooling_baseline -- 500 30 --recovery
+```
+
+Each sample edits the source, requests diagnostics, then requests semantic
+facts and hover. This includes strict checking and any recovery needed after
+an error. The fixtures cover valid source, a missing-name type error, the same
+error with 500 helpers, unavailable state access in `onDetach`, and incomplete
+function syntax. All reuse the runner's normal offset-preserving edit pattern.
+The standard-library graph is initialized before measurement.
+
+| Fixture | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| valid control | 50.20 ms | 49.51 ms | 55.79 ms | 56.90 ms |
+| type error | 83.75 ms | 55.85 ms | 111.98 ms | 56.99 ms |
+| type error, 500 helpers | 131.61 ms | 94.72 ms | 136.58 ms | 97.45 ms |
+| validation error | 80.65 ms | 55.12 ms | 86.85 ms | 61.96 ms |
+| syntax-error control | 49.0 µs | 49.9 µs | 52.7 µs | 51.4 µs |
+
+Error-path medians improved by 25.5–36.9 ms (28–33%). The valid and syntax-error
+controls are approximately unchanged. Successful strict lowering is now reused
+even when a later stage rejects the program; recovery no longer repeats library
+augmentation, parsing, and declaration resolution. Both query orders share the
+same `Arc<LoweredProgram>`. Type inference itself can still run twice.
+
+| Fixture | Before peak heap growth during edit query | After peak heap growth |
+| --- | ---: | ---: |
+| valid control | 3.81 MiB | 3.81 MiB |
+| type error | 5.45 MiB | 3.56 MiB |
+| type error, 500 helpers | 16.36 MiB | 11.36 MiB |
+| validation error | 5.45 MiB | 3.56 MiB |
+| syntax-error control | 15.3 KiB | 15.3 KiB |
+
+The runner's retained-state rows reported unchanged values: 3,029,995 bytes
+for valid, 566,374 for type error, 8,884,158 for large type error, 565,699 for
+validation error, and 52,288 for syntax error. The measurements support lower
+transient heap growth, not a measured steady-state retention reduction.
+
+Seven release modules were byte-identical before/after: Lunistice (34,526
+bytes), Minish Cap (48,773), desktop settings (8,790), managed-instance runtime
+(17,369), managed-instance Mono runtime (26,608), debug profile (1,591), and set
+runtime (3,597). The settings fixture is larger than in the 2026-09-04 baseline
+because this comparison starts after the intervening settings commits.
+
+All 47 targeted compiler-query tests passed, covering sharing in either query
+order, independent recovered facts, diagnostic identity, warning-policy changes,
+and source invalidation. Syntax recovery remains separate from strict lowering.
+The full `cargo xtask check` passed, including 414 library tests (one manual
+benchmark ignored), 608 compiler integration tests, documentation, editor/browser
+checks, and Wasm/runtime fixtures.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

@@ -2,6 +2,7 @@
 //!
 //! Run with `cargo run --release --example tooling_baseline -- 500 100`.
 //! Append `--root-effects` to measure repeated root completion in detached contexts.
+//! Append `--recovery` to measure diagnostics followed by hover after invalid edits.
 
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -77,10 +78,14 @@ fn main() {
     let mut arguments = std::env::args().skip(1);
     let functions = parse_positive(arguments.next(), DEFAULT_FUNCTIONS, "function count");
     let iterations = parse_positive(arguments.next(), DEFAULT_ITERATIONS, "iteration count");
-    let root_effects = arguments.next().is_some_and(|argument| {
-        assert_eq!(argument, "--root-effects", "unknown benchmark mode");
-        true
-    });
+    let mode = arguments.next();
+    assert!(
+        matches!(
+            mode.as_deref(),
+            None | Some("--root-effects" | "--recovery")
+        ),
+        "unknown benchmark mode"
+    );
     assert!(arguments.next().is_none(), "unexpected extra arguments");
 
     let fixtures = [
@@ -120,8 +125,12 @@ fn main() {
         "fixture\tsource_bytes\tquery\tmedian_us\tp95_us\tretained_delta_bytes\tpeak_delta_bytes"
     );
 
-    if root_effects {
+    if mode.as_deref() == Some("--root-effects") {
         run_root_effects(functions, iterations);
+        return;
+    }
+    if mode.as_deref() == Some("--recovery") {
+        run_recovery(functions, iterations);
         return;
     }
 
@@ -132,6 +141,59 @@ fn main() {
     println!("retained fixture\tstate\tretained_bytes\tpeak_delta_bytes");
     for fixture in &fixtures {
         report_retained_states(fixture);
+    }
+}
+
+fn run_recovery(functions: usize, iterations: usize) {
+    for (name, source, checked) in [
+        ("recovery_valid", small_source(), true),
+        (
+            "recovery_type_error",
+            format!("{}\nfn broken() {{ return missingName }}\n", small_source()),
+            false,
+        ),
+        (
+            "recovery_large_type_error",
+            format!(
+                "{}\nfn broken() {{ return missingName }}\n",
+                large_source(functions)
+            ),
+            false,
+        ),
+        (
+            "recovery_validation_error",
+            format!(
+                "{}\nonDetach {{ print(current.position.x) }}\n",
+                small_source()
+            ),
+            false,
+        ),
+        (
+            "recovery_syntax_error",
+            format!("{}\nfn broken(\n", small_source()),
+            false,
+        ),
+    ] {
+        let fixture = Fixture::new(name, source, "current.position", "point.x");
+        let query = |database: &mut CompilerDatabase, fixture: &Fixture| {
+            black_box(database.diagnostics());
+            let snapshot = database
+                .semantic_snapshot()
+                .expect("editor semantics should recover");
+            assert_eq!(snapshot.checked().is_some(), checked);
+            black_box(
+                database
+                    .hover(fixture.hover_offset)
+                    .expect("hover should recover"),
+            );
+        };
+        measure_database_edit(
+            &fixture,
+            "database_edit_diagnostics_hover",
+            iterations,
+            query,
+        );
+        report_retained_state(&fixture, "diagnostics_hover", query);
     }
 }
 

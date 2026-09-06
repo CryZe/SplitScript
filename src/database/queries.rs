@@ -1155,6 +1155,11 @@ impl<'ast> Visitor<'ast> for ContextualLanguageItemAt {
             return;
         }
         match &setting.kind {
+            crate::ast::SettingKind::Text { default_span, .. } => {
+                if *default_span == self.target {
+                    self.item = Some(LanguageItemId::TextInputSetting);
+                }
+            }
             crate::ast::SettingKind::Choice {
                 keyword_span,
                 options,

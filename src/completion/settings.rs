@@ -159,6 +159,13 @@ fn add_entry_completions(builder: &mut CompletionBuilder) {
     );
     add_snippet(
         builder,
+        "text input setting",
+        "settings declaration",
+        "\"${1:Label}\" => ${2:name}: \"${3:default}\",",
+        "Adds a free-form text input whose string value is available through `settings.name`.",
+    );
+    add_snippet(
+        builder,
         "settings group",
         "settings heading",
         "\"${1:Group}\" {\n\t$0\n},",
@@ -194,6 +201,13 @@ fn add_kind_completions(builder: &mut CompletionBuilder) {
     ] {
         add_snippet(builder, label, "boolean default", label, documentation);
     }
+    add_snippet(
+        builder,
+        "text input",
+        "string default",
+        "\"${1:default}\"",
+        "Creates a free-form text-input setting with this default value.",
+    );
     add_snippet(
         builder,
         "choice",

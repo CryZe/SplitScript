@@ -720,6 +720,22 @@ abi_catalog! {
         "Adds a MIME filter to a file setting."
     ),
     import!(
+        UserSettingsAddTextInput,
+        "user_settings_add_text_input",
+        &[
+            input("key_pointer"),
+            value("key_length", AbiType::I32),
+            input("description_pointer"),
+            value("description_length", AbiType::I32),
+            input("default_value_pointer"),
+            value("default_value_length", AbiType::I32)
+        ],
+        &[],
+        SETTINGS_REGISTRATION,
+        "String byte ranges are borrowed for this call only.",
+        "Registers a free-form text-input setting."
+    ),
+    import!(
         UserSettingsSetTooltip,
         "user_settings_set_tooltip",
         &[

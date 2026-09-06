@@ -1271,6 +1271,10 @@ pub enum SettingKind {
     Bool {
         default: bool,
     },
+    Text {
+        default: String,
+        default_span: Span,
+    },
     Title {
         heading_level: u32,
     },

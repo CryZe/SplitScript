@@ -205,8 +205,8 @@ with the runtime's hanging-autosplitter threshold and process cancellation.
 **Status:** Basic declarations are supported; richer frontend semantics remain
 to be proven by ports.
 
-The existing host supports booleans, headings, choices, file selection,
-filters, tooltips, and a global settings map. Future ports may require
+The existing host supports booleans, headings, free-form text inputs, choices,
+file selection, filters, tooltips, and a global settings map. Future ports may require
 conditional visibility or enablement and repeated/table-shaped settings. Those
 features need a frontend/runtime contract, not merely new SplitScript syntax.
 The maintained Axiom Verge port provides concrete semantics: its category

@@ -34,6 +34,7 @@ pub(super) struct LayoutPredicate {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum RuntimeSettingKind {
     Bool,
+    Text,
     Choice,
     File,
     Title,

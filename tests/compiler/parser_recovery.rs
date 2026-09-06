@@ -509,6 +509,7 @@ fn recovering_parse_keeps_valid_choice_options_and_file_filters() {
                 "Broken" -> "*.bad",
                 mime => "application/octet-stream",
             },
+            "Profile" => profile: "Runner",
             "After" => after: true,
         }
         whileAttached { print("still parsed") }
@@ -529,7 +530,7 @@ fn recovering_parse_keeps_valid_choice_options_and_file_filters() {
             .iter()
             .map(|setting| setting.name.as_str())
             .collect::<Vec<_>>(),
-        ["mode", "file", "after"]
+        ["mode", "file", "profile", "after"]
     );
     let SettingKind::Choice {
         default_variant,
@@ -561,6 +562,10 @@ fn recovering_parse_keeps_valid_choice_options_and_file_filters() {
     assert!(matches!(
         &filters[1],
         SettingFileFilter::Mime { value: mime, .. } if mime == "application/octet-stream"
+    ));
+    assert!(matches!(
+        &recovered.syntax().settings[2].kind,
+        SettingKind::Text { default, .. } if default == "Runner"
     ));
     assert_eq!(recovered.syntax().actions.len(), 1);
     assert_eq!(

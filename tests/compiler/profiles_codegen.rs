@@ -1603,6 +1603,8 @@ fn compiles_the_complete_settings_showcase() {
         .expect("settings example WebAssembly GC should validate");
     for expected in [
         b"Enable Auto Splitting".as_slice(),
+        b"Profile Name".as_slice(),
+        b"Player".as_slice(),
         b"Capture Source".as_slice(),
         b"Layout File".as_slice(),
         b"image/*".as_slice(),

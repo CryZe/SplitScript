@@ -1555,17 +1555,34 @@ impl Parser<'_> {
             None
         };
         self.expect(TokenKind::Colon, "expected `:` after the setting name")?;
-        let (kind_name, kind_span) =
-            self.expect_any_ident("expected a setting default, `choice`, or `file`")?;
-        let kind = match kind_name.as_str() {
-            "true" => SettingKind::Bool { default: true },
-            "false" => SettingKind::Bool { default: false },
-            "choice" => self.choice_setting(kind_span)?,
-            "file" => self.file_setting(kind_span)?,
+        let kind_token = self.current().clone();
+        let kind = match kind_token.kind {
+            TokenKind::String(default) => {
+                self.bump();
+                SettingKind::Text {
+                    default,
+                    default_span: kind_token.span,
+                }
+            }
+            TokenKind::Ident(kind_name) => {
+                self.bump();
+                match kind_name.as_str() {
+                    "true" => SettingKind::Bool { default: true },
+                    "false" => SettingKind::Bool { default: false },
+                    "choice" => self.choice_setting(kind_token.span)?,
+                    "file" => self.file_setting(kind_token.span)?,
+                    _ => {
+                        return Err(Diagnostic::new(
+                            "expected `true`, `false`, a string default, `choice`, or `file`",
+                            kind_token.span,
+                        ));
+                    }
+                }
+            }
             _ => {
                 return Err(Diagnostic::new(
-                    "expected `true`, `false`, `choice`, or `file`",
-                    kind_span,
+                    "expected `true`, `false`, a string default, `choice`, or `file`",
+                    kind_token.span,
                 ));
             }
         };

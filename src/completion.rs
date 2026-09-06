@@ -307,7 +307,9 @@ fn complete_setting_key(request: &CompletionRequest<'_>) -> Option<CompletionLis
     for setting in &syntax.settings {
         let compatible = match setting.kind {
             SettingKind::Bool { .. } => true,
-            SettingKind::Choice { .. } | SettingKind::File { .. } => method == "contains",
+            SettingKind::Text { .. } | SettingKind::Choice { .. } | SettingKind::File { .. } => {
+                method == "contains"
+            }
             SettingKind::Title { .. } => false,
         };
         if !compatible {
@@ -315,6 +317,7 @@ fn complete_setting_key(request: &CompletionRequest<'_>) -> Option<CompletionLis
         }
         let kind = match setting.kind {
             SettingKind::Bool { .. } => "boolean setting key",
+            SettingKind::Text { .. } => "text setting key",
             SettingKind::Choice { .. } => "choice setting key",
             SettingKind::File { .. } => "file setting key",
             SettingKind::Title { .. } => unreachable!(),
@@ -3363,6 +3366,7 @@ whileAttached {
         let labels = labels(&mut entries, "settings {");
         for expected in [
             "boolean setting",
+            "text input setting",
             "settings group",
             "choice setting",
             "file setting",

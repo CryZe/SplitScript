@@ -327,6 +327,7 @@ fn literal_setting_keys_are_checked_against_declared_runtime_keys() {
                 "Fast" => Mode.Fast default,
                 "Slow" => Mode.Slow,
             },
+            "Profile" => profile key "profile-name": "Runner",
             "Paths" {
                 "Route" => route: file {},
             },
@@ -335,9 +336,11 @@ fn literal_setting_keys_are_checked_against_declared_runtime_keys() {
         whileAttached {
             let enabled = settings.enabled("split-bos")
             let wrongKind = settings.enabled("run-mode")
+            let wrongTextKind = settings.enabled("profile-name")
             let heading = settings.contains("_heading0")
             print(enabled)
             print(wrongKind)
+            print(wrongTextKind)
             print(heading)
         }
     "#;
@@ -371,6 +374,18 @@ fn literal_setting_keys_are_checked_against_declared_runtime_keys() {
             .notes
             .iter()
             .any(|note| note.contains("settings.mode"))
+    );
+
+    let wrong_text_kind = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("names a text setting"))
+        .expect("a text setting is distinguished from a boolean setting");
+    assert_eq!(wrong_text_kind.labels.len(), 2);
+    assert!(
+        wrong_text_kind
+            .notes
+            .iter()
+            .any(|note| note.contains("settings.profile"))
     );
 
     let heading = diagnostics

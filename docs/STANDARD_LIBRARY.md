@@ -278,9 +278,9 @@ capability to see every available member and the bounds under which it exists.
 
 The reusable ASR surface is grouped by responsibility:
 
-- Live user settings with nested headings and tooltips, booleans, enum-backed
-  choices, file selectors with glob/MIME filters, and typed current/previous
-  tick snapshots.
+- Live user settings with nested headings and tooltips, booleans, free-form
+  text inputs with defaults, enum-backed choices, file selectors with
+  glob/MIME filters, and typed current/previous tick snapshots.
 - Process attachment to an ordered list of executable names, GC `Module`
   values containing base and size, and managed process-lifetime cancellation.
 - Compile-time parsed `sig"..."` literals and overlapping page-based module

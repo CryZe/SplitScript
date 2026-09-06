@@ -69,7 +69,7 @@ Start with the [complete ASL porting guide](ASL_PORTING.md) for lifecycle and se
 
 ### Settings
 
-- **Dynamic settings lookup** (*Supported directly*): Replace `settings[key]` with `settings.enabled(key)` and `settings.ContainsKey(key)` with `settings.contains(key)`. Declare exact host strings with `key "..."`; choice and file settings remain statically typed. Canonical: `settings`, `oldSettings`. [Porting recipe](ASL_PORTING.md#static-settings-declarations).
+- **Dynamic settings lookup** (*Supported directly*): Replace `settings[key]` with `settings.enabled(key)` and `settings.ContainsKey(key)` with `settings.contains(key)`. Declare exact host strings with `key "..."`; text, choice, and file settings remain statically typed. Canonical: `settings`, `oldSettings`. [Porting recipe](ASL_PORTING.md#static-settings-declarations).
 
 - **Runtime settings registration** (*Use a typed pattern*): Move `settings.Add` calls into the static `settings` declaration, preserving the display label, stable host key, default, hierarchy, and tooltip explicitly. A bounded `settings.Add` loop becomes a compile-time `settings family` instead of hand-expanded declarations. Canonical: `settings`, `oldSettings`, `stable setting key`, `settings family`. [Porting recipe](ASL_PORTING.md#static-settings-declarations).
 

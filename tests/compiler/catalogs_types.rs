@@ -2007,6 +2007,57 @@ fn settings_host_imports_are_filtered_by_setting_kind() {
             .iter()
             .any(|name| name == "user_settings_add_file_select")
     );
+    assert!(
+        !imports
+            .iter()
+            .any(|name| name == "user_settings_add_text_input")
+    );
+}
+
+#[test]
+fn text_settings_import_only_the_text_registration_and_string_reader() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            settings {
+                "Profile" => profile: "Runner"
+            }
+            whileAttached { print(settings.profile) }
+        "#,
+    )
+    .expect("text settings should compile");
+    let mut imports = Vec::new();
+    for payload in Parser::new(0).parse_all(&wasm) {
+        if let Payload::ImportSection(section) = payload.unwrap() {
+            imports.extend(
+                section
+                    .into_imports()
+                    .map(|import| import.unwrap().name.to_owned()),
+            );
+        }
+    }
+
+    assert!(
+        imports
+            .iter()
+            .any(|name| name == "user_settings_add_text_input")
+    );
+    assert!(
+        imports
+            .iter()
+            .any(|name| name == "setting_value_get_string")
+    );
+    assert!(!imports.iter().any(|name| name == "user_settings_add_bool"));
+    assert!(
+        !imports
+            .iter()
+            .any(|name| name == "user_settings_add_file_select")
+    );
+    assert!(
+        !imports
+            .iter()
+            .any(|name| name == "user_settings_add_choice")
+    );
 }
 
 #[derive(Default)]

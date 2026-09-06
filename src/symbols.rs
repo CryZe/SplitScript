@@ -218,6 +218,7 @@ fn setting_symbols(document: &SourceDocument, program: &Program) -> Vec<Document
             detail: Some(
                 match setting.kind {
                     SettingKind::Bool { .. } => "bool setting",
+                    SettingKind::Text { .. } => "text setting",
                     SettingKind::Title { .. } => "settings group",
                     SettingKind::Choice { .. } => "choice setting",
                     SettingKind::File { .. } => "file setting",

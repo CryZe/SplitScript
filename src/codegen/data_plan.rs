@@ -80,6 +80,9 @@ impl StaticData {
                 strings.intern(tooltip);
             }
             match &setting.kind {
+                SettingKind::Text { default, .. } => {
+                    strings.intern(default);
+                }
                 SettingKind::Choice { options, .. } => {
                     for option in options {
                         strings.intern(&option.variant);

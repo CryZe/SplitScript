@@ -866,6 +866,12 @@ focused_example!(
     "\"Enable Auto Splitting\" => enableAutoSplitting key \"auto-splitting\": true",
     SETTINGS_SOURCE
 );
+focused_example!(
+    TEXT_INPUT_SETTING_EXAMPLE,
+    "Accept free-form text",
+    "\"Profile Name\" => profileName: \"Player\"",
+    SETTINGS_SOURCE
+);
 const IF_EXAMPLES: &[Example] = &[
     Example::checked(
         "Run a conditional statement",
@@ -1569,7 +1575,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "settings { \"Group\" { \"Label\" => name key \"host-key\": value } }",
         "Declares live user settings.",
-        "Settings support nested headings, [`///`] tooltips, booleans, [`choice setting`] values, and [`file setting`] selectors. An optional [`stable setting key`] is the exact string stored in the host settings map; otherwise the source identifier is used. [`settings`] and [`oldSettings`] refresh every update.",
+        "Settings support nested headings, [`///`] tooltips, booleans, [`text input setting`] strings, [`choice setting`] values, and [`file setting`] selectors. An optional [`stable setting key`] is the exact string stored in the host settings map; otherwise the source identifier is used. [`settings`] and [`oldSettings`] refresh every update.",
         SETTINGS_DECL_EXAMPLE
     ),
     language_item!(
@@ -2054,6 +2060,15 @@ define_language_catalog! {
         "Documents a source declaration, state field, setting, or heading.",
         "On functions and methods, global variables, state fields, structs and their fields, and enums and their variants, the documentation appears in editor hovers. On settings and headings, it becomes a tooltip in the settings UI. Consecutive documentation-comment lines form paragraphs; use an empty [`///`] line to start a new paragraph.",
         DOCUMENTATION_COMMENT_EXAMPLES
+    ),
+    language_item!(
+        TextInputSetting,
+        "text input setting",
+        LanguageItemKind::Syntax,
+        "\"Label\" => name: \"default value\"",
+        "Declares a free-form text-input setting.",
+        "The quoted value is both the initial default and the signal that this declaration uses a text-input widget. The live [`String`] is available through [`settings`] and its previous-tick value through [`oldSettings`]. An existing host value takes precedence over the default.",
+        TEXT_INPUT_SETTING_EXAMPLE
     ),
     language_item!(
         ChoiceSetting,

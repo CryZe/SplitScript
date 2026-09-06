@@ -1694,6 +1694,9 @@ settings {
         "Enable Auto Splitting"
             => enableAutoSplitting key "auto-splitting": true,
 
+        /// Free-form name used by the autosplitter.
+        "Profile Name" => profileName: "Player",
+
         /// Chooses how the target application is identified.
         "Capture Source"
             => captureMode: choice {
@@ -1721,13 +1724,15 @@ become its tooltip. Lines in the same paragraph are joined with spaces; empty
 `///` lines preserve paragraph breaks. Ordinary `//` comments remain regular
 comments and do not become GUI text.
 
-A boolean setting infers its type from `true` or `false`. A `choice` is backed
-by a payloadless enum, so matching it is exhaustive and type checked. A `file`
-setting is a `String` and can declare named glob filters, an unnamed fallback
-filter, and MIME filters. A selected file is stored as an absolute path in the
-runtime's portable filesystem namespace and can be passed directly to
-`File.readAllBytes` or `File.readAllText`. The host filesystem is currently
-mounted read-only below `/mnt`: Windows `C:\foo\bar.txt` becomes
+A boolean setting infers its type from `true` or `false`. A quoted string
+default declares a free-form text-input setting and exposes its live value as a
+`String`; an existing host value takes precedence over the declared default. A
+`choice` is backed by a payloadless enum, so matching it is exhaustive and type
+checked. A `file` setting is also a `String` and can declare named glob filters,
+an unnamed fallback filter, and MIME filters. A selected file is stored as an
+absolute path in the runtime's portable filesystem namespace and can be passed
+directly to `File.readAllBytes` or `File.readAllText`. The host filesystem is
+currently mounted read-only below `/mnt`: Windows `C:\foo\bar.txt` becomes
 `/mnt/c/foo/bar.txt`, while Linux or macOS `/foo/bar.txt` becomes
 `/mnt/foo/bar.txt`.
 
@@ -1766,12 +1771,12 @@ remain visual headings and do not implicitly gate child values.
 declared boolean settings, using those same host-map strings. `oldSettings`
 provides the corresponding method for the preceding snapshot. A literal key is
 validated against the declarations and editor completion offers only compatible
-boolean keys. For a computed string, an unknown key—or one belonging to a
-choice or file setting—returns `false`; the API therefore does not erase
+boolean keys. For a computed string, an unknown key—or one belonging to a text,
+choice, or file setting—returns `false`; the API therefore does not erase
 heterogeneous setting values into a dynamic type. Use `settings.contains(key)`
 when data-driven code must distinguish an unknown key from a declared but
 disabled setting. Its literal keys are checked and completed against boolean,
-choice, and file declarations; visual headings are not values.
+text, choice, and file declarations; visual headings are not values.
 
 Controls are registered during `_start`. At the beginning of every exported
 tick, including detached ticks, the compiler loads the current host settings

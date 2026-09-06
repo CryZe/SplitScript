@@ -14,6 +14,8 @@ settings {
         /// Turns the example split logic on or off without unloading
         /// the auto splitter.
         "Enable Auto Splitting" => enableAutoSplitting key "auto-splitting": true,
+        /// Free-form text used by the auto splitter.
+        "Profile Name" => profileName: "Player",
         /// Chooses how the target application should be identified.
         "Capture Source" => captureMode: choice {
             "Window Title" => CaptureMode.WindowTitle,
@@ -77,6 +79,8 @@ whileAttached {
     let choiceKey = "captureMode"
     let headingKey = "_heading0"
     setVariable("Auto Splitting", enabledName(currentSettings.enableAutoSplitting))
+    setVariable("Profile Name", currentSettings.profileName)
+    setVariable("Previous Profile Name", previousSettings.profileName)
     setVariable("Auto Splitting by Key", enabledName(currentSettings.enabled("auto-splitting")))
     setVariable(
         "Previous Auto Splitting by Key",
@@ -86,6 +90,7 @@ whileAttached {
     setVariable("Choice Setting by Key", enabledName(currentSettings.enabled(choiceKey)))
     setVariable("Contains Boolean Key", currentSettings.contains("auto-splitting"))
     setVariable("Contains Choice Key", currentSettings.contains("captureMode"))
+    setVariable("Contains Text Key", currentSettings.contains("profileName"))
     setVariable("Contains File Key", currentSettings.contains("layoutFile"))
     setVariable("Contains Heading Key", currentSettings.contains(headingKey))
     setVariable("Contains Unknown Key", currentSettings.contains(missingKey))

@@ -1806,8 +1806,10 @@ split {
 
 Consecutive [`///`] documentation comments become the setting tooltip. The
 legacy comma-separated tooltip string is deliberately not accepted. Boolean
-settings are [`bool`]; a `choice` is the source enum named by its variants. One
-choice entry must carry `default`. Quoted groups add visual hierarchy only:
+settings are [`bool`]. A quoted string default creates a free-form text input
+whose current and previous values are available as [`String`]. A `choice` is
+the source enum named by its variants. One choice entry must carry `default`.
+Quoted groups add visual hierarchy only:
 they do not disable their children, so preserve an ASL parent checkbox by
 testing that boolean explicitly in the split condition.
 
@@ -1858,7 +1860,7 @@ Prefer direct `settings.name` access when the setting is known statically. For
 data tables whose entries select among declared boolean settings, give each
 declaration its exact host-map string with `key "..."` and use
 `settings.enabled(key)`. This remains boolean-only and is not a dynamically
-typed replacement for choice or file settings. Literal keys are validated and
+typed replacement for text, choice, or file settings. Literal keys are validated and
 completed against the declarations; computed unknown keys return false. If the
 original settings have a boolean parent, gate the child result explicitly; a
 quoted SplitScript heading is visual only. The complete A Plague Tale example
@@ -1883,7 +1885,7 @@ if settings.contains(checkpointKey) {
 # }
 ```
 
-`contains` recognizes declared boolean, choice, and file keys, including
+`contains` recognizes declared boolean, text, choice, and file keys, including
 explicit `key "..."` spellings. It returns false for visual headings and unknown
 keys. This matches legacy `Settings.ContainsKey` without exposing a dynamically
 typed host map.

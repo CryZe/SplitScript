@@ -1099,7 +1099,8 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                         }
                     }
                 }
-                SettingKind::Bool { .. } | SettingKind::Title { .. } => {}
+                SettingKind::Bool { .. } | SettingKind::Text { .. } | SettingKind::Title { .. } => {
+                }
             }
         }
     }

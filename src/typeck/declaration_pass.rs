@@ -418,6 +418,7 @@ fn collect_settings(checker: &mut Checker, program: &Program) {
         } else {
             let kind = match setting.kind {
                 SettingKind::Bool { .. } => RuntimeSettingKind::Bool,
+                SettingKind::Text { .. } => RuntimeSettingKind::Text,
                 SettingKind::Choice { .. } => RuntimeSettingKind::Choice,
                 SettingKind::File { .. } => RuntimeSettingKind::File,
                 SettingKind::Title { .. } => RuntimeSettingKind::Title,
@@ -522,7 +523,9 @@ fn setting_value_type(checker: &Checker, setting: &SettingDecl) -> Option<Type> 
         SettingKind::Choice { .. } => {
             Some(checker.enum_type(checker.resolutions.setting_enum(setting.id)?))
         }
-        SettingKind::File { .. } => Some(checker.standard_type(StdlibTypeId::String)),
+        SettingKind::Text { .. } | SettingKind::File { .. } => {
+            Some(checker.standard_type(StdlibTypeId::String))
+        }
         SettingKind::Title { .. } => None,
     }
 }

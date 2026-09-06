@@ -70,7 +70,7 @@ memory.
 Initial settings are passed to the constructor or `instantiate`; `setSetting`
 changes the live host map before a later update. Every load receives an actual
 snapshot, allowing `settings` and `oldSettings` behavior to be tested. The
-harness also records setting widgets, choice options, file filters, tooltips,
+harness also records setting widgets, text inputs, choice options, file filters, tooltips,
 and owned map/value handles so fixtures can assert that handles are released.
 
 Set `timerState`, `currentSplitIndex`, or `segmentHistory` before an update to

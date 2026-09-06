@@ -2274,7 +2274,7 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "Dynamic settings lookup",
         sources: ASL,
         support: MigrationSupport::Direct,
-        summary: "Replace `settings[key]` with `settings.enabled(key)` and `settings.ContainsKey(key)` with `settings.contains(key)`. Declare exact host strings with `key \"...\"`; choice and file settings remain statically typed.",
+        summary: "Replace `settings[key]` with `settings.enabled(key)` and `settings.ContainsKey(key)` with `settings.contains(key)`. Declare exact host strings with `key \"...\"`; text, choice, and file settings remain statically typed.",
         targets: &[
             MigrationTarget::Language("settings"),
             MigrationTarget::Language("oldSettings"),

@@ -285,7 +285,9 @@ impl BackendDependencies {
             let has_string_values = program.settings.iter().any(|setting| {
                 matches!(
                     &setting.kind,
-                    SettingKind::Choice { .. } | SettingKind::File { .. }
+                    SettingKind::Text { .. }
+                        | SettingKind::Choice { .. }
+                        | SettingKind::File { .. }
                 )
             });
             if has_values {
@@ -297,6 +299,12 @@ impl BackendDependencies {
             }
             if has_string_values {
                 dependencies.require(RuntimeHelperId::StringFromMemory);
+            }
+            if program
+                .settings
+                .iter()
+                .any(|setting| matches!(&setting.kind, SettingKind::Choice { .. }))
+            {
                 dependencies.require(RuntimeHelperId::StringEquality);
             }
             for setting in &program.settings {
@@ -307,6 +315,10 @@ impl BackendDependencies {
                     SettingKind::Bool { .. } => {
                         dependencies.require_import(AbiImportId::UserSettingsAddBool);
                         dependencies.require_import(AbiImportId::SettingValueGetBool);
+                    }
+                    SettingKind::Text { .. } => {
+                        dependencies.require_import(AbiImportId::UserSettingsAddTextInput);
+                        dependencies.require_import(AbiImportId::SettingValueGetString);
                     }
                     SettingKind::Title { .. } => {
                         dependencies.require_import(AbiImportId::UserSettingsAddTitle);

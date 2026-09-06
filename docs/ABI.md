@@ -75,6 +75,7 @@ describes only the contract that generated modules implement today.
 | `user_settings_add_file_select` | `(i32, i32, i32, i32) -> ()` |
 | `user_settings_add_file_select_name_filter` | `(i32, i32, i32, i32, i32, i32) -> ()` |
 | `user_settings_add_file_select_mime_filter` | `(i32, i32, i32, i32) -> ()` |
+| `user_settings_add_text_input` | `(i32, i32, i32, i32, i32, i32) -> ()` |
 | `user_settings_set_tooltip` | `(i32, i32, i32, i32) -> ()` |
 | `settings_map_load` | `() -> i64` |
 | `settings_map_free` | `(i64) -> ()` |

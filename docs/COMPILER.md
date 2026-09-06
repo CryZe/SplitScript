@@ -587,8 +587,8 @@ index, which feeds host-import and generated-function type assignment without
 making the final orchestrator understand individual GC fields.
 
 [`src/codegen/settings.rs`](../src/codegen/settings.rs) owns the complete
-settings lifecycle: host widget registration, nested titles, choices, file
-filters and tooltips, settings-map acquisition/freeing, String decoding,
+settings lifecycle: host widget registration, nested titles, text inputs,
+choices, file filters and tooltips, settings-map acquisition/freeing, String decoding,
 default fallback, and atomic current/old value rotation. It also emits the
 start routine that initializes enum globals, source-level state defaults, and
 the async frame before registration. Final assembly sees only generated bodies
@@ -1352,7 +1352,7 @@ named state-layout declarations remain an ordinary comma-separated list.
 These rules keep multiline process-read arguments one level inside their call without
 over-indenting a call merely because a nested argument is multiline. Braces
 in the settings DSL keep each label and `=>` on the same line, including
-boolean, choice, file, choice-option, and file-filter entries; nested block
+boolean, text-input, choice, file, choice-option, and file-filter entries; nested block
 contents and closing braces are then anchored from that line. Interpolated
 string chunks remain byte-for-byte source text, while expressions inside
 `{...}` use the ordinary spacing rules. Struct fields and enum variants are

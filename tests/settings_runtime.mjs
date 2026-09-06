@@ -24,12 +24,15 @@ const expectVariable = (name, expected) => {
 };
 
 expectVariable("Auto Splitting", "enabled");
+expectVariable("Profile Name", "Player");
+expectVariable("Previous Profile Name", "Player");
 expectVariable("Auto Splitting by Key", "enabled");
 expectVariable("Previous Auto Splitting by Key", "enabled");
 expectVariable("Unknown Setting by Key", "disabled");
 expectVariable("Choice Setting by Key", "disabled");
 expectVariable("Contains Boolean Key", "true");
 expectVariable("Contains Choice Key", "true");
+expectVariable("Contains Text Key", "true");
 expectVariable("Contains File Key", "true");
 expectVariable("Contains Heading Key", "false");
 expectVariable("Contains Unknown Key", "false");
@@ -37,6 +40,7 @@ expectVariable("Capture Source", "Executable Name");
 expectVariable("Layout File", "");
 
 host.setSetting("auto-splitting", false);
+host.setSetting("profileName", "Runner");
 host.setSetting("captureMode", "FullPath");
 host.setSetting("layoutFile", "/mnt/c/layout.json");
 host.setSetting("liveReload", false);
@@ -44,6 +48,8 @@ host.setSetting("verboseLogging", true);
 host.update();
 
 expectVariable("Auto Splitting", "disabled");
+expectVariable("Profile Name", "Runner");
+expectVariable("Previous Profile Name", "Player");
 expectVariable("Auto Splitting by Key", "disabled");
 expectVariable("Previous Auto Splitting by Key", "enabled");
 expectVariable("Capture Source", "Full Path");
@@ -73,8 +79,8 @@ if (host.widgets.filter(([kind]) => kind === "option").length !== 3) {
 if (host.filters.length !== 5) {
     throw new Error(`expected five file filters, got ${JSON.stringify(host.filters)}`);
 }
-if (host.tooltips.size !== 9) {
-    throw new Error(`expected nine tooltips, got ${host.tooltips.size}`);
+if (host.tooltips.size !== 10) {
+    throw new Error(`expected ten tooltips, got ${host.tooltips.size}`);
 }
 if (
     host.tooltips.get("auto-splitting")

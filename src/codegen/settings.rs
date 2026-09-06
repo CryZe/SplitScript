@@ -271,7 +271,7 @@ pub(super) fn compile_refresh_settings(
                 }
                 function.instruction(&Instruction::End);
             }
-            SettingKind::File { .. } => {
+            SettingKind::Text { .. } | SettingKind::File { .. } => {
                 emit_load_setting_string(
                     &mut function,
                     abi,
@@ -367,6 +367,7 @@ fn emit_setting_default(
                 gc,
             );
         }
+        SettingKind::Text { default, .. } => emit_string_literal(function, default, gc),
         SettingKind::File { .. } => emit_string_literal(function, "", gc),
         SettingKind::Title { .. } => return,
     }
@@ -411,6 +412,24 @@ pub(super) fn emit_setting_registration(
                 .instruction(&Instruction::I32Const(*heading_level as i32))
                 .instruction(&Instruction::Call(
                     abi.function(AbiImportId::UserSettingsAddTitle),
+                ));
+        }
+        SettingKind::Text { default, .. } => {
+            let storage = storage.unwrap();
+            emit_string_literal(function, default, gc);
+            let (default_ptr, default_len) = strings.get(default);
+            function
+                .instruction(&Instruction::GlobalSet(storage.current))
+                .instruction(&Instruction::GlobalGet(storage.current))
+                .instruction(&Instruction::GlobalSet(storage.old))
+                .instruction(&Instruction::I32Const(key_ptr as i32))
+                .instruction(&Instruction::I32Const(key_len as i32))
+                .instruction(&Instruction::I32Const(description_ptr as i32))
+                .instruction(&Instruction::I32Const(description_len as i32))
+                .instruction(&Instruction::I32Const(default_ptr as i32))
+                .instruction(&Instruction::I32Const(default_len as i32))
+                .instruction(&Instruction::Call(
+                    abi.function(AbiImportId::UserSettingsAddTextInput),
                 ));
         }
         SettingKind::Choice {

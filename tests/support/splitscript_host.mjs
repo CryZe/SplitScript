@@ -361,6 +361,24 @@ export class SplitScriptHost {
                     this.text(mimePointer, mimeLength),
                 ]);
             },
+            user_settings_add_text_input: (
+                keyPointer,
+                keyLength,
+                descriptionPointer,
+                descriptionLength,
+                defaultPointer,
+                defaultLength,
+            ) => {
+                const key = this.text(keyPointer, keyLength);
+                if (!this.settings.has(key)) {
+                    this.settings.set(key, this.text(defaultPointer, defaultLength));
+                }
+                this.widgets.push([
+                    "text",
+                    key,
+                    this.text(descriptionPointer, descriptionLength),
+                ]);
+            },
             user_settings_set_tooltip: (
                 keyPointer,
                 keyLength,

@@ -2517,6 +2517,7 @@ split { return layout == StateLayout.Steam }
         let source = include_str!("../examples/lso_desktop_settings.split");
         let mut database = CompilerDatabase::new(source);
         for (needle, expected) in [
+            ("\"Player\"", "Declares a free-form text-input setting"),
             ("choice", "Declares an enum-backed setting choice"),
             ("onAttach", "Initializes one attached process"),
         ] {

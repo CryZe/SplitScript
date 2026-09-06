@@ -1889,6 +1889,7 @@ impl Checker {
                 return;
             }
             let (actual, expected) = match declaration.kind {
+                RuntimeSettingKind::Text => ("a text setting", "a boolean setting"),
                 RuntimeSettingKind::Choice => ("a choice setting", "a boolean setting"),
                 RuntimeSettingKind::File => ("a file setting", "a boolean setting"),
                 RuntimeSettingKind::Title => ("a settings heading", "a value setting"),

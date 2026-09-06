@@ -502,7 +502,7 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             );
         }
         match &setting.kind {
-            SettingKind::Bool { .. } => {
+            SettingKind::Bool { .. } | SettingKind::Text { .. } => {
                 self.continuation(setting.span.start, setting.span.end);
             }
             SettingKind::Choice { options, .. } => {
@@ -1767,7 +1767,10 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
             SettingKind::File { filters, .. } if !filters.is_empty() => {
                 self.mark_comma(setting.span);
             }
-            SettingKind::Bool { .. } | SettingKind::Choice { .. } | SettingKind::File { .. } => {}
+            SettingKind::Bool { .. }
+            | SettingKind::Text { .. }
+            | SettingKind::Choice { .. }
+            | SettingKind::File { .. } => {}
         }
         visit::walk_setting(self, setting);
     }
@@ -3089,7 +3092,7 @@ B
 }
 settings{"Group"{/// Enables the feature.
 "Enabled"
-=>enabled:true,"Mode"
+=>enabled:true,"Profile"=>profile:"Runner","Mode"
 =>mode:choice{"First"=>Mode.A,"Second"=>Mode.B default},"Input"=>input:file{"Text"=>"*.txt",mime=>"text/plain"}}}"#;
         let expected = r#"state "game.exe" {}
 enum Mode {
@@ -3100,6 +3103,7 @@ settings {
     "Group" {
         /// Enables the feature.
         "Enabled" => enabled: true,
+        "Profile" => profile: "Runner",
         "Mode" => mode: choice {
             "First" => Mode.A,
             "Second" => Mode.B default,

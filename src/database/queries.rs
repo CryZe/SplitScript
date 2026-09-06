@@ -269,9 +269,15 @@ impl CompilerDatabase {
     pub fn check(&mut self) -> QueryResult<CheckedProgram> {
         if self.cache.checked.is_none() {
             self.cache.checked = Some(match self.lower() {
-                Ok(lowered) => crate::check((*lowered).clone())
-                    .map(Arc::new)
-                    .map_err(Arc::from),
+                Ok(lowered) => {
+                    let (result, recovered) = crate::check_for_tooling((*lowered).clone());
+                    if let Some(recovered) = recovered
+                        && self.cache.recovering_checked.is_none()
+                    {
+                        self.cache.recovering_checked = Some(Ok(Arc::new(recovered)));
+                    }
+                    result.map(Arc::new).map_err(Arc::from)
+                }
                 Err(errors) => Err(errors),
             });
         }

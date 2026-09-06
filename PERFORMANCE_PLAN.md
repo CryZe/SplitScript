@@ -220,6 +220,41 @@ This shares lowering only. Strict and recovering type inference can still run
 separately after a failed check; retaining partial inference results remains the
 next part of order 7. Cross-compilation parsed-library reuse remains separate.
 
+## Failed-check inference reuse implementation batch
+
+Implemented the diagnostics-first inference-reuse slice of order 7 on
+2026-09-06. The strict checker now has an internal tooling path that retains
+partial semantics when inference fails, rather than discarding the output and
+running inference again for recovery. The editor database publishes those facts
+in its revision's recovery cache while keeping strict checking unsuccessful.
+The public one-shot strict API still returns only a checked program or errors.
+
+Failures in post-type validation also retain the already-computed effect facts
+when strict and recovery validation prerequisites agree. Syntax/resolution
+failures before inference keep the existing recovery path. Existing recovery
+snapshots are not replaced if recovery was explicitly requested first.
+
+Tests count inference runs and compare retained results with independently
+executed strict/recovery APIs: diagnostics and ordering, visible expression IDs,
+inferred values, resolved calls, and effects. Additional cases cover warning
+policy, source edits, successful repairs, and failures before inference.
+See [baselines](docs/BASELINES.md) for the paired recovery-query measurements.
+
+Measured semantic-error medians improved another 24.6–26.5%: 53.49 to 39.94 ms
+for a small type error, 92.93 to 70.08 ms with 500 helpers, and 53.92 to 39.64 ms
+for unavailable detached-state access. Valid and syntax-error controls and heap
+readings are approximately unchanged. Seven release fixtures are byte-identical.
+
+Validation: four focused inference-reuse tests, all 47 compiler-query tests, and
+the full `cargo xtask check` passed, including 418 library tests (one manual
+benchmark ignored), 608 compiler integration tests, documentation, editor/browser
+checks, and Wasm/runtime fixtures.
+
+This avoids duplicate inference after the normal strict-first failed check.
+Recovery-first followed by strict checking can still run inference separately;
+successful strict/recovery products also remain separately owned. Parsed-library
+template reuse and broader immutable-stage sharing remain open.
+
 ## Evidence and scope
 
 There are three different performance concerns:

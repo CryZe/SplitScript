@@ -6,6 +6,8 @@ use std::{
 };
 
 mod cache;
+#[cfg(test)]
+mod checking_tests;
 mod position;
 mod queries;
 mod references;

@@ -696,6 +696,26 @@ pub(crate) fn lower_for_tooling(parsed: ParsedProgram) -> Result<LoweredProgram,
 
 /// Resolves and type-checks a parsed program without invoking the Wasm backend.
 pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<Diagnostic>> {
+    check_impl(lowered.into(), None)
+}
+
+/// Keeps partial facts from a failed strict attempt for the editor database.
+/// Success and failures before inference do not create a recovery product.
+pub(crate) fn check_for_tooling(
+    lowered: LoweredProgram,
+) -> (
+    Result<CheckedProgram, Vec<Diagnostic>>,
+    Option<RecoveredCheck>,
+) {
+    let mut recovered = None;
+    let result = check_impl(lowered, Some(&mut recovered));
+    (result, recovered)
+}
+
+fn check_impl(
+    lowered: LoweredProgram,
+    recovery: Option<&mut Option<RecoveredCheck>>,
+) -> Result<CheckedProgram, Vec<Diagnostic>> {
     let LoweredProgram {
         context,
         source_name,
@@ -706,7 +726,7 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         resolutions,
         syntax_diagnostics,
         resolution_diagnostics,
-    } = lowered.into();
+    } = lowered;
     if syntax_diagnostics
         .iter()
         .chain(&resolution_diagnostics)
@@ -716,18 +736,36 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         diagnostics.extend(resolution_diagnostics);
         return Err(diagnostics);
     }
-    let mut output = match typeck::check_with_library(
+    let typeck::RecoveringCheckOutput {
+        mut output,
+        diagnostics: inference_diagnostics,
+    } = typeck::check_recovering_with_library(
         &compilation_syntax,
         &resolutions,
         context.standard_library(),
-    ) {
-        Ok(output) => output,
-        Err(mut diagnostics) => {
-            diagnostics.extend(syntax_diagnostics);
-            diagnostics.sort_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
-            return Err(diagnostics);
+    );
+    if !inference_diagnostics.is_empty() {
+        if let Some(recovery) = recovery {
+            let mut diagnostics = syntax_diagnostics.clone();
+            diagnostics.extend(resolution_diagnostics);
+            diagnostics.extend(inference_diagnostics.iter().cloned());
+            *recovery = Some(RecoveredCheck {
+                context,
+                source_name,
+                document,
+                syntax,
+                hir,
+                semantics: output.semantics,
+                diagnostics,
+                enum_types: output.enum_types,
+                effects: None,
+            });
         }
-    };
+        let mut diagnostics = inference_diagnostics;
+        diagnostics.extend(syntax_diagnostics);
+        diagnostics.sort_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
+        return Err(diagnostics);
+    }
     let typed_hir = hir::TypedProgram::build(
         hir,
         &compilation_syntax,
@@ -752,6 +790,25 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         .iter()
         .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
     {
+        // Recovery builds typed HIR and validation only without resolution
+        // diagnostics. Reuse this result only when those invariants agree.
+        if resolution_diagnostics.is_empty()
+            && let Some(recovery) = recovery
+        {
+            let mut diagnostics = syntax_diagnostics.clone();
+            diagnostics.extend(validation.diagnostics.iter().cloned());
+            *recovery = Some(RecoveredCheck {
+                context,
+                source_name,
+                document,
+                syntax,
+                hir: typed_hir.declarations().clone(),
+                semantics: output.semantics,
+                diagnostics,
+                enum_types: output.enum_types,
+                effects: Some(validation.effects),
+            });
+        }
         let mut diagnostics = syntax_diagnostics;
         diagnostics.extend(validation.diagnostics);
         return Err(diagnostics);

@@ -465,6 +465,57 @@ The full `cargo xtask check` passed, including 414 library tests (one manual
 benchmark ignored), 608 compiler integration tests, documentation, editor/browser
 checks, and Wasm/runtime fixtures.
 
+## 2026-09-06 failed-check inference reuse
+
+Before: `d3367af` (shared lowering). After: retaining partial inference output
+from a failed strict check in the database's recovery cache. Rust `1.98.1`,
+Windows x86-64, 32 logical CPUs, release harness, 20 warmups, and 30 samples
+per row. Runs were sequential without concurrent builds or tests, using the
+unchanged `tooling_baseline -- 500 30 --recovery` fixtures.
+
+| Edit → diagnostics and hover | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| valid control | 48.35 ms | 48.89 ms | 49.16 ms | 51.14 ms |
+| type error | 53.49 ms | 39.94 ms | 56.15 ms | 41.14 ms |
+| type error, 500 helpers | 92.93 ms | 70.08 ms | 95.73 ms | 73.32 ms |
+| detached-state error | 53.92 ms | 39.64 ms | 56.28 ms | 40.83 ms |
+| syntax-error control | 50.3 µs | 49.4 µs | 83.9 µs | 51.9 µs |
+
+The three semantic-error fixtures improved by 24.6–26.5% in median latency.
+Valid and syntax-error controls remain approximately unchanged. Heap readings
+are essentially unchanged: the largest transient allocations still occur before
+the avoided second inference pass. Peak growth in the error rows remains about
+3.56 MiB (small) and 11.36 MiB (500 helpers); retained deltas change by at most
+eight bytes. This batch establishes a latency improvement, not a memory saving.
+
+The runner calls its detached-state row `recovery_validation_error`, but its
+direct `current` reference is rejected during type inference. The name describes
+the source-level failure, not an isolated post-type-validation stage. Separate
+regression tests use a helper with latent process effects to exercise a genuine
+post-type-validation failure and verify that its cached effect facts match a
+fresh recovery check.
+
+Tests count exactly one inference run for a failed strict check followed by
+recovery. They compare diagnostics (including syntax warnings and ordering),
+visible expression IDs, inferred values, resolved calls, and effects against
+independently executed public APIs. Warning-policy changes retain the cached
+facts; edits invalidate them. Failures before inference keep the existing
+recovery path, and previously published recovery snapshots remain stable.
+
+Recovery-first followed by strict checking can still run inference twice.
+This change targets the normal diagnostics-first editor path. Successful
+strict compilation does not create an additional recovery product.
+A database used only for a failing strict check now retains partial facts until
+its revision is invalidated; the usual diagnostics/recovery sequence already
+retained those facts. The public one-shot strict API does not retain them.
+
+The same seven release fixtures as the preceding batch remained byte-identical,
+including both managed-runtime backends and desktop settings. All four targeted
+inference-reuse tests and all 47 compiler-query integration tests passed.
+The full `cargo xtask check` passed, including 418 library tests (one manual
+benchmark ignored), 608 compiler integration tests, documentation, editor/browser
+checks, and Wasm/runtime fixtures.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

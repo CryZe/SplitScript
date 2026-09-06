@@ -117,17 +117,14 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
     recovered
 }
 
-pub(crate) fn check_with_library(
-    program: &Program,
-    resolutions: &crate::resolution::ProgramResolutions,
-    standard_library: StandardLibrary,
-) -> Result<CheckOutput, Vec<Diagnostic>> {
-    let recovered = check_recovering_with_library(program, resolutions, standard_library);
-    if recovered.diagnostics.is_empty() {
-        Ok(recovered.output)
-    } else {
-        Err(recovered.diagnostics)
-    }
+#[cfg(test)]
+thread_local! {
+    static INFERENCE_RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn inference_run_count() -> usize {
+    INFERENCE_RUNS.get()
 }
 
 pub(crate) fn check_recovering_with_library(
@@ -135,6 +132,8 @@ pub(crate) fn check_recovering_with_library(
     resolutions: &crate::resolution::ProgramResolutions,
     standard_library: StandardLibrary,
 ) -> RecoveringCheckOutput {
+    #[cfg(test)]
+    INFERENCE_RUNS.set(INFERENCE_RUNS.get() + 1);
     driver::check_recovering(program, resolutions, standard_library)
 }
 

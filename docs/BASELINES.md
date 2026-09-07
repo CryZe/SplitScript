@@ -909,6 +909,94 @@ sections remain 160 bytes in all outputs. These are opportunities identified
 for future native compiler work, not size reductions already implemented in
 SplitScript or a new external optimization stage in its build pipeline.
 
+## 2026-09-07 async completion and frame-load emission
+
+Comparison against `6a658a7`, implementing two direct-emission improvements from
+the Binaryen study. Async block emission returns conservative fallthrough
+information; completion tails and loop-back branches are omitted after
+unconditional transfers, including nested branches. Poll functions also load
+their non-null frame parameters without reasserting non-null. Nullable global
+frames keep their checks. Both changes use the same code in debug and release.
+
+### Release output attribution
+
+| Fixture | Before | After fallthrough cleanup | After both changes | Total saved |
+| --- | ---: | ---: | ---: | ---: |
+| Lunistice | 33,439 | 31,951 | 30,784 | 2,655 (7.9%) |
+| Minish Cap | 48,773 | 47,225 | 45,434 | 3,339 (6.8%) |
+| managed instances | 16,867 | 16,141 | 15,536 | 1,331 (7.9%) |
+| managed instances Mono | 25,454 | 23,720 | 22,870 | 2,584 (10.2%) |
+| cancellation | 2,727 | 2,706 | 2,706 | 21 (0.8%) |
+| settings | 8,790 | 8,790 | 8,790 | 0 |
+| debug-profile fixture, release output | 1,591 | 1,591 | 1,591 | 0 |
+| set runtime | 3,597 | 3,597 | 3,597 | 0 |
+| map runtime | 5,016 | 5,016 | 5,016 | 0 |
+
+All savings are in the code section, including section framing. The four
+unchanged controls are byte-identical. Code sections for Lunistice, Minish Cap,
+and Mono shrink from 29,870/42,862/22,170 to 27,215/39,523/19,586 bytes.
+This captures part of the Binaryen rewrite/peephole opportunity; it does not
+remove every redundant null assertion or all dead code in ordinary functions.
+
+### Compiler latency
+
+Rust 1.98.1 on Windows x86-64, 32 logical CPUs, release-built Rust harness,
+SplitScript release profile, 200 measured samples after 20 warmups per fixture.
+Saved before/after executables run sequentially without builds or tests.
+
+| Fixture | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| minimal | 48.76 ms | 53.25 ms | 52.27 ms | 56.64 ms |
+| Lunistice | 59.84 ms | 64.65 ms | 78.24 ms | 113.31 ms |
+| cancellation | 49.67 ms | 53.49 ms | 51.35 ms | 57.23 ms |
+| settings | 51.81 ms | 55.99 ms | 54.24 ms | 58.85 ms |
+
+Medians increase by about 8–9% even on the unchanged minimal/settings controls.
+An earlier before-only run also drifted from 49 ms on minimal to about 93–103
+ms on the remaining fixtures, making a single sequential run insufficient to
+attribute small latency differences to the patch.
+
+A reverse-order repeat uses 50 samples after 20 warmups, running the new
+executable first and then the saved old one:
+
+| Fixture | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| minimal | 52.56 ms | 54.55 ms | 94.14 ms | 95.40 ms |
+| Lunistice | 105.63 ms | 105.72 ms | 117.04 ms | 117.88 ms |
+| cancellation | 87.49 ms | 94.88 ms | 96.51 ms | 116.10 ms |
+| settings | 93.23 ms | 94.20 ms | 99.83 ms | 104.41 ms |
+
+This repeat again changes the absolute timing regime substantially, including
+for the old executable. Lunistice is approximately equal in that pair; the other
+differences remain mixed. No compiler speedup or precise patch-attributable
+slowdown is established. The deterministic reduction in emitted code is the
+reason to retain these changes.
+
+The initial focused run passed all 120 async tests. Added runtime cases exercise
+nested if/match returns and optional fallbacks in both profiles. The dispatcher
+boundary regression also checks that unconditional transfers are not followed
+by dead completion instructions. A separate signature/emission regression covers
+non-null frame parameters for named async functions, closures, and stored futures.
+
+During validation a Windows PDB link failure coincided with low disk space.
+The user-requested `cargo clean` removed 13.8 GiB; benchmark executables and
+investigation artifacts were preserved outside the target directory during the
+clean and then restored. The final validation rebuild uses the fresh target.
+
+All nine updated release fixture modules validate. Thirteen before/after release
+runtime scenarios also produce identical traces: Lunistice base/DLC, transient
+metadata reads, mixed/inherited layouts, both Minish Cap backends, settings,
+cancellation, managed runtimes, sets, and maps. As in the Binaryen study, these
+trace checks use Node's single-threaded, synchronous-Wasm-compilation settings
+to avoid the Windows host shutdown assertion; they do not measure Wasm runtime
+performance. The focused poll-frame signature regression passes as well.
+
+Final `cargo xtask check` passed: formatting, Clippy, documentation, 98 syntax
+tests, 420 compiler-library tests (one manual benchmark ignored), 621 compiler
+integration tests, editor/browser workers, the embedded Wasm compiler, generated
+Wasm validation, and host-runtime fixtures. Repeated Lunistice and Minish Cap
+release builds are byte-identical.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

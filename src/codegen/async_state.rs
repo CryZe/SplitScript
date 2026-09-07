@@ -112,7 +112,7 @@ pub(super) fn compile_async_function_poll(
         .expect("checked functions have Wasm IR bodies");
     let frame = AsyncFrameRef {
         struct_type: runtime.lowering.gc.function_frame_index(instance),
-        source: AsyncFrameSource::Local(0),
+        source: AsyncFrameSource::NonNullLocal(0),
     };
     compile_async_body(
         &wasm_body.entry,
@@ -143,7 +143,7 @@ pub(super) fn compile_async_closure_poll(
 ) -> Function {
     let frame = AsyncFrameRef {
         struct_type: runtime.lowering.gc.closure_frame_index(instance),
-        source: AsyncFrameSource::Local(0),
+        source: AsyncFrameSource::NonNullLocal(0),
     };
     compile_async_body(
         &closure.entry,
@@ -171,7 +171,7 @@ pub(super) fn compile_leaf_future_poll(
 ) -> Function {
     let frame = AsyncFrameRef {
         struct_type: runtime.lowering.gc.leaf_frame_index(instance),
-        source: AsyncFrameSource::Local(0),
+        source: AsyncFrameSource::NonNullLocal(0),
     };
     let planned = wasm_ir::leaf_future_locals(
         instance.expression,
@@ -482,7 +482,7 @@ fn compile_async_body(
             }
         }
 
-        match state {
+        let falls_through = match state {
             AsyncState::Block {
                 block,
                 loop_targets,
@@ -526,7 +526,7 @@ fn compile_async_body(
                     &context,
                 );
                 compile_irrefutable_pattern(&mut function, pattern, binding, &context);
-                compile_async_flow(
+                let body_falls_through = compile_async_flow(
                     &mut function,
                     body,
                     loop_depth + 1,
@@ -548,6 +548,7 @@ fn compile_async_body(
                 function
                     .instruction(&Instruction::Br(loop_depth + 1))
                     .instruction(&Instruction::End);
+                body_falls_through
             }
             AsyncState::Poll {
                 mode,
@@ -579,13 +580,16 @@ fn compile_async_body(
                 );
                 set_async_state(&mut function, resume_state, frame);
                 function.instruction(&Instruction::Br(loop_depth));
+                false
             }
+        };
+        if falls_through {
+            emit_async_action_default(&mut function, bare_return);
+            mark_future_complete(&mut function, bare_return);
+            function
+                .instruction(&Instruction::I32Const(1))
+                .instruction(&Instruction::Return);
         }
-        emit_async_action_default(&mut function, bare_return);
-        mark_future_complete(&mut function, bare_return);
-        function
-            .instruction(&Instruction::I32Const(1))
-            .instruction(&Instruction::Return);
         if !table_dispatch {
             function.instruction(&Instruction::End);
         }
@@ -3624,6 +3628,9 @@ fn set_async_state(function: &mut Function, state: wasm_ir::AsyncStateId, frame:
         });
 }
 
+/// Returns whether execution may reach the end of the emitted block. This is
+/// tracked during emission so callers can omit dead completion/loop-back code.
+#[must_use]
 #[allow(clippy::too_many_arguments)]
 fn compile_async_flow(
     function: &mut Function,
@@ -3634,7 +3641,7 @@ fn compile_async_flow(
     cancellation_region: wasm_ir::CancellationRegion,
     layout: &AsyncFrameLayout,
     context: &ExprContext<'_>,
-) {
+) -> bool {
     let expression_context = ExprContext {
         loop_control,
         ..*context
@@ -3693,7 +3700,7 @@ fn compile_async_flow(
             } => {
                 compile_expr(function, *condition, context);
                 function.instruction(&Instruction::If(BlockType::Empty));
-                compile_async_flow(
+                let then_falls_through = compile_async_flow(
                     function,
                     then_block,
                     loop_depth + 1,
@@ -3704,7 +3711,7 @@ fn compile_async_flow(
                     context,
                 );
                 function.instruction(&Instruction::Else);
-                compile_async_flow(
+                let else_falls_through = compile_async_flow(
                     function,
                     else_block,
                     loop_depth + 1,
@@ -3715,6 +3722,9 @@ fn compile_async_flow(
                     context,
                 );
                 function.instruction(&Instruction::End);
+                if !then_falls_through && !else_falls_through {
+                    return false;
+                }
             }
             wasm_ir::Statement::Match {
                 expression,
@@ -3725,6 +3735,7 @@ fn compile_async_flow(
                 let value_type = context.expression_type(*value);
                 compile_expr(function, *value, context);
                 function.instruction(&Instruction::LocalSet(value_local));
+                let mut falls_through = false;
                 for (arm_index, arm) in arms.iter().enumerate() {
                     let bindings = compile_statement_pattern(
                         function,
@@ -3754,7 +3765,7 @@ fn compile_async_flow(
                             .instruction(&Instruction::End);
                     }
                     function.instruction(&Instruction::If(BlockType::Empty));
-                    compile_async_flow(
+                    falls_through |= compile_async_flow(
                         function,
                         &arm.block,
                         loop_depth + arm_index as u32 + 1,
@@ -3770,6 +3781,9 @@ fn compile_async_flow(
                 for _ in arms {
                     function.instruction(&Instruction::End);
                 }
+                if !falls_through {
+                    return false;
+                }
             }
             wasm_ir::Statement::Fallback {
                 expression,
@@ -3779,7 +3793,7 @@ fn compile_async_flow(
             } => {
                 compile_fallback_condition(function, *expression, *value, context);
                 function.instruction(&Instruction::If(BlockType::Empty));
-                compile_async_flow(
+                let fallback_falls_through = compile_async_flow(
                     function,
                     fallback_block,
                     loop_depth + 1,
@@ -3790,7 +3804,7 @@ fn compile_async_flow(
                     context,
                 );
                 function.instruction(&Instruction::Else);
-                compile_async_flow(
+                let success_falls_through = compile_async_flow(
                     function,
                     success_block,
                     loop_depth + 1,
@@ -3801,6 +3815,9 @@ fn compile_async_flow(
                     context,
                 );
                 function.instruction(&Instruction::End);
+                if !fallback_falls_through && !success_falls_through {
+                    return false;
+                }
             }
             wasm_ir::Statement::While {
                 condition,
@@ -3814,7 +3831,7 @@ fn compile_async_flow(
                 function
                     .instruction(&Instruction::I32Eqz)
                     .instruction(&Instruction::BrIf(1));
-                compile_async_flow(
+                let body_falls_through = compile_async_flow(
                     function,
                     body,
                     loop_depth + 2,
@@ -3828,8 +3845,10 @@ fn compile_async_flow(
                     layout,
                     context,
                 );
+                if body_falls_through {
+                    function.instruction(&Instruction::Br(0));
+                }
                 function
-                    .instruction(&Instruction::Br(0))
                     .instruction(&Instruction::End)
                     .instruction(&Instruction::End);
             }
@@ -3874,7 +3893,7 @@ fn compile_async_flow(
                     context,
                 );
                 compile_irrefutable_pattern(function, pattern, *binding, context);
-                compile_async_flow(
+                let body_falls_through = compile_async_flow(
                     function,
                     body,
                     loop_depth + 2,
@@ -3888,8 +3907,10 @@ fn compile_async_flow(
                     layout,
                     context,
                 );
+                if body_falls_through {
+                    function.instruction(&Instruction::Br(0));
+                }
                 function
-                    .instruction(&Instruction::Br(0))
                     .instruction(&Instruction::End)
                     .instruction(&Instruction::End);
             }
@@ -3919,7 +3940,7 @@ fn compile_async_flow(
         }
     }
     match &block.terminator {
-        wasm_ir::Terminator::Fallthrough => {}
+        wasm_ir::Terminator::Fallthrough => return true,
         wasm_ir::Terminator::Break(value) => {
             let control = loop_control.expect("checked break expressions belong to loops");
             if let Some(value) = value {
@@ -3951,7 +3972,7 @@ fn compile_async_flow(
         } => {
             compile_expr(function, *condition, context);
             function.instruction(&Instruction::If(BlockType::Empty));
-            compile_async_flow(
+            let body_falls_through = compile_async_flow(
                 function,
                 body,
                 loop_depth + 1,
@@ -3966,6 +3987,7 @@ fn compile_async_flow(
             function
                 .instruction(&Instruction::Br(loop_depth + 1))
                 .instruction(&Instruction::End);
+            return body_falls_through;
         }
         wasm_ir::Terminator::AsyncFor { header_state, .. } => {
             set_async_state(function, *header_state, context.locals.frame());
@@ -4106,4 +4128,5 @@ fn compile_async_flow(
             }
         },
     }
+    false
 }

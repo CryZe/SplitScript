@@ -431,6 +431,37 @@ traces. A separate 75-output single-pass sweep was validated for size attributio
 The study includes caveats about the combined closed-world result, optimization
 cost, type identity, and the Windows Node runtime configuration used for testing.
 
+## Async emission cleanup implementation batch
+
+Implemented the first output-size slice from the Binaryen study after `6a658a7`.
+Async emission now reports whether a block may fall through, using the control
+flow it already emits. State completion tails and loop-back branches are omitted
+after unconditional transfers, including nested if/match/fallback branches. Real
+fallthrough paths still complete normally. This adds no separate optimization
+pass and uses the same implementation in debug and release.
+
+Also removed repeated null assertions from named-function, closure, and leaf
+future poll frame loads: their signatures already declare non-null parameters.
+The `NonNullLocal` frame source makes that invariant explicit. Nullable global
+frames retain their checks. This is the first, type-proven subset of the null
+assertion work; consumer-based removal with trap/effect ordering remains open.
+
+Release sizes fall from 33,439 to 30,784 bytes for Lunistice, 48,773 to 45,434
+for Minish Cap, 25,454 to 22,870 for Mono managed instances, 16,867 to 15,536
+for managed instances, and 2,727 to 2,706 for cancellation. Four controls remain
+byte-identical. All savings are in the code section. Detailed attribution and
+validation are recorded in [baselines](docs/BASELINES.md).
+
+Remaining work: safe null-check removal at unary GC consumers, ordinary-body
+terminal fallbacks, and the later type-planning/release passes from the study.
+Do not interpret the smaller output as a measured compiler latency improvement.
+
+Validation: the full `cargo xtask check` passed, including all 621 compiler
+integration tests, editor/browser workers, Wasm validation, and runtime fixtures.
+Thirteen additional before/after release scenarios matched their original traces.
+New regressions cover nested return/fallthrough behavior in both profiles, dead
+dispatcher tails, and non-null poll-frame signatures and loads.
+
 ## Evidence and scope
 
 There are three different performance concerns:

@@ -32,20 +32,22 @@ pub(super) struct AsyncFrameRef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum AsyncFrameSource {
     Global(u32),
-    Local(u32),
+    /// Poll signatures declare the frame parameter as a non-null reference.
+    NonNullLocal(u32),
 }
 
 impl AsyncFrameRef {
     pub(super) fn emit(self, function: &mut Function) {
         match self.source {
             AsyncFrameSource::Global(index) => {
-                function.instruction(&Instruction::GlobalGet(index));
+                function
+                    .instruction(&Instruction::GlobalGet(index))
+                    .instruction(&Instruction::RefAsNonNull);
             }
-            AsyncFrameSource::Local(index) => {
+            AsyncFrameSource::NonNullLocal(index) => {
                 function.instruction(&Instruction::LocalGet(index));
             }
         }
-        function.instruction(&Instruction::RefAsNonNull);
     }
 }
 

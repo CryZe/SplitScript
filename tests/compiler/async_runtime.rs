@@ -219,8 +219,33 @@ fn async_dispatch_tables_cover_state_boundaries_in_both_profiles() {
             let mut tables = Vec::new();
             for payload in Parser::new(0).parse_all(&wasm) {
                 if let Payload::CodeSectionEntry(body) = payload.unwrap() {
-                    for operator in body.get_operators_reader().unwrap() {
-                        if let wasmparser::Operator::BrTable { targets } = operator.unwrap() {
+                    let operators = body
+                        .get_operators_reader()
+                        .unwrap()
+                        .into_iter()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap();
+                    if operators
+                        .iter()
+                        .any(|operator| matches!(operator, wasmparser::Operator::BrTable { .. }))
+                    {
+                        for pair in operators.windows(2) {
+                            if matches!(
+                                pair[0],
+                                wasmparser::Operator::Br { .. } | wasmparser::Operator::Return
+                            ) {
+                                assert!(
+                                    matches!(
+                                        pair[1],
+                                        wasmparser::Operator::End | wasmparser::Operator::Else
+                                    ),
+                                    "{profile:?}: dead instructions after an async transfer: {pair:?}"
+                                );
+                            }
+                        }
+                    }
+                    for operator in operators {
+                        if let wasmparser::Operator::BrTable { targets } = operator {
                             tables.push((
                                 targets.targets().collect::<Result<Vec<_>, _>>().unwrap(),
                                 targets.default(),
@@ -294,6 +319,55 @@ fn async_dispatch_preserves_retry_nested_calls_and_loop_transfers() {
             "{profile:?}"
         );
         assert_eq!(store.data().module_lookups, 4, "{profile:?}");
+    }
+}
+
+#[test]
+fn async_completion_preserves_nested_returns_and_fallthrough() {
+    let source = r#"
+        state "game.exe" {}
+        fn choose(value: u32) -> async u32 {
+            await nextTick()
+            if value == 0 { return 11 } else { return 22 }
+        }
+        fn chooseMatch(value: u32) -> async u32 {
+            await nextTick()
+            match value {
+                0 => { return 33 },
+                _ => { return 44 },
+            }
+        }
+        fn optional(value: u32?) -> async u32 {
+            await nextTick()
+            let number = value else return 55
+            return number
+        }
+        onAttach {
+            print(await choose(0))
+            print(await choose(1))
+            print(await chooseMatch(0))
+            print(await chooseMatch(1))
+            print(await optional(None))
+            print(await optional(Some(66)))
+            print("complete")
+        }
+    "#;
+    for profile in [
+        splitscript::BuildProfile::Debug,
+        splitscript::BuildProfile::Release,
+    ] {
+        let (mut store, instance) = execute_with_mock_host_with_profile(source, profile);
+        let update = instance
+            .get_typed_func::<(), ()>(&mut store, "update")
+            .unwrap();
+        for _ in 0..30 {
+            update.call(&mut store, ()).unwrap();
+        }
+        assert_eq!(
+            store.data().messages,
+            ["11", "22", "33", "44", "55", "66", "complete"],
+            "{profile:?}"
+        );
     }
 }
 

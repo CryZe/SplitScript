@@ -1072,6 +1072,92 @@ fn wasm_instruction_boundaries(wasm: &[u8]) -> std::collections::BTreeSet<u64> {
     boundaries
 }
 
+#[test]
+fn async_poll_frames_use_their_non_null_parameter_contract() {
+    let wasm = splitscript::compile(
+        r#"
+        state "game.exe" {}
+        fn answer() -> async u32 {
+            await nextTick()
+            return 7
+        }
+        onAttach {
+            let delayed = (value: u32) -> async u32 => {
+                let pending = process.module("Game.dll")
+                let module = await pending
+                return value
+            }
+            let value = await answer()
+            print(await delayed(value))
+        }
+    "#,
+    )
+    .unwrap();
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .unwrap();
+    let (_, names) = debug_function_names(&wasm).unwrap();
+    let polls = names
+        .into_iter()
+        .filter(|(_, name)| name.ends_with("::poll"))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert!(polls.values().any(|name| name == "answer::poll"));
+    assert!(polls.values().any(|name| name.contains("::closure::")));
+    assert!(polls.values().any(|name| name.contains("::future::")));
+    let mut types = Vec::new();
+    let mut functions = Vec::new();
+    let mut imports = 0;
+    let mut defined = 0;
+    let mut checked = 0;
+    for payload in Parser::new(0).parse_all(&wasm) {
+        match payload.unwrap() {
+            Payload::TypeSection(section) => {
+                for group in section {
+                    types.extend(group.unwrap().into_types());
+                }
+            }
+            Payload::ImportSection(section) => imports = section.count(),
+            Payload::FunctionSection(section) => {
+                functions.extend(section.into_iter().map(Result::unwrap))
+            }
+            Payload::CodeSectionEntry(body) => {
+                if let Some(name) = polls.get(&(imports + defined as u32)) {
+                    let wasmparser::CompositeInnerType::Func(signature) =
+                        &types[functions[defined] as usize].composite_type.inner
+                    else {
+                        panic!("poll signature must be a function type");
+                    };
+                    assert!(
+                        matches!(signature.params(), [wasmparser::ValType::Ref(reference)] if !reference.is_nullable()),
+                        "{name}"
+                    );
+                    assert_eq!(signature.results(), [wasmparser::ValType::I32], "{name}");
+                    let operators = body
+                        .get_operators_reader()
+                        .unwrap()
+                        .into_iter()
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap();
+                    assert!(
+                        !operators.windows(2).any(|pair| matches!(
+                            pair,
+                            [
+                                wasmparser::Operator::LocalGet { local_index: 0 },
+                                wasmparser::Operator::RefAsNonNull
+                            ]
+                        )),
+                        "{name}: frame parameter is already non-null"
+                    );
+                    checked += 1;
+                }
+                defined += 1;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(checked, polls.len());
+}
+
 fn debug_function_names(wasm: &[u8]) -> Option<(String, Vec<(u32, String)>)> {
     for payload in Parser::new(0).parse_all(wasm) {
         let Payload::CustomSection(section) = payload.expect("generated module should parse")

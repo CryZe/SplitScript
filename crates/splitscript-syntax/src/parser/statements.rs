@@ -12,7 +12,7 @@ impl Parser<'_> {
         let start = self
             .expect(TokenKind::LBrace, "expected `{` to start a block")?
             .start;
-        let block_depth = self.brace_depth_before(self.cursor.position());
+        let block_depth = self.cursor.brace_depth();
         let mut statements = Vec::new();
         let mut trailing_semicolon = None;
         while !self.at(&TokenKind::RBrace) {

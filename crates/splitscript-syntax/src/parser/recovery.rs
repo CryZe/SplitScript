@@ -373,31 +373,24 @@ impl Parser<'_> {
     }
 
     pub(super) fn synchronize_top_level(&mut self, declaration_start: usize) {
-        let mut brace_depth = self.brace_depth_before(self.cursor.position());
-
         if self.cursor.position() > declaration_start
-            && brace_depth == 0
+            && self.cursor.brace_depth() == 0
             && self.is_top_level_start()
         {
             return;
         }
 
         while !self.at(&TokenKind::Eof) {
-            let kind = self.bump().kind.clone();
-            match kind {
-                TokenKind::LBrace => brace_depth += 1,
-                TokenKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
-                _ => {}
-            }
-            if brace_depth == 0 && self.is_top_level_start() {
+            self.bump();
+            if self.cursor.brace_depth() == 0 && self.is_top_level_start() {
                 return;
             }
         }
     }
 
     pub(super) fn synchronize_statement(&mut self, statement_start: usize, block_depth: u32) {
-        let mut brace_depth = self.brace_depth_before(self.cursor.position());
         loop {
+            let brace_depth = self.cursor.brace_depth();
             if self.at(&TokenKind::Eof)
                 || (self.at(&TokenKind::RBrace) && brace_depth == block_depth)
             {
@@ -411,12 +404,8 @@ impl Parser<'_> {
                 return;
             }
 
-            let kind = self.bump().kind.clone();
-            match kind {
-                TokenKind::LBrace => brace_depth += 1,
-                TokenKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
-                TokenKind::Semicolon if brace_depth == block_depth => return,
-                _ => {}
+            if matches!(self.bump().kind, TokenKind::Semicolon) && brace_depth == block_depth {
+                return;
             }
         }
     }
@@ -501,8 +490,8 @@ impl Parser<'_> {
     }
 
     pub(super) fn synchronize_delimited_item(&mut self, item_start: usize, body_depth: u32) {
-        let mut brace_depth = self.brace_depth_before(self.cursor.position());
         loop {
+            let brace_depth = self.cursor.brace_depth();
             if self.at(&TokenKind::Eof)
                 || (self.at(&TokenKind::RBrace) && brace_depth == body_depth)
             {
@@ -523,12 +512,10 @@ impl Parser<'_> {
                 return;
             }
 
-            let kind = self.bump().kind.clone();
-            match kind {
-                TokenKind::LBrace => brace_depth += 1,
-                TokenKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
-                TokenKind::Comma | TokenKind::Semicolon if brace_depth == body_depth => return,
-                _ => {}
+            if matches!(self.bump().kind, TokenKind::Comma | TokenKind::Semicolon)
+                && brace_depth == body_depth
+            {
+                return;
             }
         }
     }
@@ -548,16 +535,6 @@ impl Parser<'_> {
                 end: position,
             },
         });
-    }
-
-    pub(super) fn brace_depth_before(&self, position: usize) -> u32 {
-        self.cursor.tokens()[..position]
-            .iter()
-            .fold(0u32, |depth, token| match token.kind {
-                TokenKind::LBrace => depth + 1,
-                TokenKind::RBrace => depth.saturating_sub(1),
-                _ => depth,
-            })
     }
 
     pub(super) fn is_statement_start(&self) -> bool {

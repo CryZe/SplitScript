@@ -459,7 +459,7 @@ impl Parser<'_> {
             let start = self.previous().span;
             let value = self.required_expression_before_block()?;
             self.expect(TokenKind::LBrace, "expected `{` after the matched value")?;
-            let body_depth = self.brace_depth_before(self.cursor.position());
+            let body_depth = self.cursor.brace_depth();
             let mut arms = Vec::new();
             while !self.at(&TokenKind::RBrace) {
                 if self.at(&TokenKind::Eof) {
@@ -717,7 +717,7 @@ impl Parser<'_> {
                             )
                         ));
                 if begins_struct_literal && self.eat(&TokenKind::LBrace).is_some() {
-                    let body_depth = self.brace_depth_before(self.cursor.position());
+                    let body_depth = self.cursor.brace_depth();
                     let mut fields = Vec::new();
                     while !self.at(&TokenKind::RBrace) {
                         if self.at(&TokenKind::Eof) {

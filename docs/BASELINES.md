@@ -1180,6 +1180,115 @@ Evidence is retained under ignored `target/performance-review/typed-gc-*` and
 `max-opt-*` files, including a patch for the deferred experiment. Future work
 should reproduce latency in both Rust profiles before reviving that cleanup.
 
+## 2026-09-08 parser brace-depth tracking
+
+Source baseline: `25c23a8`. The parser previously scanned the complete consumed
+token prefix whenever it entered a block or started recovery. A cursor-owned
+depth now advances with tokens, and recovery uses that same depth. This removes
+quadratic prefix scanning without caching/remapping syntax or adding a separate
+debug/release path. Stray closing braces still saturate the depth at zero.
+
+The new dependency-free syntax benchmark isolates parsing and disposal from
+lexing and token cloning:
+
+```console
+cargo run -p splitscript-syntax --release --example parser_scaling -- 50
+cargo run -p splitscript-syntax --profile max-opt --example parser_scaling -- 50
+```
+
+Each function has one nested conditional block. Runs use 10 warmups and 50
+samples on Windows x86-64 with Rust 1.98.1. Medians:
+
+| Functions | Source bytes | Rust release before → after | Rust max-opt before → after |
+| --- | ---: | ---: | ---: |
+| 100 | 4,810 | 0.288 → 0.221 ms | 0.257 → 0.208 ms |
+| 500 | 24,410 | 1.809 → 0.854 ms | 1.710 → 0.851 ms |
+| 1,000 | 48,910 | 5.307 → 1.810 ms | 5.111 → 1.777 ms |
+| 2,000 | 98,910 | 17.614 → 3.878 ms | 17.096 → 3.626 ms |
+| 4,000 | 198,910 | 78.826 → 7.940 ms | 77.647 → 7.444 ms |
+
+Freshly built `compiler_baseline` binaries use 20 warmups and 50 measured
+samples per fixture. Compilation and frontend runs were kept separate from
+builds/tests. The reverse-order repeat confirms the full-compilation gains:
+
+| Fixture | Rust release before → after | Release reverse-order repeat | Rust max-opt before → after | Max-opt reverse-order repeat |
+| --- | ---: | ---: | ---: | ---: |
+| minimal | 52.95 → 49.79 ms | 53.19 → 49.69 ms | 47.94 → 44.99 ms | 48.77 → 45.37 ms |
+| Lunistice | 61.32 → 58.58 ms | 61.46 → 58.27 ms | 55.91 → 51.49 ms | 56.55 → 52.14 ms |
+| cancellation | 52.88 → 49.21 ms | 51.43 → 49.59 ms | 46.39 → 43.17 ms | 47.66 → 44.08 ms |
+| settings | 53.97 → 52.23 ms | 54.37 → 50.66 ms | 49.82 → 45.73 ms | 48.89 → 46.55 ms |
+
+Frontend-only medians (`compiler_baseline -- 50 --frontend`), including result
+disposal and excluding type checking/emission:
+
+| Fixture | Rust release before → after | Rust max-opt before → after |
+| --- | ---: | ---: |
+| minimal | 28.79 → 26.01 ms | 25.52 → 21.79 ms |
+| Lunistice | 35.16 → 32.21 ms | 30.54 → 26.87 ms |
+| cancellation | 29.44 → 26.49 ms | 25.78 → 22.48 ms |
+| settings | 31.38 → 27.59 ms | 27.11 → 23.44 ms |
+
+The instrumented `tooling_baseline` result is mixed. Two `max-opt` runs (30
+samples, 20 warmups, reverse order on the repeat) improve the generated
+500-function file but make several small/Lunistice queries a few percent slower.
+For example, first-run edit-to-diagnostics medians are 43.59 → 46.00 ms (small),
+50.77 → 51.30 ms (Lunistice), and 64.05 → 62.19 ms (large). The repeat is
+44.29 → 46.97, 51.30 → 51.94, and 63.99 → 62.45 ms. This allocator-instrumented
+executable does not establish an across-the-board editor speedup. Its saved
+output still says `profile=release`; the files were built with `--profile max-opt`.
+The harness header now reports debug assertions, as `compiler_baseline` does,
+rather than hardcoding a Cargo profile.
+
+The actual distribution `splitls` executable was then measured over its stdio
+LSP transport with its ordinary allocator, alternating a trailing-newline edit
+and awaiting versioned diagnostics. These runs use the same three sources,
+20 warmups and 50 samples; startup/initial document opening are excluded.
+The pre-change distribution artifact has the same compiler logic as `25c23a8`.
+Its build metadata identifies `5f50ac1`; the intervening profile/wiring commit
+does not alter compiler or LSP logic. Both run orders improve, so the
+instrumented harness's small-file regression does not reproduce
+in this production workload. The cause of that discrepancy is not isolated.
+
+| Fixture | Edit → diagnostics median before → after | p95 before → after | Reverse-order median before → after |
+| --- | ---: | ---: | ---: |
+| small | 44.53 → 41.62 ms | 46.18 → 43.45 ms | 45.00 → 41.19 ms |
+| Lunistice | 50.86 → 46.98 ms | 52.47 → 48.36 ms | 50.09 → 46.97 ms |
+| generated large | 75.95 → 69.28 ms | 79.53 → 74.06 ms | 77.67 → 68.63 ms |
+
+The embedded `max-opt` compiler's service ABI was measured in Node 24 with
+`--single-threaded --no-wasm-async-compilation`, 20 warmups and 50 samples.
+Module instantiation is separate (roughly 14 ms in each run); this is repeated
+compilation, not a browser startup measurement.
+
+| Fixture | Median before → after | p95 before → after | Reverse-order median before → after |
+| --- | ---: | ---: | ---: |
+| minimal | 55.67 → 42.95 ms | 58.50 → 44.63 ms | 54.61 → 43.48 ms |
+| Lunistice | 65.88 → 50.84 ms | 67.83 → 52.94 ms | 65.86 → 52.04 ms |
+
+The embedded compiler shrinks slightly, from 6,345,753 to 6,342,419 bytes.
+The native `max-opt` CLI is 6,299,136 bytes and language server 4,320,768 bytes,
+each 4,096 bytes smaller than before. These are compiler artifacts, separate
+from generated script size.
+
+All nine release script fixtures are byte-identical, including metadata.
+Lunistice remains 30,565 bytes and Minish Cap 45,113 bytes. All nine debug
+fixtures have identical executable sections and line tables. Four differ only
+in `.debug_info`; repeated old-compiler builds of `debug_profile.split` reproduce
+both complete before/after hashes, identifying existing DWARF variable-order
+nondeterminism rather than a parser regression.
+
+Validation: full `cargo xtask check` passed, including 100 syntax tests,
+420 library tests, 621 compiler integrations, editor/browser workers, Wasm
+validation, and 95 runtime scenarios built from 67 unique artifacts. The new
+syntax benchmark also passes a targeted Clippy check. Cursor tests exercise
+unmatched braces, strings/comments, lookahead, EOF, contextual token splitting,
+and clones; existing nested parser-recovery tests remain green.
+
+Evidence is retained under ignored `target/performance-review/brace-*`,
+`compiler-brace-*`, `parser-brace-*`, and `tooling-brace-*` files. Parsed-library
+reuse and remaining frontend work still need separate profiling; this change
+does not eliminate augmented parsing or claim script-size savings.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

@@ -9,6 +9,7 @@ use crate::{Token, TokenKind};
 pub struct TokenCursor {
     tokens: Vec<Token>,
     position: usize,
+    brace_depth: u32,
     /// Only contextual token splitting needs a token outside `tokens`.
     /// Ordinary advancement borrows the preceding slot without cloning text.
     split_previous: Option<Token>,
@@ -23,12 +24,19 @@ impl TokenCursor {
         Self {
             tokens,
             position: 0,
+            brace_depth: 0,
             split_previous: None,
         }
     }
 
     pub fn position(&self) -> usize {
         self.position
+    }
+
+    /// Unmatched opening braces before the current token. Stray closing braces
+    /// saturate at zero so recovery can resume at the next top-level declaration.
+    pub fn brace_depth(&self) -> u32 {
+        self.brace_depth
     }
 
     pub fn tokens(&self) -> &[Token] {
@@ -54,8 +62,11 @@ impl TokenCursor {
 
     pub fn bump(&mut self) -> &Token {
         let index = self.position;
-        if matches!(self.tokens[index].kind, TokenKind::Eof) {
-            return &self.tokens[index];
+        match self.tokens[index].kind {
+            TokenKind::Eof => return &self.tokens[index],
+            TokenKind::LBrace => self.brace_depth += 1,
+            TokenKind::RBrace => self.brace_depth = self.brace_depth.saturating_sub(1),
+            _ => {}
         }
         self.position += 1;
         self.split_previous = None;
@@ -213,6 +224,46 @@ mod tests {
         let cursor = TokenCursor::new(lex("actual", SyntaxMode::Program).unwrap());
         assert!(!cursor.at(&TokenKind::Ident("other".to_owned())));
         assert!(cursor.at_variant(&TokenKind::Ident(String::new())));
+    }
+
+    #[test]
+    fn brace_depth_tracks_consumption_and_saturates_after_stray_closers() {
+        let mut cursor = TokenCursor::new(lex("} { { \"}\" } } } {", SyntaxMode::Program).unwrap());
+        for depth in [0, 0, 1, 2, 2, 1, 0, 0, 1] {
+            assert_eq!(cursor.brace_depth(), depth);
+            // Lookahead and previous-token access must not consume braces.
+            cursor.peek(usize::MAX);
+            cursor.previous();
+            assert_eq!(cursor.brace_depth(), depth);
+            cursor.bump();
+        }
+        assert_eq!(cursor.current().kind, TokenKind::Eof);
+        cursor.bump();
+        assert_eq!(cursor.brace_depth(), 1);
+    }
+
+    #[test]
+    fn brace_depth_survives_contextual_splitting_documentation_and_cursor_clones() {
+        let mut cursor =
+            TokenCursor::new(lex("{ /// }\n>== != { } }", SyntaxMode::Program).unwrap());
+        cursor.bump();
+        assert_eq!(cursor.take_doc_comments(), ["}"]);
+        assert_eq!(cursor.brace_depth(), 1);
+        cursor.eat_leading_gt().unwrap();
+        assert_eq!(cursor.current().kind, TokenKind::EqEq);
+        assert_eq!(cursor.brace_depth(), 1);
+        cursor.bump();
+        cursor.eat_leading_bang().unwrap();
+        assert_eq!(cursor.brace_depth(), 1);
+        cursor.bump();
+        let mut cloned = cursor.clone();
+        cloned.bump();
+        assert_eq!(cloned.brace_depth(), 2);
+        cloned.bump();
+        cloned.bump();
+        assert_eq!(cloned.brace_depth(), 0);
+        assert_eq!(cursor.brace_depth(), 1);
+        assert_eq!(cursor.current().kind, TokenKind::LBrace);
     }
 
     #[test]

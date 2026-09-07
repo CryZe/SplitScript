@@ -519,6 +519,39 @@ recorded in [baselines](docs/BASELINES.md). Continue with the larger parsing and
 checking reuse opportunities in order 8; frame-load contracts and typed unary
 cleanup remain candidates rather than completed work.
 
+## Parser prefix-scan removal
+
+The next latency investigation found that every block entry and recovery start
+rescanned all preceding tokens to reconstruct brace depth. This made parsing
+quadratic for files with many blocks, including the augmented library source.
+The shared token cursor now tracks depth while consuming tokens; recovery reads
+the same counter instead of maintaining separate copies. Contextual operator
+splitting, cloned cursors, documentation, stray closers, and EOF preserve the
+existing behavior. No syntax template cache or profile-specific parser is needed.
+
+An isolated 4,000-function parse falls from 78.8 to 7.9 ms in Rust release and
+77.6 to 7.4 ms in `max-opt`, with roughly linear scaling after the change.
+Real one-shot compilation medians improve in both Rust profiles, including a
+reverse-order repeat; see [baselines](docs/BASELINES.md) for the full tables.
+The allocator-instrumented editor harness has mixed results, so these compiler
+numbers alone should not be presented as an across-the-board LSP improvement.
+Follow-up measurements of the actual `max-opt` language server over stdio improve
+edit-to-diagnostics medians on all three fixtures in both run orders: the first
+run changes small/Lunistice/large from 44.5/50.9/75.9 to 41.6/47.0/69.3 ms.
+The embedded compiler also improves: Lunistice is 65.9 → 50.8 ms, confirmed at
+65.9 → 52.0 ms in reverse order. These measure warm compilation, not startup.
+
+All nine generated release fixtures remain byte-identical. Debug executable
+sections and line tables also match. Comparison exposed existing nondeterministic
+DWARF variable ordering: the old compiler reproduces the same alternate debug
+artifacts. Track that independently of this latency change.
+Full `cargo xtask check` passed, including editor/browser workers, Wasm
+validation, and all 95 runtime scenarios.
+
+Continue profiling the remaining frontend floor before implementing parsed
+library templates. Prefix-scan removal reduces avoidable parsing work but does
+not avoid reparsing augmented source, and does not complete order 8.
+
 ## Evidence and scope
 
 There are three different performance concerns:

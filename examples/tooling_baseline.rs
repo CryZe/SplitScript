@@ -1,6 +1,7 @@
 //! Repeatable compiler-query and in-process LSP latency/retained-heap baseline.
 //!
 //! Run with `cargo run --release --example tooling_baseline -- 500 100`.
+//! Use `--profile max-opt` instead of `--release` to benchmark the packaged compiler.
 //! Append `--root-effects` to measure repeated root completion in detached contexts.
 //! Append `--recovery` to measure diagnostics followed by hover after invalid edits.
 //! Append `--check-order` to compare strict/recovery query orders and recovery alone.
@@ -113,7 +114,7 @@ fn main() {
     black_box(bootstrap.diagnostics());
     drop(bootstrap);
 
-    println!("profile=release");
+    println!("rust_debug_assertions={}", cfg!(debug_assertions));
     println!(
         "platform={}-{} logical_cpus={}",
         std::env::consts::OS,

@@ -49,7 +49,7 @@ impl Parser<'_> {
 
     fn managed_items(&mut self, owner: &'static str) -> Vec<ManagedItemDecl> {
         let mut items = Vec::new();
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
                 self.record_missing_closing(match owner {
@@ -115,7 +115,7 @@ impl Parser<'_> {
         )?;
         let mut fields = Vec::new();
         let mut conditional_fields = Vec::new();
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
                 self.record_missing_closing("unterminated managed class declaration");
@@ -206,7 +206,7 @@ impl Parser<'_> {
             TokenKind::LBrace,
             "expected `{` after the managed-field condition",
         )?;
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         let mut fields = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
@@ -336,7 +336,7 @@ impl Parser<'_> {
     pub(super) fn tick_rate_decl(&mut self) -> Result<TickRateDecl, Diagnostic> {
         let keyword_span = self.expect_ident("tickRate")?;
         self.expect(TokenKind::LBrace, "expected `{` after `tickRate`")?;
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         let mut attached = None;
         let mut detached = None;
 
@@ -432,7 +432,7 @@ impl Parser<'_> {
         let id = EnumId::from_index(self.next_enum_id);
         self.next_enum_id += 1;
         self.expect(TokenKind::LBrace, "expected `{` after the enum name")?;
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         let mut variants = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
@@ -494,7 +494,7 @@ impl Parser<'_> {
         let id = StructId::from_index(self.next_struct_id);
         self.next_struct_id += 1;
         self.expect(TokenKind::LBrace, "expected `{` after the struct name")?;
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         let mut fields = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
@@ -682,7 +682,7 @@ impl Parser<'_> {
             TokenKind::LBrace,
             "expected `{` after the process name list",
         )?;
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         let mut fields = Vec::new();
         let mut conditional_fields = Vec::new();
         while !self.at(&TokenKind::RBrace) {
@@ -778,7 +778,7 @@ impl Parser<'_> {
 
     fn multi_provider_state_decl(&mut self, start: usize) -> Result<StateDecl, Diagnostic> {
         self.expect(TokenKind::LBrace, "expected `{` after `state`")?;
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         let mut alternatives = Vec::new();
         let mut variants = Vec::new();
         while !self.at(&TokenKind::RBrace) {
@@ -863,7 +863,7 @@ impl Parser<'_> {
             TokenKind::LBrace,
             "expected `{` after the state-provider configuration",
         )?;
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         let mut fields = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
@@ -946,7 +946,7 @@ impl Parser<'_> {
             TokenKind::LBrace,
             "expected `{` after the state-field condition",
         )?;
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         let mut fields = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
@@ -1242,7 +1242,7 @@ impl Parser<'_> {
         heading_level: u32,
         heading_count: &mut u32,
     ) -> Result<(), Diagnostic> {
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
                 self.record_missing_closing("unterminated settings group");
@@ -1612,7 +1612,7 @@ impl Parser<'_> {
 
     pub(super) fn choice_setting(&mut self, keyword_span: Span) -> Result<SettingKind, Diagnostic> {
         self.expect(TokenKind::LBrace, "expected `{` after `choice`")?;
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         let mut enumeration: Option<(String, Span)> = None;
         let mut options = Vec::new();
         let mut default_variant = None;
@@ -1694,7 +1694,7 @@ impl Parser<'_> {
 
     pub(super) fn file_setting(&mut self, keyword_span: Span) -> Result<SettingKind, Diagnostic> {
         self.expect(TokenKind::LBrace, "expected `{` after `file`")?;
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         let mut filters = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
@@ -1822,7 +1822,7 @@ impl Parser<'_> {
         let process = self.expect_string("expected a process name string")?;
         self.expect(TokenKind::Comma, "expected `,` after the process name")?;
         self.expect(TokenKind::LBrace, "expected a state object")?;
-        let body_depth = self.brace_depth_before(self.cursor.position());
+        let body_depth = self.cursor.brace_depth();
         let mut fields = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {

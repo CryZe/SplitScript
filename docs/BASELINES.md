@@ -600,6 +600,144 @@ host-runtime fixtures. Smoke runs of the existing default and `--recovery`
 tooling modes also passed with the corrected fixtures (five generated helpers,
 20 warmups, one measured sample; used for assertions, not timing conclusions).
 
+## 2026-09-07 intervening commits and parser token ownership
+
+Reviewed `57f2564..ac45db0` before making the parser change. These commits add
+maps, migrate conditional state to ordinary globals, extend collection/pattern
+tooling, and fix iterator display specialization. The older source was rebuilt
+from an ignored archive. The current baseline was rebuilt from the workspace;
+an initial run using a colliding stale Cargo output was discarded after binary
+hash verification. Only the verified binaries contribute measurements below.
+
+Rust `1.98.1`, Windows x86-64, 32 logical CPUs; release harness and SplitScript
+release output. Each compiler row has 20 warmups and 200 measured samples,
+using `compiler_baseline -- 200` and `compiler_baseline -- 200 --frontend`.
+All measurements run sequentially without concurrent builds or tests.
+
+Unchanged-source comparison across the intervening commits:
+
+| Fixture | Source bytes | `57f2564` compile median | `ac45db0` compile median | Old frontend median | New frontend median |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| minimal | 19 | 46.96 ms | 50.82 ms | 24.42 ms | 26.78 ms |
+| cancellation | 507 | 49.67 ms | 52.39 ms | 24.32 ms | 26.81 ms |
+| settings | 4,269 | 50.59 ms | 54.93 ms | 25.84 ms | 28.71 ms |
+
+Compile medians increased 5.5–8.6%, with 9.7–11.1% frontend growth. This
+comparison establishes an aggregate slowdown, not which individual commit
+caused it. Map methods add source bodies to the library parsed and checked for
+every compilation, consistent with the measured fixed-cost growth. Parsed and
+checked library reuse remain larger opportunities. Lunistice changed from
+4,554 to 4,567 source bytes and migrated its state model, so its before/after
+times are excluded from this unchanged-source comparison.
+
+The seven unchanged release fixtures below have byte-identical non-custom
+sections across these commits. Raw archived-build files are each 39 bytes
+smaller because the archive lacks the compiler's Git identity, rather than
+because of different executable content:
+
+| Fixture | Non-custom bytes, both commits | Code section bytes, both commits |
+| --- | ---: | ---: |
+| Minish Cap | 48,613 | 42,862 |
+| desktop settings | 8,630 | 5,862 |
+| managed instances | 17,209 | 15,300 |
+| Mono managed instances | 26,448 | 23,324 |
+| debug-profile fixture in release | 1,431 | 701 |
+| set runtime | 3,437 | 2,508 |
+| cancellation | 2,635 | 1,675 |
+
+Non-custom bytes include the module header and each non-custom section's
+encoding. This sample shows no generated-code size regression from the
+intervening commits; it does not cover every new map/iterator specialization.
+
+The implementation in this batch removes the token cursor's unconditional
+clone on every advance. Ordinary `bump()` and `previous()` borrow token storage;
+contextual operator splitting retains its separate synthesized token. Generic
+closer/fallible-suffix probes also stop cloning the current token. Tests verify
+that token storage is reused and preserve splitting, operator reassembly,
+cloned-cursor independence, failed probes, and EOF behavior.
+
+Paired compiler measurements for the cursor change, using unchanged current
+fixtures on both sides:
+
+| Fixture / stage | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| minimal / frontend | 26.78 ms | 23.93 ms | 27.93 ms | 24.95 ms |
+| Lunistice / frontend | 33.53 ms | 29.20 ms | 46.63 ms | 30.39 ms |
+| cancellation / frontend | 26.81 ms | 24.24 ms | 28.95 ms | 25.61 ms |
+| settings / frontend | 28.71 ms | 25.79 ms | 29.98 ms | 27.36 ms |
+| minimal / compile | 50.82 ms | 48.68 ms | 55.07 ms | 50.93 ms |
+| Lunistice / compile | 61.31 ms | 57.28 ms | 64.23 ms | 59.36 ms |
+| cancellation / compile | 52.39 ms | 48.76 ms | 56.24 ms | 50.63 ms |
+| settings / compile | 54.93 ms | 51.16 ms | 57.63 ms | 57.93 ms |
+
+Frontend medians improve 9.6–12.9%; total compile medians improve 4.2–6.9%.
+This recovers much of the measured aggregate slowdown on unchanged fixtures,
+without bypassing library validation or changing language behavior.
+
+The tooling runner now supports cumulative stage measurements:
+
+```console
+cargo run --release --example tooling_baseline -- 500 30 --stages
+```
+
+Each stage row edits the source and requests `parse`, `lower`, or `check`.
+Later rows include prerequisite stages and disposal of the preceding revision;
+they are not isolated pass timers. Both sides below use the same extended
+harness, 20 warmups, and 30 measured edits:
+
+| Fixture / database query | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| small / parse | 9.5 µs | 9.1 µs | 9.7 µs | 12.0 µs |
+| small / lower | 27.67 ms | 24.68 ms | 30.17 ms | 25.68 ms |
+| small / check | 51.48 ms | 48.38 ms | 53.17 ms | 52.26 ms |
+| 500 helpers / parse | 2.48 ms | 2.17 ms | 2.66 ms | 2.42 ms |
+| 500 helpers / lower | 42.60 ms | 37.09 ms | 44.56 ms | 39.86 ms |
+| 500 helpers / check | 75.81 ms | 69.33 ms | 80.17 ms | 71.62 ms |
+
+The lowering improvement is consistent with avoiding token-text clones during
+augmented-library parsing. Retained and peak byte measurements are essentially
+unchanged: the avoided short-lived copies do not determine the heap peak.
+
+The same extended harness with `--recovery` measures edit → diagnostics → hover:
+
+| Fixture | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| valid | 51.62 ms | 48.19 ms | 52.84 ms | 49.60 ms |
+| type error | 41.98 ms | 38.62 ms | 43.94 ms | 40.07 ms |
+| type error, 500 helpers | 67.25 ms | 64.02 ms | 71.02 ms | 81.56 ms |
+| detached-state error | 42.23 ms | 38.58 ms | 46.16 ms | 40.68 ms |
+| syntax error | 49.7 µs | 49.5 µs | 51.0 µs | 89.8 µs |
+
+Editor timing is sensitive to the harness build. Before adding the stage mode,
+two paired runs of the original harness showed the opposite direction: valid
+medians were 49.49/49.59 ms before versus 53.66/54.24 ms after; small type errors
+were 40.85/40.21 versus 44.44/44.09 ms. Stage instrumentation and its matched
+recovery pair show improvements, but this disagreement remains unexplained.
+Do not treat this batch as proof of a stable end-to-end LSP latency improvement.
+The repeatable structural change is eliminated token copying; the separate
+compiler/frontend measurements and stage measurements establish its benefit
+for those measured builds. Native `splitls` and embedded-worker measurements
+remain necessary for a stronger editor claim.
+
+The intervening-commit editor comparison is likewise only a diagnostic signal:
+the original harness measured `57f2564` at 48.96 ms for valid edits, 40.16 ms for
+type errors, and 62.74 ms with 500 helpers, versus `ac45db0` at roughly 49.5,
+40–41, and 63.6–63.8 ms. Successful retained heap increased from 4,985,297 to
+5,231,862 bytes across those commits. This parser change leaves those retained
+bytes unchanged.
+
+Compared with `ac45db0`, nine release fixtures remain byte-identical after this
+change, with matching compiler identity: the seven above, current Lunistice
+(34,500 bytes), and map runtime (5,016 bytes).
+
+Validation: `cargo test -p splitscript-syntax` passed all 98 syntax tests.
+The full `cargo xtask check` passed, including formatting, Clippy,
+documentation, 418 compiler-library tests (one manual benchmark ignored),
+617 compiler integration tests, editor/browser workers, the embedded Wasm
+compiler, Wasm validation, and host-runtime fixtures including maps and
+the migrated conditional-state examples. Both benchmark modes completed with
+their fixture assertions enabled.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

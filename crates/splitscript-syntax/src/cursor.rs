@@ -9,7 +9,9 @@ use crate::{Token, TokenKind};
 pub struct TokenCursor {
     tokens: Vec<Token>,
     position: usize,
-    previous: Option<Token>,
+    /// Only contextual token splitting needs a token outside `tokens`.
+    /// Ordinary advancement borrows the preceding slot without cloning text.
+    split_previous: Option<Token>,
 }
 
 impl TokenCursor {
@@ -21,7 +23,7 @@ impl TokenCursor {
         Self {
             tokens,
             position: 0,
-            previous: None,
+            split_previous: None,
         }
     }
 
@@ -38,7 +40,9 @@ impl TokenCursor {
     }
 
     pub fn previous(&self) -> &Token {
-        self.previous.as_ref().unwrap_or_else(|| self.current())
+        self.split_previous
+            .as_ref()
+            .unwrap_or_else(|| &self.tokens[self.position.saturating_sub(1)])
     }
 
     pub fn peek(&self, offset: usize) -> &Token {
@@ -54,8 +58,8 @@ impl TokenCursor {
             return &self.tokens[index];
         }
         self.position += 1;
-        self.previous = Some(self.tokens[index].clone());
-        self.previous.as_ref().unwrap()
+        self.split_previous = None;
+        &self.tokens[index]
     }
 
     /// Consumes one leading `>` from the current token.
@@ -66,7 +70,7 @@ impl TokenCursor {
     /// This method exposes one source-accurate `>` and leaves any remaining
     /// `>`, `>=`, or `=` as the current token for the surrounding grammar.
     pub fn eat_leading_gt(&mut self) -> Option<crate::Span> {
-        let token = self.current().clone();
+        let token = self.current();
         let close = crate::Span {
             start: token.span.start,
             end: token.span.start + 1,
@@ -101,7 +105,7 @@ impl TokenCursor {
         };
 
         self.set_residual(residual);
-        self.previous = Some(Token {
+        self.split_previous = Some(Token {
             kind: TokenKind::Gt,
             span: close,
         });
@@ -111,7 +115,7 @@ impl TokenCursor {
     /// Consumes a type-level `!` even when maximal munch combined it with a
     /// following assignment into `!=`.
     pub fn eat_leading_bang(&mut self) -> Option<crate::Span> {
-        let token = self.current().clone();
+        let token = self.current();
         match token.kind {
             TokenKind::Bang => {
                 let span = self.bump().span;
@@ -129,7 +133,7 @@ impl TokenCursor {
                         end: token.span.end,
                     },
                 });
-                self.previous = Some(Token {
+                self.split_previous = Some(Token {
                     kind: TokenKind::Bang,
                     span: bang,
                 });
@@ -209,6 +213,53 @@ mod tests {
         let cursor = TokenCursor::new(lex("actual", SyntaxMode::Program).unwrap());
         assert!(!cursor.at(&TokenKind::Ident("other".to_owned())));
         assert!(cursor.at_variant(&TokenKind::Ident(String::new())));
+    }
+
+    #[test]
+    fn ordinary_advancement_reuses_tokens_and_cloned_cursors_own_their_history() {
+        let mut cursor = TokenCursor::new(lex("first second", SyntaxMode::Program).unwrap());
+        assert!(std::ptr::eq(cursor.previous(), cursor.current()));
+        let first = cursor.current() as *const Token;
+        assert!(std::ptr::eq(cursor.bump(), first));
+        assert!(std::ptr::eq(cursor.previous(), first));
+        // Failed contextual probes must leave both the current token and
+        // previous token intact, even when the current token owns text.
+        assert_eq!(cursor.eat_leading_gt(), None);
+        assert_eq!(cursor.eat_leading_bang(), None);
+        assert!(cursor.at_ident("second"));
+        assert!(std::ptr::eq(cursor.previous(), first));
+
+        let mut cloned = cursor.clone();
+        assert!(std::ptr::eq(cloned.previous(), &cloned.tokens()[0]));
+        assert!(!std::ptr::eq(cloned.previous(), cursor.previous()));
+        let second = cloned.current() as *const Token;
+        assert!(std::ptr::eq(cloned.bump(), second));
+        assert!(std::ptr::eq(cloned.previous(), second));
+        assert!(cursor.at_ident("second"));
+    }
+
+    #[test]
+    fn split_token_history_returns_to_borrowed_tokens_after_advancement() {
+        for (source, split) in [(">== next", TokenKind::Gt), ("!= next", TokenKind::Bang)] {
+            let mut cursor = TokenCursor::new(lex(source, SyntaxMode::Program).unwrap());
+            if split == TokenKind::Gt {
+                cursor.eat_leading_gt().unwrap();
+            } else {
+                cursor.eat_leading_bang().unwrap();
+            }
+            assert_eq!(cursor.previous().kind, split);
+            let mut cloned = cursor.clone();
+            assert_eq!(cloned.previous().kind, split);
+            let residual = cloned.current() as *const Token;
+            assert!(std::ptr::eq(cloned.bump(), residual));
+            assert!(std::ptr::eq(cloned.previous(), residual));
+            assert!(cloned.at_ident("next"));
+            cloned.bump();
+            assert_eq!(cloned.previous().kind, TokenKind::Ident("next".to_owned()));
+            cloned.bump();
+            assert_eq!(cloned.previous().kind, TokenKind::Ident("next".to_owned()));
+            assert_eq!(cursor.previous().kind, split);
+        }
     }
 
     #[test]

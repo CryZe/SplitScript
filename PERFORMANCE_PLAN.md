@@ -292,6 +292,53 @@ This resolves the preceding batch's outstanding query-order duplication for
 compatible inputs. Parsed-library templates and remaining parse/lower stage
 copies are still open; no incremental inference or release optimizer was added.
 
+## Parser token ownership and intervening-commit review
+
+Reviewed `57f2564..ac45db0` on 2026-09-07, including ordinary conditional
+state, insertion-ordered maps, collection completion, catalog patterns, and
+iterator display specialization. Reconstructed `57f2564` in an ignored source
+snapshot and compared unchanged compiler fixtures with `ac45db0`. Minimal,
+cancellation, and settings compile medians increased 5.5–8.6%; frontend medians
+increased 9.7–11.1%. This is evidence of aggregate overhead, not attribution to
+one commit. New map methods extend the bundled source that every compilation
+parses and checks, reinforcing order 8's priority. Lunistice's source changed
+with the state migration and is excluded from that fixed-input comparison.
+
+Seven unchanged release fixtures have identical non-custom Wasm sections across
+those commits. The archived build lacks Git identity metadata, so its raw files
+are 39 bytes smaller; that is a measurement artifact, not generated-code growth.
+New map behavior and the migrated Lunistice fixture have separate coverage.
+
+Implemented a smaller parser improvement first: `TokenCursor` now borrows the
+preceding token from its existing vector instead of cloning every consumed
+token, including owned identifier and literal text. Only contextual operator
+splitting retains a synthesized previous token. Failed contextual probes also
+borrow the current token. This benefits ordinary and privileged catalog parsing
+without changing identities, spans, lexical rules, or recovery behavior.
+
+Focused tests cover borrowed token identity, independent cloned cursor history,
+failed probes, split/reassembled operators, subsequent advancement, and EOF.
+Nine current release fixtures, including map runtime and Lunistice, remain
+byte-identical. Measurements and full validation are recorded in
+[baselines](docs/BASELINES.md).
+
+Compiler medians improved 4.2–6.9%, with 9.6–12.9% frontend improvements.
+The new `tooling_baseline --stages` mode measures edit-to-parse/lower/check
+cumulatively; paired checks improved 6.0–8.5% in that harness. Whole editor
+diagnostics/hover timings changed direction between the original and extended
+harness builds, so this is not a stable end-to-end LSP speedup claim. Native
+server and embedded-worker measurements remain open. Retained heap is unchanged.
+
+Validation: all 98 syntax tests and the full `cargo xtask check` passed,
+including 418 compiler-library tests (one manual benchmark ignored), 617
+compiler integration tests, documentation, editor/browser workers, and
+Wasm/runtime checks for the current map and conditional-state behavior.
+
+The newer catalog materialization paths also contain linear type-table searches
+for existing arrays/applications and application-layout arguments. Their scaling
+on large generic/map workloads remains an investigation target; no isolated
+regression or optimization claim is established for those searches yet.
+
 ## Evidence and scope
 
 There are three different performance concerns:

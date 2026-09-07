@@ -4,6 +4,7 @@
 //! Append `--root-effects` to measure repeated root completion in detached contexts.
 //! Append `--recovery` to measure diagnostics followed by hover after invalid edits.
 //! Append `--check-order` to compare strict/recovery query orders and recovery alone.
+//! Append `--stages` to measure cumulative parse/lower/check queries after edits.
 
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -83,7 +84,7 @@ fn main() {
     assert!(
         matches!(
             mode.as_deref(),
-            None | Some("--root-effects" | "--recovery" | "--check-order")
+            None | Some("--root-effects" | "--recovery" | "--check-order" | "--stages")
         ),
         "unknown benchmark mode"
     );
@@ -136,6 +137,24 @@ fn main() {
     }
     if mode.as_deref() == Some("--check-order") {
         run_check_order(functions, iterations);
+        return;
+    }
+    if mode.as_deref() == Some("--stages") {
+        for fixture in [&fixtures[0], &fixtures[2]] {
+            for stage in ["parse", "lower", "check"] {
+                measure_database_edit(fixture, stage, iterations, |database, _| match stage {
+                    "parse" => {
+                        black_box(database.parse().expect("fixture must parse"));
+                    }
+                    "lower" => {
+                        black_box(database.lower().expect("fixture must lower"));
+                    }
+                    _ => {
+                        black_box(database.check().expect("fixture must check"));
+                    }
+                });
+            }
+        }
         return;
     }
 

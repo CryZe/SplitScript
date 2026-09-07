@@ -123,6 +123,42 @@ fn map_editor_surface_exposes_only_the_approved_lookup_api() {
 }
 
 #[test]
+fn collection_constructors_complete_in_expression_positions() {
+    for (prefix, expected, hidden) in [
+        ("Se", "Set", "SetIterator"),
+        ("Ma", "Map", "MapEntry"),
+    ] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+                whileAttached {{
+                    let collection = {prefix}
+                }}
+            "#
+        );
+        let mut database = CompilerDatabase::new(source.clone());
+        let offset = source.find(prefix).unwrap() + prefix.len();
+        let completion = database.completions(offset).unwrap();
+        let item = completion
+            .items
+            .iter()
+            .find(|item| item.label == expected)
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing `{expected}` for `{prefix}`: {:#?}",
+                    completion.items
+                )
+            });
+        assert_eq!(item.insert_text, expected);
+        assert!(!item.is_snippet);
+        assert!(
+            completion.items.iter().all(|item| item.label != hidden),
+            "expression completion leaked `{hidden}`"
+        );
+    }
+}
+
+#[test]
 fn map_entry_binding_patterns_complete_public_fields() {
     let source = r#"
         state "game.exe" {}

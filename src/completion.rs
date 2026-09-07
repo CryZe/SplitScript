@@ -33,8 +33,9 @@ use crate::{
     lexer::TokenKind,
     semantic::{ResolvedCall, ResolvedMember, ResolvedValue, SemanticModel},
     stdlib::{
-        ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibItemId, StdlibNamespace,
-        StdlibSymbolId, StdlibTypeConstructorId, StdlibTypeId, TypeRef,
+        ItemKind, ItemVisibility, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibItemId,
+        StdlibNamespace, StdlibSymbolId, StdlibTypeConstructor, StdlibTypeConstructorId,
+        StdlibTypeId, TypeConstructorSyntax, TypeRef,
     },
     stdlib_semantic::StandardLibrarySemanticExt,
     syntax::SourceDocument,
@@ -1299,6 +1300,25 @@ fn add_root_standard_library(
             is_snippet: false,
         });
     }
+    // A named generic constructor is meaningful in an expression only when it
+    // owns a public static member, such as `Set.new` or `Map.new`. Do not leak
+    // ordinary generic type names (including implementation-only iterator
+    // adapters) into value completion merely because they are valid in types.
+    for constructor in library.type_constructors().iter().filter(|constructor| {
+        constructor.syntax == TypeConstructorSyntax::Named
+            && library.items().any(|item| {
+                item.owner == crate::stdlib::StdlibOwner::TypeConstructor(constructor.id)
+                    && item.visibility == ItemVisibility::Public
+                    && !matches!(item.kind, ItemKind::Method { .. })
+            })
+    }) {
+        builder.add(stdlib_type_constructor_completion(
+            constructor,
+            library,
+            constructor.name.to_owned(),
+            false,
+        ));
+    }
     for item in library.items() {
         let Some(path) = library.item_path(item) else {
             continue;
@@ -1318,6 +1338,26 @@ fn add_root_standard_library(
                 library,
             ));
         }
+    }
+}
+
+fn stdlib_type_constructor_completion(
+    constructor: &StdlibTypeConstructor,
+    library: &StandardLibrary,
+    insert_text: String,
+    is_snippet: bool,
+) -> CompletionItem {
+    CompletionItem {
+        label: constructor.name.to_owned(),
+        kind: CompletionKind::Type,
+        detail: Some(library.render_type_constructor(constructor.id)),
+        documentation: Some(render_documentation(&constructor.documentation)),
+        documentation_uri: Some(symbol_uri(
+            StdlibSymbolId::TypeConstructor(constructor.id),
+            library,
+        )),
+        insert_text,
+        is_snippet,
     }
 }
 

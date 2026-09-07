@@ -3,6 +3,7 @@
 use super::{
     CompletionBuilder, CompletionItem, CompletionKind, CompletionList, CompletionRequest,
     catalog_language_completion, identifier_span, render_documentation,
+    stdlib_type_constructor_completion,
 };
 use crate::{
     ast::{Program, Span},
@@ -143,18 +144,12 @@ pub(super) fn add_type_completions(
             .map(|(index, parameter)| format!("${{{}:{}}}", index + 1, parameter.name))
             .collect::<Vec<_>>()
             .join(", ");
-        builder.add(CompletionItem {
-            label: constructor.name.to_owned(),
-            kind: CompletionKind::Type,
-            detail: Some(library.render_type_constructor(constructor.id)),
-            documentation: Some(render_documentation(&constructor.documentation)),
-            documentation_uri: Some(symbol_uri(
-                StdlibSymbolId::TypeConstructor(constructor.id),
-                library,
-            )),
-            insert_text: format!("{}<{parameters}>", constructor.name),
-            is_snippet: true,
-        });
+        builder.add(stdlib_type_constructor_completion(
+            constructor,
+            library,
+            format!("{}<{parameters}>", constructor.name),
+            true,
+        ));
     }
     for structure in &syntax.structs {
         builder.add(CompletionItem {

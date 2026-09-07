@@ -131,9 +131,6 @@ impl<'ast> Visitor<'ast> for SpanCollector {
                 self.push(selector.span);
             }
         }
-        for layout in &state.layouts {
-            self.push(layout.span);
-        }
         for alternative in &state.provider_alternatives {
             self.push(alternative.span);
             self.push(alternative.provider.span);

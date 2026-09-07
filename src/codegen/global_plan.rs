@@ -24,8 +24,9 @@ pub(super) const ATTACH_READY: i32 = 1;
 /// This process was rejected after acquisition and remains held only until it
 /// closes, preventing the discovery loop from immediately selecting it again.
 pub(super) const ATTACH_REJECTED: i32 = 2;
-/// Automatic metadata selected a layout and user `onAttach` is still pending.
-pub(super) const ATTACH_LAYOUT_SELECTED: i32 = 3;
+/// Provider preparation and automatic shape selection completed; user
+/// `onAttach` is still pending.
+pub(super) const ATTACH_PREPARED: i32 = 3;
 
 pub(super) struct GlobalPlan {
     pub section: GlobalSection,
@@ -60,8 +61,8 @@ pub(super) struct RuntimeGlobals {
     pub provider_preparation_frame: Option<u32>,
     /// Whether preparation completed for the current process attachment.
     pub provider_prepared: Option<u32>,
-    /// The typed attachment layout returned by `onAttach`.
-    pub selected_layout: Option<u32>,
+    /// The typed discriminator for a multi-provider state.
+    pub selected_provider: Option<u32>,
     pub current: u32,
     pub old: u32,
     pub attach_ready: u32,
@@ -281,14 +282,14 @@ pub(super) fn encode(inputs: Inputs<'_>) -> GlobalPlan {
 
     let managed_state_reads =
         managed_state_reads::encode(&mut section, semantics, gc, wasm_ir, managed);
-    let selected_layout_type = program
+    let selected_provider_type = program
         .state
         .as_ref()
-        .and_then(|state| state.layout_value)
+        .and_then(|state| state.provider_value)
         .map(|value| value_type(value, semantics));
-    let selected_layout = selected_layout_type.map(|layout_type| {
+    let selected_provider = selected_provider_type.map(|provider_type| {
         let selected = section.len();
-        let mut val_type = gc.val_type(layout_type);
+        let mut val_type = gc.val_type(provider_type);
         if let ValType::Ref(reference) = &mut val_type {
             reference.nullable = true;
         }
@@ -419,8 +420,11 @@ pub(super) fn encode(inputs: Inputs<'_>) -> GlobalPlan {
     let mut variables = HashMap::new();
     let mut variable_types = HashMap::new();
     if let Some(state) = &program.state
-        && let (Some(value), Some(global), Some(ty)) =
-            (state.layout_value, selected_layout, selected_layout_type)
+        && let (Some(value), Some(global), Some(ty)) = (
+            state.provider_value,
+            selected_provider,
+            selected_provider_type,
+        )
     {
         variables.insert(value, global);
         variable_types.insert(value, ty);
@@ -503,7 +507,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> GlobalPlan {
             provider_preparation_value,
             provider_preparation_frame,
             provider_prepared,
-            selected_layout,
+            selected_provider,
             current,
             old,
             attach_ready,

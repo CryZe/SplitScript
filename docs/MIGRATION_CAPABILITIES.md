@@ -13,7 +13,7 @@ Start with the [complete ASL porting guide](ASL_PORTING.md) for lifecycle and se
 
 - **Bounded native stringN state** (*Use a typed pattern*): Choose the native encoding explicitly: `utf8` bounds bytes and `utf16le` bounds two-byte code units. Canonical: `state`. [Porting recipe](ASL_PORTING.md#bounded-native-stringn-state).
 
-- **Version-labelled state blocks** (*Use a typed pattern*): Use named layouts in one state block and return the selected layout from `onAttach`. Canonical: `state`. [Porting recipe](ASL_PORTING.md#version-labelled-asl-states).
+- **Version-labelled state blocks** (*Use a typed pattern*): Use one state block, initialize an ordinary build enum in `onAttach`, and guard version-specific fields with it. Canonical: `state`. [Porting recipe](ASL_PORTING.md#version-labelled-asl-states).
 
 - **Contiguous memory aggregates** (*Use a typed pattern*): Read physically contiguous values as one naturally aligned struct or fixed-length `[T; N]` array when that type exactly matches the target-memory layout. Canonical: `struct`, `[T; N]`, `state`, `Process.read`. [Porting recipe](ASL_PORTING.md#contiguous-structs-and-fixed-arrays).
 

@@ -25,7 +25,7 @@ impl BackendDependencies {
         semantics: &SemanticModel,
         wasm_ir: &wasm_ir::Program,
         reachability: &super::reachability::Reachability,
-        automatic_layout: Option<&crate::layout_selection::LayoutSelectionPlan>,
+        automatic_shape: Option<&crate::shape_selection::ShapeSelectionPlan>,
     ) -> Self {
         let mut dependencies = Self::default();
         if program
@@ -43,7 +43,7 @@ impl BackendDependencies {
         // Polling rates are lifecycle policy even when source never calls the
         // dynamic setTickRate API directly.
         dependencies.require_import(AbiImportId::RuntimeSetTickRate);
-        if automatic_layout.is_some() {
+        if automatic_shape.is_some() {
             dependencies.require_import(AbiImportId::RuntimePrintMessage);
         }
 

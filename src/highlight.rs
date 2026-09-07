@@ -707,7 +707,7 @@ impl HighlightCollector<'_> {
                 }
                 ResolvedValue::Variable(id) => {
                     let readonly = self.syntax.state.as_ref().is_some_and(|state| {
-                        state.layout_value == Some(id)
+                        state.provider_value == Some(id)
                             || state.all_fields().any(|field| {
                                 field
                                     .transform
@@ -1125,22 +1125,12 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 
     fn visit_struct(&mut self, structure: &'ast crate::ast::StructDecl) {
-        let attachment_layout = self
-            .syntax
-            .state
-            .as_ref()
-            .and_then(|state| state.layout.as_ref())
-            .filter(|layout| layout.structure == structure.id);
-        if let Some(layout) = attachment_layout {
-            self.insert_language_token(layout.keyword_span, "layout", 0);
-        } else {
-            self.mark_ident(
-                structure.span,
-                &structure.name,
-                SemanticTokenKind::Struct,
-                MODIFIER_DECLARATION,
-            );
-        }
+        self.mark_ident(
+            structure.span,
+            &structure.name,
+            SemanticTokenKind::Struct,
+            MODIFIER_DECLARATION,
+        );
         for field in &structure.fields {
             self.mark_ident(
                 field.span,
@@ -1781,14 +1771,15 @@ whileAttached {
     fn highlights_managed_schema_declarations_by_their_language_roles() {
         let source = r#"
 enum Edition { Alternate }
-state "game.exe" { layout { edition: Edition } }
-onAttach { return Layout { edition: Edition.Alternate } }
+let edition: Edition
+state "game.exe" {}
+onAttach { edition = Edition.Alternate }
 image "Assembly-CSharp" {
     namespace Game {
         class Player from "RuntimePlayer" {
             static f32 health from "_health";
             String name maxLength 64;
-            if layout.edition == Edition.Alternate {
+            if edition == Edition.Alternate {
                 f32 armor;
             }
         }
@@ -1809,7 +1800,6 @@ let player: Player.Ref? = None
             "from",
             "static",
             "maxLength",
-            "layout",
             "if",
         ] {
             assert!(contains(
@@ -2135,41 +2125,6 @@ state "game.exe" {
             .expect("dynamic state base should be highlighted");
         assert_eq!(highlight.kind, SemanticTokenKind::StateField);
         assert_eq!(highlight.modifiers, MODIFIER_READONLY);
-    }
-
-    #[test]
-    fn highlights_named_layouts_as_generated_enum_members() {
-        let source = r#"
-state "game.exe" {
-    layout Steam { level: u32 at 0x100 },
-    layout GOG { level: u32 at 0x200 }
-}
-onAttach { return StateLayout.Steam }
-split { return layout == StateLayout.Steam }
-"#;
-        let mut database = CompilerDatabase::new(source);
-        let highlights = database.semantic_highlights().unwrap();
-        assert!(contains(
-            source,
-            &highlights,
-            "layout",
-            SemanticTokenKind::Keyword,
-            0
-        ));
-        assert!(contains(
-            source,
-            &highlights,
-            "Steam",
-            SemanticTokenKind::EnumMember,
-            MODIFIER_DECLARATION | MODIFIER_READONLY
-        ));
-        assert!(contains(
-            source,
-            &highlights,
-            "StateLayout",
-            SemanticTokenKind::Enum,
-            0
-        ));
     }
 
     #[test]

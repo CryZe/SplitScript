@@ -205,12 +205,14 @@ fn initialize_checker(
         inference,
         provider_value,
         provider_values,
-        layout_value: program.state.as_ref().and_then(|state| state.layout_value),
-        layout_available_in_on_attach: false,
-        active_state_layouts: None,
+        state_refinement_value: program
+            .state
+            .as_ref()
+            .and_then(|state| state.provider_value),
+        active_provider_variants: None,
         active_state_field: None,
-        layout_dimensions: Vec::new(),
-        active_layouts: None,
+        shape_dimensions: Vec::new(),
+        active_shapes: None,
         scopes: Vec::new(),
         condition_flows: std::collections::HashMap::new(),
         active_condition_bindings: Vec::new(),

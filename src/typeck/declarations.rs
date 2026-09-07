@@ -7,20 +7,13 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{
-        EnumDecl, EnumVariantId, FunctionId, ManagedFieldId, Span, StructDecl, StructFieldId,
-        ValueId,
-    },
+    ast::{EnumDecl, EnumVariantId, FunctionId, ManagedFieldId, Span, StructDecl, ValueId},
     inference::Type,
 };
 
 /// The source value that selects one finite declaration shape.
-///
-/// `LayoutField` is retained while the old source syntax is migrated. Ordinary
-/// attachment-scoped globals are the canonical source representation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum LayoutDimension {
-    LayoutField(StructFieldId),
+pub(super) enum ShapeDimension {
     Global(ValueId),
     /// A dynamically polled state field. These dimensions may guard other
     /// state fields, but never managed metadata declarations.
@@ -29,19 +22,19 @@ pub(super) enum LayoutDimension {
 
 /// One fact established about a finite declaration-shape discriminator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct LayoutConstraint {
-    pub(super) dimension: LayoutDimension,
+pub(super) struct ShapeConstraint {
+    pub(super) dimension: ShapeDimension,
     pub(super) variant: EnumVariantId,
 }
 
-/// A bounded set of exact attachment-layout assignments.
+/// A bounded set of exact declaration-shape assignments.
 ///
-/// Each alternative contains one variant for every declared layout dimension.
+/// Each alternative contains one variant for every declared shape dimension.
 /// This disjunctive representation lets declaration `else` branches retain
 /// complements that cannot be expressed as one conjunction.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(super) struct LayoutPredicate {
-    pub(super) alternatives: Vec<Vec<LayoutConstraint>>,
+pub(super) struct ShapePredicate {
+    pub(super) alternatives: Vec<Vec<ShapeConstraint>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -221,22 +214,22 @@ impl DeclarationEnvironment {
 }
 
 pub(super) struct DeclarationEnvironment {
-    /// Fields available on every named layout with one compatible type. For
+    /// Fields available on every provider alternative with one compatible type. For
     /// ordinary state declarations this contains every field.
     pub(super) state_fields: HashMap<String, (ValueId, Type)>,
     /// Every concrete state-field declaration, including declarations in
-    /// later named layouts that project into a common field.
+    /// later provider alternatives that project into a common field.
     pub(super) state_fields_by_id: HashMap<ValueId, Type>,
     pub(super) state_field_spans: HashMap<ValueId, crate::ast::Span>,
-    /// Concrete fields available after refining `layout` to a variant.
-    pub(super) layout_state_fields: HashMap<EnumVariantId, HashMap<String, (ValueId, Type)>>,
-    /// State declarations guarded by attachment-wide layout facts.
-    pub(super) conditional_state_fields: HashMap<String, Vec<(ValueId, Type, LayoutPredicate)>>,
-    pub(super) conditional_state_field_predicates: HashMap<ValueId, LayoutPredicate>,
-    /// Exact layout alternatives guarding each conditionally bound managed field.
-    pub(super) conditional_managed_fields: HashMap<ManagedFieldId, LayoutPredicate>,
+    /// Concrete fields available after refining `provider` to a variant.
+    pub(super) provider_state_fields: HashMap<EnumVariantId, HashMap<String, (ValueId, Type)>>,
+    /// State declarations guarded by attachment-wide shape facts.
+    pub(super) conditional_state_fields: HashMap<String, Vec<(ValueId, Type, ShapePredicate)>>,
+    pub(super) conditional_state_field_predicates: HashMap<ValueId, ShapePredicate>,
+    /// Exact shape alternatives guarding each conditionally bound managed field.
+    pub(super) conditional_managed_fields: HashMap<ManagedFieldId, ShapePredicate>,
     /// Concrete declarations mapped to their physical snapshot field. Common
-    /// declarations from later layouts map to the first layout's identity.
+    /// declarations from later provider alternatives map to the first provider alternative's identity.
     pub(super) state_storage_fields: HashMap<ValueId, ValueId>,
     pub(super) settings: HashMap<String, (ValueId, Type)>,
     pub(super) settings_by_runtime_key: HashMap<String, RuntimeSettingDeclaration>,
@@ -264,7 +257,7 @@ impl DeclarationEnvironment {
             state_fields: HashMap::new(),
             state_fields_by_id: HashMap::new(),
             state_field_spans: HashMap::new(),
-            layout_state_fields: HashMap::new(),
+            provider_state_fields: HashMap::new(),
             conditional_state_fields: HashMap::new(),
             conditional_state_field_predicates: HashMap::new(),
             conditional_managed_fields: HashMap::new(),

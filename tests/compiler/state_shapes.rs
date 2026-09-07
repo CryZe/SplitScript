@@ -112,43 +112,6 @@ fn state_dependency_cycles_point_to_every_participating_field() {
 }
 
 #[test]
-fn sibling_dependencies_resolve_within_each_named_layout() {
-    let source = r#"
-        state "game.exe" {
-            layout First {
-                copy: u32 = source;
-                source: u32 at 0x1000;
-            },
-            layout Second {
-                copy: u32 = source;
-                source: u32 at 0x2000;
-            },
-        }
-
-        onAttach { return StateLayout.First }
-    "#;
-    let checked = splitscript::check(splitscript::parse(source).unwrap())
-        .expect("each named layout should have an independent dependency graph");
-    let state = checked.syntax().state.as_ref().unwrap();
-    for layout in &state.layouts {
-        let copy = layout
-            .fields
-            .iter()
-            .find(|field| field.name == "copy")
-            .unwrap();
-        let source = layout
-            .fields
-            .iter()
-            .find(|field| field.name == "source")
-            .unwrap();
-        assert_eq!(checked.semantics().state_dependencies(copy.id), [source.id]);
-    }
-    Validator::new_with_features(WasmFeatures::all())
-        .validate_all(&splitscript::codegen(&checked))
-        .expect("layout-local dependency ordering should emit valid Wasm GC");
-}
-
-#[test]
 fn emulator_state_paths_accept_sibling_hardware_addresses() {
     let source = r#"
         state GBA {
@@ -164,84 +127,38 @@ fn emulator_state_paths_accept_sibling_hardware_addresses() {
 }
 
 #[test]
-fn attachment_layout_dimensions_are_an_ordinary_typed_global_struct() {
-    let source = r#"
-        enum Edition {
-            BaseGame,
-            DlcDemo,
-        }
-
-        enum Storefront {
-            Steam,
-            GOG,
-        }
-
-        state "game.exe" {
-            layout {
-                edition: Edition,
-                storefront: Storefront,
-            }
-
-            level: u32 at 0x100
-        }
-
-        onAttach {
-            return Layout {
-                edition: Edition.BaseGame,
-                storefront: Storefront.Steam,
-            }
-        }
-
-        split {
-            return layout.edition == Edition.BaseGame
-                && layout.storefront == Storefront.Steam
-                && old.level != current.level
-        }
-    "#;
-
-    let wasm = splitscript::compile(source)
-        .expect("provider-independent layout dimensions should compile as an ordinary struct");
-    Validator::new_with_features(WasmFeatures::all())
-        .validate_all(&wasm)
-        .expect("layout structs should lower to valid Wasm GC");
-}
-
-#[test]
 fn managed_metadata_can_select_multiple_attachment_dimensions_automatically() {
     let source = r#"
         enum Edition { Base, Demo }
         enum Storefront { Steam, GOG }
+        let edition: Edition
+        let storefront: Storefront
 
         image "Assembly-CSharp" {
             class GameManager {
-                if layout.edition == Edition.Base && layout.storefront == Storefront.Steam {
+                if edition == Edition.Base && storefront == Storefront.Steam {
                     u32 baseSteamMarker;
                 }
-                if layout.edition == Edition.Base && layout.storefront == Storefront.GOG {
+                if edition == Edition.Base && storefront == Storefront.GOG {
                     u32 baseGogMarker;
                 }
-                if layout.edition == Edition.Demo && layout.storefront == Storefront.Steam {
+                if edition == Edition.Demo && storefront == Storefront.Steam {
                     u32 demoSteamMarker;
                 }
-                if layout.edition == Edition.Demo && layout.storefront == Storefront.GOG {
+                if edition == Edition.Demo && storefront == Storefront.GOG {
                     u32 demoGogMarker;
                 }
             }
         }
 
-        state Unity ["game.exe"] {
-            layout {
-                edition: Edition,
-                storefront: Storefront,
-            }
-        }
+        state Unity ["game.exe"] {}
 
         onAttach {
-            print(layout.edition)
+            print(edition)
         }
 
         whileAttached {
-            if layout.edition == Edition.Base {
+            if edition == Edition.Base {
                 print("base")
             }
         }
@@ -251,17 +168,18 @@ fn managed_metadata_can_select_multiple_attachment_dimensions_automatically() {
         .expect("distinct managed presence patterns should select every dimension");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
-        .expect("automatic multi-dimensional layout selection should emit valid Wasm");
+        .expect("automatic multi-dimensional shape selection should emit valid Wasm");
 }
 
 #[test]
-fn binding_free_is_patterns_refine_static_layout_predicates() {
+fn binding_free_is_patterns_refine_static_shape_predicates() {
     let source = r#"
         enum Edition { Base, Demo }
+        let edition: Edition
 
         image "Assembly-CSharp" {
             class GameManager {
-                if layout.edition is Edition.Base {
+                if edition is Edition.Base {
                     u32 level;
                 } else {
                     u32 scene;
@@ -269,37 +187,33 @@ fn binding_free_is_patterns_refine_static_layout_predicates() {
             }
         }
 
-        state Unity ["game.exe"] {
-            layout { edition: Edition }
-        }
+        state Unity ["game.exe"] {}
     "#;
     let wasm = splitscript::compile(source)
-        .expect("a binding-free enum `is` pattern should select a static layout");
+        .expect("a binding-free enum `is` pattern should select a static shape");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
-        .expect("an `is`-selected managed layout should emit valid Wasm");
+        .expect("an `is`-selected managed shape should emit valid Wasm");
 
-    let invalid = source.replace(
-        "layout.edition is Edition.Base",
-        "(layout.edition is selectedEdition)",
-    );
+    let invalid = source.replace("edition is Edition.Base", "(edition is selectedEdition)");
     let diagnostics = splitscript::compile(&invalid)
-        .expect_err("static layout predicates cannot introduce runtime bindings");
+        .expect_err("static shape predicates cannot introduce runtime bindings");
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("layout predicates cannot introduce conditional binding")
+            .contains("shape predicates cannot introduce conditional binding")
     }));
 }
 
 #[test]
-fn automatic_layout_failure_report_names_observations_and_source_candidates() {
+fn automatic_shape_failure_report_names_observations_and_source_candidates() {
     let source = r#"
         enum Edition { Base, Demo }
+        let edition: Edition
 
         image "Assembly-CSharp" {
             class GameManager {
-                if layout.edition == Edition.Base {
+                if edition == Edition.Base {
                     u32 level;
                 } else {
                     u32 scene;
@@ -307,13 +221,11 @@ fn automatic_layout_failure_report_names_observations_and_source_candidates() {
             }
         }
 
-        state Unity ["game.exe"] {
-            layout { edition: Edition }
-        }
+        state Unity ["game.exe"] {}
     "#;
 
     let wasm = splitscript::compile(source)
-        .expect("a metadata-selected layout should compile with a failure report");
+        .expect("a metadata-selected shape should compile with a failure report");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("the attachment report should emit valid Wasm GC");
@@ -322,149 +234,78 @@ fn automatic_layout_failure_report_names_observations_and_source_candidates() {
             .any(|window| window == needle.as_bytes())
     };
     assert!(contains(
-        "Could not select an attachment layout: managed metadata did not match any declared layout"
+        "Could not select the attachment shape: managed metadata did not match any declared shape"
     ));
     assert!(contains("Observed present managed fields:"));
     assert!(contains("Observed absent managed fields:"));
     assert!(contains("Assembly-CSharp::GameManager.level"));
     assert!(contains("Assembly-CSharp::GameManager.scene"));
-    assert!(contains("Expected `Layout { edition: Edition.Base }`"));
-    assert!(contains("Expected `Layout { edition: Edition.Demo }`"));
+    assert!(contains(
+        "Expected attachment shape `edition = Edition.Base`"
+    ));
+    assert!(contains(
+        "Expected attachment shape `edition = Edition.Demo`"
+    ));
 }
 
 #[test]
-fn explicit_layout_selection_does_not_embed_the_automatic_failure_report() {
+fn explicit_shape_selection_does_not_embed_the_automatic_failure_report() {
     let source = r#"
         enum Edition { Base, Demo }
+        let edition: Edition
 
         image "Assembly-CSharp" {
             class GameManager {
-                if layout.edition == Edition.Base { u32 level; }
+                if edition == Edition.Base { u32 level; }
                 else { u32 scene; }
             }
         }
 
-        state Unity ["game.exe"] {
-            layout { edition: Edition }
-        }
+        state Unity ["game.exe"] {}
 
         onAttach {
-            return Layout { edition: Edition.Base }
+            edition = Edition.Base
         }
     "#;
 
     let wasm = splitscript::compile(source)
-        .expect("explicit layout selection should bypass the automatic report");
+        .expect("explicit shape selection should bypass the automatic report");
     assert!(
         !wasm
-            .windows("Could not select an attachment layout".len())
-            .any(|window| window == "Could not select an attachment layout".as_bytes())
+            .windows("Could not select the attachment shape".len())
+            .any(|window| window == "Could not select the attachment shape".as_bytes())
     );
 }
 
 #[test]
-fn automatic_layout_selection_requires_distinguishable_metadata_evidence() {
+fn automatic_shape_selection_requires_distinguishable_metadata_evidence() {
     let source = r#"
         enum Edition { Base, Demo }
+        enum Storefront { Steam, GOG }
+        let edition: Edition
+        let storefront: Storefront
         image "Assembly-CSharp" {
             class GameManager {
-                u32 marker;
+                if (edition == Edition.Base && storefront == Storefront.Steam)
+                    || (edition == Edition.Base && storefront == Storefront.GOG)
+                {
+                    u32 marker;
+                }
             }
         }
-        state Unity ["game.exe"] {
-            layout { edition: Edition }
-        }
+        state Unity ["game.exe"] {}
     "#;
     let diagnostics = splitscript::compile(source)
-        .expect_err("unconditional metadata cannot identify either layout");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .notes
-            .iter()
-            .any(|note| note.contains("do not distinguish every layout combination"))
-    }));
-}
-
-#[test]
-fn attachment_layout_dimensions_require_nonempty_source_enum_fields() {
-    let non_enum = r#"
-        state "game.exe" {
-            layout {
-                edition: u32,
-            }
-        }
-        onAttach { return Layout { edition: 1 } }
-    "#;
-    let diagnostics = splitscript::compile(non_enum).expect_err("integers are not dimensions");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.message == "layout dimension `edition` must use a source enum type"
-    }));
-
-    let empty = r#"
-        state "game.exe" {
-            layout {}
-        }
-        onAttach { return Layout {} }
-    "#;
-    let diagnostics = splitscript::compile(empty).expect_err("empty layouts are meaningless");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.message == "an attachment layout needs at least one dimension"
-    }));
-}
-
-#[test]
-fn attachment_layout_type_value_and_dimensions_have_source_identity() {
-    use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
-
-    let source = r#"
-        enum Edition { BaseGame }
-        state "game.exe" {
-            /// The distributed game edition.
-            layout {
-                /// Selects the game's content set.
-                edition: Edition,
-            }
-        }
-        onAttach { return Layout { edition: Edition.BaseGame } }
-        split { return layout.edition == Edition.BaseGame }
-    "#;
-    let mut database = CompilerDatabase::new(source);
-
-    let type_use = source.find("Layout {").unwrap() + 1;
-    let DefinitionTarget::Source(layout_type) = database.definition_at(type_use).unwrap().unwrap()
-    else {
-        panic!("Layout should navigate to the attachment declaration");
-    };
-    assert!(matches!(layout_type.id, SourceDefinitionId::Struct(_)));
-    assert_eq!(
-        &source[layout_type.span.start..layout_type.span.end],
-        "layout"
+        .expect_err("unconditional metadata cannot identify either shape");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("do not distinguish every shape combination"))
+        }),
+        "{diagnostics:#?}"
     );
-
-    let value_use = source.find("layout.edition").unwrap() + 1;
-    let DefinitionTarget::Source(layout_value) =
-        database.definition_at(value_use).unwrap().unwrap()
-    else {
-        panic!("layout should navigate to the attachment declaration");
-    };
-    assert!(matches!(layout_value.id, SourceDefinitionId::Value(_)));
-    assert_eq!(
-        &source[layout_value.span.start..layout_value.span.end],
-        "layout"
-    );
-
-    let dimension_use = source.find("layout.edition").unwrap() + "layout.".len();
-    let DefinitionTarget::Source(dimension) =
-        database.definition_at(dimension_use).unwrap().unwrap()
-    else {
-        panic!("the dimension should navigate to its declaration");
-    };
-    assert!(matches!(dimension.id, SourceDefinitionId::StructField(_)));
-    assert_eq!(&source[dimension.span.start..dimension.span.end], "edition");
-
-    let hover = database.hover(dimension_use).unwrap().unwrap();
-    assert!(hover.markdown.contains("Layout.edition: Edition"));
-    assert!(hover.markdown.contains("Selects the game's content set."));
 }
 
 #[test]
@@ -472,42 +313,38 @@ fn conditional_state_fields_refine_multiple_attachment_dimensions() {
     let source = r#"
         enum Edition { BaseGame, DlcDemo }
         enum Storefront { Steam, GOG }
+        let edition: Edition
+        let storefront: Storefront
 
         state "game.exe" {
-            layout {
-                edition: Edition,
-                storefront: Storefront,
-            }
             common: u8 at 0x100;
-            if layout.edition == Edition.BaseGame {
+            if edition == Edition.BaseGame {
                 baseLevel: u8 at 0x180;
             }
-            if layout.edition == Edition.BaseGame
-                && layout.storefront == Storefront.Steam
+            if edition == Edition.BaseGame
+                && storefront == Storefront.Steam
             {
                 steamLevel: u16 at 0x200;
             }
         }
 
         onAttach {
-            return Layout {
-                edition: Edition.BaseGame,
-                storefront: Storefront.Steam,
-            }
+            edition = Edition.BaseGame
+            storefront = Storefront.Steam
         }
 
         split {
-            let steamLevelChanged = layout.edition == Edition.BaseGame
-                && layout.storefront == Storefront.Steam
+            let steamLevelChanged = edition == Edition.BaseGame
+                && storefront == Storefront.Steam
                 && current.steamLevel != old.steamLevel
-            let baseLevelKnown = layout.edition == Edition.DlcDemo
+            let baseLevelKnown = edition == Edition.DlcDemo
                 || current.common == 255
                 || current.baseLevel > 0
             return steamLevelChanged || baseLevelKnown || current.common != old.common
         }
     "#;
     let wasm = splitscript::compile(source)
-        .expect("layout predicates should refine and gate conditional state fields");
+        .expect("shape predicates should refine and gate conditional state fields");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("conditional state polling should produce valid Wasm GC");
@@ -671,19 +508,17 @@ fn exhaustive_shape_branches_share_compatible_state_fields() {
 }
 
 #[test]
-fn conditional_state_field_chains_preserve_exact_remaining_layouts() {
+fn conditional_state_field_chains_preserve_exact_remaining_shapes() {
     let source = r#"
         enum Edition { Base, Demo }
         enum Storefront { Steam, GOG }
+        let edition: Edition
+        let storefront: Storefront
 
         state "game.exe" {
-            layout {
-                edition: Edition,
-                storefront: Storefront,
-            }
-            if layout.edition == Edition.Base && layout.storefront == Storefront.Steam {
+            if edition == Edition.Base && storefront == Storefront.Steam {
                 steamLevel: u8 at 0x100;
-            } else if layout.edition == Edition.Base {
+            } else if edition == Edition.Base {
                 gogLevel: u8 at 0x200;
             } else {
                 demoLevel: u8 at 0x300;
@@ -691,32 +526,30 @@ fn conditional_state_field_chains_preserve_exact_remaining_layouts() {
         }
 
         onAttach {
-            return Layout {
-                edition: Edition.Base,
-                storefront: Storefront.GOG,
-            }
+            edition = Edition.Base
+            storefront = Storefront.GOG
         }
 
         split {
-            if layout.edition == Edition.Base && layout.storefront == Storefront.Steam {
+            if edition == Edition.Base && storefront == Storefront.Steam {
                 return current.steamLevel != old.steamLevel
-            } else if layout.edition == Edition.Base && layout.storefront == Storefront.GOG {
+            } else if edition == Edition.Base && storefront == Storefront.GOG {
                 return current.gogLevel != old.gogLevel
-            } else if layout.edition == Edition.Demo {
+            } else if edition == Edition.Demo {
                 return current.demoLevel != old.demoLevel
             }
             return false
         }
     "#;
     let wasm = splitscript::compile(source)
-        .expect("else-if state fields should retain the exact layouts left by earlier branches");
+        .expect("else-if state fields should retain the exact shapes left by earlier branches");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("conditional branch predicates should lower to valid Wasm GC");
 
     let insufficiently_refined = source.replace(
-        "if layout.edition == Edition.Base && layout.storefront == Storefront.Steam {\n                return current.steamLevel != old.steamLevel\n            } else if layout.edition == Edition.Base && layout.storefront == Storefront.GOG {\n                return current.gogLevel != old.gogLevel\n            } else if layout.edition == Edition.Demo {\n                return current.demoLevel != old.demoLevel\n            }\n            return false",
-        "if layout.edition == Edition.Base {\n                return current.gogLevel != old.gogLevel\n            }\n            return false",
+        "if edition == Edition.Base && storefront == Storefront.Steam {\n                return current.steamLevel != old.steamLevel\n            } else if edition == Edition.Base && storefront == Storefront.GOG {\n                return current.gogLevel != old.gogLevel\n            } else if edition == Edition.Demo {\n                return current.demoLevel != old.demoLevel\n            }\n            return false",
+        "if edition == Edition.Base {\n                return current.gogLevel != old.gogLevel\n            }\n            return false",
     );
     let diagnostics = splitscript::compile(&insufficiently_refined)
         .expect_err("the else-if field is absent from the earlier Base/Steam branch");
@@ -728,63 +561,69 @@ fn conditional_state_field_chains_preserve_exact_remaining_layouts() {
 }
 
 #[test]
-fn conditional_layout_branch_enumeration_has_a_deterministic_bound() {
+fn conditional_shape_branch_enumeration_has_a_deterministic_bound() {
     let source = r#"
         enum Binary { A, B }
+        let a: Binary
+        let b: Binary
+        let c: Binary
+        let d: Binary
+        let e: Binary
+        let f: Binary
+        let g: Binary
+        let h: Binary
+        let i: Binary
         state "game.exe" {
-            layout {
-                a: Binary,
-                b: Binary,
-                c: Binary,
-                d: Binary,
-                e: Binary,
-                f: Binary,
-                g: Binary,
-                h: Binary,
-                i: Binary,
-            }
-            if layout.a == Binary.A {
+            if a == Binary.A
+                && b == Binary.A
+                && c == Binary.A
+                && d == Binary.A
+                && e == Binary.A
+                && f == Binary.A
+                && g == Binary.A
+                && h == Binary.A
+                && i == Binary.A
+            {
                 value: u8 at 0x100;
             } else {
                 other: u8 at 0x200;
             }
         }
         onAttach {
-            return Layout {
-                a: Binary.A,
-                b: Binary.A,
-                c: Binary.A,
-                d: Binary.A,
-                e: Binary.A,
-                f: Binary.A,
-                g: Binary.A,
-                h: Binary.A,
-                i: Binary.A,
-            }
+            a = Binary.A
+            b = Binary.A
+            c = Binary.A
+            d = Binary.A
+            e = Binary.A
+            f = Binary.A
+            g = Binary.A
+            h = Binary.A
+            i = Binary.A
         }
     "#;
     let diagnostics = splitscript::compile(source)
-        .expect_err("conditional declarations must not enumerate an unbounded layout product");
+        .expect_err("conditional declarations must not enumerate an unbounded shape product");
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("conditional fields require a bounded attachment layout")
+            .contains("conditional fields require a bounded attachment shape")
             && diagnostic
                 .notes
                 .iter()
-                .any(|note| note.contains("at most 256 layout combinations"))
+                .any(|note| note.contains("at most 256 shape combinations"))
     }));
 }
 
 #[test]
-fn managed_fields_share_the_attachment_layout_refinement_model() {
+fn managed_fields_share_the_attachment_shape_refinement_model() {
     let source = r#"
         enum Edition { BaseGame, Demo }
+        let edition: Edition
 
         image "Assembly-CSharp" {
             class GameManager {
                 static GameManager instance;
-                if layout.edition == Edition.BaseGame {
+                if edition == Edition.BaseGame {
                     u32 level;
                 }
                 else {
@@ -793,15 +632,13 @@ fn managed_fields_share_the_attachment_layout_refinement_model() {
             }
         }
 
-        state Unity ["game.exe"] {
-            layout { edition: Edition }
-        }
+        state Unity ["game.exe"] {}
 
-        onAttach { return Layout { edition: Edition.BaseGame } }
+        onAttach { edition = Edition.BaseGame }
 
         whileAttached {
             let manager = GameManager.instance else return
-            if layout.edition == Edition.BaseGame {
+            if edition == Edition.BaseGame {
                 print(manager.level else 0)
             } else {
                 print(manager.scene else 0)
@@ -809,17 +646,17 @@ fn managed_fields_share_the_attachment_layout_refinement_model() {
         }
     "#;
     let wasm = splitscript::compile(source)
-        .expect("managed fields should consume the global layout predicate");
+        .expect("managed fields should consume the global shape predicate");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("conditional managed bindings should produce valid Wasm GC");
 
     let unrefined = source.replace(
-        "if layout.edition == Edition.BaseGame {\n                print(manager.level else 0)\n            }",
+        "if edition == Edition.BaseGame {\n                print(manager.level else 0)\n            }",
         "print(manager.level else 0)",
     );
     let diagnostics =
-        splitscript::compile(&unrefined).expect_err("managed fields need layout refinement");
+        splitscript::compile(&unrefined).expect_err("managed fields need shape refinement");
     assert!(
         diagnostics.iter().any(|diagnostic| {
             diagnostic
@@ -890,6 +727,8 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
             DlcDemo,
         }
 
+        let edition: Edition
+
         struct LevelTimeParts {
             minutes: f32,
             seconds: f32,
@@ -903,7 +742,7 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
                 u32 points from "_points";
                 u32 deaths from "_deaths";
 
-                if layout.edition == Edition.BaseGame {
+                if edition == Edition.BaseGame {
                     i32 level from "currentLevel";
                 }
 
@@ -923,12 +762,10 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
         }
 
         state Unity.il2cpp(2020) ["Lunistice.exe", "Lunistice-Demo.exe"] {
-            layout { edition: Edition }
-
             gameState: i32 = GameManager.instance?.gameState?;
             points: u32 = GameManager.instance?.points?;
             deaths: u32 = GameManager.instance?.deaths?;
-            if layout.edition == Edition.BaseGame {
+            if edition == Edition.BaseGame {
                 level: i32 = GameManager.instance?.level?;
             }
             else {
@@ -943,7 +780,7 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
 
         whileAttached {
             print(current.levelTimeParts)
-            if layout.edition == Edition.BaseGame {
+            if edition == Edition.BaseGame {
                 print(current.level)
             } else {
                 print(current.scene)
@@ -964,7 +801,7 @@ fn lunistice_shaped_unity_schema_reads_both_editions_without_manual_offsets() {
         .collect::<Vec<_>>();
     assert!(
         unused.is_empty(),
-        "generated layout declarations are used: {unused:#?}"
+        "shape declarations are used: {unused:#?}"
     );
     let wasm = splitscript::codegen(&checked);
     Validator::new_with_features(WasmFeatures::all())
@@ -1137,75 +974,58 @@ fn sonic_three_air_shaped_range_discovery_and_filtered_state_compile_cleanly() {
 }
 
 #[test]
-fn attachment_scoped_globals_infer_from_on_attach_and_support_layout_specific_values() {
+fn attachment_scoped_globals_infer_from_on_attach_and_support_shape_specific_values() {
     let source = r#"
+        enum Build { Steam, GOG }
+        let build: Build
         let module
         let steamBase
         let gogBase
 
         state "game.exe" {
-            layout Steam { level: u32 = process.read(steamBase)? },
-            layout GOG { level: u32 = process.read(gogBase)? },
+            if build == Build.Steam {
+                level: u32 = process.read(steamBase)?;
+            } else {
+                level: u32 = process.read(gogBase)?;
+            }
         }
 
         onAttach {
             module = await process.mainModule()
             if module.size == 0x1000 {
                 steamBase = module.address
-                return StateLayout.Steam
+                build = Build.Steam
+                return
             }
             gogBase = module.address
-            return StateLayout.GOG
+            build = Build.GOG
         }
 
         split {
-            return match layout {
-                StateLayout.Steam => steamBase != 0 && current.level != old.level,
-                StateLayout.GOG => gogBase != 0 && current.level != old.level,
+            return match build {
+                Build.Steam => steamBase != 0 && current.level != old.level,
+                Build.GOG => gogBase != 0 && current.level != old.level,
             }
         }
     "#;
 
     let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
         .expect("attachment globals should infer from assignments and uses");
-    let globals = checked.syntax().globals.iter().collect::<Vec<_>>();
-    assert!(
-        checked
-            .scoped_globals()
-            .available_layouts(globals[0].id)
-            .count()
-            == 2
-    );
-    assert!(
-        checked
-            .scoped_globals()
-            .available_layouts(globals[1].id)
-            .count()
-            == 1
-    );
-    assert!(
-        checked
-            .scoped_globals()
-            .available_layouts(globals[2].id)
-            .count()
-            == 1
-    );
-
     let wasm = splitscript::codegen(&checked);
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("attachment-global WebAssembly GC should validate");
 
-    let wrong_layout = source.replace(
-        "layout Steam { level: u32 = process.read(steamBase)? }",
-        "layout Steam { level: u32 = process.read(gogBase)? }",
+    let wrong_shape = source.replace(
+        "level: u32 = process.read(steamBase)?;",
+        "level: u32 = process.read(gogBase)?;",
     );
-    let errors = splitscript::compile(&wrong_layout)
-        .expect_err("state expressions need the attachment values for their own layout");
+    let errors = splitscript::compile(&wrong_shape)
+        .expect_err("state expressions need the attachment values for their own shape");
     assert!(errors.iter().any(|error| {
-        error.message.contains(
-            "attachment-scoped global `gogBase` is not initialized for `StateLayout.Steam`",
-        )
+        error
+            .message
+            .contains("attachment-scoped global `gogBase` is not initialized")
     }));
 }
 
@@ -1278,7 +1098,7 @@ fn debug_attachment_globals_are_initialized_and_erased_with_their_profile() {
 }
 
 #[test]
-fn attachment_globals_require_definite_initialization_and_layout_refinement() {
+fn attachment_globals_require_definite_initialization_and_shape_refinement() {
     let missing = r#"
         let base: address
         state "game.exe" {}
@@ -1290,49 +1110,52 @@ fn attachment_globals_require_definite_initialization_and_layout_refinement() {
         split { return base != 0 }
     "#;
     let errors = splitscript::compile(missing)
-        .expect_err("single-layout attachment values need assignment on every completion path");
+        .expect_err("single-shape attachment values need assignment on every completion path");
     assert!(errors.iter().any(|error| {
         error.message == "attachment-scoped global `base` is never initialized by `onAttach`"
             || error.message.contains("not initialized for the attachment")
     }));
 
     let unrefined = r#"
+        enum Build { Steam, GOG }
+        let build: Build
         let steamBase: address
         let gogBase: address
         state "game.exe" {
-            layout Steam { level: u32 at 0x10 },
-            layout GOG { level: u32 at 0x20 },
+            if build == Build.Steam { level: u32 at 0x10; }
+            else { level: u32 at 0x20; }
         }
         onAttach {
             if process.name() == "game.exe" {
                 steamBase = 0x1000
-                return StateLayout.Steam
+                build = Build.Steam
+                return
             }
             gogBase = 0x2000
-            return StateLayout.GOG
+            build = Build.GOG
         }
         fn steamReady() -> bool { return steamBase != 0 }
         split { return steamReady() }
     "#;
     let errors = splitscript::compile(unrefined)
-        .expect_err("a layout-specific helper needs a matching refinement");
+        .expect_err("a shape-specific helper needs a matching refinement");
     assert!(errors.iter().any(|error| {
         error
             .message
-            .contains("`steamReady` requires attachment values unavailable for `StateLayout.GOG`")
+            .contains("`steamReady` requires attachment values unavailable")
     }));
 
     let refined = unrefined.replace(
         "split { return steamReady() }",
         r#"split {
-            return match layout {
-                StateLayout.Steam => steamReady(),
-                StateLayout.GOG => gogBase != 0,
+            return match build {
+                Build.Steam => steamReady(),
+                Build.GOG => gogBase != 0,
             }
         }"#,
     );
     splitscript::compile(&refined)
-        .expect("a direct layout match should prove attachment-global availability");
+        .expect("a direct shape match should prove attachment-global availability");
 }
 
 #[test]
@@ -1520,323 +1343,17 @@ fn attempt_scoped_globals_are_rejected_outside_attempt_actions() {
 }
 
 #[test]
-fn named_state_layouts_select_a_typed_layout_and_validate() {
-    let source = r#"
-        state "game.exe" {
-            /// Steam memory layout.
-            layout Steam {
-                level: u32 at 0x100;
-                loading: bool at 0x104;
-            },
-
-            /// GOG memory layout.
-            layout GOG {
-                loading: bool at 0x204;
-                level: u32 at 0x200;
-            },
-        }
-
-        onAttach {
-            let module = await process.mainModule()
-            if module.size == 0x1000 {
-                return StateLayout.Steam
-            }
-            if module.size == 0x2000 {
-                return StateLayout.GOG
-            }
-            await process.closed()
-        }
-
-        split {
-            return layout == StateLayout.Steam && current.level != old.level
-        }
-    "#;
-
-    let wasm = splitscript::compile(source).expect("named layouts should compile");
-    Validator::new_with_features(WasmFeatures::all())
-        .validate_all(&wasm)
-        .expect("named-layout WebAssembly GC should validate");
-}
-
-#[test]
-fn alternate_process_names_can_select_matching_named_layouts() {
-    let source = r#"
-        state ["CrazyMachines.exe", "cm_family.exe", "cmnftl.exe"] {
-            layout Original {
-                win: u8 at 0x10F344, 0xE0, 0xC, 0x4, 0x4, 0x8, 0x50;
-            },
-            layout Family {
-                win: u8 at 0x110484, 0xE0, 0xC, 0x4, 0x4, 0x8, 0x50;
-            },
-            layout NewFromTheLab {
-                win: u8 at 0x112764, 0xE0, 0xC, 0x4, 0x4, 0x8, 0x50;
-            },
-        }
-
-        tickRate { attached: 120 }
-
-        onAttach {
-            return match process.name() {
-                "CrazyMachines.exe" => StateLayout.Original,
-                "cm_family.exe" => StateLayout.Family,
-                "cmnftl.exe" => StateLayout.NewFromTheLab,
-                _ => await process.closed(),
-            }
-        }
-
-        split { return current.win > old.win }
-    "#;
-
-    let wasm = splitscript::compile(source)
-        .expect("alternate exact process identities should select named layouts");
-    Validator::new_with_features(WasmFeatures::all())
-        .validate_all(&wasm)
-        .expect("alternate-process named-layout WebAssembly GC should validate");
-}
-
-#[test]
-fn named_state_layouts_refine_layout_specific_fields_and_types() {
-    let source = r#"
-        state "game.exe" {
-            layout V8 {
-                loading: i32 at 0x100;
-                bike: i16 at 0x104;
-            },
-            layout V9 {
-                loading: i32 at 0x200;
-                bike: u16 at 0x204;
-                video: u8 at 0x206;
-            },
-        }
-        onAttach { return StateLayout.V8 }
-        isLoading { return current.loading == 1 }
-        split {
-            return match layout {
-                StateLayout.V8 => old.bike != 21368 && current.bike == 21368,
-                StateLayout.V9 => old.bike != 52688 && current.bike == 52688 && current.video == 0,
-            }
-        }
-    "#;
-
-    let wasm =
-        splitscript::compile(source).expect("layout refinement should expose concrete fields");
-    Validator::new_with_features(WasmFeatures::all())
-        .validate_all(&wasm)
-        .expect("non-uniform state layout Wasm GC should validate");
-
-    let outside = source.replace(
-        "isLoading { return current.loading == 1 }",
-        "isLoading { return current.bike == 1 }",
-    );
-    let errors = splitscript::compile(&outside).expect_err("specific fields need refinement");
-    assert!(errors.iter().any(|error| error.message ==
-        "state field `bike` is layout-specific; access it inside the corresponding `match layout` arm"));
-}
-
-#[test]
-fn alternative_layout_patterns_retain_fields_shared_by_the_selected_layouts() {
-    let source = r#"
-        state "game.exe" {
-            layout V8 {
-                shared: u16 at 0x100;
-                legacy: u8 at 0x102;
-            },
-            layout V9 {
-                shared: u16 at 0x200;
-                modern: u8 at 0x202;
-            },
-            layout Demo {
-                demoOnly: u32 at 0x300;
-            },
-        }
-        onAttach { return StateLayout.V8 }
-        split {
-            return match layout {
-                StateLayout.V8 | StateLayout.V9 => current.shared > old.shared,
-                StateLayout.Demo => false,
-            }
-        }
-    "#;
-
-    let wasm = splitscript::compile(source)
-        .expect("an alternative layout refinement should retain its common fields");
-    Validator::new_with_features(WasmFeatures::all())
-        .validate_all(&wasm)
-        .expect("shared subset storage should produce valid WebAssembly");
-
-    let invalid = source.replace("current.shared > old.shared", "current.legacy > old.legacy");
-    let diagnostics = splitscript::compile(&invalid)
-        .expect_err("a field missing from one selected layout is not available");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("state field `legacy` is layout-specific")
-    }));
-}
-
-#[test]
-fn named_state_layouts_require_a_total_on_attach_selection() {
-    for (source, expected) in [
-        (
-            r#"
-                state "game.exe" {
-                    layout Steam { level: u32 at 0x100 }
-                }
-            "#,
-            "named state layouts require an `onAttach` block that returns the selected layout",
-        ),
-        (
-            r#"
-                state "game.exe" {
-                    layout Steam { level: u32 at 0x100 }
-                }
-                onAttach {
-                    if process.name() == "game.exe" {
-                        return StateLayout.Steam
-                    }
-                }
-            "#,
-            "`onAttach` must return a layout on every completing path",
-        ),
-        (
-            r#"
-                state "game.exe" {
-                    layout Steam { level: u32 at 0x100 }
-                }
-                onAttach {
-                    print(layout)
-                    return StateLayout.Steam
-                }
-            "#,
-            "`layout` is only available after `onAttach` has returned it",
-        ),
-    ] {
-        let errors = splitscript::compile(source).expect_err("invalid layout selection must fail");
-        assert!(
-            errors.iter().any(|error| error.message == expected),
-            "missing `{expected}` in {errors:#?}"
-        );
-    }
-}
-
-#[test]
-fn named_layout_diagnostics_offer_safe_selection_fixes() {
-    use splitscript::FixApplicability;
-
-    let missing = r#"state "game.exe" {
-    layout Steam { level: u32 at 0x100 },
-    layout GOG { level: u32 at 0x200 },
-}"#;
-    let diagnostics = splitscript::compile(missing).unwrap_err();
-    let diagnostic = diagnostics
-        .iter()
-        .find(|diagnostic| {
-            diagnostic
-                .message
-                .starts_with("named state layouts require")
-        })
-        .expect("missing selector diagnostic");
-    let fix = diagnostic.fixes.first().expect("selector skeleton fix");
-    assert_eq!(fix.applicability, FixApplicability::HasPlaceholders);
-    let fixed = apply_fix(missing, fix);
-    assert!(fixed.contains("return StateLayout.Steam"));
-    assert!(fixed.contains("return StateLayout.GOG"));
-    assert!(fixed.ends_with("await process.closed()\n}"));
-    splitscript::compile(&fixed).expect("the inert skeleton should compile safely");
-
-    let fallthrough = r#"state "game.exe" {
-    layout Steam { level: u32 at 0x100 },
-}
-onAttach {
-    if process.name() == "game.exe" {
-        return StateLayout.Steam
-    }
-}"#;
-    let diagnostics = splitscript::compile(fallthrough).unwrap_err();
-    let diagnostic = diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.message.starts_with("`onAttach` must return"))
-        .expect("non-total selector diagnostic");
-    let fix = diagnostic.fixes.first().expect("unsupported-build fix");
-    assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
-    let fixed = apply_fix(fallthrough, fix);
-    splitscript::compile(&fixed).expect("the process-close fallback should make selection total");
-
-    let provider = r#"state GBA {
-    layout English { level: u8 at 0x100 },
-}"#;
-    let diagnostics = splitscript::compile(provider).unwrap_err();
-    let diagnostic = diagnostics
-        .iter()
-        .find(|diagnostic| {
-            diagnostic
-                .message
-                .starts_with("named state layouts require")
-        })
-        .expect("provider selector diagnostic");
-    assert!(diagnostic.fixes.is_empty());
-    assert!(
-        diagnostic
-            .notes
-            .iter()
-            .any(|note| note.contains("no generic process-close wait"))
-    );
-}
-
-fn apply_fix(source: &str, fix: &splitscript::DiagnosticFix) -> String {
-    let mut fixed = source.to_owned();
-    for edit in fix.edits.iter().rev() {
-        fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
-    }
-    fixed
-}
-
-#[test]
-fn generated_layout_type_and_value_navigate_but_are_not_renameable() {
-    use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
-
-    let source = r#"
-        state "game.exe" {
-            layout Steam { level: u32 at 0x100 }
-        }
-        onAttach { return StateLayout.Steam }
-        split { return layout == StateLayout.Steam }
-    "#;
-    let mut database = CompilerDatabase::new(source);
-
-    let layout = source.find("layout ==").unwrap() + 1;
-    let DefinitionTarget::Source(definition) = database.definition_at(layout).unwrap().unwrap()
-    else {
-        panic!("layout should navigate to a source domain declaration");
-    };
-    assert!(matches!(definition.id, SourceDefinitionId::Value(_)));
-    assert_eq!(definition.name, "layout");
-    assert!(database.rename_target_at(layout).unwrap().is_none());
-
-    let state_layout = source.rfind("StateLayout").unwrap() + 1;
-    let DefinitionTarget::Source(definition) =
-        database.definition_at(state_layout).unwrap().unwrap()
-    else {
-        panic!("StateLayout should navigate to its generated source identity");
-    };
-    assert!(matches!(definition.id, SourceDefinitionId::Enum(_)));
-    assert_eq!(definition.name, "StateLayout");
-    assert!(database.rename_target_at(state_layout).unwrap().is_none());
-
-    let steam = source.rfind("Steam").unwrap() + 1;
-    assert!(database.rename_target_at(steam).unwrap().is_some());
-}
-
-#[test]
-fn renaming_a_named_layout_field_updates_the_shared_state_interface() {
+fn renaming_a_shared_conditional_field_updates_the_shared_state_interface() {
     use splitscript::tooling::database::CompilerDatabase;
 
     let source = r#"
+        enum Build { Steam, GOG }
+        let build: Build
         state "game.exe" {
-            layout Steam { level: u32 at 0x100 },
-            layout GOG { level: u32 at 0x200 },
+            if build == Build.Steam { level: u32 at 0x100; }
+            else { level: u32 at 0x200; }
         }
-        onAttach { return StateLayout.Steam }
+        onAttach { build = Build.Steam }
         split { return current.level != old.level }
     "#;
     let second_declaration = source.match_indices("level: u32").nth(1).unwrap().0;
@@ -1861,19 +1378,21 @@ fn renaming_a_named_layout_field_updates_the_shared_state_interface() {
 }
 
 #[test]
-fn renaming_a_conflicting_layout_field_keeps_the_other_layout_independent() {
+fn renaming_a_conflicting_shape_field_keeps_the_other_branch_independent() {
     use splitscript::tooling::database::CompilerDatabase;
 
     let source = r#"
+        enum Build { V8, V9 }
+        let build: Build
         state "game.exe" {
-            layout V8 { bike: i16 at 0x100 },
-            layout V9 { bike: u16 at 0x200 },
+            if build == Build.V8 { bike: i16 at 0x100; }
+            else { bike: u16 at 0x200; }
         }
-        onAttach { return StateLayout.V8 }
+        onAttach { build = Build.V8 }
         split {
-            return match layout {
-                StateLayout.V8 => current.bike == 1,
-                StateLayout.V9 => current.bike == 2,
+            return match build {
+                Build.V8 => current.bike == 1,
+                Build.V9 => current.bike == 2,
             }
         }
     "#;
@@ -1897,19 +1416,21 @@ fn renaming_a_conflicting_layout_field_keeps_the_other_layout_independent() {
 }
 
 #[test]
-fn layout_refinement_drives_hover_and_definition_identity() {
+fn shape_refinement_drives_hover_and_definition_identity() {
     use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget};
 
     let source = r#"
+        enum Build { V8, V9 }
+        let build: Build
         state "game.exe" {
-            layout V8 { bike: i16 at 0x100 },
-            layout V9 { bike: u16 at 0x200 },
+            if build == Build.V8 { bike: i16 at 0x100; }
+            else { bike: u16 at 0x200; }
         }
-        onAttach { return StateLayout.V8 }
+        onAttach { build = Build.V8 }
         split {
-            return match layout {
-                StateLayout.V8 => current.bike == 1,
-                StateLayout.V9 => current.bike == 2,
+            return match build {
+                Build.V8 => current.bike == 1,
+                Build.V9 => current.bike == 2,
             }
         }
     "#;

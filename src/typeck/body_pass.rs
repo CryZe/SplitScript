@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    Diagnostic, DiagnosticFix, FixApplicability, TextEdit,
+    Diagnostic,
     ast::{
         ActionKind, ExprKind, FunctionId, Program, Span, StateDecl, StateField, StateSource, Stmt,
     },
@@ -22,14 +22,14 @@ use super::{
 pub(super) fn check(checker: &mut Checker, program: &Program) {
     check_global_initializers(checker, program);
     check_state_provider_configuration(checker, program);
-    check_layout_conditions(checker, program);
+    check_shape_conditions(checker, program);
     super::declaration_pass::collect_conditional_fields(checker, program);
     check_function_bodies(checker, program);
     check_state_expressions(checker, program);
     check_action_bodies(checker, program);
 }
 
-fn check_layout_conditions(checker: &mut Checker, program: &Program) {
+fn check_shape_conditions(checker: &mut Checker, program: &Program) {
     let expected = checker.core_type(CoreTypeId::Bool);
     checker.scopes.clear();
     checker.scopes.push(HashMap::new());
@@ -59,7 +59,7 @@ fn check_layout_conditions(checker: &mut Checker, program: &Program) {
             .iter()
             .filter_map(|group| group.condition.as_ref())
         {
-            check_layout_condition(checker, condition, expected);
+            check_shape_condition(checker, condition, expected);
         }
     }
     checker.scopes.clear();
@@ -69,21 +69,21 @@ fn check_layout_conditions(checker: &mut Checker, program: &Program) {
         .flat_map(|class| &class.conditional_fields)
         .filter_map(|group| group.condition.as_ref())
     {
-        check_layout_condition(checker, condition, expected);
+        check_shape_condition(checker, condition, expected);
     }
 }
 
-fn check_layout_condition(
+fn check_shape_condition(
     checker: &mut Checker,
     condition: &crate::ast::Expr,
     expected: crate::inference::Type,
 ) {
-    let mut conditional_bindings = ConditionalLayoutBindingCollector::default();
+    let mut conditional_bindings = ConditionalShapeBindingCollector::default();
     conditional_bindings.visit_expr(condition);
     for (name, span) in conditional_bindings.bindings {
         checker.error(
             format!(
-                "layout predicates cannot introduce conditional binding `{}`",
+                "shape predicates cannot introduce conditional binding `{}`",
                 name
             ),
             span,
@@ -93,11 +93,11 @@ fn check_layout_condition(
 }
 
 #[derive(Default)]
-struct ConditionalLayoutBindingCollector {
+struct ConditionalShapeBindingCollector {
     bindings: Vec<(String, Span)>,
 }
 
-impl<'ast> Visitor<'ast> for ConditionalLayoutBindingCollector {
+impl<'ast> Visitor<'ast> for ConditionalShapeBindingCollector {
     fn visit_expr(&mut self, expression: &'ast crate::ast::Expr) {
         if let ExprKind::Is { pattern, .. } = &expression.kind {
             pattern.kind.visit_bindings(&mut |binding| {
@@ -347,21 +347,14 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
                     .get(&field.id)
                     .cloned()
             });
-            checker.with_layout_predicate(predicate.as_ref(), |checker| {
+            checker.with_shape_predicate(predicate.as_ref(), |checker| {
                 for field in &group.fields {
                     check_state_expression(checker, field);
                 }
             });
         }
-        for layout in &state.layouts {
-            checker.with_state_layout(Some(layout.variant), |checker| {
-                for field in &layout.fields {
-                    check_state_expression(checker, field);
-                }
-            });
-        }
         for alternative in &state.provider_alternatives {
-            checker.with_state_layout(Some(alternative.variant), |checker| {
+            checker.with_provider_variant(Some(alternative.variant), |checker| {
                 for field in &alternative.fields {
                     check_state_expression(checker, field);
                 }
@@ -371,9 +364,9 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
     });
 }
 
-/// Checks one state-field source in the layout context established by its
+/// Checks one state-field source in the shape context established by its
 /// declaration. The caller owns that context so conditional state fields and
-/// named layouts can refine every expression attached to the field uniformly.
+/// provider alternatives can refine every expression attached to the field uniformly.
 fn check_state_expression(checker: &mut Checker, field: &StateField) {
     checker.with_state_field(field.id, |checker| {
         check_state_expression_inner(checker, field)
@@ -948,7 +941,7 @@ fn generalize_component(checker: &mut Checker, functions: &[FunctionId]) {
 }
 
 fn check_action_bodies(checker: &mut Checker, program: &Program) {
-    if let Some((assigned, missing)) = crate::layout_selection::partial_shape_selection(program)
+    if let Some((assigned, missing)) = crate::shape_selection::partial_shape_selection(program)
         && let Some(action) = program
             .actions
             .iter()
@@ -966,14 +959,25 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
             .with_note(format!("still provider-inferred: {}", missing.join(", "))),
         );
     }
-    let explicit_attachment_layout =
-        crate::layout_selection::has_explicit_layout_selection(program);
-    let automatic_attachment_layout = !explicit_attachment_layout
-        && matches!(
-            automatic_layout_selection(checker, program),
-            crate::layout_selection::AutomaticLayoutSelection::Available(_)
+    let explicit_attachment_shape = crate::shape_selection::has_explicit_shape_selection(program);
+    let automatic_selection = automatic_shape_selection(checker, program);
+    if !explicit_attachment_shape
+        && let crate::shape_selection::AutomaticShapeSelection::RequiresExplicit(reason) =
+            &automatic_selection
+    {
+        let span = program
+            .state
+            .as_ref()
+            .map_or(crate::ast::Span::default(), |state| state.span);
+        checker.errors.push(
+            Diagnostic::type_error(
+                "attachment-shape globals require explicit initialization",
+                span,
+            )
+            .with_primary_label("initialize every shape global in `onAttach`")
+            .with_note(reason.note()),
         );
-    checker.layout_available_in_on_attach = automatic_attachment_layout;
+    }
     let mut actions = HashSet::new();
     for action in &program.actions {
         if !actions.insert(action.kind) {
@@ -983,8 +987,7 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
             );
             continue;
         }
-        let return_ty =
-            action_return_type(checker, program, action.kind, automatic_attachment_layout);
+        let return_ty = action_return_type(checker, action.kind);
         checker
             .semantics
             .resolve_action_result(action.kind, return_ty);
@@ -1006,85 +1009,16 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
                 checker.block(&action.body, false);
             },
         );
-        if action.kind == ActionKind::OnAttach
-            && program.state.as_ref().is_some_and(|state| {
-                !state.layouts.is_empty()
-                    || (state.layout.is_some() && !automatic_attachment_layout)
-            })
-            && !block_is_terminal(checker, &action.body)
-        {
-            let mut diagnostic = Diagnostic::type_error(
-                "`onAttach` must return a layout on every completing path",
-                action.span,
-            )
-            .with_primary_label("this selector can finish without choosing a layout");
-            if program
-                .state
-                .as_ref()
-                .is_some_and(|state| state.provider.is_none())
-            {
-                let insertion = action.body.span.end.saturating_sub(1);
-                diagnostic = diagnostic
-                    .with_note(
-                        "keep an unsupported build attached but inert by awaiting `process.closed()` instead of selecting a fallback layout",
-                    )
-                    .with_machine_applicable_fix(
-                        "wait for an unsupported process to close",
-                        Span {
-                            start: insertion,
-                            end: insertion,
-                        },
-                        "\n    await process.closed()\n",
-                    );
-            } else {
-                diagnostic = diagnostic.with_note(
-                    "return a layout on every completing path; this state provider has no generic process-close wait",
-                );
-            }
-            checker.errors.push(diagnostic);
-        }
-    }
-    if let Some(state) = program.state.as_ref() {
-        let missing_named = !state.layouts.is_empty() && !actions.contains(&ActionKind::OnAttach);
-        let missing_dimensions =
-            state.layout.is_some() && !automatic_attachment_layout && !explicit_attachment_layout;
-        if missing_named || missing_dimensions {
-            let selection = automatic_layout_selection(checker, program);
-            checker
-                .errors
-                .push(missing_layout_selector_diagnostic(state, &selection));
-        }
     }
 }
 
-fn automatic_layout_selection(
+fn automatic_shape_selection(
     checker: &mut Checker,
     program: &Program,
-) -> crate::layout_selection::AutomaticLayoutSelection {
+) -> crate::shape_selection::AutomaticShapeSelection {
     let mut enum_by_dimension = HashMap::new();
-    if let Some(layout) = program
-        .state
-        .as_ref()
-        .and_then(|state| state.layout.as_ref())
-    {
-        let structure = &program.structs[layout.structure.index()];
-        for field in &structure.fields {
-            let ty = checker.syntax_type(field.ty);
-            let Type::Known(ty) = checker.shallow_type(ty) else {
-                continue;
-            };
-            if let crate::types::TypeKind::Enum(enumeration) =
-                checker.inference.type_store().kind(ty)
-            {
-                enum_by_dimension.insert(
-                    crate::semantic::ResolvedLayoutDimension::LayoutField(field.id),
-                    *enumeration,
-                );
-            }
-        }
-    }
-    for dimension in checker.layout_dimensions.clone() {
-        let crate::typeck::declarations::LayoutDimension::Global(value) = dimension else {
+    for dimension in checker.shape_dimensions.clone() {
+        let crate::typeck::declarations::ShapeDimension::Global(value) = dimension else {
             continue;
         };
         let Some(ty) = checker
@@ -1100,12 +1034,12 @@ fn automatic_layout_selection(
         };
         if let crate::types::TypeKind::Enum(enumeration) = checker.inference.type_store().kind(ty) {
             enum_by_dimension.insert(
-                crate::semantic::ResolvedLayoutDimension::Global(value),
+                crate::semantic::ResolvedShapeDimension::Global(value),
                 *enumeration,
             );
         }
     }
-    let selection = crate::layout_selection::automatic_layout_selection_with(
+    let selection = crate::shape_selection::automatic_shape_selection_with(
         program,
         |field| enum_by_dimension.get(&field).copied(),
         |field| {
@@ -1122,19 +1056,12 @@ fn automatic_layout_selection(
                                 .iter()
                                 .map(|constraint| {
                                     let dimension = match constraint.dimension {
-                                        crate::typeck::declarations::LayoutDimension::LayoutField(
-                                            field,
-                                        ) => crate::semantic::ResolvedLayoutDimension::LayoutField(
-                                            field,
-                                        ),
-                                        crate::typeck::declarations::LayoutDimension::Global(
+                                        crate::typeck::declarations::ShapeDimension::Global(
                                             value,
-                                        ) => crate::semantic::ResolvedLayoutDimension::Global(
+                                        ) => crate::semantic::ResolvedShapeDimension::Global(value),
+                                        crate::typeck::declarations::ShapeDimension::StateField(
                                             value,
-                                        ),
-                                        crate::typeck::declarations::LayoutDimension::StateField(
-                                            value,
-                                        ) => crate::semantic::ResolvedLayoutDimension::StateField(
+                                        ) => crate::semantic::ResolvedShapeDimension::StateField(
                                             value,
                                         ),
                                     };
@@ -1147,74 +1074,16 @@ fn automatic_layout_selection(
                 .unwrap_or_default()
         },
     );
-    if let crate::layout_selection::AutomaticLayoutSelection::Available(plan) = &selection
+    if let crate::shape_selection::AutomaticShapeSelection::Available(plan) = &selection
         && !plan.evidence_fields.is_empty()
         && checker.resolutions.state_provider() != Some(crate::stdlib::StdlibStateProviderId::Unity)
     {
-        crate::layout_selection::AutomaticLayoutSelection::RequiresExplicit(
-            crate::layout_selection::ExplicitSelectionReason::EvidenceUnavailable,
+        crate::shape_selection::AutomaticShapeSelection::RequiresExplicit(
+            crate::shape_selection::ShapeSelectionReason::EvidenceUnavailable,
         )
     } else {
         selection
     }
-}
-
-fn missing_layout_selector_diagnostic(
-    state: &StateDecl,
-    selection: &crate::layout_selection::AutomaticLayoutSelection,
-) -> Diagnostic {
-    if state.layout.is_some() {
-        let mut diagnostic = Diagnostic::type_error(
-            "layout dimensions require an `onAttach` block that returns the selected `Layout`",
-            state.span,
-        )
-        .with_primary_label("these dimensions need an explicit attach-time value");
-        if let crate::layout_selection::AutomaticLayoutSelection::RequiresExplicit(reason) =
-            selection
-        {
-            diagnostic = diagnostic.with_note(reason.note());
-        }
-        return diagnostic;
-    }
-    let diagnostic = Diagnostic::type_error(
-        "named state layouts require an `onAttach` block that returns the selected layout",
-        state.span,
-    )
-    .with_primary_label("these layouts need an explicit attach-time selector");
-    if state.provider.is_some() {
-        return diagnostic.with_note(
-            "return a layout only after identifying the supported target; this state provider has no generic process-close wait",
-        );
-    }
-    let variants = state
-        .layout_enum
-        .as_ref()
-        .expect("named layouts have a generated enum")
-        .variants
-        .iter()
-        .map(|variant| {
-            format!(
-                "    // if <{} build check> {{\n    //     return StateLayout.{}\n    // }}\n",
-                variant.name, variant.name
-            )
-        })
-        .collect::<String>();
-    let fix = DiagnosticFix {
-        title: "add a safe `onAttach` layout-selection skeleton".to_owned(),
-        applicability: FixApplicability::HasPlaceholders,
-        edits: vec![TextEdit {
-            span: Span {
-                start: state.span.end,
-                end: state.span.end,
-            },
-            replacement: format!("\n\nonAttach {{\n{variants}    await process.closed()\n}}"),
-        }],
-    };
-    diagnostic
-        .with_note(
-            "select only builds identified by reliable process or module evidence; leave every unknown build at `await process.closed()`",
-        )
-        .with_fix(fix)
 }
 
 pub(super) fn block_is_terminal(checker: &mut Checker, block: &crate::ast::Block) -> bool {
@@ -1281,12 +1150,7 @@ fn expression_is_never(checker: &mut Checker, expression: &crate::ast::Expr) -> 
         .is_some_and(|ty| checker.is_never_type(ty))
 }
 
-fn action_return_type(
-    checker: &mut Checker,
-    program: &Program,
-    action: ActionKind,
-    automatic_attachment_layout: bool,
-) -> Type {
+fn action_return_type(checker: &mut Checker, action: ActionKind) -> Type {
     match action {
         ActionKind::SelectProcess => {
             let boolean = checker.core_type(CoreTypeId::Bool);
@@ -1297,22 +1161,7 @@ fn action_return_type(
         | ActionKind::OnStateReady
         | ActionKind::OnStart
         | ActionKind::OnReset => checker.core_type(CoreTypeId::None),
-        ActionKind::OnAttach => program.state.as_ref().map_or_else(
-            || checker.core_type(CoreTypeId::None),
-            |state| {
-                if automatic_attachment_layout {
-                    checker.core_type(CoreTypeId::None)
-                } else if let Some(layout) = &state.layout {
-                    checker.struct_type(layout.structure)
-                } else if !state.provider_alternatives.is_empty() {
-                    checker.core_type(CoreTypeId::None)
-                } else if let Some(enumeration) = &state.layout_enum {
-                    checker.enum_type(crate::types::EnumTypeId::Source(enumeration.id))
-                } else {
-                    checker.core_type(CoreTypeId::None)
-                }
-            },
-        ),
+        ActionKind::OnAttach => checker.core_type(CoreTypeId::None),
         ActionKind::WhileAttached
         | ActionKind::Start
         | ActionKind::Split

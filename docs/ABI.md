@@ -129,7 +129,7 @@ variants and selected paths become GC strings. The preceding tick remains
 available as `oldSettings`.
 
 When process liveness fails, `update` detaches and clears the process handle,
-provider-specific state, selected layout, ready flags, and process-lifetime
+provider-specific state, attachment-scoped globals, ready flags, and process-lifetime
 continuations. It then invokes `onDetach` exactly once and returns. The detach
 action is compiler-generated
 lifecycle behavior and requires no additional host callback or ABI import.

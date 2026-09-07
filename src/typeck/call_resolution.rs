@@ -2022,7 +2022,7 @@ impl Checker {
         {
             self.error(
                 format!(
-                    "managed field `{class_name}.{field_name}` is conditional; access it only where its `layout` predicate is established"
+                    "managed field `{class_name}.{field_name}` is conditional; access it only where its shape condition is established"
                 ),
                 span,
             );
@@ -2566,7 +2566,7 @@ impl Checker {
                     .expect("the conditional field belongs to a managed class");
                 self.error(
                     format!(
-                        "managed field `{}.{field}` is conditional; access it only where its `layout` predicate is established",
+                        "managed field `{}.{field}` is conditional; access it only where its shape condition is established",
                         class.name
                     ),
                     span,
@@ -2754,7 +2754,7 @@ impl Checker {
                                 .declarations
                                 .conditional_managed_fields
                                 .get(&field.id)
-                                .is_some_and(|predicate| self.layout_predicate_satisfied(predicate))
+                                .is_some_and(|predicate| self.shape_predicate_satisfied(predicate))
                     })
             })
             .cloned()
@@ -2778,16 +2778,16 @@ impl Checker {
                     .and_then(|candidates| {
                         candidates
                             .iter()
-                            .find(|(_, _, predicate)| self.layout_predicate_satisfied(predicate))
+                            .find(|(_, _, predicate)| self.shape_predicate_satisfied(predicate))
                             .map(|(field, ty, _)| (*field, *ty))
                     })
             })
             .or_else(|| {
-                let layouts = self.active_state_layouts.as_ref()?;
-                let mut candidates = layouts.iter().map(|layout| {
+                let variants = self.active_provider_variants.as_ref()?;
+                let mut candidates = variants.iter().map(|variant| {
                     self.declarations
-                        .layout_state_fields
-                        .get(layout)
+                        .provider_state_fields
+                        .get(variant)
                         .and_then(|fields| fields.get(name))
                         .copied()
                 });
@@ -2805,20 +2805,20 @@ impl Checker {
             })
     }
 
-    /// Resolves a physical field while checking a state source. Named layouts
-    /// must select their own declaration even when the field is also part of
-    /// the canonical snapshot interface shared by every layout.
+    /// Resolves a physical field while checking a state source. Provider
+    /// alternatives must select their own declaration even when the field is
+    /// also part of their canonical shared snapshot interface.
     fn visible_state_source_field(&self, name: &str) -> Option<(crate::ast::ValueId, Type)> {
-        self.active_state_layouts
+        self.active_provider_variants
             .as_ref()
-            .and_then(|layouts| {
-                if layouts.len() != 1 {
+            .and_then(|variants| {
+                if variants.len() != 1 {
                     return None;
                 }
-                let layout = layouts.iter().next().unwrap();
+                let variant = variants.iter().next().unwrap();
                 self.declarations
-                    .layout_state_fields
-                    .get(layout)
+                    .provider_state_fields
+                    .get(variant)
                     .and_then(|fields| fields.get(name))
                     .copied()
             })
@@ -2829,7 +2829,7 @@ impl Checker {
                     .and_then(|candidates| {
                         candidates
                             .iter()
-                            .find(|(_, _, predicate)| self.layout_predicate_satisfied(predicate))
+                            .find(|(_, _, predicate)| self.shape_predicate_satisfied(predicate))
                             .map(|(field, ty, _)| (*field, *ty))
                     })
             })
@@ -2839,7 +2839,7 @@ impl Checker {
     fn unknown_state_field(&mut self, name: &str, span: Span) {
         let layouts = self
             .declarations
-            .layout_state_fields
+            .provider_state_fields
             .values()
             .filter(|fields| fields.contains_key(name))
             .count();
@@ -2851,14 +2851,14 @@ impl Checker {
         if conditional != 0 {
             self.error(
                 format!(
-                    "state field `{name}` is conditional; access it only where its `layout` predicate is established"
+                    "state field `{name}` is conditional; access it only where its shape condition is established"
                 ),
                 span,
             );
         } else if layouts != 0 {
             self.error(
                 format!(
-                    "state field `{name}` is layout-specific; access it inside the corresponding `match layout` arm"
+                    "state field `{name}` is shape-specific; test or match its enum discriminator before accessing it"
                 ),
                 span,
             );

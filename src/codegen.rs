@@ -441,23 +441,23 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     );
     let async_frames = AsyncFrameLayouts::plan(program, wasm_ir, semantics, &reachability);
     let managed = crate::managed::ManagedBindingPlan::build(program, semantics);
-    let explicit_layout_selection = crate::layout_selection::has_explicit_layout_selection(program);
-    let automatic_layout = if explicit_layout_selection {
+    let explicit_shape_selection = crate::shape_selection::has_explicit_shape_selection(program);
+    let automatic_shape = if explicit_shape_selection {
         None
     } else {
-        managed.automatic_layout.as_ref().filter(|plan| {
+        managed.automatic_shape.as_ref().filter(|plan| {
             plan.evidence_fields.is_empty()
                 || semantics.state_provider() == Some(crate::stdlib::StdlibStateProviderId::Unity)
         })
     };
     let dependencies =
-        BackendDependencies::analyze(program, semantics, wasm_ir, &reachability, automatic_layout);
+        BackendDependencies::analyze(program, semantics, wasm_ir, &reachability, automatic_shape);
     reachability.require_runtime_helper_types(&dependencies, array_types, semantics);
     let failure_payloads = FailurePayloadDemand::analyze(semantics, wasm_ir, &reachability);
     let static_data = StaticData::collect(
         program,
         &process_names,
-        automatic_layout,
+        automatic_shape,
         wasm_ir,
         &reachability,
         memory_layouts,
@@ -606,7 +606,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         wasm_ir,
         gc: &gc,
         async_frames: &async_frames,
-        explicit_layout_selection,
+        explicit_shape_selection,
         debug: debug_recorder.as_ref(),
     };
     let runtime = AttachContext {
@@ -713,7 +713,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         managed_state_reads: &managed_state_reads,
         pointer_prefixes: &pointer_prefixes,
         scratch: static_data.layout().scratch(),
-        explicit_layout_selection,
+        explicit_shape_selection,
         globals: &global_indices,
         global_types: &global_types,
         attachment_globals: &attachment_globals,

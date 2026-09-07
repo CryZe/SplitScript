@@ -221,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn wasm_emitters_do_not_redeclare_unity_layout_facts() {
+    fn wasm_emitters_do_not_redeclare_unity_shape_facts() {
         let emitters = [
             include_str!("async_state.rs"),
             include_str!("data_plan.rs"),

@@ -10,8 +10,8 @@ mod driver;
 mod expressions;
 mod finalization;
 mod function_graph;
-mod layout_refinement;
 mod pattern_usefulness;
+mod shape_refinement;
 mod statements;
 
 use context::{
@@ -159,16 +159,14 @@ struct Checker {
     inference: InferenceContext,
     provider_value: Option<(StdlibStateProviderId, Type)>,
     provider_values: HashMap<StdlibStateProviderId, Type>,
-    layout_value: Option<ValueId>,
-    layout_available_in_on_attach: bool,
-    active_state_layouts: Option<HashSet<crate::ast::EnumVariantId>>,
+    state_refinement_value: Option<ValueId>,
+    active_provider_variants: Option<HashSet<crate::ast::EnumVariantId>>,
     /// Physical state field whose source or transform is currently checked.
     /// Sibling references struct graph edges against this declaration.
     active_state_field: Option<ValueId>,
     /// Finite source values referenced by conditional declaration predicates.
-    /// The old generated `layout` fields remain implicit during migration.
-    layout_dimensions: Vec<declarations::LayoutDimension>,
-    active_layouts: Option<declarations::LayoutPredicate>,
+    shape_dimensions: Vec<declarations::ShapeDimension>,
+    active_shapes: Option<declarations::ShapePredicate>,
     scopes: Vec<HashMap<String, Binding>>,
     condition_flows: HashMap<ExprId, expressions::ConditionFlow>,
     active_condition_bindings: Vec<HashSet<String>>,
@@ -207,10 +205,10 @@ impl Checker {
     }
 
     fn active_state_provider(&self) -> Option<StdlibStateProviderId> {
-        let Some(layouts) = &self.active_state_layouts else {
+        let Some(variants) = &self.active_provider_variants else {
             return self.provider_value.map(|(provider, _)| provider);
         };
-        let mut providers = layouts.iter().filter_map(|variant| {
+        let mut providers = variants.iter().filter_map(|variant| {
             self.resolutions
                 .state_provider_alternative(*variant)
                 .map(|alternative| alternative.provider)
@@ -247,27 +245,32 @@ impl Checker {
         })
     }
 
-    fn with_state_layout<T>(
+    fn with_provider_variant<T>(
         &mut self,
-        layout: Option<crate::ast::EnumVariantId>,
+        provider_variant: Option<crate::ast::EnumVariantId>,
         operation: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        self.with_state_layouts(layout.map(|layout| HashSet::from([layout])), operation)
+        self.with_provider_variants(
+            provider_variant.map(|variant| HashSet::from([variant])),
+            operation,
+        )
     }
 
-    fn with_state_layouts<T>(
+    fn with_provider_variants<T>(
         &mut self,
-        layouts: Option<HashSet<crate::ast::EnumVariantId>>,
+        variants: Option<HashSet<crate::ast::EnumVariantId>>,
         operation: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        let next = match (&self.active_state_layouts, layouts) {
-            (Some(active), Some(layouts)) => Some(active.intersection(&layouts).copied().collect()),
+        let next = match (&self.active_provider_variants, variants) {
+            (Some(active), Some(variants)) => {
+                Some(active.intersection(&variants).copied().collect())
+            }
             (Some(active), None) => Some(active.clone()),
-            (None, layouts) => layouts,
+            (None, variants) => variants,
         };
-        let previous = std::mem::replace(&mut self.active_state_layouts, next);
+        let previous = std::mem::replace(&mut self.active_provider_variants, next);
         let output = operation(self);
-        self.active_state_layouts = previous;
+        self.active_provider_variants = previous;
         output
     }
 

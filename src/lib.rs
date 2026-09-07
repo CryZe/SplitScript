@@ -5,7 +5,7 @@
 
 mod abi;
 mod scoped_globals;
-pub use scoped_globals::{AttachmentLayout, GlobalLifetime, ScopedGlobalAnalysis};
+pub use scoped_globals::{AttachmentShape, GlobalLifetime, ScopedGlobalAnalysis};
 pub use splitscript_syntax::ast;
 mod build_identity;
 mod capabilities;
@@ -29,13 +29,13 @@ mod inlay_hints;
 mod insight;
 mod intrinsic_registry;
 mod language;
-mod layout_selection;
 mod lexer;
 mod lsp;
 mod managed;
 mod memory;
 pub mod migration;
 mod name_matching;
+mod shape_selection;
 use splitscript_syntax::parser;
 mod refactor;
 mod resolution;

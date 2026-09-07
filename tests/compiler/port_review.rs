@@ -38,19 +38,27 @@ fn native_review_fixture_preserves_identity_build_lifecycle_settings_width_and_f
             "Enable checkpoint splits" => checkpointSplits: true,
         }
 
+        enum Build { Retail, Demo }
+        let build: Build
+
         state ["game.exe", "game-demo.exe"] {
-            layout Retail {
+            if build == Build.Retail {
                 checkpoint: u16 at "engine.dll", 0x1000;
-            },
-            layout Demo {
+            } else {
                 checkpoint: u16 at "engine.dll", 0x2000;
-            },
+            }
         }
 
         onAttach {
             let executable = await process.mainModule()
-            if executable.size == 10_000 { return StateLayout.Retail }
-            if executable.size == 20_000 { return StateLayout.Demo }
+            if executable.size == 10_000 {
+                build = Build.Retail
+                return
+            }
+            if executable.size == 20_000 {
+                build = Build.Demo
+                return
+            }
             await process.closed()
         }
 
@@ -63,7 +71,11 @@ fn native_review_fixture_preserves_identity_build_lifecycle_settings_width_and_f
     let checked = checked_without_warnings(source);
     let state = checked.syntax().state.as_ref().expect("state declaration");
     assert_eq!(state.processes, ["game.exe", "game-demo.exe"]);
-    assert_eq!(state.layouts.len(), 2, "build choice must remain explicit");
+    assert_eq!(
+        state.conditional_fields.len(),
+        2,
+        "build choice must remain explicit"
+    );
     assert!(state.all_fields().all(|field| {
         field
             .annotation

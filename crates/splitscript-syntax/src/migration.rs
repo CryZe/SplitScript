@@ -165,7 +165,7 @@ pub struct MigrationDiagnostic {
 pub const ASL_STRING_N_FIELD_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.state.string-n-field");
 pub const DUPLICATE_STATE_DIAGNOSTIC: MigrationDiagnosticId =
-    MigrationDiagnosticId::new("asl.state.duplicate-version-layout");
+    MigrationDiagnosticId::new("asl.state.duplicate-version-state");
 pub const ASL_STARTUP_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.lifecycle.startup-block");
 pub const ASL_INIT_DIAGNOSTIC: MigrationDiagnosticId =
@@ -283,11 +283,11 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
         id: DUPLICATE_STATE_DIAGNOSTIC,
         concept: MigrationConceptId::new("asl.state.version-label"),
-        message: "SplitScript uses one `state` declaration with named layouts for game versions",
-        primary_label: "merge this state declaration into named `layout` blocks",
+        message: "SplitScript uses one `state` declaration with conditional fields for game versions",
+        primary_label: "merge this declaration and guard version-specific fields with an enum global",
         notes: &[
-            "compatible fields form a common interface; missing or conflicting fields are accessed after `match layout` refines the selected `StateLayout` variant",
-            "`onAttach` returns the selected `StateLayout` variant before polling begins",
+            "initialize the enum global from reliable version evidence in `onAttach` before polling begins",
+            "compatible conditional fields form a common interface; test or match the enum global before accessing missing or conflicting fields",
             "merging is not automatic because versioned fields and pointer paths may differ semantically",
         ],
     },
@@ -309,7 +309,7 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         message: "ASL `init` has no blind one-to-one lifecycle rename",
         primary_label: "choose the destination from the state this block needs",
         notes: &[
-            "use `onAttach` for suspending process discovery and layout selection before SplitScript starts polling",
+            "use `onAttach` for suspending process discovery and attachment-shape initialization before SplitScript starts polling",
             "use synchronous `onStateReady` for initialization that consumes the first complete snapshot; `old` and `current` are equal there",
         ],
     },
@@ -1951,7 +1951,7 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "Version-labelled state blocks",
         sources: ASL,
         support: MigrationSupport::TypedPattern,
-        summary: "Use named layouts in one state block and return the selected layout from [`onAttach`].",
+        summary: "Use one state block, initialize an ordinary build enum in [`onAttach`], and guard version-specific fields with it.",
         targets: &[MigrationTarget::Language("state")],
         cookbook_anchor: Some("version-labelled-asl-states"),
         spellings: &[],

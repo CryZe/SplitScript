@@ -21,9 +21,9 @@ Before runtime testing, review these semantic choices:
   Windows executable identities include `.exe`. An array represents alternate
   names for one attachment, not several simultaneous attachments.
 - **Selected build:** Preserve every source version distinction that changes an
-  address, type, or behavior. Select named state layouts or independent
-  [`layout`] dimensions from reliable evidence, and handle an unknown build
-  explicitly instead of silently choosing a default.
+  address, type, or behavior. Initialize one or more ordinary enum globals from
+  reliable evidence, use them to guard conditional fields, and handle an
+  unknown build explicitly instead of silently choosing a default.
 - **Provider choice:** Use the canonical typed provider. Unity ports declare
   [`image`] schemas under [`Unity`]. Emulator ports use the provider for the
   original console rather than manually rediscovering emulator memory.
@@ -88,8 +88,9 @@ current Windows host reports the executable filename including `.exe`, so a
 Windows candidate must include that extension; `state "game"` will not attach
 to `game.exe`. Other host platforms use their exact runtime identity. The array
 contains alternate names for one attachment, not several processes to attach
-to concurrently. Build-specific addresses belong in named layouts selected
-from [`onAttach`], rather than in multiple ASL-style state blocks.
+to concurrently. Build-specific addresses belong in conditional field branches
+selected by enum globals initialized from [`onAttach`], rather than in multiple
+ASL-style state blocks.
 
 Typed emulator support replaces the native process root. Choose the provider
 for the emulated console: [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`],
@@ -861,37 +862,44 @@ overloads remain separate policies and are not ordinary [`Display`] conversions.
 
 ## Version-labelled ASL states
 
-The second argument in `state("game.exe", "Steam")` is a layout label, not
-another executable candidate. Co-locate layouts in one state and return the
-selected generated variant from [`onAttach`]:
+The second argument in `state("game.exe", "Steam")` is a build label, not
+another executable candidate. Represent that persistent fact as an ordinary
+enum global initialized during [`onAttach`], then use the same value to select
+conditional state fields and refine their use:
 
 ```splitscript
+enum Build {
+    Steam,
+    Epic,
+}
+
+let build: Build
+
 state "game.exe" {
-    layout Steam {
+    if build == Build.Steam {
         loading: bool at "engine.dll", 0x1000;
         checkpoint: u8 at "engine.dll", 0x1100;
-    },
-
-    layout Epic {
+    } else {
         loading: bool at "engine.dll", 0x2000;
         checkpoint: u16 at "engine.dll", 0x2100;
-    },
+    }
 }
 
 onAttach {
     let executable = await process.mainModule()
     if executable.size == 10_000 {
-        return StateLayout.Steam
+        build = Build.Steam
     } else if executable.size == 20_000 {
-        return StateLayout.Epic
+        build = Build.Epic
+    } else {
+        await process.closed()
     }
-    await process.closed()
 }
 
 split {
-    return match layout {
-        StateLayout.Steam => old.checkpoint != current.checkpoint,
-        StateLayout.Epic => old.checkpoint != current.checkpoint,
+    return match build {
+        Build.Steam => old.checkpoint != current.checkpoint,
+        Build.Epic => old.checkpoint != current.checkpoint,
     }
 }
 ```
@@ -901,20 +909,19 @@ signatures, process identity, or discovered memory. `await process.closed()`
 keeps an unsupported attachment inert without detaching and immediately
 reattaching to the same process.
 
-Compatible fields declared by every named layout expose one common interface.
-When a field is missing or the same name has a conflicting type, match the
-generated [`layout`] value and access the field only in the corresponding arm.
-The compiler gives each incompatible declaration its real physical type rather
-than turning it into an option or inventing a default. An honest typed default
-is still appropriate when consumers already define that value as unavailable;
-the A Plague Tale Xbox layout uses `cutsceneState: i32 = 0` for exactly that
-reason.
+Compatible fields declared by every conditional branch expose one common
+interface. When a field is missing or the same name has a conflicting type,
+test or match the enum global and access the field only where that condition is
+proven. The compiler gives each incompatible declaration its real physical
+type rather than turning it into an option or inventing a default. An honest
+typed default is still appropriate when consumers already define that value as
+unavailable; the A Plague Tale Xbox build uses `cutsceneState: i32 = 0` for
+exactly that reason.
 
 When the original script has several independent build facts, avoid turning
 their cartesian product into many version-labelled states. Declare enum-valued
-dimensions in one unnamed state [`layout`] block and return the generated
-`Layout` struct from [`onAttach`]. The selected [`layout`] value can guard native
-state fields and managed class fields with the same predicate:
+globals independently. Assign each one during [`onAttach`]. Any of them can
+guard native state fields and managed class fields with the same predicate:
 
 ```splitscript
 enum Edition {
@@ -927,28 +934,26 @@ enum Storefront {
     GOG,
 }
 
-state Unity ["game.exe"] {
-    layout {
-        edition: Edition,
-        storefront: Storefront,
-    }
+let edition: Edition
+let storefront: Storefront
 
-    if layout.edition == Edition.Full {
+state Unity ["game.exe"] {
+    if edition == Edition.Full {
         level: u32 at 0x1000;
     }
 }
 
 onAttach {
-    return Layout {
-        edition: Edition.Full,
-        storefront: Storefront.Steam,
-    }
+    edition = Edition.Full
+    storefront = Storefront.Steam
 }
 ```
 
-Use a named `layout Steam { ... }` state when one selection genuinely chooses
-the complete memory shape. Use dimensions when edition, storefront, renderer,
-or another fact can vary independently or is shared with managed metadata.
+One enum can describe a complete build when those facts always move together.
+Use separate globals when edition, storefront, renderer, or another fact can
+vary independently or is shared with managed metadata. These are ordinary
+values rather than a separate layout subsystem, so the same control-flow and
+exhaustiveness rules apply everywhere.
 
 ## Attached process identity
 
@@ -956,15 +961,19 @@ ASL exposes the selected process through `game.ProcessName`. In a native
 SplitScript state, use `process.name()`:
 
 ```splitscript
-state ["game.exe", "game-demo.exe"] {
-    layout FullGame {},
-    layout Demo {},
+enum Build {
+    FullGame,
+    Demo,
 }
 
+let build: Build
+
+state ["game.exe", "game-demo.exe"] {}
+
 onAttach {
-    return match process.name() {
-        "game.exe" => StateLayout.FullGame,
-        "game-demo.exe" => StateLayout.Demo,
+    build = match process.name() {
+        "game.exe" => Build.FullGame,
+        "game-demo.exe" => Build.Demo,
         _ => await process.closed(),
     }
 }
@@ -974,7 +983,7 @@ The returned string is the exact candidate from the [`state`] declaration that
 matched during attachment. It is not the executable path and does not perform
 another host lookup. String literals are first-class [`match`] patterns and
 compare text contents, so this is the direct selector when executable names map
-to named layouts. Keep the wildcard arm because strings are an open-ended
+to build shapes. Keep the wildcard arm because strings are an open-ended
 domain. When several builds share a name, discriminate with reliable evidence
 such as `process.mainModule().size`, `process.path()`,
 [`Module.fileVersion()`], [`Module.productVersion()`], or a signature instead.
@@ -1041,16 +1050,27 @@ on-disk file, not the mapped image, and produces the same uppercase 32-character
 spelling commonly created with `BitConverter.ToString(...).Replace("-", "")`:
 
 ```splitscript
-# state "game.exe" {
-#     layout Original { value: u32 at 0x1000; },
-#     layout Updated { value: u32 at 0x2000; },
-# }
+enum Build {
+    Original,
+    Updated,
+}
+
+let build: Build
+
+state "game.exe" {
+    if build == Build.Original {
+        value: u32 at 0x1000;
+    } else {
+        value: u32 at 0x2000;
+    }
+}
+
 onAttach {
     let executable = await process.mainModule()
     let fingerprint = (await executable.md5())?
-    return match fingerprint {
-        "951389C953020FC7B5DEF32E7BED129A" => StateLayout.Original,
-        "E1E439BD3FE89DE97BE08B15505837E2" => StateLayout.Updated,
+    build = match fingerprint {
+        "951389C953020FC7B5DEF32E7BED129A" => Build.Original,
+        "E1E439BD3FE89DE97BE08B15505837E2" => Build.Updated,
         _ => await process.closed(),
     }
 }
@@ -1304,12 +1324,12 @@ onAttach {
 }
 ```
 
-With named layouts, a bare global may belong to only the layouts whose return
-paths initialize it. Access it under the same direct [`match`] on [`layout`]
-that refines layout-specific state fields. Helpers inherit these requirements,
-so a helper reading a Steam-only value is callable from the
-`StateLayout.Steam` arm but not from unrefined polling code. Values assigned on
-every successful layout path remain available everywhere while attached.
+A bare global may belong to only the attachment shapes whose [`onAttach`]
+paths initialize it. Access it under the same direct condition or [`match`] on
+the shape enum global that refines conditional state fields. Helpers inherit
+these requirements, so a helper reading a Steam-only value is callable from
+the `Build.Steam` arm but not from unrefined polling code. Values assigned on
+every successful attachment path remain available everywhere while attached.
 
 Expression-backed fields are persistent watcher values. The initial snapshot
 waits for every required field to succeed together. Afterwards, a failed [`T!`]
@@ -1375,7 +1395,7 @@ for another explicit address range. Use `process.scanMemory` only when the
 legacy source genuinely enumerates readable mappings or the target may live
 outside known modules. [`scanAny`] and [`scanMemoryAny`] accept an array of
 signatures and return both the address and selected index, which keeps fallback
-layout selection in one cooperative pass.
+build selection in one cooperative pass.
 
 Those operations deliberately keep starting new passes until a signature
 appears. When a legacy script uses exhaustion as build or version evidence,
@@ -1509,7 +1529,7 @@ headers and backend-specific decoding inside the generated Unity reader.
 Use [`from`] for exact metadata names or ordered name alternatives. Without it,
 the source declaration name is used and instance fields also recognize the
 conventional C# automatic-property backing-field spelling. Build-specific
-managed shapes use the same attachment-wide [`layout`] dimensions and
+managed shapes use the same attachment-wide enum globals and
 [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chains as state fields.
 The compiler rejects a native [`state`] declaration that tries to consume managed
 schema references, so managed reads cannot silently bypass the Unity provider.
@@ -1999,7 +2019,7 @@ LiveSplit component invokes them at different boundaries:
 | ASL construct | Exact legacy timing | SplitScript direction |
 | --- | --- | --- |
 | `startup` | Once when the script is loaded, before process attachment | Put settings in [`settings`], constant data in global initializers, and remaining process-independent statements in [`setup`]. |
-| `init` | Once for each found process, after one legacy state refresh; a failure retries attachment initialization | Put suspending discovery and layout selection in [`onAttach`]. Put synchronous work that consumes the first complete snapshot in [`onStateReady`]. |
+| `init` | Once for each found process, after one legacy state refresh; a failure retries attachment initialization | Put suspending discovery and attachment-shape initialization in [`onAttach`]. Put synchronous work that consumes the first complete snapshot in [`onStateReady`]. |
 | `update` | After each refresh and before all timer decisions; `false` skips the remaining decisions for that tick | Put per-tick work in [`whileAttached`]. It may suspend for recoverable discovery; an explicit `return false` preserves the legacy control result exactly. |
 | `exit` | When the attached process exits | Use [`onDetach`]. It runs exactly once for a real process closure and never at initial detached startup. |
 | `shutdown` | When the script is disabled, reloaded, dropped, or LiveSplit exits | No exact host callback exists yet; do not approximate it with [`onDetach`]. |
@@ -2025,7 +2045,7 @@ therefore runs it again on that module's first update.
 actions. They run before attachment and state polling when two consecutive
 updates observe the timer leave or enter [`TimerState.NotRunning`]. The first
 update only establishes a baseline. They may use settings and ordinary globals,
-but not `process`, an emulator provider, attachment-scoped globals, [`layout`],
+but not `process`, an emulator provider, attachment-scoped globals,
 [`current`], or [`old`]. A start or reset requested by this script is observed
 on the following update instead of being invoked directly from [`start`] or
 [`reset`]. This sampled contract delivers an ordinary persistent transition
@@ -2058,7 +2078,7 @@ default storage; ordinary use should load the autosplitter before beginning the
 attempt.
 
 Legacy `init` combines two boundaries that SplitScript keeps explicit. Use
-[`onAttach`] for discovery that may suspend and for layout selection. Use
+[`onAttach`] for discovery that may suspend and for attachment-shape initialization. Use
 [`onStateReady`] for synchronous initialization that needs polled state:
 
 ```splitscript
@@ -2168,7 +2188,7 @@ onDetach {
 ```
 
 The compiler invokes this block once after clearing the closed handle, provider
-state, selected layout, and pending process-lifetime continuations. Neither
+state, attachment-scoped globals, and pending process-lifetime continuations. Neither
 `process` nor state snapshots are available in [`onDetach`]: a process may close
 before attachment initialization or the
 first state poll completes.

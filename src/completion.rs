@@ -750,8 +750,8 @@ fn add_state_source_bindings(builder: &mut CompletionBuilder, syntax: &Program, 
     let Some(state) = &syntax.state else {
         return;
     };
-    if state.has_named_variants() {
-        let Some((_, fields)) = state.variant_fields().find(|(_, fields)| {
+    if state.has_provider_alternatives() {
+        let Some((_, fields)) = state.provider_variant_fields().find(|(_, fields)| {
             fields
                 .iter()
                 .any(|field| contains_offset(field.span, offset))
@@ -798,32 +798,6 @@ fn add_state_source_bindings(builder: &mut CompletionBuilder, syntax: &Program, 
     }
 }
 
-fn layout_selector_completion(state: &crate::ast::StateDecl) -> CompletionItem {
-    let checks = state
-        .layout_enum
-        .as_ref()
-        .expect("named layouts have a generated enum")
-        .variants
-        .iter()
-        .enumerate()
-        .map(|(index, variant)| {
-            let placeholder = index + 1;
-            format!(
-                "    if ${{{placeholder}:{} build check}} {{\n        return StateLayout.{}\n    }}\n",
-                variant.name, variant.name
-            )
-        })
-        .collect::<String>();
-    let item = LanguageCatalog::new().action(crate::ast::ActionKind::OnAttach);
-    catalog_language_completion(
-        item.name,
-        CompletionKind::Snippet,
-        item,
-        format!("onAttach {{\n{checks}    $0\n    await process.closed()\n}}"),
-        true,
-    )
-}
-
 fn is_top_level_offset(syntax: &Program, offset: usize) -> bool {
     !syntax
         .actions
@@ -865,7 +839,7 @@ fn complete_member(
 ) -> CompletionList {
     let standard_library = compiler_context.standard_library();
     let mut builder = CompletionBuilder::new(context.prefix.clone(), context.replacement);
-    let active_layout_facts = active_attachment_layout_facts(syntax, context.dot);
+    let active_shape_facts = active_attachment_shape_facts(syntax, tokens, context.dot);
     let path = context
         .receiver_path
         .iter()
@@ -882,23 +856,19 @@ fn complete_member(
                         "state field",
                     ));
                 }
-                if let Some(layout) = active_state_layout(syntax, source, tokens, context.dot) {
-                    for field in &layout.fields {
-                        if !state.is_common_field(&field.name) {
-                            builder.add(simple_completion(
-                                &field.name,
-                                CompletionKind::StateField,
-                                "layout-specific state field",
-                            ));
-                        }
-                    }
+                for field in conditionally_common_state_fields(state) {
+                    builder.add(simple_completion(
+                        &field.name,
+                        CompletionKind::StateField,
+                        "state field shared by every shape branch",
+                    ));
                 }
                 for (index, group) in state.conditional_fields.iter().enumerate() {
-                    if layout_group_is_active(
+                    if shape_group_is_active(
                         syntax,
                         &state.conditional_fields,
                         index,
-                        &active_layout_facts,
+                        &active_shape_facts,
                     ) {
                         for field in &group.fields {
                             builder.add(simple_completion(
@@ -951,7 +921,7 @@ fn complete_member(
                     syntax,
                     &TypeKind::Standard(provider.process_type),
                     &standard_library,
-                    &active_layout_facts,
+                    &active_shape_facts,
                 );
                 add_inferred_methods(
                     &mut builder,
@@ -974,7 +944,7 @@ fn complete_member(
                     syntax,
                     &TypeKind::Standard(context.ty),
                     &standard_library,
-                    &active_layout_facts,
+                    &active_shape_facts,
                 );
                 add_inferred_methods(
                     &mut builder,
@@ -1014,11 +984,11 @@ fn complete_member(
                     builder.add(completion);
                 }
                 for (index, group) in class.conditional_fields.iter().enumerate() {
-                    if layout_group_is_active(
+                    if shape_group_is_active(
                         syntax,
                         &class.conditional_fields,
                         index,
-                        &active_layout_facts,
+                        &active_shape_facts,
                     ) {
                         for field in group.fields.iter().filter(|field| field.is_static) {
                             let mut completion = simple_completion(
@@ -1064,7 +1034,7 @@ fn complete_member(
             syntax,
             &receiver.ty,
             &standard_library,
-            &active_layout_facts,
+            &active_shape_facts,
         );
         add_inferred_methods(
             &mut builder,
@@ -1463,12 +1433,12 @@ fn add_source_declarations(
     if syntax
         .state
         .as_ref()
-        .is_some_and(|state| state.layout_value.is_some())
+        .is_some_and(|state| state.provider_value.is_some())
     {
         builder.add(simple_completion(
-            "layout",
+            "provider",
             CompletionKind::Variable,
-            "selected state layout",
+            "selected state provider",
         ));
     }
     for global in &syntax.globals {
@@ -1929,8 +1899,59 @@ fn add_scoped_variable(builder: &mut CompletionBuilder, name: &str, detail: &str
     builder.add_scoped(simple_completion(name, CompletionKind::Variable, detail));
 }
 
+fn conditionally_common_state_fields(
+    state: &crate::ast::StateDecl,
+) -> Vec<&crate::ast::StateField> {
+    let mut common = Vec::new();
+    let mut chain_start = 0;
+    while chain_start < state.conditional_fields.len() {
+        let mut chain_end = chain_start + 1;
+        while chain_end < state.conditional_fields.len()
+            && state.conditional_fields[chain_end].else_span.is_some()
+        {
+            chain_end += 1;
+        }
+        let chain = &state.conditional_fields[chain_start..chain_end];
+        if chain.last().is_some_and(|group| group.condition.is_none()) {
+            for candidate in &chain[0].fields {
+                let declarations = chain
+                    .iter()
+                    .map(|group| {
+                        group
+                            .fields
+                            .iter()
+                            .find(|field| field.name == candidate.name)
+                    })
+                    .collect::<Option<Vec<_>>>();
+                if declarations.is_some_and(|declarations| {
+                    let mut annotation = None;
+                    declarations.iter().all(|field| match field.annotation {
+                        Some(found) if annotation.is_some_and(|expected| expected != found) => {
+                            false
+                        }
+                        Some(found) => {
+                            annotation = Some(found);
+                            true
+                        }
+                        None => true,
+                    })
+                }) {
+                    common.push(candidate);
+                }
+            }
+        }
+        chain_start = chain_end;
+    }
+    common
+}
+
 fn contains_offset(span: Span, offset: usize) -> bool {
     span.start <= offset && offset <= span.end
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CompletionShapeDimension {
+    Value(crate::ast::ValueId),
 }
 
 fn statement_span(statement: &Stmt) -> Span {
@@ -1953,7 +1974,7 @@ fn add_inferred_fields(
     syntax: &Program,
     receiver: &TypeKind,
     standard_library: &StandardLibrary,
-    active_layout_facts: &[(crate::ast::StructFieldId, crate::ast::EnumVariantId)],
+    active_shape_facts: &[(CompletionShapeDimension, crate::ast::EnumVariantId)],
 ) {
     match receiver {
         TypeKind::Error => {}
@@ -1966,12 +1987,19 @@ fn add_inferred_fields(
                         "state field",
                     ));
                 }
+                for field in conditionally_common_state_fields(state) {
+                    builder.add(simple_completion(
+                        &field.name,
+                        CompletionKind::Property,
+                        "state field shared by every shape branch",
+                    ));
+                }
                 for (index, group) in state.conditional_fields.iter().enumerate() {
-                    if layout_group_is_active(
+                    if shape_group_is_active(
                         syntax,
                         &state.conditional_fields,
                         index,
-                        active_layout_facts,
+                        active_shape_facts,
                     ) {
                         for field in &group.fields {
                             builder.add(simple_completion(
@@ -2015,11 +2043,11 @@ fn add_inferred_fields(
                     .iter()
                     .enumerate()
                     .filter(|(index, _)| {
-                        layout_group_is_active(
+                        shape_group_is_active(
                             syntax,
                             &class.conditional_fields,
                             *index,
-                            active_layout_facts,
+                            active_shape_facts,
                         )
                     })
                     .flat_map(|(_, group)| &group.fields);
@@ -2133,117 +2161,19 @@ fn add_constructor_fields(
     }
 }
 
-fn active_state_layout<'a>(
-    syntax: &'a Program,
-    source: &str,
+fn active_attachment_shape_facts(
+    syntax: &Program,
     tokens: &[&crate::lexer::Token],
     offset: usize,
-) -> Option<&'a crate::ast::StateLayoutDecl> {
-    struct Finder<'a> {
+) -> Vec<(CompletionShapeDimension, crate::ast::EnumVariantId)> {
+    struct Finder<'a, 'tokens> {
         syntax: &'a Program,
+        tokens: &'tokens [&'tokens crate::lexer::Token],
         offset: usize,
-        variant: Option<crate::ast::EnumVariantId>,
-        match_start: Option<usize>,
+        facts: Vec<(CompletionShapeDimension, crate::ast::EnumVariantId)>,
     }
 
-    impl<'ast> Visitor<'ast> for Finder<'ast> {
-        fn visit_expr(&mut self, expression: &'ast Expr) {
-            if self.variant.is_none()
-                && let ExprKind::Match { value, arms } = &expression.kind
-                && matches!(&value.kind, ExprKind::Path(path) if path.as_slice() == ["layout"])
-                && contains_offset(expression.span, self.offset)
-                // Recovering member completion may end the arm's parsed value
-                // immediately before the dot. Arm starts and the enclosing
-                // match span remain reliable, so choose the latest arm that
-                // has begun at the cursor instead of requiring its shortened
-                // value span to contain the cursor.
-                && let Some(arm) = arms
-                    .iter()
-                    .rev()
-                    .find(|arm| arm.span.start <= self.offset)
-                && let MatchPattern::Enum { variant, .. } = &arm.pattern
-                && let Some(layout) = self.syntax.state.as_ref().and_then(|state| {
-                    state.layouts.iter().find(|layout| {
-                        state
-                            .layout_enum
-                            .as_ref()
-                            .and_then(|enumeration| {
-                                enumeration
-                                    .variants
-                                    .iter()
-                                    .find(|candidate| candidate.id == layout.variant)
-                            })
-                            .is_some_and(|candidate| candidate.name == *variant)
-                    })
-                })
-            {
-                self.variant = Some(layout.variant);
-                self.match_start = Some(expression.span.start);
-            }
-            visit::walk_expr(self, expression);
-        }
-    }
-
-    let mut finder = Finder {
-        syntax,
-        offset,
-        variant: None,
-        match_start: None,
-    };
-    finder.visit_program(syntax);
-    let variant = finder
-        .variant
-        .filter(|_| {
-            finder
-                .match_start
-                .is_some_and(|start| cursor_is_inside_braces(tokens, start, offset))
-        })
-        .or_else(|| {
-            let before = source.get(..offset)?;
-            let match_start = before.rfind("match layout")?;
-            if !cursor_is_inside_braces(tokens, match_start, offset) {
-                return None;
-            }
-            let state = syntax.state.as_ref()?;
-            state
-                .layouts
-                .iter()
-                .filter_map(|layout| {
-                    let name = state
-                        .layout_enum
-                        .as_ref()?
-                        .variants
-                        .iter()
-                        .find(|variant| variant.id == layout.variant)?
-                        .name
-                        .as_str();
-                    let marker = format!("StateLayout.{name}");
-                    let position = before.rfind(&marker)?;
-                    (match_start < position && before[position + marker.len()..].contains("=>"))
-                        .then_some((position, layout.variant))
-                })
-                .max_by_key(|(position, _)| *position)
-                .map(|(_, variant)| variant)
-        })?;
-    syntax
-        .state
-        .as_ref()?
-        .layouts
-        .iter()
-        .find(|layout| layout.variant == variant)
-}
-
-fn active_attachment_layout_facts(
-    syntax: &Program,
-    offset: usize,
-) -> Vec<(crate::ast::StructFieldId, crate::ast::EnumVariantId)> {
-    struct Finder<'a> {
-        syntax: &'a Program,
-        offset: usize,
-        facts: Vec<(crate::ast::StructFieldId, crate::ast::EnumVariantId)>,
-    }
-
-    impl<'ast> Visitor<'ast> for Finder<'ast> {
+    impl<'ast> Visitor<'ast> for Finder<'ast, '_> {
         fn visit_stmt(&mut self, statement: &'ast Stmt) {
             if let Stmt::If {
                 condition,
@@ -2253,12 +2183,12 @@ fn active_attachment_layout_facts(
             } = statement
             {
                 if contains_offset(then_block.span, self.offset) {
-                    collect_attachment_layout_facts(self.syntax, condition, &mut self.facts);
+                    collect_attachment_shape_facts(self.syntax, condition, &mut self.facts);
                 } else if else_block
                     .as_ref()
                     .is_some_and(|block| contains_offset(block.span, self.offset))
                 {
-                    collect_attachment_layout_falsy_facts(self.syntax, condition, &mut self.facts);
+                    collect_attachment_shape_falsy_facts(self.syntax, condition, &mut self.facts);
                 }
             }
             visit::walk_stmt(self, statement);
@@ -2273,10 +2203,18 @@ fn active_attachment_layout_facts(
             } = &expression.kind
             {
                 if contains_offset(then_expr.span, self.offset) {
-                    collect_attachment_layout_facts(self.syntax, condition, &mut self.facts);
+                    collect_attachment_shape_facts(self.syntax, condition, &mut self.facts);
                 } else if contains_offset(else_expr.span, self.offset) {
-                    collect_attachment_layout_falsy_facts(self.syntax, condition, &mut self.facts);
+                    collect_attachment_shape_falsy_facts(self.syntax, condition, &mut self.facts);
                 }
+            }
+            if let ExprKind::Match { value, arms } = &expression.kind
+                && expression.span.start <= self.offset
+                && cursor_is_inside_braces(self.tokens, expression.span.start, self.offset)
+                && let Some(arm) = arms.iter().rev().find(|arm| arm.span.start <= self.offset)
+                && let Some(fact) = pattern_shape_fact(self.syntax, value, &arm.pattern)
+            {
+                self.facts.push(fact);
             }
             visit::walk_expr(self, expression);
         }
@@ -2284,20 +2222,26 @@ fn active_attachment_layout_facts(
 
     let mut finder = Finder {
         syntax,
+        tokens,
         offset,
         facts: Vec::new(),
     };
     finder.visit_program(syntax);
-    finder.facts.sort_by_key(|(field, _)| field.index());
+    if let Some(fact) = fallback_shape_match_fact(syntax, tokens, offset) {
+        finder.facts.push(fact);
+    }
+    finder
+        .facts
+        .sort_by_key(|(dimension, variant)| (*dimension, variant.index()));
     finder.facts.dedup();
     finder.facts
 }
 
-fn layout_group_is_active<Field>(
+fn shape_group_is_active<Field>(
     syntax: &Program,
     groups: &[crate::ast::ConditionalFieldsDecl<Field>],
     target: usize,
-    active: &[(crate::ast::StructFieldId, crate::ast::EnumVariantId)],
+    active: &[(CompletionShapeDimension, crate::ast::EnumVariantId)],
 ) -> bool {
     let mut chain_start = target;
     while chain_start > 0 && groups[chain_start].else_span.is_some() {
@@ -2307,19 +2251,19 @@ fn layout_group_is_active<Field>(
         let Some(condition) = &group.condition else {
             return false;
         };
-        if layout_condition_value(syntax, active, condition) != Some(false) {
+        if shape_condition_value(syntax, active, condition) != Some(false) {
             return false;
         }
     }
     groups[target]
         .condition
         .as_ref()
-        .is_none_or(|condition| layout_condition_value(syntax, active, condition) == Some(true))
+        .is_none_or(|condition| shape_condition_value(syntax, active, condition) == Some(true))
 }
 
-fn layout_condition_value(
+fn shape_condition_value(
     syntax: &Program,
-    active: &[(crate::ast::StructFieldId, crate::ast::EnumVariantId)],
+    active: &[(CompletionShapeDimension, crate::ast::EnumVariantId)],
     condition: &Expr,
 ) -> Option<bool> {
     match &condition.kind {
@@ -2327,14 +2271,14 @@ fn layout_condition_value(
         ExprKind::Unary {
             op: crate::ast::UnaryOp::Not,
             expr,
-        } => layout_condition_value(syntax, active, expr).map(|value| !value),
+        } => shape_condition_value(syntax, active, expr).map(|value| !value),
         ExprKind::Binary {
             op: crate::ast::BinaryOp::And,
             left,
             right,
         } => match (
-            layout_condition_value(syntax, active, left),
-            layout_condition_value(syntax, active, right),
+            shape_condition_value(syntax, active, left),
+            shape_condition_value(syntax, active, right),
         ) {
             (Some(false), _) | (_, Some(false)) => Some(false),
             (Some(true), Some(true)) => Some(true),
@@ -2345,8 +2289,8 @@ fn layout_condition_value(
             left,
             right,
         } => match (
-            layout_condition_value(syntax, active, left),
-            layout_condition_value(syntax, active, right),
+            shape_condition_value(syntax, active, left),
+            shape_condition_value(syntax, active, right),
         ) {
             (Some(true), _) | (_, Some(true)) => Some(true),
             (Some(false), Some(false)) => Some(false),
@@ -2357,8 +2301,8 @@ fn layout_condition_value(
             left,
             right,
         } => {
-            let fact = attachment_layout_fact(syntax, left, right)
-                .or_else(|| attachment_layout_fact(syntax, right, left))?;
+            let fact = attachment_shape_fact(syntax, left, right)
+                .or_else(|| attachment_shape_fact(syntax, right, left))?;
             let selected = active
                 .iter()
                 .find(|(field, _)| *field == fact.0)
@@ -2377,14 +2321,21 @@ fn layout_condition_value(
                 },
             )
         }
+        ExprKind::Is { value, pattern, .. } => {
+            let fact = pattern_shape_fact(syntax, value, &pattern.kind)?;
+            active
+                .iter()
+                .find(|(dimension, _)| *dimension == fact.0)
+                .map(|(_, variant)| *variant == fact.1)
+        }
         _ => None,
     }
 }
 
-fn collect_attachment_layout_facts(
+fn collect_attachment_shape_facts(
     syntax: &Program,
     expression: &Expr,
-    output: &mut Vec<(crate::ast::StructFieldId, crate::ast::EnumVariantId)>,
+    output: &mut Vec<(CompletionShapeDimension, crate::ast::EnumVariantId)>,
 ) {
     match &expression.kind {
         ExprKind::Binary {
@@ -2392,17 +2343,22 @@ fn collect_attachment_layout_facts(
             left,
             right,
         } => {
-            collect_attachment_layout_facts(syntax, left, output);
-            collect_attachment_layout_facts(syntax, right, output);
+            collect_attachment_shape_facts(syntax, left, output);
+            collect_attachment_shape_facts(syntax, right, output);
         }
         ExprKind::Binary {
             op: crate::ast::BinaryOp::Eq,
             left,
             right,
         } => {
-            if let Some(fact) = attachment_layout_fact(syntax, left, right)
-                .or_else(|| attachment_layout_fact(syntax, right, left))
+            if let Some(fact) = attachment_shape_fact(syntax, left, right)
+                .or_else(|| attachment_shape_fact(syntax, right, left))
             {
+                output.push(fact);
+            }
+        }
+        ExprKind::Is { value, pattern, .. } => {
+            if let Some(fact) = pattern_shape_fact(syntax, value, &pattern.kind) {
                 output.push(fact);
             }
         }
@@ -2410,10 +2366,10 @@ fn collect_attachment_layout_facts(
     }
 }
 
-fn collect_attachment_layout_falsy_facts(
+fn collect_attachment_shape_falsy_facts(
     syntax: &Program,
     expression: &Expr,
-    output: &mut Vec<(crate::ast::StructFieldId, crate::ast::EnumVariantId)>,
+    output: &mut Vec<(CompletionShapeDimension, crate::ast::EnumVariantId)>,
 ) {
     if let ExprKind::Binary {
         op: crate::ast::BinaryOp::Or,
@@ -2421,17 +2377,20 @@ fn collect_attachment_layout_falsy_facts(
         right,
     } = &expression.kind
     {
-        collect_attachment_layout_falsy_facts(syntax, left, output);
-        collect_attachment_layout_falsy_facts(syntax, right, output);
-    } else if let Some(fact) = inverse_attachment_layout_fact(syntax, expression) {
+        collect_attachment_shape_falsy_facts(syntax, left, output);
+        collect_attachment_shape_falsy_facts(syntax, right, output);
+    } else if let Some(fact) = inverse_attachment_shape_fact(syntax, expression) {
         output.push(fact);
     }
 }
 
-fn inverse_attachment_layout_fact(
+fn inverse_attachment_shape_fact(
     syntax: &Program,
     expression: &Expr,
-) -> Option<(crate::ast::StructFieldId, crate::ast::EnumVariantId)> {
+) -> Option<(CompletionShapeDimension, crate::ast::EnumVariantId)> {
+    if let ExprKind::Is { value, pattern, .. } = &expression.kind {
+        return inverse_shape_fact(syntax, pattern_shape_fact(syntax, value, &pattern.kind)?);
+    }
     let ExprKind::Binary {
         op: crate::ast::BinaryOp::Eq | crate::ast::BinaryOp::Ne,
         left,
@@ -2440,8 +2399,8 @@ fn inverse_attachment_layout_fact(
     else {
         return None;
     };
-    let selected = attachment_layout_fact(syntax, left, right)
-        .or_else(|| attachment_layout_fact(syntax, right, left))?;
+    let selected = attachment_shape_fact(syntax, left, right)
+        .or_else(|| attachment_shape_fact(syntax, right, left))?;
     if matches!(
         expression.kind,
         ExprKind::Binary {
@@ -2451,6 +2410,13 @@ fn inverse_attachment_layout_fact(
     ) {
         return Some(selected);
     }
+    inverse_shape_fact(syntax, selected)
+}
+
+fn inverse_shape_fact(
+    syntax: &Program,
+    selected: (CompletionShapeDimension, crate::ast::EnumVariantId),
+) -> Option<(CompletionShapeDimension, crate::ast::EnumVariantId)> {
     let enumeration = syntax.enum_declarations().find(|enumeration| {
         enumeration
             .variants
@@ -2467,27 +2433,17 @@ fn inverse_attachment_layout_fact(
     Some((selected.0, inverse.id))
 }
 
-fn attachment_layout_fact(
+fn attachment_shape_fact(
     syntax: &Program,
     dimension: &Expr,
     variant: &Expr,
-) -> Option<(crate::ast::StructFieldId, crate::ast::EnumVariantId)> {
+) -> Option<(CompletionShapeDimension, crate::ast::EnumVariantId)> {
     let dimension = completion_expression_path(dimension)?;
-    let ["layout", dimension_name] = dimension.as_slice() else {
-        return None;
-    };
+    let dimension = completion_shape_dimension(syntax, &dimension)?;
     let variant = completion_expression_path(variant)?;
     let [enum_name, variant_name] = variant.as_slice() else {
         return None;
     };
-    let layout = syntax
-        .structs
-        .iter()
-        .find(|structure| structure.name == "Layout")?;
-    let field = layout
-        .fields
-        .iter()
-        .find(|field| field.name == *dimension_name)?;
     let enumeration = syntax
         .enum_declarations()
         .find(|enumeration| enumeration.name == *enum_name)?;
@@ -2495,7 +2451,122 @@ fn attachment_layout_fact(
         .variants
         .iter()
         .find(|variant| variant.name == *variant_name)?;
-    Some((field.id, variant.id))
+    Some((dimension, variant.id))
+}
+
+fn completion_shape_dimension(syntax: &Program, path: &[&str]) -> Option<CompletionShapeDimension> {
+    Some(match path {
+        [name] => {
+            let global = syntax.globals.iter().find(|global| {
+                global
+                    .simple_binding()
+                    .is_some_and(|binding| binding.name == *name)
+            });
+            if let Some(global) = global {
+                CompletionShapeDimension::Value(global.id)
+            } else {
+                let field = syntax
+                    .state
+                    .as_ref()?
+                    .all_fields()
+                    .find(|field| field.name == *name)?;
+                CompletionShapeDimension::Value(field.id)
+            }
+        }
+        ["current", name] => {
+            let field = syntax
+                .state
+                .as_ref()?
+                .all_fields()
+                .find(|field| field.name == *name)?;
+            CompletionShapeDimension::Value(field.id)
+        }
+        _ => return None,
+    })
+}
+
+fn pattern_shape_fact(
+    syntax: &Program,
+    value: &Expr,
+    pattern: &MatchPattern,
+) -> Option<(CompletionShapeDimension, crate::ast::EnumVariantId)> {
+    let MatchPattern::Enum {
+        enumeration,
+        variant,
+        payload: None,
+    } = pattern
+    else {
+        return None;
+    };
+    let value_path = completion_expression_path(value)?;
+    let dimension = completion_shape_dimension(syntax, &value_path)?;
+    let enumeration = syntax
+        .enum_declarations()
+        .find(|candidate| candidate.name == enumeration.name)?;
+    let variant = enumeration
+        .variants
+        .iter()
+        .find(|candidate| candidate.name == *variant)?;
+    Some((dimension, variant.id))
+}
+
+fn fallback_shape_match_fact(
+    syntax: &Program,
+    tokens: &[&crate::lexer::Token],
+    offset: usize,
+) -> Option<(CompletionShapeDimension, crate::ast::EnumVariantId)> {
+    let (match_index, open_index) = tokens
+        .iter()
+        .enumerate()
+        .take_while(|(_, token)| token.span.start < offset)
+        .filter_map(|(index, token)| {
+            matches!(&token.kind, TokenKind::Ident(name) if name == "match").then(|| {
+                let open = tokens[index + 1..]
+                    .iter()
+                    .position(|candidate| matches!(candidate.kind, TokenKind::LBrace))?
+                    + index
+                    + 1;
+                cursor_is_inside_braces(tokens, token.span.start, offset).then_some((index, open))
+            })?
+        })
+        .last()?;
+    let dimension_path = tokens[match_index + 1..open_index]
+        .iter()
+        .filter_map(|token| match &token.kind {
+            TokenKind::Ident(name) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let dimension = completion_shape_dimension(syntax, &dimension_path)?;
+    let arrow_index = tokens[open_index + 1..]
+        .iter()
+        .enumerate()
+        .take_while(|(_, token)| token.span.start < offset)
+        .filter(|(_, token)| matches!(token.kind, TokenKind::FatArrow))
+        .map(|(relative, _)| open_index + 1 + relative)
+        .last()?;
+    let pattern_start = tokens[open_index + 1..arrow_index]
+        .iter()
+        .rposition(|token| matches!(token.kind, TokenKind::Comma | TokenKind::LBrace))
+        .map_or(open_index + 1, |relative| open_index + 2 + relative);
+    let pattern_path = tokens[pattern_start..arrow_index]
+        .iter()
+        .filter_map(|token| match &token.kind {
+            TokenKind::Ident(name) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let [enum_name, variant_name] = pattern_path.as_slice() else {
+        return None;
+    };
+    let enumeration = syntax
+        .enum_declarations()
+        .find(|enumeration| enumeration.name == *enum_name)?;
+    let variant = enumeration
+        .variants
+        .iter()
+        .find(|variant| variant.name == *variant_name)?;
+    Some((dimension, variant.id))
 }
 
 fn completion_expression_path(expression: &Expr) -> Option<Vec<&str>> {
@@ -3426,7 +3497,7 @@ whileAttached {
     }
 
     #[test]
-    fn state_completion_offers_fields_layouts_types_and_sources_contextually() {
+    fn state_completion_offers_fields_types_and_sources_contextually() {
         let mut empty = CompilerDatabase::new("state \"game.exe\" {\n    \n}");
         let candidates = labels(&mut empty, "state \"game.exe\" {");
         for expected in [
@@ -3436,8 +3507,6 @@ whileAttached {
             "module pointer field",
             "UTF-8 string field",
             "UTF-16LE string field",
-            "layout dimensions",
-            "named layout",
         ] {
             assert!(
                 candidates.contains(&expected.to_owned()),
@@ -3458,23 +3527,23 @@ whileAttached {
     }
 
     #[test]
-    fn layout_refinement_completes_conditional_state_and_managed_fields() {
+    fn shape_refinement_completes_conditional_state_and_managed_fields() {
         let source = r#"
 enum Edition { Base, Demo }
+let edition: Edition
 image "Assembly-CSharp" {
     class GameManager {
         static GameManager instance;
-        if layout.edition == Edition.Base { u32 level; }
+        if edition == Edition.Base { u32 level; }
     }
 }
 state Unity ["game.exe"] {
-    layout { edition: Edition }
-    if layout.edition == Edition.Base { scene: u8 at 0x100; }
+    if edition == Edition.Base { scene: u8 at 0x100; }
 }
-onAttach { return Layout { edition: Edition.Base } }
+onAttach { edition = Edition.Base }
 split {
     let manager = GameManager.instance else return false
-    if layout.edition == Edition.Base {
+    if edition == Edition.Base {
         current.
         manager.
     }
@@ -3622,32 +3691,12 @@ fn inspect() {
     }
 
     #[test]
-    fn state_completion_respects_layout_and_specialized_provider_grammars() {
+    fn state_completion_respects_specialized_provider_grammars() {
         let mut gba = CompilerDatabase::new("state GBA {\n    \n}");
         let candidates = labels(&mut gba, "state GBA {");
         assert!(candidates.contains(&"memory field".to_owned()));
         assert!(!candidates.contains(&"module pointer field".to_owned()));
         assert!(!candidates.contains(&"UTF-8 string field".to_owned()));
-
-        let source = "state \"game.exe\" {\n    layout Steam {\n        \n    },\n    /// outer marker\n    \n}";
-        let mut layouts = CompilerDatabase::new(source);
-        let inside = labels(&mut layouts, "layout Steam {");
-        assert!(inside.contains(&"memory field".to_owned()));
-        assert!(!inside.contains(&"named layout".to_owned()));
-        assert_eq!(
-            labels(&mut layouts, "/// outer marker\n    "),
-            vec!["named layout"]
-        );
-
-        let source =
-            "enum Edition { BaseGame }\nstate \"game.exe\" {\n    layout {\n        \n    }\n}";
-        let mut dimensions = CompilerDatabase::new(source);
-        assert_eq!(
-            labels(&mut dimensions, "layout {"),
-            vec!["layout dimension"]
-        );
-        let candidates = labels(&mut dimensions, "layout {\n        ");
-        assert_eq!(candidates, vec!["layout dimension"]);
     }
 
     #[test]
@@ -4110,28 +4159,33 @@ split {
     }
 
     #[test]
-    fn completes_only_the_refined_layout_fields_in_layout_match_arms() {
+    fn completes_only_shape_fields_refined_in_match_arms() {
         let source = r#"
+enum Build { V8, V9 }
+let build: Build
 state "game.exe" {
-    layout V8 { loading: i32 at 0x100; bike: i16 at 0x104; },
-    layout V9 { loading: i32 at 0x200; bike: u16 at 0x204; video: u8 at 0x206; },
+    if build == Build.V8 {
+        loading: i32 at 0x100; bike: i16 at 0x104;
+    } else {
+        loading: i32 at 0x200; bike: u16 at 0x204; video: u8 at 0x206;
+    }
 }
-onAttach { return StateLayout.V8 }
+onAttach { build = Build.V8 }
 split {
-    return match layout {
-        StateLayout.V8 => current.,
-        StateLayout.V9 => old.,
+    return match build {
+        Build.V8 => current.,
+        Build.V9 => old.,
     }
 }
 "#;
         let mut database = CompilerDatabase::new(source);
-        let v8 = labels(&mut database, "StateLayout.V8 => current.");
+        let v8 = labels(&mut database, "Build.V8 => current.");
         assert!(v8.contains(&"loading".to_owned()));
         assert!(v8.contains(&"bike".to_owned()), "{v8:#?}");
         assert!(!v8.contains(&"video".to_owned()));
 
         let mut database = CompilerDatabase::new(source);
-        let v9 = labels(&mut database, "StateLayout.V9 => old.");
+        let v9 = labels(&mut database, "Build.V9 => old.");
         assert!(v9.contains(&"loading".to_owned()));
         assert!(v9.contains(&"bike".to_owned()));
         assert!(v9.contains(&"video".to_owned()));
@@ -4497,40 +4551,6 @@ whileAttached {
     }
 
     #[test]
-    fn named_layouts_complete_the_generated_type_value_and_variants() {
-        let source = r#"
-state "game.exe" {
-    layout Steam { level: u32 at 0x100 },
-    layout GOG { level: u32 at 0x200 }
-}
-onAttach { return StateLayout. }
-split { lay }
-"#;
-        let mut database = CompilerDatabase::new(source);
-        let variants = labels(&mut database, "StateLayout.");
-        assert!(variants.contains(&"Steam".to_owned()));
-        assert!(variants.contains(&"GOG".to_owned()));
-        assert!(labels(&mut database, "lay }").contains(&"layout".to_owned()));
-
-        let missing_selector = r#"state "game.exe" {
-    layout Steam { level: u32 at 0x100 },
-    layout GOG { level: u32 at 0x200 },
-}
-onA"#;
-        let mut database = CompilerDatabase::new(missing_selector);
-        let completions = database.completions(missing_selector.len()).unwrap();
-        let selector = completions
-            .items
-            .iter()
-            .find(|item| item.label == "onAttach")
-            .expect("named layouts should offer a safe selector snippet");
-        assert!(selector.is_snippet);
-        assert!(selector.insert_text.contains("return StateLayout.Steam"));
-        assert!(selector.insert_text.contains("return StateLayout.GOG"));
-        assert!(selector.insert_text.ends_with("await process.closed()\n}"));
-    }
-
-    #[test]
     fn state_decoder_completion_is_contextual_and_inserts_its_bound() {
         let source = "state \"game.exe\" { mapName at 0x100 as ut }";
         let mut database = CompilerDatabase::new(source);
@@ -4600,19 +4620,20 @@ onAttach {
     }
 
     #[test]
-    fn managed_classes_expose_only_global_layout_refined_fields() {
+    fn managed_classes_expose_only_globally_refined_shape_fields() {
         let schema = r#"
 enum Edition { BaseGame, Demo }
+let edition: Edition
 image "Assembly-CSharp" {
     class GameManager {
         static GameManager instance;
         u32 common;
-        if layout.edition == Edition.BaseGame { u32 level; }
+        if edition == Edition.BaseGame { u32 level; }
         else { u32 scene; }
     }
 }
-state Unity ["game.exe"] { layout { edition: Edition } }
-onAttach { return Layout { edition: Edition.BaseGame } }
+state Unity ["game.exe"] {}
+onAttach { edition = Edition.BaseGame }
 "#;
 
         let source = format!("{schema}\nwhileAttached {{ GameManager. }}");
@@ -4623,7 +4644,7 @@ onAttach { return Layout { edition: Edition.BaseGame } }
         assert!(!class.contains(&"Layout".to_owned()), "{class:#?}");
 
         let source = format!(
-            "{schema}\nwhileAttached {{\n    let manager = GameManager.instance else return\n    if layout.edition == Edition.BaseGame {{\n        manager.\n    }}\n}}"
+            "{schema}\nwhileAttached {{\n    let manager = GameManager.instance else return\n    if edition == Edition.BaseGame {{\n        manager.\n    }}\n}}"
         );
         let mut database = CompilerDatabase::new(source);
         let fields = labels(&mut database, "        manager.");
@@ -4632,7 +4653,7 @@ onAttach { return Layout { edition: Edition.BaseGame } }
         assert!(!fields.contains(&"scene".to_owned()), "{fields:#?}");
 
         let source = format!(
-            "{schema}\nwhileAttached {{\n    let manager = GameManager.instance else return\n    if layout.edition == Edition.BaseGame {{\n        print(\"base\")\n    }} else {{\n        manager.\n    }}\n}}"
+            "{schema}\nwhileAttached {{\n    let manager = GameManager.instance else return\n    if edition == Edition.BaseGame {{\n        print(\"base\")\n    }} else {{\n        manager.\n    }}\n}}"
         );
         let mut database = CompilerDatabase::new(source);
         let fields = labels(&mut database, "        manager.");

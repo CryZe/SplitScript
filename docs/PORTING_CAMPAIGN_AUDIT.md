@@ -58,7 +58,7 @@ just as much as a missing facility is.
 - **policy** means the difference is intentional and documented.
 
 The existing facilities were compiled together in one probe: alternate exact
-process names, named layouts selected through `process.name()`, `tickRate`,
+process names, build enums initialized through `process.name()`, `tickRate`,
 `timer.state()`, and schema-declared bounded managed strings all compose in one source
 file.
 
@@ -68,7 +68,7 @@ file.
 | --- | --- | --- |
 | Arietta of Spirits | `PORTED` | The extensionless Windows provider compiles but does not attach under the current host contract. This is an exact-name **discoverability failure**. Omitting the single ASL version label remains a reasonable **policy** until another physical layout is supported. |
 | TUNIC | `PORTED-LIMITED` | The campaign could not find how one file accepts both `TUNIC` and `Secret Legend`; one state candidate array supports both exact executable names. The port also manually decodes a Mono string instead of declaring a bounded managed `String` field. Both are **discoverability failures**. Missing Unity scene behavior is a **language or library question**, and exact `onStart` cleanup remains a **host gap**. |
-| A Proof of Concept | `PORTED-LIMITED` as two files | One state candidate array, two named layouts, `process.name()`, and a returned `StateLayout` can represent both executables in one file. Producing separate files is a **discoverability failure** around the combined attachment/layout workflow. Timer run-offset mutation and exact `onStart` restoration remain **host gaps**. |
+| A Proof of Concept | `PORTED-LIMITED` as two files | One state candidate array, an ordinary build enum initialized from `process.name()`, and conditional fields can represent both executables in one file. Producing separate files is a **discoverability failure** around the combined attachment/shape workflow. Timer run-offset mutation and exact `onStart` restoration remain **host gaps**. |
 | Aim Climb | `PORTED-LIMITED` | Dropping ASL's 60 Hz `refreshRate` is a **discoverability failure** because `tickRate { attached: 60 }` owns this lifecycle behavior. The module-qualified `.exe` reads do not repair the extensionless provider. Dynamic lookup of a statically declared setting is valid but misses its typed member. |
 | 25 To Life | `PORTED-LIMITED` | Missing `timer.state() == TimerState.NotRunning` is a **discoverability failure** because it can preserve the source's accumulator reset. Accumulating on every positive IGT rollback instead of only a positive-to-zero boundary is a **port bug**. The provider is also extensionless. |
 
@@ -79,7 +79,7 @@ file.
 - Source: one process identity and one labelled physical layout.
 - Candidate: the same extensionless process identity, with the label omitted.
 - Correction: use and live-verify the exact Windows executable filename,
-  including `.exe`. No layout selection is needed until another build exists.
+  including `.exe`. No shape discriminator is needed until another build exists.
 
 This is a silent failure category: type checking says nothing about whether the
 host will ever discover the declared process.
@@ -109,9 +109,10 @@ behavior.
   addresses, two route tables, and identity-specific start/reset rules.
 - Candidate: two independent SplitScript files because the porter believed one
   provider could not represent both.
-- Correction: use an alternate-name provider, one layout per executable,
-  `process.name()` in `onAttach`, and return the matching generated
-  `StateLayout` variant. Keep the distinct route mapping behind that selection.
+- Correction: use an alternate-name provider, one build enum variant and
+  conditional field branch per executable, then initialize the enum from
+  `process.name()` in `onAttach`. Keep the distinct route mapping behind that
+  selection.
 - Remaining host gap: saving, replacing, and restoring the timer run offset
   requires timer configuration and exact `onStart` support. It must not be
   approximated through game time.
@@ -153,17 +154,18 @@ Audit result: mostly a false aggregate blocker with two narrower host gaps.
   file version.
 - Campaign claim: executable file-version metadata and alternate layout
   selection are unavailable.
-- Existing translation: declare four named layouts, read
+- Existing translation: declare a four-variant build enum, read
   `process.mainModule().fileVersion()` in `onAttach`, compare `FileVersion`
-  values with version literals, and return the matching `StateLayout` variant.
+  values with version literals, assign the matching build variant, and guard
+  version-specific fields with it.
   The exact Windows process candidate must be `AoE2DE_s.exe` under the current
   host contract.
 - Current compiler result: `Process.closed()` now completes as `async Never`,
   so `module.fileVersion() else await process.closed()` has type
   `FileVersion` and provides a clean unsupported-build path without a fake
   version value. A braced fallback block remains separate syntax work; bare
-  `else return` is still correctly rejected because a layout-selecting
-  `onAttach` must return `StateLayout`.
+  `else return` is still correctly rejected because it would leave the build
+  global uninitialized.
 - Source: map and lost-time logic reads `timer.CurrentPhase` and
   `timer.CurrentSplitIndex`.
 - Campaign claim: timer phase and split index are unavailable.
@@ -315,16 +317,16 @@ language and standard library.
 - Source: two labelled layouts contain the same two boolean fields at different
   addresses. `modules.First().FileVersionInfo.FileVersion` selects patch 1.0 for
   `1.0.0.0` and patch 1.4.1 for `1.5.0.0`; loading is the OR of both fields.
-- Existing translation: attach to exact `Borderlands.exe`, declare two named
-  layouts, read `process.mainModule().fileVersion()` in `onAttach`, return the
-  matching `StateLayout` variant, and use `await process.closed()` for read
+- Existing translation: attach to exact `Borderlands.exe`, declare a build enum
+  and two conditional field branches, read `process.mainModule().fileVersion()`
+  in `onAttach`, assign the matching variant, and use `await process.closed()` for read
   failure or an unsupported version. A focused current-compiler probe validates
   this complete shape.
 - The report could not find executable file-version dispatch. This is a
   **discoverability failure**, and no module-size approximation or new host
   selector is needed.
 - `FileVersion` literals are first-class match patterns, so version selection
-  maps directly to `v"1.0.0.0" => StateLayout.Patch100` arms. Because executable
+  maps directly to `v"1.0.0.0" => Build.Patch100` arms. Because executable
   versions form an open value space, the match must include `_` for unsupported
   builds; no string parsing or chained comparison workaround is required.
 - The source's `doStart` value is initialized but unused. There are no active
@@ -371,8 +373,9 @@ Audit result: the timer and layout claims were false aggregate blockers, and
 the one exact-build-selection requirement now has a direct language API.
 
 - Both sources declare two named physical layouts for one Windows executable.
-  SplitScript can represent those layouts directly, expose their common state
-  fields, and return the selected `StateLayout` from `onAttach`. Their exact
+  SplitScript can represent those shapes with one ordinary build enum and
+  conditional fields, expose their common state fields, and initialize the
+  selected build in `onAttach`. Their exact
   current attachment candidates are `COTM.exe` and `game.exe`.
 - COTM's reset logic uses `timer.CurrentPhase`, and its stage and boss-rush
   routes use `timer.CurrentSplitIndex`. These map to the existing exhaustive
@@ -532,8 +535,9 @@ source behavior is now directly representable.
   alternate state selection has not been demonstrated. It also drops the
   source's 120 Hz refresh rate.
 - Existing facilities: use one exact-name candidate array containing
-  `CrazyMachines.exe`, `cm_family.exe`, and `cmnftl.exe`; declare one named layout
-  per executable; return the corresponding `StateLayout` from `onAttach`; and
+  `CrazyMachines.exe`, `cm_family.exe`, and `cmnftl.exe`; declare one build enum
+  variant and conditional field branch per executable; assign the build from
+  `process.name()` in `onAttach`; and
   declare `tickRate { attached: 120 }`.
 - The natural selector is a `match process.name()` with one string-literal arm
   per executable. The audit initially had to replace that expression with an
@@ -542,7 +546,7 @@ source behavior is now directly representable.
   diagnose duplicate values, and work across suspending match arms.
 - A focused current-compiler probe validates the complete composition and
   exposes `win` through the common snapshot interface. The unmatched-name arm
-  waits for process closure, so layout selection remains total without a silent
+  waits for process closure, so shape initialization remains total without a silent
   fallback.
 - Live-game verification is still required for the executable filenames,
   addresses, pointer chains, and transition timing. Compilation proves that all
@@ -623,7 +627,7 @@ feature:
 - state candidate rejection retains a previous field value without making
   `current` mutable; derived run-owned values belong in globals;
 - `process.loadedModule(name)`, `process.mainModule()`, executable versions,
-  typed layout selection, and whole-expression [`retry`] cover reviewed
+  typed shape selection, and whole-expression [`retry`] cover reviewed
   known-name probes, while arbitrary prefix module
   discovery still requires host enumeration;
 - `scan`, `readRelative32`, `MemoryPath`, `onAttach`, and `retry` cover the

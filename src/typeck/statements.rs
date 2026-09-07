@@ -334,21 +334,18 @@ impl Checker {
                 ..
             } => {
                 let flow = self.check_condition(condition);
-                let constraints = self.layout_constraints(condition);
-                let inverse_constraints = self.inverse_layout_constraints(condition);
+                let constraints = self.shape_constraints(condition);
+                let inverse_constraints = self.inverse_shape_constraints(condition);
                 self.with_condition_path(flow.when_true.as_ref(), |checker| {
-                    checker.with_layout_constraints(constraints.as_deref(), |checker| {
+                    checker.with_shape_constraints(constraints.as_deref(), |checker| {
                         checker.block(then_block, true);
                     });
                 });
                 if let Some(else_block) = else_block {
                     self.with_condition_path(flow.when_false.as_ref(), |checker| {
-                        checker.with_layout_constraints(
-                            inverse_constraints.as_deref(),
-                            |checker| {
-                                checker.block(else_block, true);
-                            },
-                        );
+                        checker.with_shape_constraints(inverse_constraints.as_deref(), |checker| {
+                            checker.block(else_block, true);
+                        });
                     });
                 }
             }
@@ -795,16 +792,6 @@ impl Checker {
 
     pub(super) fn binding_for_use(&mut self, name: &str, span: Span) -> Option<Binding> {
         let binding = self.binding(name)?;
-        if name == "layout"
-            && binding.id == self.layout_value
-            && matches!(self.callable, CallableContext::Action(ActionKind::OnAttach))
-            && !self.layout_available_in_on_attach
-        {
-            self.error(
-                "`layout` is only available after `onAttach` has returned it",
-                span,
-            );
-        }
         if binding.debug_only && !self.debug_context.is_debug() {
             self.error(
                 format!("debug-only binding `{name}` can only be used from debug code"),

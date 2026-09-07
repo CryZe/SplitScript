@@ -169,31 +169,15 @@ impl PointerPrefixPlan {
             field_paths.push((field.id, path_nodes));
         }
 
-        let named_layouts = state
-            .layouts
-            .iter()
-            .enumerate()
-            .flat_map(|(layout, declaration)| {
-                declaration
-                    .fields
-                    .iter()
-                    .map(move |field| (field.id, layout))
-            })
-            .collect::<HashMap<_, _>>();
-        let can_share = |left: ValueId, right: ValueId| {
-            if !state.layouts.is_empty() {
-                return named_layouts.get(&left) == named_layouts.get(&right);
-            }
-            match (
-                semantics.state_field_layout_predicate(left),
-                semantics.state_field_layout_predicate(right),
-            ) {
-                (Some(left), Some(right)) => left
-                    .alternatives
-                    .iter()
-                    .any(|left| right.alternatives.contains(left)),
-                _ => true,
-            }
+        let can_share = |left: ValueId, right: ValueId| match (
+            semantics.state_field_shape_predicate(left),
+            semantics.state_field_shape_predicate(right),
+        ) {
+            (Some(left), Some(right)) => left
+                .alternatives
+                .iter()
+                .any(|left| right.alternatives.contains(left)),
+            _ => true,
         };
         let shared = nodes
             .iter()

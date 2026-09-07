@@ -25,14 +25,14 @@ use super::{
 
 pub(super) struct CheckedPattern {
     pub(super) coverage: PatternCoverage,
-    pub(super) layout_variants: Option<HashSet<crate::ast::EnumVariantId>>,
+    pub(super) shape_variants: Option<HashSet<crate::ast::EnumVariantId>>,
 }
 
 impl CheckedPattern {
     fn new(coverage: PatternCoverage) -> Self {
         Self {
             coverage,
-            layout_variants: None,
+            shape_variants: None,
         }
     }
 }
@@ -688,11 +688,11 @@ impl Checker {
             }
             ExprKind::Match { value, arms } => {
                 let value_type = self.expr(value, None)?;
-                let refines_state_layout = matches!(
+                let refines_state_provider = matches!(
                     &value.kind,
                     ExprKind::Path(path)
-                        if matches!(path.as_slice(), [name] if name == "layout" || name == "provider")
-                            && self.layout_value.is_some()
+                        if matches!(path.as_slice(), [name] if name == "provider")
+                            && self.state_refinement_value.is_some()
                 );
                 let mut unguarded_patterns = Vec::<PatternCoverage>::new();
                 let mut result_type = expected;
@@ -701,14 +701,14 @@ impl Checker {
                     self.scopes.push(HashMap::new());
                     let checked =
                         self.check_pattern(&arm.pattern, arm.pattern_id, value_type, arm.span);
-                    let state_layouts = if refines_state_layout {
-                        checked.layout_variants.clone()
+                    let provider_variants = if refines_state_provider {
+                        checked.shape_variants.clone()
                     } else {
                         None
                     };
-                    let shape_constraints = self.layout_match_constraints(value, &arm.pattern);
-                    let arm_type = self.with_state_layouts(state_layouts, |checker| {
-                        checker.with_layout_constraints(shape_constraints.as_deref(), |checker| {
+                    let shape_constraints = self.shape_match_constraints(value, &arm.pattern);
+                    let arm_type = self.with_provider_variants(provider_variants, |checker| {
+                        checker.with_shape_constraints(shape_constraints.as_deref(), |checker| {
                             if let Some(guard) = &arm.guard {
                                 let flow = checker.check_condition(guard);
                                 checker.with_condition_path(flow.when_true.as_ref(), |checker| {
@@ -821,8 +821,8 @@ impl Checker {
                 else_expr,
             } => {
                 let flow = self.check_condition(condition);
-                let layout_constraints = self.layout_constraints(condition);
-                let inverse_layout_constraints = self.inverse_layout_constraints(condition);
+                let shape_constraints = self.shape_constraints(condition);
+                let inverse_shape_constraints = self.inverse_shape_constraints(condition);
                 let result_type =
                     expected.unwrap_or_else(|| self.fresh_inference(Requirements::none(), None));
                 // `None` can either remain the zero-sized unit value or lift into
@@ -835,26 +835,26 @@ impl Checker {
                     && !expression_is_bare_none(else_expr)
                 {
                     let else_type = self.with_condition_path(flow.when_false.as_ref(), |checker| {
-                        checker.with_layout_constraints(
-                            inverse_layout_constraints.as_deref(),
+                        checker.with_shape_constraints(
+                            inverse_shape_constraints.as_deref(),
                             |checker| checker.expr(else_expr, Some(result_type)),
                         )
                     });
                     let then_type = self.with_condition_path(flow.when_true.as_ref(), |checker| {
-                        checker.with_layout_constraints(layout_constraints.as_deref(), |checker| {
+                        checker.with_shape_constraints(shape_constraints.as_deref(), |checker| {
                             checker.expr(then_expr, Some(result_type))
                         })
                     });
                     (then_type, else_type)
                 } else {
                     let then_type = self.with_condition_path(flow.when_true.as_ref(), |checker| {
-                        checker.with_layout_constraints(layout_constraints.as_deref(), |checker| {
+                        checker.with_shape_constraints(shape_constraints.as_deref(), |checker| {
                             checker.expr(then_expr, Some(result_type))
                         })
                     });
                     let else_type = self.with_condition_path(flow.when_false.as_ref(), |checker| {
-                        checker.with_layout_constraints(
-                            inverse_layout_constraints.as_deref(),
+                        checker.with_shape_constraints(
+                            inverse_shape_constraints.as_deref(),
                             |checker| checker.expr(else_expr, Some(result_type)),
                         )
                     });
@@ -1739,7 +1739,7 @@ impl Checker {
         let mut expected_names = None::<HashSet<String>>;
         let mut arm_bindings = HashMap::<String, Binding>::new();
         let mut coverage = Vec::with_capacity(alternatives.len());
-        let mut layout_variants = Some(HashSet::new());
+        let mut shape_variants = Some(HashSet::new());
 
         for alternative in alternatives {
             *self.scopes.last_mut().unwrap() = base_scope.clone();
@@ -1784,7 +1784,7 @@ impl Checker {
                 }
             }
 
-            match (&mut layout_variants, checked.layout_variants) {
+            match (&mut shape_variants, checked.shape_variants) {
                 (Some(all), Some(current)) => all.extend(current),
                 (slot, None) => *slot = None,
                 (None, Some(_)) => {}
@@ -1802,7 +1802,7 @@ impl Checker {
         };
         CheckedPattern {
             coverage,
-            layout_variants,
+            shape_variants,
         }
     }
 
@@ -2020,7 +2020,7 @@ impl Checker {
                         name: variant.clone(),
                         payload: Box::new(payload_coverage),
                     },
-                    layout_variants: match resolved_variant {
+                    shape_variants: match resolved_variant {
                         ResolvedEnumVariantId::Source(variant) => Some(HashSet::from([variant])),
                         ResolvedEnumVariantId::Standard(_) => None,
                     },
@@ -2252,16 +2252,16 @@ impl Checker {
             let (bindings, constraints) = match op {
                 BinaryOp::And => (
                     left_flow.when_true.as_ref(),
-                    self.truthy_layout_constraints(left),
+                    self.truthy_shape_constraints(left),
                 ),
                 BinaryOp::Or => (
                     left_flow.when_false.as_ref(),
-                    self.falsy_layout_constraints(left),
+                    self.falsy_shape_constraints(left),
                 ),
                 _ => unreachable!("logical operators were matched above"),
             };
             self.with_condition_path(bindings, |checker| {
-                checker.with_layout_constraints(Some(&constraints), |checker| {
+                checker.with_shape_constraints(Some(&constraints), |checker| {
                     checker.expr(right, Some(bool_type));
                 });
             });

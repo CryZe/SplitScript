@@ -136,7 +136,7 @@ to inference or code generation.
     misses and ambiguities report the responsible source aliases once and keep
     the attachment inert until the process closes instead of rescanning
     metadata forever.
-- [ ] Remove `layout` as a user-facing concept and express every observable
+- [x] Remove `layout` as a user-facing concept and express every observable
   shape decision with ordinary typed state. Attachment-static decisions such
   as edition, storefront, renderer, or build are bare enum globals initialized
   by `onAttach` or, when uniquely proven, by Unity metadata. Decisions that may
@@ -144,8 +144,8 @@ to inference or code generation.
   fields. The compiler retains one finite internal predicate model for field
   availability and schema planning; users should not need a parallel `Layout`
   struct, implicit `layout` value, or generated `StateLayout` enum.
-  - [x] Generalize the predicate representation across legacy layout fields,
-    attachment globals, and dynamic state fields. Use it for path-sensitive
+  - [x] Generalize the predicate representation across attachment globals and
+    dynamic state fields. Use it for path-sensitive
     member availability, declaration checking, and code generation rather than
     introducing syntax-specific aliases.
   - [x] Allow attachment enum globals to guard state and managed-class fields.
@@ -156,12 +156,14 @@ to inference or code generation.
     discriminator first, initialize an entering branch transactionally, leave
     inactive branches unread, and seed newly active fields into `old` so a
     shape transition cannot manufacture a split from storage defaults.
-  - [ ] Replace every maintained example, test, guide, hover, completion item,
+  - [x] Replace every maintained example, test, guide, hover, completion item,
     and generated-reference entry that still teaches `layout`, `Layout`, or
     `StateLayout` with ordinary globals/state fields. Remove the old grammar,
     AST nodes, generated symbols, backend storage, and layout-return contract
-    from `onAttach`; retain at most a focused migration diagnostic.
-  - [ ] Document compiler-initialized attachment globals in hover/reference
+    from `onAttach`. The removed experimental SplitScript syntax receives no
+    compatibility path or bespoke diagnostic; ASL migration diagnostics still
+    guide source-language layout labels to the ordinary shape model.
+  - [x] Document compiler-initialized attachment globals in hover/reference
     output and diagnose partial mixed ownership when one shape dimension is
     assigned by `onAttach` while another is expected from metadata.
   - [x] Allow state and managed-class fields to be conditioned by ordinary,
@@ -169,11 +171,11 @@ to inference or code generation.
     those predicates once and use the same predicate representation for member
     availability, control-flow refinement, binding, diagnostics, and codegen.
   - [x] Support `else if` and `else` chains for conditional state and managed
-    fields. Represent every branch as the exact bounded set of layout
+    fields. Represent every branch as the exact bounded set of shape
     assignments left after preceding branches, so complements across several
     dimensions remain correct in tooling, availability checks, binding, and
     generated polling code.
-  - [x] Make managed schema probes contribute constraints to the global layout
+  - [x] Make managed schema probes contribute constraints to the global shape
     dimensions. Probe results preserve both offsets and presence. When the
     complete set of conditional fields gives every bounded shape combination
     a distinct exact presence pattern, attachment initializes the responsible
@@ -191,7 +193,7 @@ to inference or code generation.
     transient read failure, completed absence, and a found offset. Generated
     attachment binding probes complete alternatives without adding a public
     lookup API or duplicating the metadata scanner. Reuse this mechanism as
-    the low-level evidence source for global layout constraints.
+    the low-level evidence source for global shape constraints.
   - [x] Replace the temporary inert zero-match behavior with a focused runtime
     attachment report naming every observed conditional managed field and the
     expected presence pattern of each responsible source shape. Distinct
@@ -257,12 +259,12 @@ to inference or code generation.
   paths. Resolve a shared module lookup or raw pointer dereference once into an
   `update` local and reuse it across sibling fields, including the case where
   fields add different offsets after the same dereference. Resolution remains
-  lazy inside the active layout branch, failures retain the existing per-field
+  lazy inside the active shape branch, failures retain the existing per-field
   boundary, and locals reset naturally for the next candidate snapshot. The
   release Neon White fixture shrank from 6,707 to 6,515 bytes while removing
   the duplicate host calls.
 - [x] Extend the attachment cache with managed field offsets and presence
-  evidence used to validate the attachment-wide layout. Strings, arrays, and
+  evidence used to validate the attachment-wide shape. Strings, arrays, and
   explicit snapshots may still allocate their returned values.
 - [x] Preserve the existing transactional state-field failure boundary for
   generated member reads. A failed pointer hop or memory read retains the last
@@ -629,7 +631,7 @@ concepts rather than maintaining a parallel inventory.
   the event contract in R2. Track teardown in R6 of
   [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
 
-### State layouts, discovery, and process identity
+### State shapes, discovery, and process identity
 
 - [x] Make `process.findMemoryRange(size, access)` wait until a matching range
   exists and return `async MemoryRange`, not `async MemoryRange?`. The current
@@ -643,9 +645,9 @@ concepts rather than maintaining a parallel inventory.
   asynchronous discovery APIs for the same accidental “not found yet” option;
   retain optionality only when absence is a meaningful completed result rather
   than temporary discovery state. The only remaining async options are private
-  Unity metadata probes, where completed class or field absence is layout
+  Unity metadata probes, where completed class or field absence is shape
   evidence rather than a request to keep waiting.
-- [ ] Add layout sharing or overrides only if a maintained port proves that
+- [ ] Add pointer-path shape sharing or overrides only if a maintained port proves that
   repeated pointer paths across many versions are materially unmaintainable.
   Keep the selected physical layout auditable.
 - [ ] Add safe full-module enumeration for ports that cannot know every module
@@ -903,7 +905,8 @@ concepts rather than maintaining a parallel inventory.
   handled by the type-aware callable suggestion machinery. The current proven
   holes are `HashSet` -> `Set`, tuple collections -> a named struct in `[T]`,
   `Environment.TickCount` / elapsed `Stopwatch` use -> `Instant`, and duplicate
-  native ASL state blocks -> one process-candidate array with named layouts.
+  native ASL state blocks -> one state with ordinary shape globals and
+  conditional fields.
   Searches for `Dictionary`, `File.GetLastWriteTime`, and JSON should identify
   their explicit pending designs rather than returning a misleading nearby
   symbol; `Thread.Sleep` should explain cooperative state-machine timing and
@@ -1167,7 +1170,7 @@ remaining work is product hardening and distribution.
   test.
   - [x] Introduce one condition-flow analysis with explicit true and false
     outcomes. Carry pattern bindings through parentheses, `!`, short-circuit
-    `&&`, and short-circuit `||` alongside the compiler's existing layout
+    `&&`, and short-circuit `||` alongside the compiler's existing shape
     refinements. The right operand of `&&` receives facts from the left true
     edge; the right operand of `||` receives facts from the left false edge;
     joined paths retain only bindings initialized with the same identity on
@@ -1189,7 +1192,7 @@ remaining work is product hardening and distribution.
     documentation from match arms to `is` patterns. Diagnose uses on an edge
     where the declaration is not definitely initialized, allow irrefutable
     binding patterns with an always-matches warning, and allow binding-free
-    `is` tests in static layout predicates while rejecting declarations that
+    `is` tests in static shape predicates while rejecting declarations that
     have no executable lexical scope.
 - [x] Generalize patterns into irrefutable binding declarations everywhere
   executable code introduces values. Local and initialized global `let`

@@ -765,34 +765,22 @@ fn syntax_parameter(
     finder.found
 }
 
-fn append_attachment_layouts(
+fn append_attachment_shapes(
     description: &mut String,
     syntax: &crate::ast::Program,
-    layouts: &[crate::AttachmentLayout],
-    total_layouts: usize,
+    analysis: &crate::ScopedGlobalAnalysis,
+    shapes: &[crate::AttachmentShape],
+    total_shapes: usize,
 ) {
-    if layouts.is_empty() || layouts.len() == total_layouts {
+    if shapes.is_empty() || shapes.len() == total_shapes {
         return;
     }
-    let names = layouts
+    let names = shapes
         .iter()
-        .filter_map(|layout| match layout {
-            crate::AttachmentLayout::Single => Some("the attachment".to_owned()),
-            crate::AttachmentLayout::Named(variant) => syntax
-                .state
-                .as_ref()
-                .and_then(|state| state.layout_enum.as_ref())
-                .and_then(|enumeration| {
-                    enumeration
-                        .variants
-                        .iter()
-                        .find(|candidate| candidate.id == *variant)
-                })
-                .map(|variant| format!("`StateLayout.{}`", variant.name)),
-        })
+        .map(|shape| format!("`{}`", analysis.shape_label(*shape, syntax)))
         .collect::<Vec<_>>();
     if !names.is_empty() {
-        description.push_str("\n\n**Attachment layouts:** ");
+        description.push_str("\n\n**Attachment shapes:** ");
         description.push_str(&names.join(", "));
     }
 }
@@ -920,18 +908,14 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             let (signature, description) = if syntax
                 .state
                 .as_ref()
-                .is_some_and(|state| state.layout_value == Some(value))
+                .is_some_and(|state| state.provider_value == Some(value))
             {
                 let name = syntax
                     .state
                     .as_ref()
                     .and_then(|state| state.refinement_value_name())
-                    .unwrap_or("layout");
-                let description = if name == "provider" {
-                    "Read-only state provider selected for the attached process. Match on it to refine provider-specific state fields and roots."
-                } else {
-                    "Read-only memory layout selected for the attached game build."
-                };
+                    .unwrap_or("provider");
+                let description = "Read-only state provider selected for the attached process. Match on it to refine provider-specific state fields and roots.";
                 (format!("{name}: {ty}"), description.to_owned())
             } else if let Some(global) = syntax.globals.iter().find(|global| {
                 let mut contains = false;
@@ -964,12 +948,13 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                     && let Some(checked) = context.snapshot.checked()
                 {
                     let attachment = checked.scoped_globals();
-                    let layouts = attachment.available_layouts(value).collect::<Vec<_>>();
-                    append_attachment_layouts(
+                    let layouts = attachment.available_shapes(value).collect::<Vec<_>>();
+                    append_attachment_shapes(
                         &mut description,
                         syntax,
+                        attachment,
                         &layouts,
-                        attachment.layouts().len(),
+                        attachment.shapes().len(),
                     );
                 }
                 (format!("let {}: {ty}", definition.name), description)
@@ -1113,12 +1098,13 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             }
             if let Some(checked) = context.snapshot.checked() {
                 let attachment = checked.scoped_globals();
-                let allowed = attachment.function_layouts(function.id).collect::<Vec<_>>();
-                append_attachment_layouts(
+                let allowed = attachment.function_shapes(function.id).collect::<Vec<_>>();
+                append_attachment_shapes(
                     &mut description,
                     syntax,
+                    attachment,
                     &allowed,
-                    attachment.layouts().len(),
+                    attachment.shapes().len(),
                 );
                 if attachment.function_requires_attempt(function.id) {
                     description.push_str(
@@ -1809,8 +1795,9 @@ mod tests {
     fn hover_uses_resolved_catalog_signature_effects_and_examples() {
         let source = r#"
 enum Edition { Alternate }
-state "game.exe" { layout { edition: Edition } }
-onAttach { return Layout { edition: Edition.Alternate } }
+let edition: Edition
+state "game.exe" {}
+onAttach { edition = Edition.Alternate }
 
 whileAttached {
     let value: i32 = 8
@@ -2481,44 +2468,6 @@ fn classify(value: [u8]) -> bool {
     }
 
     #[test]
-    fn generated_state_layout_type_and_value_have_source_hover() {
-        let source = r#"
-state "game.exe" {
-    /// Steam build layout.
-    layout Steam { level: u32 at 0x100 },
-    layout GOG { level: u32 at 0x200 }
-}
-onAttach { return StateLayout.Steam }
-split { return layout == StateLayout.Steam }
-"#;
-        let mut database = CompilerDatabase::new(source);
-        let layout_type = database
-            .hover(source.find("StateLayout").unwrap() + 1)
-            .unwrap()
-            .expect("generated layout type hover");
-        assert!(layout_type.markdown.contains("enum StateLayout"));
-        assert!(
-            layout_type
-                .markdown
-                .contains("memory layout selected for the attached game build")
-        );
-
-        let layout = database
-            .hover(source.find("layout ==").unwrap() + 1)
-            .unwrap()
-            .expect("selected layout hover");
-        assert!(layout.markdown.contains("layout: StateLayout"));
-        assert!(layout.markdown.contains("Read-only memory layout"));
-
-        let variant = database
-            .hover(source.rfind("Steam").unwrap() + 1)
-            .unwrap()
-            .expect("generated layout variant hover");
-        assert!(variant.markdown.contains("StateLayout.Steam"));
-        assert!(variant.markdown.contains("Steam build layout."));
-    }
-
-    #[test]
     fn settings_and_lifecycle_hover_share_the_language_catalog() {
         let source = include_str!("../examples/lso_desktop_settings.split");
         let mut database = CompilerDatabase::new(source);
@@ -2772,26 +2721,29 @@ state "game.exe" {}
     #[test]
     fn hover_distinguishes_attachment_globals_and_layout_constrained_helpers() {
         let source = r#"
+enum Build { Steam, GOG }
+let build: Build
 let steamBase
 let gogBase
 state "game.exe" {
-    layout Steam { level: u32 at 0x10 },
-    layout GOG { level: u32 at 0x20 },
+    if build == Build.Steam { level: u32 at 0x10; }
+    else { level: u32 at 0x20; }
 }
 onAttach {
     if process.name() == "game.exe" {
         steamBase = 0x1000 as address
-        return StateLayout.Steam
+        build = Build.Steam
+        return
     }
 
     gogBase = 0x2000 as address
-    return StateLayout.GOG
+    build = Build.GOG
 }
 fn steamReady() { return steamBase != 0 }
 split {
-    return match layout {
-        StateLayout.Steam => steamReady(),
-        StateLayout.GOG => gogBase != 0,
+    return match build {
+        Build.Steam => steamReady(),
+        Build.GOG => gogBase != 0,
     }
 }
 "#;
@@ -2809,18 +2761,18 @@ split {
         assert!(
             global
                 .markdown
-                .contains("**Attachment layouts:** `StateLayout.Steam`")
+                .contains("**Attachment shapes:** `build = Build.Steam`")
         );
 
         let helper = database
             .hover(source.find("steamReady() {").unwrap() + 1)
             .unwrap()
-            .expect("layout-constrained helper hover");
+            .expect("shape-constrained helper hover");
         assert!(helper.markdown.contains("requires an attached process"));
         assert!(
             helper
                 .markdown
-                .contains("**Attachment layouts:** `StateLayout.Steam`")
+                .contains("**Attachment shapes:** `build = Build.Steam`")
         );
     }
 
@@ -2857,8 +2809,9 @@ gameTime { return elapsedTime() }
     fn managed_schema_declarations_have_source_hover_and_documentation() {
         let source = r#"
 enum Edition { Alternate }
-state "game.exe" { layout { edition: Edition } }
-onAttach { return Layout { edition: Edition.Alternate } }
+let edition: Edition
+state "game.exe" {}
+onAttach { edition = Edition.Alternate }
 /// Gameplay metadata.
 image "Assembly-CSharp" {
     /// Runtime namespace.
@@ -2868,7 +2821,7 @@ image "Assembly-CSharp" {
             /// Current hit points.
             static f32 health from "_health";
 
-            if layout.edition == Edition.Alternate {
+            if edition == Edition.Alternate {
                 /// Armor in the alternate release.
                 f32 armor;
             }

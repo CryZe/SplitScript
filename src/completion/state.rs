@@ -1,4 +1,4 @@
-//! Contextual completion for state declarations and named memory layouts.
+//! Contextual completion for state declarations and conditional field groups.
 
 use super::{
     CompletionBuilder, CompletionItem, CompletionKind, CompletionList, CompletionRequest,
@@ -9,16 +9,7 @@ use crate::{ast::Span, lexer::TokenKind, stdlib::StandardLibrary};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Context {
     State,
-    NamedLayout,
-    AttachmentLayout,
     ConditionalState,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StateBodyKind {
-    Unknown,
-    Fields,
-    Layouts,
 }
 
 pub(super) fn complete_state_dsl(
@@ -31,22 +22,12 @@ pub(super) fn complete_state_dsl(
     let replacement = request.replacement;
     let tokens = &request.tokens;
     let state_open = state_open_containing(tokens, source.len(), offset)?;
-    let (context_open, context) = innermost_context(tokens, state_open, offset)?;
+    let (context_open, _context) = innermost_context(tokens, state_open, offset)?;
     let provider_is_specialized = syntax
         .state
         .as_ref()
         .is_some_and(|state| state.provider.is_some());
-    let body_kind = if context != Context::State {
-        StateBodyKind::Fields
-    } else {
-        state_body_kind(tokens, state_open, offset)
-    };
-    let delimiter = if body_kind == StateBodyKind::Layouts {
-        TokenKind::Comma
-    } else {
-        TokenKind::Semicolon
-    };
-    let segment = current_segment(tokens, context_open, offset, delimiter);
+    let segment = current_segment(tokens, context_open, offset, TokenKind::Semicolon);
     let significant = segment
         .iter()
         .copied()
@@ -60,20 +41,7 @@ pub(super) fn complete_state_dsl(
             && significant[0].span == replacement
             && matches!(significant[0].kind, TokenKind::Ident(_))
     {
-        if context == Context::AttachmentLayout {
-            add_dimension_completion(&mut builder);
-            return Some(builder.finish());
-        }
-        if body_kind != StateBodyKind::Layouts {
-            add_field_completions(&mut builder, provider_is_specialized);
-        }
-        if context == Context::State && body_kind != StateBodyKind::Fields {
-            add_layout_completion(&mut builder, body_kind == StateBodyKind::Unknown);
-        }
-        return Some(builder.finish());
-    }
-
-    if context == Context::State && body_kind == StateBodyKind::Layouts {
+        add_field_completions(&mut builder, provider_is_specialized);
         return Some(builder.finish());
     }
 
@@ -204,59 +172,7 @@ fn declaration_group_kind(
     {
         return Some(Context::ConditionalState);
     }
-    if !matches!(significant.first().map(|token| &token.kind), Some(TokenKind::Ident(name)) if name == "layout")
-    {
-        return None;
-    }
-    Some(if significant.len() == 1 {
-        Context::AttachmentLayout
-    } else {
-        Context::NamedLayout
-    })
-}
-
-fn state_body_kind(
-    tokens: &[&crate::lexer::Token],
-    state_open: usize,
-    offset: usize,
-) -> StateBodyKind {
-    let mut brace_depth = 0_u32;
-    let mut bracket_depth = 0_u32;
-    let mut paren_depth = 0_u32;
-    for token in tokens.iter().skip(state_open + 1) {
-        if token.span.start >= offset {
-            break;
-        }
-        match token.kind {
-            TokenKind::LBrace => brace_depth += 1,
-            TokenKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
-            TokenKind::LBracket => bracket_depth += 1,
-            TokenKind::RBracket => bracket_depth = bracket_depth.saturating_sub(1),
-            TokenKind::LParen => paren_depth += 1,
-            TokenKind::RParen => paren_depth = paren_depth.saturating_sub(1),
-            TokenKind::DocComment(_) => {}
-            TokenKind::Ident(ref name)
-                if brace_depth == 0 && bracket_depth == 0 && paren_depth == 0 =>
-            {
-                return if name == "layout" {
-                    let structured = tokens
-                        .iter()
-                        .skip_while(|candidate| candidate.span.end <= token.span.end)
-                        .find(|candidate| !matches!(candidate.kind, TokenKind::DocComment(_)))
-                        .is_some_and(|candidate| matches!(candidate.kind, TokenKind::LBrace));
-                    if structured {
-                        StateBodyKind::Fields
-                    } else {
-                        StateBodyKind::Layouts
-                    }
-                } else {
-                    StateBodyKind::Fields
-                };
-            }
-            _ => {}
-        }
-    }
-    StateBodyKind::Unknown
+    None
 }
 
 fn current_segment<'a>(
@@ -341,35 +257,6 @@ fn add_field_completions(builder: &mut CompletionBuilder, provider_is_specialize
         "bounded native string state field",
         "${1:name} at \"${2:game.dll}\", ${3:0x1000} as utf16le(${4:64});",
         "Reads a bounded, null-terminated UTF-16LE string through a pointer path.",
-    );
-}
-
-fn add_layout_completion(builder: &mut CompletionBuilder, allow_dimensions: bool) {
-    if allow_dimensions {
-        add_snippet(
-            builder,
-            "layout dimensions",
-            "attachment-wide layout dimensions",
-            "layout {\n\t${1:dimension}: ${2:Enum},\n}",
-            "Declares independent enum-valued facts that describe the selected attachment layout.",
-        );
-    }
-    add_snippet(
-        builder,
-        "named layout",
-        "version-specific state layout",
-        "layout ${1:Name} {\n\t$0\n},",
-        "Adds one named memory layout. An `onAttach` block selects its generated `StateLayout` variant.",
-    );
-}
-
-fn add_dimension_completion(builder: &mut CompletionBuilder) {
-    add_snippet(
-        builder,
-        "layout dimension",
-        "enum-valued layout dimension",
-        "${1:name}: ${2:Enum},",
-        "Adds one independent enum-valued fact to the attachment-wide `Layout` structure.",
     );
 }
 

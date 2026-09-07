@@ -65,7 +65,7 @@ impl DeclarationIndex {
                     field.span,
                 );
             }
-            if let (Some(value), Some(enumeration)) = (state.layout_value, &state.layout_enum) {
+            if let (Some(value), Some(enumeration)) = (state.provider_value, &state.provider_enum) {
                 program.push(
                     DeclarationId::Global(value),
                     None,

@@ -51,7 +51,7 @@ pub fn document_symbols(document: &SourceDocument, program: &Program) -> Vec<Doc
                 .iter()
                 .map(|alternative| DocumentSymbol {
                     name: state
-                        .layout_enum
+                        .provider_enum
                         .as_ref()
                         .and_then(|enumeration| {
                             enumeration

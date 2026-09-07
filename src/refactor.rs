@@ -721,7 +721,12 @@ fn global_values(program: &Program) -> HashSet<ValueId> {
         .globals
         .iter()
         .map(|variable| variable.id)
-        .chain(program.state.as_ref().and_then(|state| state.layout_value))
+        .chain(
+            program
+                .state
+                .as_ref()
+                .and_then(|state| state.provider_value),
+        )
         .collect()
 }
 
@@ -939,9 +944,9 @@ fn value_names(program: &Program) -> HashMap<ValueId, String> {
         names: HashMap::new(),
     };
     if let Some(state) = &program.state
-        && let Some(layout) = state.layout_value
+        && let Some(provider) = state.provider_value
     {
-        collector.names.insert(layout, "layout".to_owned());
+        collector.names.insert(provider, "provider".to_owned());
     }
     collector.visit_program(program);
     collector.names

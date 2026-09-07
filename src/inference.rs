@@ -32,6 +32,16 @@ pub(crate) enum Type {
 }
 
 impl Type {
+    /// Returns the source-level identity of a type when inference has resolved
+    /// far enough to have one.
+    pub(crate) fn try_to_ref(self, types: &TypeStore) -> Option<ResolvedTypeRef> {
+        if matches!(self, Self::Variable(_)) {
+            None
+        } else {
+            Some(self.to_ref(types))
+        }
+    }
+
     pub(crate) fn to_ref(self, types: &TypeStore) -> ResolvedTypeRef {
         match self {
             Self::Known(id) => match types.kind(id) {
@@ -578,6 +588,24 @@ impl InferenceContext {
         let root = self.root(id);
         if let Some(binding) = self.variables[root as usize].binding {
             self.shallow(binding)
+        } else {
+            Type::Variable(root)
+        }
+    }
+
+    /// Resolves the current outer inference binding without path compression.
+    ///
+    /// Read-only semantic passes may need to recognize a type that has already
+    /// been constrained while inference is still in progress. An unbound
+    /// variable remains a variable and must not be converted into a source
+    /// type reference.
+    pub(crate) fn shallow_readonly(&self, ty: Type) -> Type {
+        let Type::Variable(id) = ty else {
+            return ty;
+        };
+        let root = self.root_without_compression(id);
+        if let Some(binding) = self.variables[root as usize].binding {
+            self.shallow_readonly(binding)
         } else {
             Type::Variable(root)
         }

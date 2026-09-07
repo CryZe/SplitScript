@@ -2458,11 +2458,13 @@ fn unused_struct_field_fix_survives_save_undo_and_save() {
 #[test]
 fn unused_shared_state_field_has_one_validated_multi_layout_suppression() {
     let source = concat!(
+        "enum Build { Steam, GOG }\n",
+        "let build: Build\n",
         "state \"game.exe\" {\n",
-        "    layout Steam { level: u32 at 0x100; spare: u32 at 0x104; },\n",
-        "    layout GOG { level: u32 at 0x200; spare: u32 at 0x204; },\n",
+        "    if build == Build.Steam { level: u32 at 0x100; spare: u32 at 0x104; }\n",
+        "    else { level: u32 at 0x200; spare: u32 at 0x204; }\n",
         "}\n",
-        "onAttach { return StateLayout.Steam }\n",
+        "onAttach { build = Build.Steam }\n",
         "split { return current.level != old.level }\n"
     );
     let uri = "file:///unused-state-field.split";

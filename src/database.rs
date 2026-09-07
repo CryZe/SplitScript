@@ -1080,17 +1080,11 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             && let Some(definition) =
                 self.definition(SourceDefinitionId::State, "state", state.span)
         {
-            if let Some(value) = state.layout_value {
+            if let Some(value) = state.provider_value {
                 let span = state
-                    .layout
-                    .as_ref()
-                    .map(|layout| layout.keyword_span)
-                    .or_else(|| {
-                        state
-                            .provider_alternatives
-                            .first()
-                            .map(|alternative| alternative.keyword_span)
-                    })
+                    .provider_alternatives
+                    .first()
+                    .map(|alternative| alternative.keyword_span)
                     .unwrap_or(definition.span);
                 self.index.values.insert(
                     value,
@@ -1104,14 +1098,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                     },
                 );
             }
-            if let Some(layout) = &state.layout {
-                self.insert_definition(SourceDefinition {
-                    id: SourceDefinitionId::Struct(layout.structure),
-                    name: "Layout".to_owned(),
-                    span: layout.keyword_span,
-                });
-            }
-            if let Some(enumeration) = &state.layout_enum {
+            if let Some(enumeration) = &state.provider_enum {
                 self.index.enums.insert(
                     enumeration.id,
                     SourceDefinition {
@@ -1197,19 +1184,11 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
     }
 
     fn visit_struct(&mut self, structure: &'ast crate::ast::StructDecl) {
-        let is_attachment_layout = self
-            .syntax
-            .state
-            .as_ref()
-            .and_then(|state| state.layout.as_ref())
-            .is_some_and(|layout| layout.structure == structure.id);
-        if !is_attachment_layout
-            && let Some(definition) = self.definition(
-                SourceDefinitionId::Struct(structure.id),
-                &structure.name,
-                structure.span,
-            )
-        {
+        if let Some(definition) = self.definition(
+            SourceDefinitionId::Struct(structure.id),
+            &structure.name,
+            structure.span,
+        ) {
             self.insert_definition(definition);
         }
         for field in &structure.fields {

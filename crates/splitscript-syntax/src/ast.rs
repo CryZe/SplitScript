@@ -426,7 +426,7 @@ pub struct ManagedClassDecl {
     pub metadata_names: ManagedMetadataNames,
     pub opening_span: Span,
     pub fields: Vec<ManagedFieldDecl>,
-    /// Fields available only while the attachment-wide layout satisfies the
+    /// Fields available only while the attachment-wide shape satisfies the
     /// written predicate.
     pub conditional_fields: Vec<ConditionalFieldsDecl<ManagedFieldDecl>>,
     pub span: Span,
@@ -590,7 +590,7 @@ impl Program {
         self.enums.iter().chain(
             self.state
                 .as_ref()
-                .and_then(|state| state.layout_enum.as_ref()),
+                .and_then(|state| state.provider_enum.as_ref()),
         )
     }
 
@@ -895,69 +895,36 @@ pub struct StateDecl {
     /// Named, mutually exclusive attachment-provider alternatives. Ordinary
     /// single-provider declarations leave this empty. Each alternative owns
     /// its provider configuration and physical state fields, while compatible
-    /// fields are projected through the same common snapshot interface as
-    /// named layouts.
+    /// fields are projected through one common snapshot interface.
     pub provider_alternatives: Vec<StateProviderAlternativeDecl>,
-    /// Fields of the ordinary single-layout form. This is empty when named
-    /// layouts are present.
+    /// Fields of the ordinary single-provider form.
     pub fields: Vec<StateField>,
-    /// Fields available only while the attachment-wide layout satisfies the
+    /// Fields available only while the attachment-wide shape satisfies the
     /// written predicate.
     pub conditional_fields: Vec<ConditionalFieldsDecl<StateField>>,
-    /// Independent attachment-wide layout dimensions. The generated `Layout`
-    /// struct is an ordinary nominal source type whose fields are the written
-    /// dimensions; the read-only `layout` value has this type while attached.
-    pub layout: Option<AttachmentLayoutDecl>,
-    /// Versioned memory layouts. Semantic analysis projects compatible fields
-    /// into a common interface and retains missing or conflicting fields as
-    /// layout-specific declarations.
-    pub layouts: Vec<StateLayoutDecl>,
-    /// The generated enum represented by the named layout declarations.
-    pub layout_enum: Option<EnumDecl>,
-    /// Stable identity of the implicit read-only `layout` value.
-    pub layout_value: Option<ValueId>,
-    pub span: Span,
-}
-
-/// The attachment-wide structural facts selected for one attached process.
-///
-/// This belongs to the state language rather than any individual provider.
-/// Native processes, emulators, and managed runtimes all consume the same
-/// generated struct and refinement model.
-#[derive(Debug, Clone)]
-pub struct AttachmentLayoutDecl {
-    pub keyword_span: Span,
-    pub documentation: Option<String>,
-    pub opening_span: Span,
-    /// Stable identity of the generated ordinary `Layout` struct stored in
-    /// [`Program::structs`].
-    pub structure: StructId,
+    /// The generated enum represented by multi-provider alternatives.
+    pub provider_enum: Option<EnumDecl>,
+    /// Stable identity of the implicit read-only `provider` value.
+    pub provider_value: Option<ValueId>,
     pub span: Span,
 }
 
 impl StateDecl {
-    pub fn has_named_variants(&self) -> bool {
-        !self.layouts.is_empty() || !self.provider_alternatives.is_empty()
+    pub fn has_provider_alternatives(&self) -> bool {
+        !self.provider_alternatives.is_empty()
     }
 
-    pub fn variant_fields(&self) -> impl Iterator<Item = (EnumVariantId, &[StateField])> {
-        self.layouts
+    pub fn provider_variant_fields(&self) -> impl Iterator<Item = (EnumVariantId, &[StateField])> {
+        self.provider_alternatives
             .iter()
-            .map(|layout| (layout.variant, layout.fields.as_slice()))
-            .chain(
-                self.provider_alternatives
-                    .iter()
-                    .map(|alternative| (alternative.variant, alternative.fields.as_slice())),
-            )
+            .map(|alternative| (alternative.variant, alternative.fields.as_slice()))
     }
 
-    pub fn canonical_fields(&self) -> &[StateField] {
+    pub fn canonical_provider_fields(&self) -> &[StateField] {
         if let Some(alternative) = self.provider_alternatives.first() {
             return &alternative.fields;
         }
-        self.layouts
-            .first()
-            .map_or(self.fields.as_slice(), |layout| layout.fields.as_slice())
+        self.fields.as_slice()
     }
 
     pub fn all_fields(&self) -> impl Iterator<Item = &StateField> {
@@ -968,7 +935,6 @@ impl StateDecl {
                     .iter()
                     .flat_map(|group| &group.fields),
             )
-            .chain(self.layouts.iter().flat_map(|layout| &layout.fields))
             .chain(
                 self.provider_alternatives
                     .iter()
@@ -976,7 +942,7 @@ impl StateDecl {
             )
     }
 
-    /// Whether a field name is present in every layout without conflicting
+    /// Whether a field name is present in every provider alternative without conflicting
     /// explicit annotations, and can therefore be projected through the
     /// common StateSnapshot interface.
     pub fn is_common_field(&self, name: &str) -> bool {
@@ -998,44 +964,18 @@ impl StateDecl {
                 })
             });
         }
-        if self.layouts.is_empty() {
-            return self.fields.iter().any(|field| field.name == name);
-        }
-        let declarations = self
-            .layouts
-            .iter()
-            .map(|layout| layout.fields.iter().find(|field| field.name == name))
-            .collect::<Option<Vec<_>>>();
-        declarations.is_some_and(|declarations| {
-            let mut annotation = None;
-            declarations.iter().all(|field| match field.annotation {
-                Some(found) if annotation.is_some_and(|expected| expected != found) => false,
-                Some(found) => {
-                    annotation = Some(found);
-                    true
-                }
-                None => true,
-            })
-        })
+        self.fields.iter().any(|field| field.name == name)
     }
 
     pub fn common_fields(&self) -> impl Iterator<Item = &StateField> {
-        self.canonical_fields()
+        self.canonical_provider_fields()
             .iter()
             .filter(|field| self.is_common_field(&field.name))
     }
 
-    /// The implicit refinement value generated by this state declaration.
-    /// Named build layouts expose it as `layout`; provider alternatives expose
-    /// it as `provider`.
+    /// The implicit refinement value generated by a multi-provider state.
     pub fn refinement_value_name(&self) -> Option<&'static str> {
-        self.layout_value.map(|_| {
-            if self.provider_alternatives.is_empty() {
-                "layout"
-            } else {
-                "provider"
-            }
-        })
+        self.provider_value.map(|_| "provider")
     }
 }
 
@@ -1053,7 +993,7 @@ pub struct StateProviderAlternativeDecl {
 }
 
 /// A group of declarations guarded by a statically decidable predicate over
-/// the attachment-wide [`Layout`](AttachmentLayoutDecl) value.
+/// ordinary enum globals or state fields.
 ///
 /// The same declaration shape is shared by native/emulator state fields and
 /// managed metadata fields. Provider-specific binding turns the predicate
@@ -1068,13 +1008,6 @@ pub struct ConditionalFieldsDecl<Field> {
     pub condition: Option<Expr>,
     pub opening_span: Span,
     pub fields: Vec<Field>,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone)]
-pub struct StateLayoutDecl {
-    pub variant: EnumVariantId,
-    pub fields: Vec<StateField>,
     pub span: Span,
 }
 
@@ -1140,7 +1073,7 @@ pub enum PointerPathBase {
     Absolute(u64),
     /// A module identity and a signed displacement from its load address.
     Module { name: String, offset: i64 },
-    /// An address supplied by another state field in the same active layout.
+    /// An address supplied by another state field in the same active shape.
     /// The type checker resolves the expression to that field's stable identity
     /// and structs the dependency used to order snapshot polling.
     Expression(Expr),
@@ -1171,7 +1104,7 @@ impl Eq for PointerPathBase {}
 /// A bounded interpretation applied after resolving a state pointer path.
 ///
 /// The ordinary expression API exposes the same operation directly. This is
-/// only compact state-layout syntax; it is not a separate string type.
+/// only compact state-field syntax; it is not a separate string type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StateMemoryDecoder {
     /// Reads at most `max_bytes`, stops at the first NUL byte, and requires

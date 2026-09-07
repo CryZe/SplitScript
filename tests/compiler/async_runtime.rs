@@ -16,9 +16,14 @@ fn semantic_statements(
 #[test]
 fn never_completions_join_with_values_and_erase_from_wasm_storage() {
     let source = r#"
+        enum Build { Steam, GOG }
+        let build: Build
         state "game.exe" {
-            layout Steam { level: u32 at 0x100; },
-            layout GOG { level: u32 at 0x200; },
+            if build == Build.Steam {
+                level: u32 at 0x100;
+            } else {
+                level: u32 at 0x200;
+            }
         }
 
         fn ignoreUnsupportedBuild(flag: bool) -> async Never {
@@ -39,10 +44,10 @@ fn never_completions_join_with_values_and_erase_from_wasm_storage() {
             }
             let selected = match conditional {
                 0 => await ignoreUnsupportedBuild(true),
-                1 => StateLayout.Steam,
-                _ => StateLayout.GOG,
+                1 => Build.Steam,
+                _ => Build.GOG,
             }
-            return selected
+            build = selected
         }
     "#;
 
@@ -752,20 +757,18 @@ fn shared_pointer_prefixes_remain_lazy_for_inactive_layout_fields() {
             Inactive,
         }
 
-        state "game.exe" {
-            layout {
-                edition: Edition,
-            }
+        let edition: Edition
 
+        state "game.exe" {
             active: u8 at 0x9000;
-            if layout.edition == Edition.Inactive {
+            if edition == Edition.Inactive {
                 dormantA: u8 at "unused.dll", 0x20, 0x4;
                 dormantB: u8 at "unused.dll", 0x20, 0x8;
             }
         }
 
         onAttach {
-            return Layout { edition: Edition.Active }
+            edition = Edition.Active
         }
     "#;
 

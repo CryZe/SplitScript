@@ -3105,7 +3105,7 @@ fn string_n_like_field_names_are_not_treated_as_asl_types() {
 }
 
 #[test]
-fn duplicate_state_blocks_explain_named_version_layouts_without_cascades() {
+fn duplicate_state_blocks_explain_conditional_version_fields_without_cascades() {
     let source = r#"
         state "game.exe" {
             first: u32 at 0x100
@@ -3120,14 +3120,14 @@ fn duplicate_state_blocks_explain_named_version_layouts_without_cascades() {
     let diagnostic = &recovered.diagnostics()[0];
     assert_eq!(
         diagnostic.message,
-        "SplitScript uses one `state` declaration with named layouts for game versions"
+        "SplitScript uses one `state` declaration with conditional fields for game versions"
     );
     assert_eq!(diagnostic.labels.len(), 2);
     assert!(
         diagnostic
             .notes
             .iter()
-            .any(|note| note.contains("StateLayout"))
+            .any(|note| note.contains("enum global"))
     );
     assert!(diagnostic.fixes.is_empty());
     assert_eq!(recovered.syntax().actions.len(), 1);

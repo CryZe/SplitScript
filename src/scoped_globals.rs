@@ -4,7 +4,7 @@
 //! source lifetime is inferred from the lifecycle action that definitely
 //! initializes it. `onAttach` owns attachment-scoped values and `onStart`
 //! owns attempt-scoped values. This pass is the semantic authority for those
-//! lifetimes, layout-dependent attachment availability, and the viral helper
+//! lifetimes, shape-dependent attachment availability, and the viral helper
 //! requirements they induce. Backend defaults must never become observable
 //! source values.
 
@@ -17,15 +17,18 @@ use crate::{
     Diagnostic,
     ast::{ActionKind, EnumVariantId, FunctionId, Program, Span, ValueId},
     hir::{TypedBlock, TypedExpressionKind, TypedProgram, TypedStatementKind},
-    semantic::{ResolvedCall, ResolvedEnumVariantId, ResolvedValue, SemanticModel},
+    semantic::{
+        ResolvedCall, ResolvedEnumVariantId, ResolvedShapeConstraint, ResolvedShapeDimension,
+        ResolvedValue, SemanticModel,
+    },
     stdlib::CoreTypeId,
     types::TypeKind,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AttachmentLayout {
+pub enum AttachmentShape {
     Single,
-    Named(EnumVariantId),
+    Shape(u16),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -52,9 +55,10 @@ pub const fn action_has_attempt_scope(action: ActionKind) -> bool {
 pub struct ScopedGlobalAnalysis {
     lifetimes: HashMap<ValueId, GlobalLifetime>,
     compiler_initialized: HashSet<ValueId>,
-    layouts: Vec<AttachmentLayout>,
-    available_in: HashMap<ValueId, HashSet<AttachmentLayout>>,
-    function_layouts: HashMap<FunctionId, HashSet<AttachmentLayout>>,
+    shapes: Vec<AttachmentShape>,
+    shape_facts: HashMap<AttachmentShape, Vec<ResolvedShapeConstraint>>,
+    available_in: HashMap<ValueId, HashSet<AttachmentShape>>,
+    function_shapes: HashMap<FunctionId, HashSet<AttachmentShape>>,
     function_requires_attempt: HashSet<FunctionId>,
     action_requires_attempt: HashSet<ActionKind>,
 }
@@ -92,27 +96,52 @@ impl ScopedGlobalAnalysis {
         })
     }
 
-    pub fn layouts(&self) -> &[AttachmentLayout] {
-        &self.layouts
+    pub fn shapes(&self) -> &[AttachmentShape] {
+        &self.shapes
     }
 
-    pub fn is_available_in(&self, value: ValueId, layout: AttachmentLayout) -> bool {
+    fn shape_has_fact(
+        &self,
+        shape: AttachmentShape,
+        dimension: ResolvedShapeDimension,
+        variant: EnumVariantId,
+    ) -> bool {
+        self.shape_facts.get(&shape).is_some_and(|facts| {
+            facts
+                .iter()
+                .any(|fact| fact.dimension == dimension && fact.variant == variant)
+        })
+    }
+
+    fn shape_satisfies(
+        &self,
+        shape: AttachmentShape,
+        predicate: &crate::semantic::ResolvedShapePredicate,
+    ) -> bool {
+        predicate.alternatives.iter().any(|alternative| {
+            alternative.iter().all(|constraint| {
+                self.shape_has_fact(shape, constraint.dimension, constraint.variant)
+            })
+        })
+    }
+
+    pub fn is_available_in(&self, value: ValueId, shape: AttachmentShape) -> bool {
         self.available_in
             .get(&value)
-            .is_some_and(|layouts| layouts.contains(&layout))
+            .is_some_and(|shapes| shapes.contains(&shape))
     }
 
-    pub fn available_layouts(&self, value: ValueId) -> impl Iterator<Item = AttachmentLayout> + '_ {
+    pub fn available_shapes(&self, value: ValueId) -> impl Iterator<Item = AttachmentShape> + '_ {
         self.available_in.get(&value).into_iter().flatten().copied()
     }
 
-    /// Layouts in which a helper's attachment-global preconditions hold.
+    /// Shapes in which a helper's attachment-global preconditions hold.
     /// An empty result means the helper has no valid attached call context.
-    pub fn function_layouts(
+    pub fn function_shapes(
         &self,
         function: FunctionId,
-    ) -> impl Iterator<Item = AttachmentLayout> + '_ {
-        self.function_layouts
+    ) -> impl Iterator<Item = AttachmentShape> + '_ {
+        self.function_shapes
             .get(&function)
             .into_iter()
             .flatten()
@@ -123,6 +152,44 @@ impl ScopedGlobalAnalysis {
         self.function_requires_attempt.contains(&function)
     }
 
+    pub fn shape_label(&self, shape: AttachmentShape, syntax: &Program) -> String {
+        let Some(facts) = self.shape_facts.get(&shape) else {
+            return "the attachment".to_owned();
+        };
+        let labels = facts
+            .iter()
+            .filter_map(|fact| {
+                let ResolvedShapeDimension::Global(value) = fact.dimension else {
+                    return None;
+                };
+                let global = syntax
+                    .globals
+                    .iter()
+                    .filter_map(|global| global.binding.simple_binding())
+                    .find(|binding| binding.id == value)?;
+                let enumeration = syntax.enums.iter().find(|enumeration| {
+                    enumeration
+                        .variants
+                        .iter()
+                        .any(|variant| variant.id == fact.variant)
+                })?;
+                let variant = enumeration
+                    .variants
+                    .iter()
+                    .find(|variant| variant.id == fact.variant)?;
+                Some(format!(
+                    "{} = {}.{}",
+                    global.name, enumeration.name, variant.name
+                ))
+            })
+            .collect::<Vec<_>>();
+        if labels.is_empty() {
+            "the attachment".to_owned()
+        } else {
+            labels.join(", ")
+        }
+    }
+
     pub fn action_requires_attempt(&self, action: ActionKind) -> bool {
         self.action_requires_attempt.contains(&action)
     }
@@ -131,14 +198,14 @@ impl ScopedGlobalAnalysis {
 #[derive(Clone)]
 struct EvalPath {
     assigned: HashSet<ValueId>,
-    layouts: Option<HashSet<EnumVariantId>>,
+    shape_facts: HashMap<ValueId, EnumVariantId>,
 }
 
 impl EvalPath {
     fn new(assigned: HashSet<ValueId>) -> Self {
         Self {
             assigned,
-            layouts: None,
+            shape_facts: HashMap::new(),
         }
     }
 }
@@ -154,9 +221,108 @@ struct Initializer<'a> {
     semantics: &'a SemanticModel,
     globals: &'a HashSet<ValueId>,
     debug_globals: HashSet<ValueId>,
-    layout_variants: HashSet<EnumVariantId>,
+    shape_globals: HashSet<ValueId>,
     requirements: &'a HashMap<FunctionId, FunctionRequirements>,
     uninitialized_reads: RefCell<HashSet<(ValueId, Span)>>,
+}
+
+fn attachment_shapes(
+    syntax: &Program,
+    semantics: &SemanticModel,
+) -> (
+    Vec<AttachmentShape>,
+    HashMap<AttachmentShape, Vec<ResolvedShapeConstraint>>,
+) {
+    let mut dimensions = Vec::new();
+    let predicates = syntax
+        .state
+        .iter()
+        .flat_map(|state| state.all_fields())
+        .filter_map(|field| semantics.state_field_shape_predicate(field.id))
+        .chain(
+            syntax
+                .managed_class_declarations()
+                .into_iter()
+                .flat_map(|class| class.all_fields())
+                .filter_map(|field| semantics.managed_field_shape_predicate(field.id)),
+        );
+    for predicate in predicates {
+        for constraint in predicate.alternatives.iter().flatten() {
+            if matches!(constraint.dimension, ResolvedShapeDimension::Global(_))
+                && !dimensions.contains(&constraint.dimension)
+            {
+                dimensions.push(constraint.dimension);
+            }
+        }
+    }
+    dimensions.sort_by_key(|dimension| match dimension {
+        ResolvedShapeDimension::Global(value) => value.index(),
+        ResolvedShapeDimension::StateField(_) => {
+            unreachable!("attachment shapes only contain global dimensions")
+        }
+    });
+    if dimensions.is_empty() {
+        return (
+            vec![AttachmentShape::Single],
+            HashMap::from([(AttachmentShape::Single, Vec::new())]),
+        );
+    }
+
+    let mut assignments = vec![Vec::new()];
+    for dimension in dimensions {
+        let ResolvedShapeDimension::Global(value) = dimension else {
+            unreachable!()
+        };
+        let Some(ty) = semantics.value_type(value) else {
+            continue;
+        };
+        let TypeKind::Enum(enumeration) = semantics.types().kind(ty) else {
+            continue;
+        };
+        let Some(declaration) = syntax.enum_declaration(*enumeration) else {
+            continue;
+        };
+        let mut expanded = Vec::new();
+        for assignment in &assignments {
+            for variant in &declaration.variants {
+                let mut candidate = assignment.clone();
+                candidate.push(ResolvedShapeConstraint {
+                    dimension,
+                    variant: variant.id,
+                });
+                expanded.push(candidate);
+            }
+        }
+        assignments = expanded;
+    }
+    if assignments.is_empty()
+        || assignments.len() > crate::shape_selection::MAX_ENUMERATED_SHAPE_COMBINATIONS
+    {
+        return (
+            vec![AttachmentShape::Single],
+            HashMap::from([(AttachmentShape::Single, Vec::new())]),
+        );
+    }
+    let shapes = (0..assignments.len())
+        .map(|index| AttachmentShape::Shape(index as u16))
+        .collect::<Vec<_>>();
+    let facts = shapes.iter().copied().zip(assignments).collect();
+    (shapes, facts)
+}
+
+fn path_matches_shape(
+    path: &EvalPath,
+    shape: AttachmentShape,
+    facts: &HashMap<AttachmentShape, Vec<ResolvedShapeConstraint>>,
+) -> bool {
+    facts.get(&shape).into_iter().flatten().all(|constraint| {
+        let ResolvedShapeDimension::Global(value) = constraint.dimension else {
+            return true;
+        };
+        path.shape_facts
+            .get(&value)
+            .is_none_or(|variant| *variant == constraint.variant)
+    })
 }
 
 pub(crate) fn analyze(
@@ -165,25 +331,14 @@ pub(crate) fn analyze(
     semantics: &SemanticModel,
 ) -> (ScopedGlobalAnalysis, Vec<Diagnostic>) {
     let bare_globals = hir.bare_globals().collect::<HashSet<_>>();
-    let layouts = syntax.state.as_ref().map_or_else(
-        || vec![AttachmentLayout::Single],
-        |state| {
-            if !state.has_named_variants() {
-                vec![AttachmentLayout::Single]
-            } else {
-                state
-                    .variant_fields()
-                    .map(|(variant, _)| AttachmentLayout::Named(variant))
-                    .collect()
-            }
-        },
-    );
+    let (shapes, shape_facts) = attachment_shapes(syntax, semantics);
     let mut analysis = ScopedGlobalAnalysis {
         lifetimes: HashMap::new(),
         compiler_initialized: HashSet::new(),
-        layouts,
+        shapes,
+        shape_facts,
         available_in: HashMap::new(),
-        function_layouts: HashMap::new(),
+        function_shapes: HashMap::new(),
         function_requires_attempt: HashSet::new(),
         action_requires_attempt: HashSet::new(),
     };
@@ -191,13 +346,13 @@ pub(crate) fn analyze(
         return (analysis, Vec::new());
     }
 
-    let automatic_shape = if crate::layout_selection::has_explicit_layout_selection(syntax) {
-        crate::layout_selection::AutomaticLayoutSelection::NotDeclared
+    let automatic_shape = if crate::shape_selection::has_explicit_shape_selection(syntax) {
+        crate::shape_selection::AutomaticShapeSelection::NotDeclared
     } else {
-        crate::layout_selection::automatic_layout_selection(syntax, semantics)
+        crate::shape_selection::automatic_shape_selection(syntax, semantics)
     };
     let compiler_initialized = match automatic_shape {
-        crate::layout_selection::AutomaticLayoutSelection::Available(plan)
+        crate::shape_selection::AutomaticShapeSelection::Available(plan)
             if plan.evidence_fields.is_empty()
                 || semantics.state_provider()
                     == Some(crate::stdlib::StdlibStateProviderId::Unity) =>
@@ -205,9 +360,8 @@ pub(crate) fn analyze(
             plan.dimensions
                 .into_iter()
                 .filter_map(|dimension| match dimension.dimension {
-                    crate::semantic::ResolvedLayoutDimension::Global(value) => Some(value),
-                    crate::semantic::ResolvedLayoutDimension::LayoutField(_) => None,
-                    crate::semantic::ResolvedLayoutDimension::StateField(_) => None,
+                    crate::semantic::ResolvedShapeDimension::Global(value) => Some(value),
+                    crate::semantic::ResolvedShapeDimension::StateField(_) => None,
                 })
                 .collect::<HashSet<_>>()
         }
@@ -299,12 +453,13 @@ pub(crate) fn analyze(
     let requirements = infer_function_requirements(syntax, hir, &analysis);
     let attachment_globals = analysis.attachment_globals().collect::<HashSet<_>>();
     let attempt_globals = analysis.attempt_globals().collect::<HashSet<_>>();
-    let layout_variants = analysis
-        .layouts
-        .iter()
-        .filter_map(|layout| match layout {
-            AttachmentLayout::Named(variant) => Some(*variant),
-            AttachmentLayout::Single => None,
+    let shape_globals = analysis
+        .shape_facts
+        .values()
+        .flatten()
+        .filter_map(|constraint| match constraint.dimension {
+            ResolvedShapeDimension::Global(value) => Some(value),
+            ResolvedShapeDimension::StateField(_) => None,
         })
         .collect();
     if let Some(on_attach) = hir.action_body(ActionKind::OnAttach)
@@ -315,47 +470,51 @@ pub(crate) fn analyze(
             semantics,
             globals: &attachment_globals,
             debug_globals: debug_globals(hir, &attachment_globals),
-            layout_variants,
+            shape_globals,
             requirements: &requirements,
             uninitialized_reads: RefCell::new(HashSet::new()),
         };
-        let mut flow =
-            initializer.eval_block(on_attach, vec![EvalPath::new(compiler_initialized.clone())]);
-        if analysis.layouts == [AttachmentLayout::Single] {
-            // Explicit empty returns and ordinary fallthrough both complete a
-            // single-layout attachment successfully.
-            flow.returned.append(&mut flow.normal);
-            record_availability(
-                &mut analysis.available_in,
-                AttachmentLayout::Single,
-                &flow.returned,
-                &attachment_globals,
-            );
+        let initial = if compiler_initialized.is_empty() {
+            vec![EvalPath::new(HashSet::new())]
         } else {
-            for layout in analysis.layouts.iter().copied() {
-                let AttachmentLayout::Named(variant) = layout else {
-                    unreachable!()
-                };
-                let paths = flow
-                    .returned
-                    .iter()
-                    .filter(|path| {
-                        path.layouts
-                            .as_ref()
-                            .is_none_or(|variants| variants.contains(&variant))
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-                if !paths.is_empty() {
-                    record_availability(
-                        &mut analysis.available_in,
-                        layout,
-                        &paths,
-                        &attachment_globals,
-                    );
-                }
+            analysis
+                .shapes
+                .iter()
+                .copied()
+                .map(|shape| {
+                    let mut path = EvalPath::new(compiler_initialized.clone());
+                    for constraint in analysis.shape_facts.get(&shape).into_iter().flatten() {
+                        if let ResolvedShapeDimension::Global(value) = constraint.dimension
+                            && compiler_initialized.contains(&value)
+                        {
+                            path.shape_facts.insert(value, constraint.variant);
+                        }
+                    }
+                    path
+                })
+                .collect()
+        };
+        let mut flow = initializer.eval_block(on_attach, initial);
+        flow.returned.append(&mut flow.normal);
+        let mut reachable_shapes = Vec::new();
+        for shape in analysis.shapes.iter().copied() {
+            let paths = flow
+                .returned
+                .iter()
+                .filter(|path| path_matches_shape(path, shape, &analysis.shape_facts))
+                .cloned()
+                .collect::<Vec<_>>();
+            if !paths.is_empty() {
+                reachable_shapes.push(shape);
+                record_availability(
+                    &mut analysis.available_in,
+                    shape,
+                    &paths,
+                    &attachment_globals,
+                );
             }
         }
+        analysis.shapes = reachable_shapes;
         diagnostics.extend(initialization_diagnostics(
             &attachment_globals,
             &initializer,
@@ -366,7 +525,7 @@ pub(crate) fn analyze(
                 analysis
                     .available_in
                     .get(&value)
-                    .is_some_and(|layouts| !layouts.is_empty())
+                    .is_some_and(|shapes| !shapes.is_empty())
             },
         ));
     } else if !compiler_initialized.is_empty() {
@@ -375,7 +534,7 @@ pub(crate) fn analyze(
                 .available_in
                 .entry(value)
                 .or_default()
-                .insert(AttachmentLayout::Single);
+                .extend(analysis.shapes.iter().copied());
         }
     }
 
@@ -387,7 +546,7 @@ pub(crate) fn analyze(
             semantics,
             globals: &attempt_globals,
             debug_globals: debug_globals(hir, &attempt_globals),
-            layout_variants: HashSet::new(),
+            shape_globals: HashSet::new(),
             requirements: &requirements,
             uninitialized_reads: RefCell::new(HashSet::new()),
         };
@@ -404,18 +563,18 @@ pub(crate) fn analyze(
         ));
     }
 
-    analysis.function_layouts = requirements
+    analysis.function_shapes = requirements
         .iter()
         .map(|(function, facts)| {
             let valid = analysis
-                .layouts
+                .shapes
                 .iter()
                 .copied()
-                .filter(|layout| {
+                .filter(|shape| {
                     facts
                         .attachment_globals
                         .iter()
-                        .all(|global| analysis.is_available_in(*global, *layout))
+                        .all(|global| analysis.is_available_in(*global, *shape))
                 })
                 .collect();
             (*function, valid)
@@ -427,7 +586,13 @@ pub(crate) fn analyze(
         .collect();
     analysis.action_requires_attempt =
         infer_action_attempt_requirements(hir, &analysis, &requirements);
-    diagnostics.extend(validate_uses(syntax, hir, &analysis, &requirements));
+    diagnostics.extend(validate_uses(
+        syntax,
+        hir,
+        semantics,
+        &analysis,
+        &requirements,
+    ));
     (analysis, diagnostics)
 }
 
@@ -452,21 +617,15 @@ fn assignments_in_action(
             false
         }
 
-        fn global(&mut self, _value: ValueId, _span: Span, _refined: Option<AttachmentLayout>) {}
+        fn global(&mut self, _value: ValueId, _span: Span, _refined: Option<AttachmentShape>) {}
 
-        fn global_write(
-            &mut self,
-            value: ValueId,
-            _span: Span,
-            _refined: Option<AttachmentLayout>,
-        ) {
+        fn global_write(&mut self, value: ValueId, _span: Span, _refined: Option<AttachmentShape>) {
             if self.globals.contains(&value) {
                 self.assigned.insert(value);
             }
         }
 
-        fn call(&mut self, _function: FunctionId, _span: Span, _refined: Option<AttachmentLayout>) {
-        }
+        fn call(&mut self, _function: FunctionId, _span: Span, _refined: Option<AttachmentShape>) {}
     }
 
     let mut collector = Collector {
@@ -499,7 +658,7 @@ fn initialization_diagnostics(
         GlobalLifetime::Attachment => (
             "attachment-scoped",
             "onAttach",
-            "assign this value on every path that completes the corresponding attachment layout",
+            "assign this value on every path that completes the corresponding attachment shape",
         ),
         GlobalLifetime::Attempt => (
             "attempt-scoped",
@@ -550,8 +709,8 @@ fn initialization_diagnostics(
 }
 
 fn record_availability(
-    availability: &mut HashMap<ValueId, HashSet<AttachmentLayout>>,
-    layout: AttachmentLayout,
+    availability: &mut HashMap<ValueId, HashSet<AttachmentShape>>,
+    shape: AttachmentShape,
     paths: &[EvalPath],
     globals: &HashSet<ValueId>,
 ) {
@@ -560,7 +719,7 @@ fn record_availability(
         definitely_assigned.retain(|global| path.assigned.contains(global));
     }
     for global in definitely_assigned {
-        availability.entry(global).or_default().insert(layout);
+        availability.entry(global).or_default().insert(shape);
     }
 }
 
@@ -614,6 +773,15 @@ impl Initializer<'_> {
                 if op.is_none() && self.globals.contains(&assignment.target) {
                     for path in &mut flow.normal {
                         path.assigned.insert(assignment.target);
+                    }
+                }
+                if op.is_none()
+                    && self.shape_globals.contains(&assignment.target)
+                    && let Some(ResolvedEnumVariantId::Source(variant)) =
+                        self.hir.enum_variant(*value)
+                {
+                    for path in &mut flow.normal {
+                        path.shape_facts.insert(assignment.target, variant);
                     }
                 }
                 flow
@@ -711,22 +879,14 @@ impl Initializer<'_> {
         }
         let mut flow = match &expression.kind {
             TypedExpressionKind::Enum { payload, .. } => {
-                let mut flow = if let Some(payload) = payload {
+                if let Some(payload) = payload {
                     self.eval_expr(*payload, input)
                 } else {
                     Flow {
                         normal: input,
                         returned: Vec::new(),
                     }
-                };
-                if let Some(ResolvedEnumVariantId::Source(variant)) = self.hir.enum_variant(id)
-                    && self.layout_variants.contains(&variant)
-                {
-                    for path in &mut flow.normal {
-                        path.layouts = Some(HashSet::from([variant]));
-                    }
                 }
-                flow
             }
             TypedExpressionKind::Block { statements, value } => {
                 let mut flow = self.eval_block(statements, input);
@@ -801,11 +961,6 @@ impl Initializer<'_> {
                         returned: Vec::new(),
                     }
                 };
-                for path in &mut flow.normal {
-                    if path.layouts.is_none() && !self.layout_variants.is_empty() {
-                        path.layouts = Some(self.layout_variants.clone());
-                    }
-                }
                 flow.returned.append(&mut flow.normal);
                 flow
             }
@@ -866,9 +1021,6 @@ impl Initializer<'_> {
                 break;
             }
         }
-        for path in &mut normal {
-            path.layouts = None;
-        }
         Flow { normal, returned }
     }
 
@@ -881,14 +1033,20 @@ impl Initializer<'_> {
 }
 
 fn collapse_paths(paths: Vec<EvalPath>) -> Vec<EvalPath> {
-    let Some(first) = paths.first() else {
-        return Vec::new();
-    };
-    let mut assigned = first.assigned.clone();
-    for path in &paths[1..] {
-        assigned.retain(|global| path.assigned.contains(global));
+    let mut groups: Vec<EvalPath> = Vec::new();
+    for path in paths {
+        if let Some(existing) = groups
+            .iter_mut()
+            .find(|existing| existing.shape_facts == path.shape_facts)
+        {
+            existing
+                .assigned
+                .retain(|global| path.assigned.contains(global));
+        } else {
+            groups.push(path);
+        }
     }
-    vec![EvalPath::new(assigned)]
+    groups
 }
 
 #[derive(Clone, Default)]
@@ -906,9 +1064,9 @@ trait ScopedUseVisitor {
         true
     }
 
-    fn global(&mut self, value: ValueId, span: Span, refined: Option<AttachmentLayout>);
-    fn global_write(&mut self, value: ValueId, span: Span, refined: Option<AttachmentLayout>);
-    fn call(&mut self, function: FunctionId, span: Span, refined: Option<AttachmentLayout>);
+    fn global(&mut self, value: ValueId, span: Span, refined: Option<AttachmentShape>);
+    fn global_write(&mut self, value: ValueId, span: Span, refined: Option<AttachmentShape>);
+    fn call(&mut self, function: FunctionId, span: Span, refined: Option<AttachmentShape>);
 }
 
 fn infer_function_requirements(
@@ -921,7 +1079,7 @@ fn infer_function_requirements(
         facts: FunctionRequirements,
     }
     impl ScopedUseVisitor for Collector<'_> {
-        fn global(&mut self, value: ValueId, _span: Span, refined: Option<AttachmentLayout>) {
+        fn global(&mut self, value: ValueId, _span: Span, refined: Option<AttachmentShape>) {
             if refined.is_none() {
                 if self.analysis.is_attachment_global(value) {
                     self.facts.attachment_globals.insert(value);
@@ -931,7 +1089,7 @@ fn infer_function_requirements(
             }
         }
 
-        fn global_write(&mut self, value: ValueId, _span: Span, refined: Option<AttachmentLayout>) {
+        fn global_write(&mut self, value: ValueId, _span: Span, refined: Option<AttachmentShape>) {
             if refined.is_none() {
                 if self.analysis.is_attachment_global(value) {
                     self.facts.attachment_globals.insert(value);
@@ -941,27 +1099,20 @@ fn infer_function_requirements(
             }
         }
 
-        fn call(&mut self, function: FunctionId, _span: Span, refined: Option<AttachmentLayout>) {
+        fn call(&mut self, function: FunctionId, _span: Span, refined: Option<AttachmentShape>) {
             if refined.is_none() {
                 self.facts.callees.insert(function);
             }
         }
     }
 
-    let layout_value = hir
-        .declarations()
-        .declarations_named("layout")
-        .find_map(|declaration| match declaration.id {
-            crate::hir::DeclarationId::Global(value) => Some(value),
-            _ => None,
-        });
     let mut requirements = HashMap::new();
     for function in hir.function_bodies() {
         let mut collector = Collector {
             analysis,
             facts: FunctionRequirements::default(),
         };
-        walk_block(&mut collector, &function.body, hir, layout_value, None);
+        walk_block(&mut collector, &function.body, hir, Some(analysis), None);
         requirements.insert(function.function.function, collector.facts);
     }
 
@@ -1006,20 +1157,15 @@ fn infer_action_attempt_requirements(
     }
 
     impl ScopedUseVisitor for Collector<'_> {
-        fn global(&mut self, value: ValueId, _span: Span, _refined: Option<AttachmentLayout>) {
+        fn global(&mut self, value: ValueId, _span: Span, _refined: Option<AttachmentShape>) {
             self.requires_attempt |= self.analysis.is_attempt_global(value);
         }
 
-        fn global_write(
-            &mut self,
-            value: ValueId,
-            _span: Span,
-            _refined: Option<AttachmentLayout>,
-        ) {
+        fn global_write(&mut self, value: ValueId, _span: Span, _refined: Option<AttachmentShape>) {
             self.requires_attempt |= self.analysis.is_attempt_global(value);
         }
 
-        fn call(&mut self, function: FunctionId, _span: Span, _refined: Option<AttachmentLayout>) {
+        fn call(&mut self, function: FunctionId, _span: Span, _refined: Option<AttachmentShape>) {
             self.requires_attempt |= self
                 .requirements
                 .get(&function)
@@ -1027,13 +1173,6 @@ fn infer_action_attempt_requirements(
         }
     }
 
-    let layout_value = hir
-        .declarations()
-        .declarations_named("layout")
-        .find_map(|declaration| match declaration.id {
-            crate::hir::DeclarationId::Global(value) => Some(value),
-            _ => None,
-        });
     hir.action_bodies()
         .filter_map(|action| {
             let mut collector = Collector {
@@ -1041,7 +1180,7 @@ fn infer_action_attempt_requirements(
                 requirements,
                 requires_attempt: false,
             };
-            walk_block(&mut collector, &action.body, hir, layout_value, None);
+            walk_block(&mut collector, &action.body, hir, Some(analysis), None);
             collector.requires_attempt.then_some(action.action)
         })
         .collect()
@@ -1050,6 +1189,7 @@ fn infer_action_attempt_requirements(
 fn validate_uses(
     syntax: &Program,
     hir: &TypedProgram,
+    semantics: &SemanticModel,
     analysis: &ScopedGlobalAnalysis,
     requirements: &HashMap<FunctionId, FunctionRequirements>,
 ) -> Vec<Diagnostic> {
@@ -1057,7 +1197,7 @@ fn validate_uses(
         syntax: &'a Program,
         analysis: &'a ScopedGlobalAnalysis,
         requirements: &'a HashMap<FunctionId, FunctionRequirements>,
-        base: Vec<AttachmentLayout>,
+        base: Vec<AttachmentShape>,
         detached_action: Option<ActionKind>,
         validate_attachment: bool,
         attempt_available: bool,
@@ -1067,8 +1207,8 @@ fn validate_uses(
     }
 
     impl Validator<'_> {
-        fn active(&self, refined: Option<AttachmentLayout>) -> Vec<AttachmentLayout> {
-            refined.map_or_else(|| self.base.clone(), |layout| vec![layout])
+        fn active(&self, refined: Option<AttachmentShape>) -> Vec<AttachmentShape> {
+            refined.map_or_else(|| self.base.clone(), |shape| vec![shape])
         }
 
         fn global_name(&self, value: ValueId) -> &str {
@@ -1087,37 +1227,56 @@ fn validate_uses(
                 .map(|global| global.name_span)
         }
 
-        fn invalid_layouts(
+        fn invalid_shapes(
             &self,
             value: ValueId,
-            refined: Option<AttachmentLayout>,
-        ) -> Vec<AttachmentLayout> {
+            refined: Option<AttachmentShape>,
+        ) -> Vec<AttachmentShape> {
             self.active(refined)
                 .into_iter()
-                .filter(|layout| !self.analysis.is_available_in(value, *layout))
+                .filter(|shape| !self.analysis.is_available_in(value, *shape))
                 .collect()
         }
 
-        fn layout_names(&self, layouts: &[AttachmentLayout]) -> String {
-            let names = layouts
+        fn shape_names(&self, shapes: &[AttachmentShape]) -> String {
+            let names = shapes
                 .iter()
-                .map(|layout| match layout {
-                    AttachmentLayout::Single => "the attachment".to_owned(),
-                    AttachmentLayout::Named(variant) => self
-                        .syntax
-                        .state
-                        .as_ref()
-                        .and_then(|state| state.layout_enum.as_ref())
-                        .and_then(|enumeration| {
-                            enumeration
+                .map(|shape| {
+                    let Some(facts) = self.analysis.shape_facts.get(shape) else {
+                        return "the attachment".to_owned();
+                    };
+                    if facts.is_empty() {
+                        return "the attachment".to_owned();
+                    }
+                    facts
+                        .iter()
+                        .filter_map(|fact| {
+                            let ResolvedShapeDimension::Global(value) = fact.dimension else {
+                                return None;
+                            };
+                            let global = self
+                                .syntax
+                                .globals
+                                .iter()
+                                .filter_map(|global| global.binding.simple_binding())
+                                .find(|binding| binding.id == value)?;
+                            let enumeration = self.syntax.enums.iter().find(|enumeration| {
+                                enumeration
+                                    .variants
+                                    .iter()
+                                    .any(|variant| variant.id == fact.variant)
+                            })?;
+                            let variant = enumeration
                                 .variants
                                 .iter()
-                                .find(|candidate| candidate.id == *variant)
+                                .find(|variant| variant.id == fact.variant)?;
+                            Some(format!(
+                                "{} = {}.{}",
+                                global.name, enumeration.name, variant.name
+                            ))
                         })
-                        .map_or_else(
-                            || "an unknown layout".to_owned(),
-                            |variant| format!("`StateLayout.{}`", variant.name),
-                        ),
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 })
                 .collect::<Vec<_>>();
             match names.as_slice() {
@@ -1131,7 +1290,7 @@ fn validate_uses(
             &mut self,
             value: ValueId,
             span: Span,
-            refined: Option<AttachmentLayout>,
+            refined: Option<AttachmentShape>,
             access: &str,
         ) {
             if self.analysis.is_attempt_global(value) {
@@ -1189,7 +1348,7 @@ fn validate_uses(
                 }
                 return;
             }
-            let invalid = self.invalid_layouts(value, refined);
+            let invalid = self.invalid_shapes(value, refined);
             if invalid.is_empty() || !self.seen.insert((span.start, span.end, Some(value), None)) {
                 return;
             }
@@ -1197,7 +1356,7 @@ fn validate_uses(
             let mut diagnostic = Diagnostic::semantic(
                 format!(
                     "attachment-scoped global `{name}` is not initialized for {}",
-                    self.layout_names(&invalid)
+                    self.shape_names(&invalid)
                 ),
                 span,
             )
@@ -1215,15 +1374,15 @@ fn validate_uses(
     }
 
     impl ScopedUseVisitor for Validator<'_> {
-        fn global(&mut self, value: ValueId, span: Span, refined: Option<AttachmentLayout>) {
+        fn global(&mut self, value: ValueId, span: Span, refined: Option<AttachmentShape>) {
             self.validate_global_access(value, span, refined, "read");
         }
 
-        fn global_write(&mut self, value: ValueId, span: Span, refined: Option<AttachmentLayout>) {
+        fn global_write(&mut self, value: ValueId, span: Span, refined: Option<AttachmentShape>) {
             self.validate_global_access(value, span, refined, "write");
         }
 
-        fn call(&mut self, function: FunctionId, span: Span, refined: Option<AttachmentLayout>) {
+        fn call(&mut self, function: FunctionId, span: Span, refined: Option<AttachmentShape>) {
             let Some(facts) = self.requirements.get(&function) else {
                 return;
             };
@@ -1265,11 +1424,11 @@ fn validate_uses(
             let invalid = self
                 .active(refined)
                 .into_iter()
-                .filter(|layout| {
+                .filter(|shape| {
                     facts
                         .attachment_globals
                         .iter()
-                        .any(|global| !self.analysis.is_available_in(*global, *layout))
+                        .any(|global| !self.analysis.is_available_in(*global, *shape))
                 })
                 .collect::<Vec<_>>();
             if !self.validate_attachment {
@@ -1291,11 +1450,11 @@ fn validate_uses(
             let mut diagnostic = Diagnostic::semantic(
                 format!(
                     "`{name}` requires attachment values unavailable for {}",
-                    self.layout_names(&invalid)
+                    self.shape_names(&invalid)
                 ),
                 span,
             )
-            .with_primary_label("refine `layout` before calling this helper");
+            .with_primary_label("refine the attachment shape before calling this helper");
             if let Some(declaration) = self
                 .syntax
                 .functions
@@ -1311,7 +1470,6 @@ fn validate_uses(
         }
     }
 
-    let layout_value = syntax.state.as_ref().and_then(|state| state.layout_value);
     let mut diagnostics = Vec::new();
     for action in hir.action_bodies() {
         // Candidate selection owns a temporary process handle, but it runs
@@ -1323,7 +1481,7 @@ fn validate_uses(
             syntax,
             analysis,
             requirements,
-            base: analysis.layouts.clone(),
+            base: analysis.shapes.clone(),
             detached_action,
             validate_attachment: action.action != ActionKind::OnAttach,
             attempt_available: action_has_attempt_scope(action.action),
@@ -1331,7 +1489,7 @@ fn validate_uses(
             diagnostics: Vec::new(),
             seen: HashSet::new(),
         };
-        walk_block(&mut validator, &action.body, hir, layout_value, None);
+        walk_block(&mut validator, &action.body, hir, Some(analysis), None);
         diagnostics.extend(validator.diagnostics);
     }
 
@@ -1341,7 +1499,7 @@ fn validate_uses(
             analysis,
             requirements,
             base: analysis
-                .function_layouts(function.function.function)
+                .function_shapes(function.function.function)
                 .collect(),
             detached_action: None,
             validate_attachment: true,
@@ -1350,70 +1508,76 @@ fn validate_uses(
             diagnostics: Vec::new(),
             seen: HashSet::new(),
         };
-        walk_block(&mut validator, &function.body, hir, layout_value, None);
+        walk_block(&mut validator, &function.body, hir, Some(analysis), None);
         diagnostics.extend(validator.diagnostics);
     }
 
-    if let Some(state) = &syntax.state {
-        let field_layouts = if !state.has_named_variants() {
-            state
-                .fields
-                .iter()
-                .map(|field| (field.id, AttachmentLayout::Single))
-                .collect::<HashMap<_, _>>()
-        } else {
-            state
-                .variant_fields()
-                .flat_map(|(variant, fields)| {
-                    fields
-                        .iter()
-                        .map(move |field| (field.id, AttachmentLayout::Named(variant)))
-                })
-                .collect()
-        };
+    if syntax.state.is_some() {
         for (field, expression) in hir.state_sources() {
-            let Some(layout) = field_layouts.get(&field).copied() else {
-                continue;
-            };
-            let mut validator = Validator {
-                syntax,
-                analysis,
-                requirements,
-                base: vec![layout],
-                detached_action: None,
-                validate_attachment: true,
-                attempt_available: false,
-                attempt_context: "state polling".to_owned(),
-                diagnostics: Vec::new(),
-                seen: HashSet::new(),
-            };
-            walk_expression(&mut validator, expression, hir, layout_value, None);
-            diagnostics.extend(validator.diagnostics);
+            let shapes = semantics.state_field_shape_predicate(field).map_or_else(
+                || analysis.shapes.clone(),
+                |predicate| {
+                    analysis
+                        .shapes
+                        .iter()
+                        .copied()
+                        .filter(|shape| analysis.shape_satisfies(*shape, predicate))
+                        .collect()
+                },
+            );
+            for shape in shapes {
+                let mut validator = Validator {
+                    syntax,
+                    analysis,
+                    requirements,
+                    base: vec![shape],
+                    detached_action: None,
+                    validate_attachment: true,
+                    attempt_available: false,
+                    attempt_context: "state polling".to_owned(),
+                    diagnostics: Vec::new(),
+                    seen: HashSet::new(),
+                };
+                walk_expression(&mut validator, expression, hir, Some(analysis), Some(shape));
+                diagnostics.extend(validator.diagnostics);
+            }
         }
         for transform in hir.state_transforms() {
-            let Some(layout) = field_layouts.get(&transform.field).copied() else {
-                continue;
-            };
-            let mut validator = Validator {
-                syntax,
-                analysis,
-                requirements,
-                base: vec![layout],
-                detached_action: None,
-                validate_attachment: true,
-                attempt_available: false,
-                attempt_context: "a state transform".to_owned(),
-                diagnostics: Vec::new(),
-                seen: HashSet::new(),
-            };
-            walk_expression(
-                &mut validator,
-                transform.expression,
-                hir,
-                layout_value,
-                None,
-            );
-            diagnostics.extend(validator.diagnostics);
+            let shapes = semantics
+                .state_field_shape_predicate(transform.field)
+                .map_or_else(
+                    || analysis.shapes.clone(),
+                    |predicate| {
+                        analysis
+                            .shapes
+                            .iter()
+                            .copied()
+                            .filter(|shape| analysis.shape_satisfies(*shape, predicate))
+                            .collect()
+                    },
+                );
+            for shape in shapes {
+                let mut validator = Validator {
+                    syntax,
+                    analysis,
+                    requirements,
+                    base: vec![shape],
+                    detached_action: None,
+                    validate_attachment: true,
+                    attempt_available: false,
+                    attempt_context: "a state transform".to_owned(),
+                    diagnostics: Vec::new(),
+                    seen: HashSet::new(),
+                };
+                walk_expression(
+                    &mut validator,
+                    transform.expression,
+                    hir,
+                    Some(analysis),
+                    Some(shape),
+                );
+                diagnostics.extend(validator.diagnostics);
+            }
         }
     }
     diagnostics
@@ -1423,14 +1587,14 @@ fn walk_block(
     visitor: &mut impl ScopedUseVisitor,
     block: &TypedBlock,
     hir: &TypedProgram,
-    layout_value: Option<ValueId>,
-    refined: Option<AttachmentLayout>,
+    shapes: Option<&ScopedGlobalAnalysis>,
+    refined: Option<AttachmentShape>,
 ) {
     for statement in &block.statements {
         match &statement.kind {
             TypedStatementKind::Variable { initializer, .. }
             | TypedStatementKind::Expression(initializer) => {
-                walk_expression(visitor, *initializer, hir, layout_value, refined)
+                walk_expression(visitor, *initializer, hir, shapes, refined)
             }
             TypedStatementKind::Assign {
                 assignment,
@@ -1442,34 +1606,39 @@ fn walk_block(
                 } else {
                     visitor.global_write(assignment.target, assignment.span, refined);
                 }
-                walk_expression(visitor, *value, hir, layout_value, refined);
+                walk_expression(visitor, *value, hir, shapes, refined);
             }
             TypedStatementKind::StateAssign { target, value, .. }
             | TypedStatementKind::IndexAssign { target, value, .. } => {
-                walk_expression(visitor, *target, hir, layout_value, refined);
-                walk_expression(visitor, *value, hir, layout_value, refined);
+                walk_expression(visitor, *target, hir, shapes, refined);
+                walk_expression(visitor, *value, hir, shapes, refined);
             }
             TypedStatementKind::If {
                 condition,
                 then_block,
                 else_block,
             } => {
-                walk_expression(visitor, *condition, hir, layout_value, refined);
-                walk_block(visitor, then_block, hir, layout_value, refined);
-                if let Some(else_block) = else_block {
-                    walk_block(visitor, else_block, hir, layout_value, refined);
-                }
+                walk_expression(visitor, *condition, hir, shapes, refined);
+                walk_conditional_blocks(
+                    visitor,
+                    *condition,
+                    then_block,
+                    else_block.as_ref(),
+                    hir,
+                    shapes,
+                    refined,
+                );
             }
             TypedStatementKind::While { condition, body } => {
-                walk_expression(visitor, *condition, hir, layout_value, refined);
-                walk_block(visitor, body, hir, layout_value, refined);
+                walk_expression(visitor, *condition, hir, shapes, refined);
+                walk_block(visitor, body, hir, shapes, refined);
             }
             TypedStatementKind::For { iterable, body, .. } => {
-                walk_expression(visitor, *iterable, hir, layout_value, refined);
-                walk_block(visitor, body, hir, layout_value, refined);
+                walk_expression(visitor, *iterable, hir, shapes, refined);
+                walk_block(visitor, body, hir, shapes, refined);
             }
             TypedStatementKind::Suspend { value, .. } => {
-                walk_expression(visitor, *value, hir, layout_value, refined)
+                walk_expression(visitor, *value, hir, shapes, refined)
             }
         }
     }
@@ -1479,8 +1648,8 @@ fn walk_expression(
     visitor: &mut impl ScopedUseVisitor,
     id: crate::ast::ExprId,
     hir: &TypedProgram,
-    layout_value: Option<ValueId>,
-    refined: Option<AttachmentLayout>,
+    shapes: Option<&ScopedGlobalAnalysis>,
+    refined: Option<AttachmentShape>,
 ) {
     let expression = hir
         .expression(id)
@@ -1505,39 +1674,53 @@ fn walk_expression(
 
     match &expression.kind {
         TypedExpressionKind::Block { statements, value } => {
-            walk_block(visitor, statements, hir, layout_value, refined);
+            walk_block(visitor, statements, hir, shapes, refined);
             if let Some(value) = value {
-                walk_expression(visitor, *value, hir, layout_value, refined);
+                walk_expression(visitor, *value, hir, shapes, refined);
             }
         }
-        TypedExpressionKind::Loop { body } => walk_block(visitor, body, hir, layout_value, refined),
-        TypedExpressionKind::Match { value, arms }
-            if layout_value.is_some_and(|layout| {
-                hir.value_path(*value).and_then(|(root, _)| root)
-                    == Some(ResolvedValue::Variable(layout))
-            }) =>
-        {
-            walk_expression(visitor, *value, hir, layout_value, refined);
-            for arm in arms {
-                if let Some(guard) = arm.guard {
-                    walk_expression(visitor, guard, hir, layout_value, refined);
-                }
-                let arm_layout = match arm.resolution.variant {
-                    Some(ResolvedEnumVariantId::Source(variant)) => {
-                        Some(AttachmentLayout::Named(variant))
-                    }
-                    _ => refined,
-                };
-                walk_expression(visitor, arm.value, hir, layout_value, arm_layout);
-            }
-        }
+        TypedExpressionKind::Loop { body } => walk_block(visitor, body, hir, shapes, refined),
         TypedExpressionKind::Match { value, arms } => {
-            walk_expression(visitor, *value, hir, layout_value, refined);
+            walk_expression(visitor, *value, hir, shapes, refined);
+            let dimension = hir
+                .value_path(*value)
+                .and_then(|(root, _)| root)
+                .and_then(ResolvedValue::source_value)
+                .map(ResolvedShapeDimension::Global);
+            let mut remaining = active_shapes(shapes, refined);
             for arm in arms {
                 if let Some(guard) = arm.guard {
-                    walk_expression(visitor, guard, hir, layout_value, refined);
+                    walk_expression(visitor, guard, hir, shapes, refined);
                 }
-                walk_expression(visitor, arm.value, hir, layout_value, refined);
+                let selected = match (
+                    shapes,
+                    dimension,
+                    arm.resolution.variant,
+                    arm.guard.is_none(),
+                ) {
+                    (
+                        Some(shapes),
+                        Some(dimension),
+                        Some(ResolvedEnumVariantId::Source(variant)),
+                        _,
+                    ) => remaining
+                        .iter()
+                        .copied()
+                        .filter(|shape| shapes.shape_has_fact(*shape, dimension, variant))
+                        .collect::<Vec<_>>(),
+                    (Some(_), Some(_), None, true) => remaining.clone(),
+                    _ => Vec::new(),
+                };
+                if selected.is_empty() {
+                    walk_expression(visitor, arm.value, hir, shapes, refined);
+                } else {
+                    for shape in &selected {
+                        walk_expression(visitor, arm.value, hir, shapes, Some(*shape));
+                    }
+                    if arm.guard.is_none() {
+                        remaining.retain(|shape| !selected.contains(shape));
+                    }
+                }
             }
         }
         TypedExpressionKind::If {
@@ -1545,24 +1728,167 @@ fn walk_expression(
             then_expr,
             else_expr,
         } => {
-            walk_expression(visitor, *condition, hir, layout_value, refined);
-            walk_expression(visitor, *then_expr, hir, layout_value, refined);
-            walk_expression(visitor, *else_expr, hir, layout_value, refined);
+            walk_expression(visitor, *condition, hir, shapes, refined);
+            walk_conditional_expressions(
+                visitor, *condition, *then_expr, *else_expr, hir, shapes, refined,
+            );
         }
         TypedExpressionKind::Fallback { value, fallback } => {
-            walk_expression(visitor, *value, hir, layout_value, refined);
-            walk_expression(visitor, *fallback, hir, layout_value, refined);
+            walk_expression(visitor, *value, hir, shapes, refined);
+            walk_expression(visitor, *fallback, hir, shapes, refined);
         }
         TypedExpressionKind::Closure { body, .. } => {
             if visitor.visit_closure_bodies() {
-                walk_expression(visitor, *body, hir, layout_value, refined);
+                walk_expression(visitor, *body, hir, shapes, refined);
             }
         }
         _ => {
             for child in expression_children(&expression.kind) {
-                walk_expression(visitor, child, hir, layout_value, refined);
+                walk_expression(visitor, child, hir, shapes, refined);
             }
         }
+    }
+}
+
+fn active_shapes(
+    shapes: Option<&ScopedGlobalAnalysis>,
+    refined: Option<AttachmentShape>,
+) -> Vec<AttachmentShape> {
+    refined.map_or_else(
+        || shapes.map_or_else(Vec::new, |shapes| shapes.shapes.clone()),
+        |shape| vec![shape],
+    )
+}
+
+fn condition_value(
+    hir: &TypedProgram,
+    shapes: &ScopedGlobalAnalysis,
+    expression: crate::ast::ExprId,
+    shape: AttachmentShape,
+) -> Option<bool> {
+    let expression = hir.expression(expression)?;
+    match &expression.kind {
+        TypedExpressionKind::Is { value, pattern } => {
+            let dimension = hir
+                .value_path(*value)
+                .and_then(|(root, _)| root)
+                .and_then(ResolvedValue::source_value)
+                .map(ResolvedShapeDimension::Global)?;
+            let ResolvedEnumVariantId::Source(variant) = pattern.resolution.variant? else {
+                return None;
+            };
+            Some(shapes.shape_has_fact(shape, dimension, variant))
+        }
+        TypedExpressionKind::Binary { op, left, right }
+            if matches!(op, crate::ast::BinaryOp::Eq | crate::ast::BinaryOp::Ne) =>
+        {
+            let atom = |value, variant_expression| {
+                let dimension = hir
+                    .value_path(value)
+                    .and_then(|(root, _)| root)
+                    .and_then(ResolvedValue::source_value)
+                    .map(ResolvedShapeDimension::Global)?;
+                let ResolvedEnumVariantId::Source(variant) =
+                    hir.enum_variant(variant_expression)?
+                else {
+                    return None;
+                };
+                Some(shapes.shape_has_fact(shape, dimension, variant))
+            };
+            let equal = atom(*left, *right).or_else(|| atom(*right, *left))?;
+            Some(if *op == crate::ast::BinaryOp::Eq {
+                equal
+            } else {
+                !equal
+            })
+        }
+        TypedExpressionKind::Binary { op, left, right }
+            if matches!(op, crate::ast::BinaryOp::And | crate::ast::BinaryOp::Or) =>
+        {
+            let left = condition_value(hir, shapes, *left, shape)?;
+            let right = condition_value(hir, shapes, *right, shape)?;
+            Some(if *op == crate::ast::BinaryOp::And {
+                left && right
+            } else {
+                left || right
+            })
+        }
+        TypedExpressionKind::Unary {
+            op: crate::ast::UnaryOp::Not,
+            expression,
+        } => condition_value(hir, shapes, *expression, shape).map(|value| !value),
+        _ => None,
+    }
+}
+
+fn conditional_shapes(
+    hir: &TypedProgram,
+    shapes: Option<&ScopedGlobalAnalysis>,
+    condition: crate::ast::ExprId,
+    refined: Option<AttachmentShape>,
+    expected: bool,
+) -> Option<Vec<AttachmentShape>> {
+    let shapes = shapes?;
+    let active = active_shapes(Some(shapes), refined);
+    let mut understood = false;
+    let selected = active
+        .into_iter()
+        .filter(|shape| {
+            condition_value(hir, shapes, condition, *shape).is_none_or(|value| {
+                understood = true;
+                value == expected
+            })
+        })
+        .collect();
+    understood.then_some(selected)
+}
+
+fn walk_conditional_blocks(
+    visitor: &mut impl ScopedUseVisitor,
+    condition: crate::ast::ExprId,
+    then_block: &TypedBlock,
+    else_block: Option<&TypedBlock>,
+    hir: &TypedProgram,
+    shapes: Option<&ScopedGlobalAnalysis>,
+    refined: Option<AttachmentShape>,
+) {
+    let Some(then_shapes) = conditional_shapes(hir, shapes, condition, refined, true) else {
+        walk_block(visitor, then_block, hir, shapes, refined);
+        if let Some(else_block) = else_block {
+            walk_block(visitor, else_block, hir, shapes, refined);
+        }
+        return;
+    };
+    for shape in then_shapes {
+        walk_block(visitor, then_block, hir, shapes, Some(shape));
+    }
+    if let Some(else_block) = else_block {
+        for shape in conditional_shapes(hir, shapes, condition, refined, false).unwrap_or_default()
+        {
+            walk_block(visitor, else_block, hir, shapes, Some(shape));
+        }
+    }
+}
+
+fn walk_conditional_expressions(
+    visitor: &mut impl ScopedUseVisitor,
+    condition: crate::ast::ExprId,
+    then_expression: crate::ast::ExprId,
+    else_expression: crate::ast::ExprId,
+    hir: &TypedProgram,
+    shapes: Option<&ScopedGlobalAnalysis>,
+    refined: Option<AttachmentShape>,
+) {
+    let Some(then_shapes) = conditional_shapes(hir, shapes, condition, refined, true) else {
+        walk_expression(visitor, then_expression, hir, shapes, refined);
+        walk_expression(visitor, else_expression, hir, shapes, refined);
+        return;
+    };
+    for shape in then_shapes {
+        walk_expression(visitor, then_expression, hir, shapes, Some(shape));
+    }
+    for shape in conditional_shapes(hir, shapes, condition, refined, false).unwrap_or_default() {
+        walk_expression(visitor, else_expression, hir, shapes, Some(shape));
     }
 }
 

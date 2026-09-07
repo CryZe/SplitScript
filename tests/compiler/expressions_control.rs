@@ -1288,24 +1288,25 @@ fn unused_state_fields_follow_snapshot_reads_and_candidate_dependencies() {
 }
 
 #[test]
-fn shared_layout_state_fields_produce_one_logical_unused_warning() {
+fn shared_shape_state_fields_produce_one_logical_unused_warning() {
     let source = r#"
+        enum Build { Steam, GOG }
+        let build: Build
         state "game.exe" {
-            layout Steam {
+            if build == Build.Steam {
                 level: u32 at 0x100;
                 spare: u32 at 0x104;
-            },
-            layout GOG {
+            } else {
                 level: u32 at 0x200;
                 spare: u32 at 0x204;
-            },
+            }
         }
 
-        onAttach { return StateLayout.Steam }
+        onAttach { build = Build.Steam }
         split { return current.level != old.level }
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap())
-        .expect("shared layout fields should be analyzed by logical identity");
+        .expect("shared shape fields should be analyzed by logical identity");
     let unused = checked
         .diagnostics()
         .iter()

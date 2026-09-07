@@ -2263,25 +2263,24 @@ fn validate_unused_declarations(
         .state
         .iter()
         .flat_map(|state| state.all_fields())
-        .filter_map(|field| semantics.state_field_layout_predicate(field.id))
+        .filter_map(|field| semantics.state_field_shape_predicate(field.id))
         .chain(
             syntax
                 .managed_class_declarations()
                 .into_iter()
                 .flat_map(|class| class.all_fields())
-                .filter_map(|field| semantics.managed_field_layout_predicate(field.id)),
+                .filter_map(|field| semantics.managed_field_shape_predicate(field.id)),
         );
     for predicate in predicates {
         for constraint in predicate.alternatives.iter().flatten() {
             observed_enum_variants.insert(constraint.variant);
             match constraint.dimension {
-                crate::semantic::ResolvedLayoutDimension::Global(value) => {
+                crate::semantic::ResolvedShapeDimension::Global(value) => {
                     pending.push_back((DeclarationWorkItem::Global(value), UseProfiles::ALL))
                 }
-                crate::semantic::ResolvedLayoutDimension::StateField(value) => {
+                crate::semantic::ResolvedShapeDimension::StateField(value) => {
                     observed_state_fields.insert(value);
                 }
-                crate::semantic::ResolvedLayoutDimension::LayoutField(_) => {}
             }
         }
     }
@@ -2296,32 +2295,6 @@ fn validate_unused_declarations(
                 .all_fields()
                 .filter_map(|field| semantics.value_type(field.id)),
         );
-        // The attachment runtime constructs and consumes the generated Layout
-        // value even when user code never names the struct directly. Its
-        // dimensions and every possible enum value participate in automatic
-        // metadata selection, so none of those declarations are dead source.
-        if let Some(layout) = &state.layout {
-            reachable_types.insert(semantics.types().id_for_struct(layout.structure));
-            if let Some(structure) = syntax.structs.get(layout.structure.index()) {
-                observed_struct_fields.extend(structure.fields.iter().map(|field| field.id));
-                for field in &structure.fields {
-                    let Some(ty) = semantics.struct_field_type(field.id) else {
-                        continue;
-                    };
-                    let TypeKind::Enum(enumeration) = semantics.types().kind(ty) else {
-                        continue;
-                    };
-                    if let Some(enumeration) = syntax
-                        .enums
-                        .iter()
-                        .find(|candidate| candidate.id == *enumeration)
-                    {
-                        observed_enum_variants
-                            .extend(enumeration.variants.iter().map(|variant| variant.id));
-                    }
-                }
-            }
-        }
     }
     reachable_types.extend(
         syntax
@@ -2461,7 +2434,7 @@ fn validate_unused_declarations(
             for declaration in declarations.iter().skip(1) {
                 diagnostic = diagnostic.with_secondary_label(
                     state_field_name_span(declaration),
-                    "this layout declaration shares the same snapshot field",
+                    "this conditional declaration shares the same snapshot field",
                 );
             }
             diagnostics.push(diagnostic);

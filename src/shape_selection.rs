@@ -1,4 +1,4 @@
-//! Attachment-wide layout selection derived from runtime schema evidence.
+//! Attachment-wide shape selection derived from runtime schema evidence.
 //!
 //! Managed metadata contributes presence observations for conditional fields;
 //! this module turns those observations into a bounded, backend-independent
@@ -8,93 +8,93 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     ast::{ActionKind, EnumId, EnumVariantId, Expr, ExprKind, ManagedFieldId, Program},
-    semantic::{ResolvedLayoutDimension, SemanticModel},
+    semantic::{ResolvedShapeDimension, SemanticModel},
     types::TypeKind,
     visit::{self, Visitor},
 };
 
-/// Layout products above this size require an explicit selector. This is a
+/// Shape products above this size require an explicit selector. This is a
 /// compiler-complexity bound, not a runtime language limit: explicit
 /// `onAttach` code can still select any declared combination.
-pub(crate) const MAX_ENUMERATED_LAYOUT_COMBINATIONS: usize = 256;
+pub(crate) const MAX_ENUMERATED_SHAPE_COMBINATIONS: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AutomaticLayoutSelection {
+pub(crate) enum AutomaticShapeSelection {
     NotDeclared,
-    Available(LayoutSelectionPlan),
-    RequiresExplicit(ExplicitSelectionReason),
+    Available(ShapeSelectionPlan),
+    RequiresExplicit(ShapeSelectionReason),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ExplicitSelectionReason {
+pub(crate) enum ShapeSelectionReason {
     PayloadVariants,
     CandidateLimit { combinations: Option<usize> },
     IndistinguishableEvidence,
     EvidenceUnavailable,
 }
 
-impl ExplicitSelectionReason {
+impl ShapeSelectionReason {
     pub(crate) fn note(&self) -> String {
         match self {
-            Self::PayloadVariants => "automatic layout selection currently requires unit-only dimension enums; return `Layout { ... }` explicitly when a dimension carries payloads".to_owned(),
+            Self::PayloadVariants => "automatic attachment-shape selection currently requires unit-only enum globals; assign those globals explicitly in `onAttach` when a variant carries a payload".to_owned(),
             Self::CandidateLimit { combinations } => combinations.map_or_else(
-                || "the layout product is too large to derive a bounded metadata selector; return `Layout { ... }` explicitly".to_owned(),
-                |count| format!("the layout has {count} possible combinations, above the automatic-selection limit of {MAX_ENUMERATED_LAYOUT_COMBINATIONS}; return `Layout {{ ... }}` explicitly"),
+                || "the attachment-shape product is too large to derive a bounded metadata selector; assign the shape globals explicitly in `onAttach`".to_owned(),
+                |count| format!("the attachment shape has {count} possible combinations, above the automatic-selection limit of {MAX_ENUMERATED_SHAPE_COMBINATIONS}; assign the shape globals explicitly in `onAttach`"),
             ),
-            Self::IndistinguishableEvidence => "the declared managed fields do not distinguish every layout combination; return `Layout { ... }` explicitly after checking the remaining build facts".to_owned(),
-            Self::EvidenceUnavailable => "this state provider cannot probe the conditional managed fields used as layout evidence; return `Layout { ... }` explicitly".to_owned(),
+            Self::IndistinguishableEvidence => "the declared managed fields do not distinguish every shape combination; assign the shape globals explicitly in `onAttach` after checking the remaining build facts".to_owned(),
+            Self::EvidenceUnavailable => "this state provider cannot probe the conditional managed fields used as shape evidence; assign the shape globals explicitly in `onAttach`".to_owned(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LayoutSelectionPlan {
-    pub dimensions: Vec<LayoutSelectionDimension>,
+pub(crate) struct ShapeSelectionPlan {
+    pub dimensions: Vec<ShapeSelectionDimension>,
     /// Every probed conditional field, in stable source identity order.
     pub evidence_fields: Vec<ManagedFieldId>,
     /// Every possible assignment and its exact expected presence pattern.
-    pub candidates: Vec<LayoutSelectionCandidate>,
+    pub candidates: Vec<ShapeSelectionCandidate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LayoutSelectionDimension {
-    pub dimension: ResolvedLayoutDimension,
+pub(crate) struct ShapeSelectionDimension {
+    pub dimension: ResolvedShapeDimension,
     pub enumeration: EnumId,
     pub variants: Vec<EnumVariantId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LayoutSelectionCandidate {
-    /// One variant per [`LayoutSelectionPlan::dimensions`] entry.
+pub(crate) struct ShapeSelectionCandidate {
+    /// One variant per [`ShapeSelectionPlan::dimensions`] entry.
     pub variants: Vec<EnumVariantId>,
     /// Conditional fields that must be present for this exact assignment.
     pub present_fields: Vec<ManagedFieldId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LayoutSelectionFailureReport {
+pub(crate) struct ShapeSelectionFailureReport {
     pub header: String,
     pub observed_present: String,
     pub observed_absent: String,
     pub expected_present: String,
     pub expected_absent: String,
-    pub evidence: Vec<LayoutSelectionEvidenceReport>,
-    pub candidates: Vec<LayoutSelectionCandidateReport>,
+    pub evidence: Vec<ShapeSelectionEvidenceReport>,
+    pub candidates: Vec<ShapeSelectionCandidateReport>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LayoutSelectionEvidenceReport {
+pub(crate) struct ShapeSelectionEvidenceReport {
     pub field: ManagedFieldId,
     pub label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LayoutSelectionCandidateReport {
+pub(crate) struct ShapeSelectionCandidateReport {
     pub label: String,
     pub present_fields: Vec<ManagedFieldId>,
 }
 
-impl LayoutSelectionFailureReport {
+impl ShapeSelectionFailureReport {
     pub(crate) fn messages(&self) -> impl Iterator<Item = &str> {
         std::iter::once(self.header.as_str())
             .chain(std::iter::once(self.observed_present.as_str()))
@@ -110,21 +110,21 @@ impl LayoutSelectionFailureReport {
     }
 }
 
-impl LayoutSelectionPlan {
+impl ShapeSelectionPlan {
     /// Builds the source-facing report used when the runtime metadata presence
-    /// vector does not equal any statically valid layout pattern.
+    /// vector does not equal any statically valid shape pattern.
     ///
     /// The selector itself remains a compact bit-vector comparison. Keeping
     /// human-readable labels here gives static-data planning and failure
     /// emission one canonical description without making diagnostics part of
     /// either managed backend.
-    pub(crate) fn failure_report(&self, program: &Program) -> LayoutSelectionFailureReport {
+    pub(crate) fn failure_report(&self, program: &Program) -> ShapeSelectionFailureReport {
         let evidence = self
             .evidence_fields
             .iter()
             .map(|field| {
                 let label = managed_field_label(program, *field);
-                LayoutSelectionEvidenceReport {
+                ShapeSelectionEvidenceReport {
                     field: *field,
                     label,
                 }
@@ -134,43 +134,37 @@ impl LayoutSelectionPlan {
             .candidates
             .iter()
             .map(|candidate| {
-                let layout = self
+                let shape = self
                     .dimensions
                     .iter()
                     .zip(&candidate.variants)
                     .map(|(dimension, variant)| {
                         let enumeration = program
                             .enum_declaration(dimension.enumeration)
-                            .expect("layout dimensions use source enums");
+                            .expect("shape dimensions use source enums");
                         let variant = enumeration
                             .variants
                             .iter()
                             .find(|declaration| declaration.id == *variant)
-                            .expect("layout candidates use declared variants");
+                            .expect("shape candidates use declared variants");
                         format!(
-                            "{}: {}.{}",
-                            layout_dimension_name(program, dimension.dimension),
+                            "{} = {}.{}",
+                            shape_dimension_name(program, dimension.dimension),
                             enumeration.name,
                             variant.name
                         )
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                let label = if self.dimensions.iter().all(|dimension| {
-                    matches!(dimension.dimension, ResolvedLayoutDimension::LayoutField(_))
-                }) {
-                    format!("Expected `Layout {{ {layout} }}`")
-                } else {
-                    format!("Expected attachment shape `{layout}`")
-                };
-                LayoutSelectionCandidateReport {
+                let label = format!("Expected attachment shape `{shape}`");
+                ShapeSelectionCandidateReport {
                     label,
                     present_fields: candidate.present_fields.clone(),
                 }
             })
             .collect();
-        LayoutSelectionFailureReport {
-            header: "Could not select an attachment layout: managed metadata did not match any declared layout".to_owned(),
+        ShapeSelectionFailureReport {
+            header: "Could not select the attachment shape: managed metadata did not match any declared shape".to_owned(),
             observed_present: "Observed present managed fields:".to_owned(),
             observed_absent: "Observed absent managed fields:".to_owned(),
             expected_present: "  Expected present fields:".to_owned(),
@@ -217,53 +211,43 @@ fn managed_field_label(program: &Program, target: ManagedFieldId) -> String {
             return format!("{}::{field}", image.name);
         }
     }
-    unreachable!("layout evidence belongs to a managed source field")
+    unreachable!("shape evidence belongs to a managed source field")
 }
 
-fn layout_dimension_name(program: &Program, dimension: ResolvedLayoutDimension) -> &str {
+fn shape_dimension_name(program: &Program, dimension: ResolvedShapeDimension) -> &str {
     match dimension {
-        ResolvedLayoutDimension::LayoutField(target) => program
-            .structs
-            .iter()
-            .flat_map(|structure| &structure.fields)
-            .find(|field| field.id == target)
-            .map(|field| field.name.as_str())
-            .expect("layout dimensions refer to declared fields"),
-        ResolvedLayoutDimension::Global(target) => program
+        ResolvedShapeDimension::Global(target) => program
             .globals
             .iter()
             .filter_map(|global| global.binding.simple_binding())
             .find(|binding| binding.id == target)
             .map(|binding| binding.name.as_str())
-            .expect("layout dimensions refer to declared globals"),
-        ResolvedLayoutDimension::StateField(target) => program
+            .expect("shape dimensions refer to declared globals"),
+        ResolvedShapeDimension::StateField(target) => program
             .state
             .iter()
             .flat_map(|state| state.all_fields())
             .find(|field| field.id == target)
             .map(|field| field.name.as_str())
-            .expect("layout dimensions refer to declared state fields"),
+            .expect("shape dimensions refer to declared state fields"),
     }
 }
 
 struct ManagedEvidenceGroup {
-    alternatives: Vec<Vec<(ResolvedLayoutDimension, EnumVariantId)>>,
+    alternatives: Vec<Vec<(ResolvedShapeDimension, EnumVariantId)>>,
     fields: Vec<ManagedFieldId>,
 }
 
-pub(crate) fn automatic_layout_selection(
+pub(crate) fn automatic_shape_selection(
     program: &Program,
     semantics: &SemanticModel,
-) -> AutomaticLayoutSelection {
-    automatic_layout_selection_with(
+) -> AutomaticShapeSelection {
+    automatic_shape_selection_with(
         program,
         |dimension| {
             let ty = match dimension {
-                ResolvedLayoutDimension::LayoutField(field) => {
-                    semantics.struct_field_type(field)?
-                }
-                ResolvedLayoutDimension::Global(value) => semantics.value_type(value)?,
-                ResolvedLayoutDimension::StateField(value) => semantics.value_type(value)?,
+                ResolvedShapeDimension::Global(value) => semantics.value_type(value)?,
+                ResolvedShapeDimension::StateField(value) => semantics.value_type(value)?,
             };
             let TypeKind::Enum(enumeration) = semantics.types().kind(ty) else {
                 return None;
@@ -272,7 +256,7 @@ pub(crate) fn automatic_layout_selection(
         },
         |field| {
             semantics
-                .managed_field_layout_predicate(field)
+                .managed_field_shape_predicate(field)
                 .map(|predicate| {
                     predicate
                         .alternatives
@@ -290,24 +274,12 @@ pub(crate) fn automatic_layout_selection(
     )
 }
 
-pub(crate) fn automatic_layout_selection_with(
+pub(crate) fn automatic_shape_selection_with(
     program: &Program,
-    enum_for_dimension: impl Fn(ResolvedLayoutDimension) -> Option<EnumId>,
-    predicates_for_field: impl Fn(ManagedFieldId) -> Vec<Vec<(ResolvedLayoutDimension, EnumVariantId)>>,
-) -> AutomaticLayoutSelection {
+    enum_for_dimension: impl Fn(ResolvedShapeDimension) -> Option<EnumId>,
+    predicates_for_field: impl Fn(ManagedFieldId) -> Vec<Vec<(ResolvedShapeDimension, EnumVariantId)>>,
+) -> AutomaticShapeSelection {
     let mut source_dimensions = Vec::new();
-    if let Some(layout) = program
-        .state
-        .as_ref()
-        .and_then(|state| state.layout.as_ref())
-    {
-        source_dimensions.extend(
-            program.structs[layout.structure.index()]
-                .fields
-                .iter()
-                .map(|field| ResolvedLayoutDimension::LayoutField(field.id)),
-        );
-    }
     for field in program
         .managed_class_declarations()
         .into_iter()
@@ -315,7 +287,7 @@ pub(crate) fn automatic_layout_selection_with(
     {
         for alternative in predicates_for_field(field.id) {
             for (dimension, _) in alternative {
-                if matches!(dimension, ResolvedLayoutDimension::StateField(_)) {
+                if matches!(dimension, ResolvedShapeDimension::StateField(_)) {
                     continue;
                 }
                 if !source_dimensions.contains(&dimension) {
@@ -325,44 +297,43 @@ pub(crate) fn automatic_layout_selection_with(
         }
     }
     if source_dimensions.is_empty() {
-        return AutomaticLayoutSelection::NotDeclared;
+        return AutomaticShapeSelection::NotDeclared;
     }
     source_dimensions.sort_by_key(|dimension| match dimension {
-        ResolvedLayoutDimension::LayoutField(field) => (0, field.index()),
-        ResolvedLayoutDimension::Global(value) => (1, value.index()),
-        ResolvedLayoutDimension::StateField(value) => (2, value.index()),
+        ResolvedShapeDimension::Global(value) => (0, value.index()),
+        ResolvedShapeDimension::StateField(value) => (1, value.index()),
     });
     let mut dimensions = Vec::with_capacity(source_dimensions.len());
     let mut combination_count = 1usize;
     for dimension in source_dimensions {
         let Some(enumeration) = enum_for_dimension(dimension) else {
-            return AutomaticLayoutSelection::RequiresExplicit(
-                ExplicitSelectionReason::IndistinguishableEvidence,
+            return AutomaticShapeSelection::RequiresExplicit(
+                ShapeSelectionReason::IndistinguishableEvidence,
             );
         };
         let declaration = program
             .enum_declaration(enumeration)
-            .expect("checked layout dimensions use source enums");
+            .expect("checked shape dimensions use source enums");
         if declaration
             .variants
             .iter()
             .any(|variant| variant.payload.is_some())
         {
-            return AutomaticLayoutSelection::RequiresExplicit(
-                ExplicitSelectionReason::PayloadVariants,
+            return AutomaticShapeSelection::RequiresExplicit(
+                ShapeSelectionReason::PayloadVariants,
             );
         }
         combination_count = match combination_count.checked_mul(declaration.variants.len()) {
-            Some(count) if count <= MAX_ENUMERATED_LAYOUT_COMBINATIONS => count,
+            Some(count) if count <= MAX_ENUMERATED_SHAPE_COMBINATIONS => count,
             count => {
-                return AutomaticLayoutSelection::RequiresExplicit(
-                    ExplicitSelectionReason::CandidateLimit {
+                return AutomaticShapeSelection::RequiresExplicit(
+                    ShapeSelectionReason::CandidateLimit {
                         combinations: count,
                     },
                 );
             }
         };
-        dimensions.push(LayoutSelectionDimension {
+        dimensions.push(ShapeSelectionDimension {
             dimension,
             enumeration,
             variants: declaration
@@ -411,13 +382,13 @@ pub(crate) fn automatic_layout_selection_with(
             .insert(candidate.present_fields.clone(), index)
             .is_some()
         {
-            return AutomaticLayoutSelection::RequiresExplicit(
-                ExplicitSelectionReason::IndistinguishableEvidence,
+            return AutomaticShapeSelection::RequiresExplicit(
+                ShapeSelectionReason::IndistinguishableEvidence,
             );
         }
     }
 
-    AutomaticLayoutSelection::Available(LayoutSelectionPlan {
+    AutomaticShapeSelection::Available(ShapeSelectionPlan {
         dimensions,
         evidence_fields,
         candidates,
@@ -425,11 +396,11 @@ pub(crate) fn automatic_layout_selection_with(
 }
 
 fn enumerate_candidates(
-    dimensions: &[LayoutSelectionDimension],
+    dimensions: &[ShapeSelectionDimension],
     groups: &[ManagedEvidenceGroup],
     dimension_index: usize,
     variants: &mut Vec<EnumVariantId>,
-    output: &mut Vec<LayoutSelectionCandidate>,
+    output: &mut Vec<ShapeSelectionCandidate>,
 ) {
     if dimension_index != dimensions.len() {
         for variant in &dimensions[dimension_index].variants {
@@ -458,27 +429,15 @@ fn enumerate_candidates(
         .collect::<Vec<_>>();
     present_fields.sort_by_key(|field| field.index());
     present_fields.dedup();
-    output.push(LayoutSelectionCandidate {
+    output.push(ShapeSelectionCandidate {
         variants: variants.clone(),
         present_fields,
     });
 }
 
-/// Whether user `onAttach` code explicitly owns layout selection. Returns
+/// Whether user `onAttach` code explicitly owns shape selection. Returns
 /// inside closures belong to those closures and do not count.
-pub(crate) fn has_explicit_layout_selection(program: &Program) -> bool {
-    struct Finder(bool);
-
-    impl<'ast> Visitor<'ast> for Finder {
-        fn visit_expr(&mut self, expression: &'ast Expr) {
-            match &expression.kind {
-                ExprKind::Return(Some(_)) => self.0 = true,
-                ExprKind::Closure { .. } => {}
-                _ => visit::walk_expr(self, expression),
-            }
-        }
-    }
-
+pub(crate) fn has_explicit_shape_selection(program: &Program) -> bool {
     let Some(action) = program
         .actions
         .iter()
@@ -486,11 +445,8 @@ pub(crate) fn has_explicit_layout_selection(program: &Program) -> bool {
     else {
         return false;
     };
-    let mut finder = Finder(false);
-    finder.visit_block(&action.body);
-    let complete_globals = shape_global_assignments(program, action)
-        .is_some_and(|(dimensions, assigned)| !assigned.is_empty() && assigned == dimensions);
-    finder.0 || complete_globals
+    shape_global_assignments(program, action)
+        .is_some_and(|(dimensions, assigned)| !assigned.is_empty() && assigned == dimensions)
 }
 
 /// Returns the attachment-shape globals assigned directly by `onAttach`, but

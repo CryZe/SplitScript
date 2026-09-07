@@ -29,7 +29,7 @@ pub(super) fn collect(checker: &mut Checker, program: &Program) {
 /// This deliberately runs after global initializers have established their
 /// bindings and types. Conditional schema declarations can therefore use an
 /// ordinary enum global as their discriminator without introducing a second,
-/// layout-specific name-resolution path.
+/// shape-specific name-resolution path.
 pub(super) fn collect_conditional_fields(checker: &mut Checker, program: &Program) {
     collect_conditional_state_fields(checker, program);
     collect_conditional_managed_fields(checker, program);
@@ -42,7 +42,7 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
     let provider = checker
         .provider_value
         .map(|(provider, _)| checker.standard_library.state_provider(provider));
-    if !state.has_named_variants() {
+    if !state.has_provider_alternatives() {
         for field in &state.fields {
             let ty = collect_state_field_type(checker, field, provider);
             checker.semantics.resolve_value_type(field.id, ty);
@@ -68,9 +68,9 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
             }
         }
     } else {
-        // First collect every physical declaration independently. Layouts are
-        // allowed to omit names or use the same name with a different type.
-        for (variant, variant_fields) in state.variant_fields() {
+        // First collect every provider alternative independently. Alternatives
+        // may omit names or use the same name with a different type.
+        for (variant, variant_fields) in state.provider_variant_fields() {
             let variant_provider = checker
                 .resolutions
                 .state_provider_alternative(variant)
@@ -96,25 +96,29 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
                     .insert(field.id, field.span);
                 if fields.insert(field.name.clone(), (field.id, ty)).is_some() {
                     checker.error(
-                        format!("duplicate state field `{}` in this layout", field.name),
+                        format!(
+                            "duplicate state field `{}` in this provider alternative",
+                            field.name
+                        ),
                         field.span,
                     );
                 }
             }
             checker
                 .declarations
-                .layout_state_fields
+                .provider_state_fields
                 .insert(variant, fields);
         }
 
         // A name becomes part of StateSnapshot's common interface only when
-        // every layout declares it and explicit annotations do not conflict.
+        // every provider alternative declares it and explicit annotations do
+        // not conflict.
         // Unannotated declarations still participate in bidirectional
         // inference by unifying with the canonical declaration.
-        let first = state.canonical_fields();
+        let first = state.canonical_provider_fields();
         for field in first {
             let declarations = state
-                .variant_fields()
+                .provider_variant_fields()
                 .map(|(_, fields)| fields.iter().find(|item| item.name == field.name))
                 .collect::<Option<Vec<_>>>();
             let is_common = state.is_common_field(&field.name);
@@ -132,7 +136,7 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
                             super::ExpectedTypeSource {
                                 span: field.span,
                                 label: format!(
-                                    "the first layout declares `{}` as `{canonical_name}`",
+                                    "the first provider alternative declares `{}` as `{canonical_name}`",
                                     field.name
                                 ),
                             },
@@ -149,12 +153,13 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
             }
         }
 
-        // Layout subsets may also share one physical snapshot slot. This is
-        // what lets an or-pattern such as `StateLayout.V8 | StateLayout.V9`
-        // retain a field that has the same name and type in both layouts even
-        // when a third layout omits it. Conflicting types remain independent.
+        // Provider subsets may also share one physical snapshot slot. This is
+        // what lets an or-pattern such as `StateProvider.Windows |
+        // StateProvider.GBA` retain a field that has the same name and type in
+        // both alternatives even when a third omits it. Conflicting types
+        // remain independent.
         let mut compatible_storage = HashMap::<(String, Type), crate::ast::ValueId>::new();
-        for (_, fields) in state.variant_fields() {
+        for (_, fields) in state.provider_variant_fields() {
             for field in fields {
                 let ty = checker.declarations.state_fields_by_id[&field.id];
                 let key = (field.name.clone(), ty);
@@ -176,22 +181,20 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
         }
     }
 
-    if let Some(layout_value) = state.layout_value {
-        let ty = if let Some(layout) = &state.layout {
-            checker.struct_type(layout.structure)
-        } else if let Some(layout_enum) = &state.layout_enum {
-            checker.enum_type(EnumTypeId::Source(layout_enum.id))
+    if let Some(provider_value) = state.provider_value {
+        let ty = if let Some(provider_enum) = &state.provider_enum {
+            checker.enum_type(EnumTypeId::Source(provider_enum.id))
         } else {
-            unreachable!("a layout value has either a structured or legacy layout type")
+            unreachable!("a provider discriminant has a generated enum type")
         };
-        checker.semantics.resolve_value_type(layout_value, ty);
+        checker.semantics.resolve_value_type(provider_value, ty);
         checker.declarations.globals.insert(
             state
                 .refinement_value_name()
                 .expect("a refinement value has a source name")
                 .to_owned(),
             Binding {
-                id: Some(layout_value),
+                id: Some(provider_value),
                 ty,
                 mutable: false,
                 debug_only: false,
@@ -200,7 +203,7 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
         );
     }
 
-    if !state.has_named_variants() {
+    if !state.has_provider_alternatives() {
         // Conditional fields are collected after globals have been checked;
         // that later phase finalizes the physical snapshot layout as well.
         return;
@@ -208,7 +211,7 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
 
     let storage_fields = {
         let mut fields = state
-            .canonical_fields()
+            .canonical_provider_fields()
             .iter()
             .filter(|field| {
                 checker
@@ -227,14 +230,14 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
         }));
         fields
     };
-    let layout_fields = state
-        .variant_fields()
+    let provider_fields = state
+        .provider_variant_fields()
         .map(|(variant, fields)| (variant, fields.iter().map(|field| field.id).collect()))
         .collect();
-    checker.semantics.resolve_state_layout(
+    checker.semantics.resolve_state_storage(
         storage_fields,
         checker.declarations.state_storage_fields.clone(),
-        layout_fields,
+        provider_fields,
     );
 }
 
@@ -242,13 +245,13 @@ fn collect_conditional_state_fields(checker: &mut Checker, program: &Program) {
     let Some(state) = program.state.as_ref() else {
         return;
     };
-    if state.has_named_variants() {
+    if state.has_provider_alternatives() {
         return;
     }
     let provider = checker
         .provider_value
         .map(|(provider, _)| checker.standard_library.state_provider(provider));
-    let predicates = checker.layout_branch_predicates(&state.conditional_fields);
+    let predicates = checker.shape_branch_predicates(&state.conditional_fields);
     for (group, predicate) in state.conditional_fields.iter().zip(predicates) {
         let mut names = state
             .fields
@@ -282,9 +285,8 @@ fn collect_conditional_state_fields(checker: &mut Checker, program: &Program) {
                 .iter()
                 .flatten()
                 .filter_map(|constraint| match constraint.dimension {
-                    super::declarations::LayoutDimension::StateField(value) => Some(value),
-                    super::declarations::LayoutDimension::LayoutField(_)
-                    | super::declarations::LayoutDimension::Global(_) => None,
+                    super::declarations::ShapeDimension::StateField(value) => Some(value),
+                    super::declarations::ShapeDimension::Global(_) => None,
                 })
             {
                 checker
@@ -293,7 +295,7 @@ fn collect_conditional_state_fields(checker: &mut Checker, program: &Program) {
             }
             checker
                 .semantics
-                .resolve_conditional_state_field(field.id, resolved_layout_predicate(&predicate));
+                .resolve_conditional_state_field(field.id, resolved_shape_predicate(&predicate));
             if !names.insert(field.name.clone()) {
                 checker.error(
                     format!("duplicate conditional state field `{}`", field.name),
@@ -305,7 +307,7 @@ fn collect_conditional_state_fields(checker: &mut Checker, program: &Program) {
     for (name, declarations) in checker.declarations.conditional_state_fields.clone() {
         if declarations.is_empty()
             || !checker
-                .layout_predicates_cover_all(declarations.iter().map(|(_, _, predicate)| predicate))
+                .shape_predicates_cover_all(declarations.iter().map(|(_, _, predicate)| predicate))
         {
             continue;
         }
@@ -334,7 +336,7 @@ fn collect_conditional_state_fields(checker: &mut Checker, program: &Program) {
             (checker.declarations.state_storage_fields[&field.id] == field.id).then_some(field.id)
         })
         .collect();
-    checker.semantics.resolve_state_layout(
+    checker.semantics.resolve_state_storage(
         storage_fields,
         checker.declarations.state_storage_fields.clone(),
         HashMap::new(),
@@ -608,11 +610,6 @@ fn setting_value_type(checker: &Checker, setting: &SettingDecl) -> Option<Type> 
 }
 
 fn collect_named_type_members(checker: &mut Checker, program: &Program) {
-    let attachment_layout_struct = program
-        .state
-        .as_ref()
-        .and_then(|state| state.layout.as_ref())
-        .map(|layout| layout.structure);
     let mut struct_names = HashSet::new();
     for structure in &program.structs {
         if !struct_names.insert(structure.name.clone()) {
@@ -627,27 +624,6 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
             checker
                 .semantics
                 .resolve_struct_field_type(field.id, field_ty);
-            if attachment_layout_struct == Some(structure.id) {
-                let Type::Known(ty) = checker.shallow_type(field_ty) else {
-                    checker.error(
-                        "a layout dimension must use a concrete enum type",
-                        field.span,
-                    );
-                    continue;
-                };
-                if !matches!(
-                    checker.inference.type_store().kind(ty),
-                    crate::types::TypeKind::Enum(_)
-                ) {
-                    checker.error(
-                        format!(
-                            "layout dimension `{}` must use a source enum type",
-                            field.name
-                        ),
-                        field.span,
-                    );
-                }
-            }
             if !fields.insert(field.name.clone()) {
                 checker.error(
                     format!(
@@ -666,23 +642,6 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
                     );
                 }
             }
-        }
-    }
-
-    if let Some(layout) = program
-        .state
-        .as_ref()
-        .and_then(|state| state.layout.as_ref())
-    {
-        let structure = program
-            .structs
-            .get(layout.structure.index())
-            .expect("generated attachment layout structs retain stable indexes");
-        if structure.fields.is_empty() {
-            checker.error(
-                "an attachment layout needs at least one dimension",
-                layout.span,
-            );
         }
     }
 
@@ -761,12 +720,12 @@ fn collect_conditional_managed_fields(checker: &mut Checker, program: &Program) 
                     .map(|(name, span, _)| (name, (field.name.clone(), span)))
             })
             .collect();
-        let predicates = checker.layout_branch_predicates(&class.conditional_fields);
+        let predicates = checker.shape_branch_predicates(&class.conditional_fields);
         for (group, predicate) in class.conditional_fields.iter().zip(predicates) {
             if predicate.alternatives.iter().flatten().any(|constraint| {
                 matches!(
                     constraint.dimension,
-                    super::declarations::LayoutDimension::StateField(_)
+                    super::declarations::ShapeDimension::StateField(_)
                 )
             }) {
                 checker.error(
@@ -790,33 +749,30 @@ fn collect_conditional_managed_fields(checker: &mut Checker, program: &Program) 
                     .insert(field.id, predicate.clone());
                 checker.semantics.resolve_conditional_managed_field(
                     field.id,
-                    resolved_layout_predicate(&predicate),
+                    resolved_shape_predicate(&predicate),
                 );
             }
         }
     }
 }
 
-fn resolved_layout_predicate(
-    predicate: &super::declarations::LayoutPredicate,
-) -> crate::semantic::ResolvedLayoutPredicate {
-    crate::semantic::ResolvedLayoutPredicate {
+fn resolved_shape_predicate(
+    predicate: &super::declarations::ShapePredicate,
+) -> crate::semantic::ResolvedShapePredicate {
+    crate::semantic::ResolvedShapePredicate {
         alternatives: predicate
             .alternatives
             .iter()
             .map(|alternative| {
                 alternative
                     .iter()
-                    .map(|constraint| crate::semantic::ResolvedLayoutConstraint {
+                    .map(|constraint| crate::semantic::ResolvedShapeConstraint {
                         dimension: match constraint.dimension {
-                            super::declarations::LayoutDimension::LayoutField(field) => {
-                                crate::semantic::ResolvedLayoutDimension::LayoutField(field)
+                            super::declarations::ShapeDimension::Global(value) => {
+                                crate::semantic::ResolvedShapeDimension::Global(value)
                             }
-                            super::declarations::LayoutDimension::Global(value) => {
-                                crate::semantic::ResolvedLayoutDimension::Global(value)
-                            }
-                            super::declarations::LayoutDimension::StateField(value) => {
-                                crate::semantic::ResolvedLayoutDimension::StateField(value)
+                            super::declarations::ShapeDimension::StateField(value) => {
+                                crate::semantic::ResolvedShapeDimension::StateField(value)
                             }
                         },
                         variant: constraint.variant,

@@ -195,25 +195,31 @@ fn on_attach_is_a_fallible_boundary_without_changing_its_success_type() {
         .validate_all(&splitscript::codegen(&checked))
         .expect("fallible attachment initialization should produce valid WebAssembly");
 
-    let layout = r#"
+    let conditional_shape = r#"
+        enum Build { Full, Demo }
+        let build: Build
         state "game.exe" {
-            layout Full { value: u8 at 0x1000 },
-            layout Demo { value: u8 at 0x2000 },
+            if build == Build.Full {
+                value: u8 at 0x1000;
+            } else {
+                value: u8 at 0x2000;
+            }
         }
 
         onAttach {
             let marker = process.read<u8>(0x3000)?
             if marker == 1 {
-                return StateLayout.Full
+                build = Build.Full
+                return
             }
-            return StateLayout.Demo
+            build = Build.Demo
         }
     "#;
-    let checked = splitscript::check(splitscript::parse(layout).unwrap())
-        .expect("rejection paths do not need to manufacture a layout selection");
+    let checked = splitscript::check(splitscript::parse(conditional_shape).unwrap())
+        .expect("rejection paths do not need to initialize a successful shape");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
-        .expect("fallible explicit layout selection should produce valid WebAssembly");
+        .expect("fallible explicit shape selection should produce valid WebAssembly");
 
     let attachment_global = r#"
         let executable: Module

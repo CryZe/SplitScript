@@ -9,12 +9,12 @@ campaign's compiling translation as behavioral evidence.
 | ASL behavior | SplitScript representation |
 | --- | --- |
 | Attach to ASL's extensionless process name `Nioh` | `state "Nioh.exe"` for the current Windows host contract |
-| Select versions 1.21.04, 1.21.05, and 1.21.06 by main-module size | Three named layouts selected in `onAttach` |
+| Select versions 1.21.04, 1.21.05, and 1.21.06 by main-module size | One build enum initialized in `onAttach`, with three conditional field branches |
 | Poll at 29 Hz | `tickRate { attached: 29 }` lifecycle policy |
 | Remove loads while the mission timer is unchanged and the game is off-map | Original `isLoading` predicate |
 | Read the pointer paths of each build | Typed `u8` and `f32` state fields using 64-bit process traversal |
 
-Versions 1.21.05 and 1.21.06 intentionally remain separate layouts despite
+Versions 1.21.05 and 1.21.06 intentionally remain separate build variants despite
 sharing addresses: their distinct module sizes are part of the source's
 supported-build contract and remain visible in tooling and diagnostics.
 
@@ -26,7 +26,7 @@ restores the ordinary 1 Hz cadence on detach.
 
 ## Runtime status
 
-The deterministic host fixtures execute all three supported layouts and an
+The deterministic host fixtures execute all three supported build shapes and an
 unsupported build. They verify the required `Nioh.exe` process identity,
 module-size selection, 64-bit pointer reads, direct and indirect state fields,
 29 Hz attach and 1 Hz detach cadence, load pause/resume order, persistent state

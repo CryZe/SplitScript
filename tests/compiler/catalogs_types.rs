@@ -1277,6 +1277,8 @@ fn unity_provider_preparation_is_selected_typed_and_lowered_before_attachment() 
             Demo,
         }
 
+        let edition: Edition
+
         image "Assembly-CSharp" {
             class Player {
                 u32 score;
@@ -1286,34 +1288,29 @@ fn unity_provider_preparation_is_selected_typed_and_lowered_before_attachment() 
                 static GameManager instance;
                 Player player;
 
-                if layout.edition == Edition.BaseGame {
+                if edition == Edition.BaseGame {
                     u32 level;
                 }
 
-                if layout.edition == Edition.Demo {
+                if edition == Edition.Demo {
                     u32 scene;
                 }
             }
         }
         state Unity ["game.exe"] {
-            layout {
-                edition: Edition,
-            }
             score: u32 = GameManager.instance?.player?.score?
         }
 
         onAttach {
-            return Layout {
-                edition: Edition.BaseGame,
-            }
+            edition = Edition.BaseGame
         }
 
         whileAttached {
             let manager = GameManager.instance else return
-            if layout.edition == Edition.BaseGame {
+            if edition == Edition.BaseGame {
                 print(manager.level else 0)
             }
-            if layout.edition == Edition.Demo {
+            if edition == Edition.Demo {
                 print(manager.scene else 0)
             }
         }

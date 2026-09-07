@@ -53,9 +53,9 @@ suspend. Runtime-dependent values belong in the lifecycle boundary that owns
 their lifetime.
 
 Attachment-scoped storage is cleared when the process detaches and is not
-available in detached actions. With named state layouts, a value may be
-initialized for only some returned layouts; a direct `match layout` refines
-where it and helpers that use it are available.
+available in detached actions. A value may be initialized for only some
+attachment shapes; a direct test or `match` on the ordinary enum globals that
+describe those shapes refines where it and helpers that use it are available.
 
 Attempt-scoped storage remains alive across process detach and is cleared after
 `onReset`. It is available in `onStart`, `onReset`, `split`, `reset`,
@@ -66,7 +66,7 @@ declaration remains module-scoped.
 
 Closed comma-separated forms use punctuation rather than line breaks to
 separate items. This includes arguments, array and struct literals, match arms,
-struct fields, enum variants, state layouts, settings, choice options, and file
+struct fields, enum variants, settings, choice options, and file
 filters. A trailing comma is always optional. The formatter adds one when it
 lays a list out across multiple lines and omits it for a compact one-line list.
 State fields are instead separated by semicolons because their unclosed pointer
@@ -139,7 +139,7 @@ the right-hand side. A pointer-path field has no typed right-hand side, so its
 type must come from a `current`/`old` use or an explicit annotation. The
 compiler reports an ambiguity if neither provides enough information.
 
-A state field can refer to another field from the same active layout by its
+A state field can refer to another field from the same active shape by its
 source name. This works in an expression-backed field and as a dynamic pointer
 base after [`at`](syntax@at):
 
@@ -154,8 +154,8 @@ state "game.exe" {
 Declarations do not need to be topologically ordered. The compiler builds the
 dependency graph, evaluates `playerAddress` before `health` and `health` before
 `displayedHealth`, and reports every participating declaration when it finds a
-cycle. In a named [`layout`], a reference resolves to the sibling in that
-physical layout rather than a same-named field from another layout.
+cycle. In a conditional field group, a reference resolves to a sibling that is
+available under the same shape predicate.
 
 After attachment, initialization waits for one poll in which every required
 field succeeds. That snapshot initializes both `old` and `current`, and
@@ -206,15 +206,9 @@ uninitialized. Afterwards, rejection retains that field's last value without
 discarding a new `entities` value from the same poll. Snapshot `current` and
 `old` values stay read-only and are available only after initialization.
 
-Games with multiple supported memory layouts can name each layout inside one
-state declaration. Fields present in every layout with a compatible type form
-the common snapshot interface; field order may differ. A missing field or a
-same-named field with a conflicting type remains specific to its layout.
-
-When several independent build facts affect state fields, managed classes, or
-both, declare those facts once in an unnamed `layout` block. Every dimension is
-an enum. You can always select the generated `Layout` struct explicitly in
-[`onAttach`]:
+Games with multiple supported memory shapes use ordinary enum globals for the
+facts that select those shapes. Assign every such global in [`onAttach`], then
+use normal `if`, `else if`, and `else` groups in state and managed declarations:
 
 ```splitscript
 enum Edition {
@@ -227,38 +221,34 @@ enum Storefront {
     GOG,
 }
 
-state Unity ["game.exe"] {
-    layout {
-        edition: Edition,
-        storefront: Storefront,
-    }
+let edition: Edition
+let storefront: Storefront
 
-    if layout.edition == Edition.BaseGame {
+state Unity ["game.exe"] {
+    if edition == Edition.BaseGame {
         level: u32 at 0x1000;
+    } else {
+        scene: String = unity.scenes.active();
     }
 }
 
 onAttach {
-    return Layout {
-        edition: Edition.BaseGame,
-        storefront: Storefront.Steam,
-    }
+    edition = Edition.BaseGame
+    storefront = Storefront.Steam
 }
 ```
 
-The generated `layout: Layout` value is read-only and stable for the whole
-attachment. The same predicate refines every declaration guarded by it,
-including managed fields. Conditional declarations support `else if` and
-`else`. Each later branch covers exactly the layout combinations not selected
-by an earlier branch, including conditions over several independent
-dimensions:
+Shape globals are attachment-scoped and become read-only after `onAttach`.
+The same predicate refines every declaration guarded by it, including managed
+fields. Each later branch covers exactly the shape combinations not selected
+by an earlier branch, including conditions over several independent facts:
 
 ```splitscript
 image "Assembly-CSharp" {
     class GameManager {
         static GameManager instance;
 
-        if layout.edition == Edition.BaseGame {
+        if edition == Edition.BaseGame {
             u32 level;
         } else {
             String scene maxLength 64;
@@ -267,7 +257,7 @@ image "Assembly-CSharp" {
 }
 
 whileAttached {
-    if layout.edition == Edition.BaseGame {
+    if edition == Edition.BaseGame {
         let manager = GameManager.instance else return
         print(manager.level else 0)
     } else {
@@ -289,86 +279,52 @@ onAttach {
 ```
 
 If conditional managed fields give each possible dimension combination a
-unique presence pattern, attachment selects `layout` automatically before user
-[`onAttach`] code runs. In that case `onAttach` need not return a `Layout` and
-can already read `layout`.
+unique presence pattern, attachment initializes the shape globals automatically
+before user [`onAttach`] code runs. User attachment code can already read them.
 
-Dimensions are independent, so an edition and storefront do not require a
-cartesian product of public variants. Managed classes do not create their own
-layout types or selectors. A class-only distinction that affects its public
-fields is another attachment-wide dimension; metadata spellings that preserve
-the public shape stay private binding alternatives. If the managed metadata
-cannot uniquely identify every combination, [`onAttach`] must instead return
-`Layout { ... }` explicitly after checking the remaining build facts.
+Facts are independent, so an edition and storefront do not require a cartesian
+product of public variants. Managed classes do not create separate selectors.
+A class-only distinction that affects its public fields is another ordinary
+attachment-wide enum global; metadata spellings that preserve the public shape
+stay private binding alternatives. If managed metadata cannot uniquely identify
+every combination, [`onAttach`] must assign every shape global explicitly after
+checking the remaining build facts.
 
-Named state layouts remain the concise form when one choice selects an entire
-native memory shape:
-
-```text
-state "game.exe" {
-    layout Steam {
-        level: u32 at 0x1000;
-    },
-    layout GOG {
-        level: u32 at 0x2000;
-    },
-}
-
-onAttach {
-    let module = await process.mainModule()
-    if module.size == 0x1000 {
-        return StateLayout.Steam
-    }
-    if module.size == 0x2000 {
-        return StateLayout.GOG
-    }
-    await process.closed()
-}
-```
-
-Named layouts generate the enum `StateLayout` and the read-only value `layout`.
-For such a state declaration, `onAttach` returns the selected enum variant;
-state polling does not begin until it does. Detection remains ordinary typed
-SplitScript, so it can use module metadata, signatures, reads, `await`, and
-`retry` rather than being limited to a special module-size grammar. Awaiting
-`process.closed()` is the explicit unsupported-build path: it keeps the current
-process attachment inert until process-lifetime cancellation occurs. Later
-lifecycle blocks can compare or exhaustively match `layout`.
-
-Layout-specific fields become available when a direct `match layout` arm proves
-which memory layout is active. The refinement applies to both `old` and
-`current`, because the selected layout is stable for the attachment. An
-alternative such as `StateLayout.V8 | StateLayout.V9` retains fields that have
-the same name and type in every selected layout; a field missing from either
-layout remains unavailable:
+Fields declared in every exhaustive branch with a compatible type form the
+common snapshot interface. A missing field or a same-named field with a
+conflicting type remains branch-specific and requires refinement:
 
 ```text
+enum Build { V8, V9 }
+let build: Build
+
 state "Ronin.exe" {
-    layout V8 {
+    if build == Build.V8 {
         loading: i32 at 0x100;
         bike: i16 at 0x104;
-    },
-    layout V9 {
+    } else {
         loading: i32 at 0x200;
         bike: u16 at 0x204;
-    },
+    }
 }
+
+onAttach { build = Build.V8 }
 
 isLoading {
     return current.loading == 1
 }
 
 split {
-    return match layout {
-        StateLayout.V8 => old.bike != 21_368 && current.bike == 21_368,
-        StateLayout.V9 => old.bike != 52_688 && current.bike == 52_688,
+    return match build {
+        Build.V8 => old.bike != 21_368 && current.bike == 21_368,
+        Build.V9 => old.bike != 52_688 && current.bike == 52_688,
     }
 }
 ```
 
 The incompatible `bike` declarations remain distinct typed fields. They are not
 optional and the compiler does not synthesize a default to hide the difference.
-Accessing `current.bike` without a layout refinement is an error.
+Accessing `current.bike` without a matching shape refinement is an error.
 
 ## Variables and inference
 
@@ -481,13 +437,13 @@ underscore-prefixed name and updates writes to that same binding.
 
 The compiler separately warns when a state field's produced snapshot value is
 never read by reachable code. Reads through `current`, `old`, and sibling state
-fields count and propagate through sibling dependencies. A shared field in
-several named layouts produces one warning with every physical declaration
-labelled. Displaying a field through `print` or `setVariable` is an ordinary
-read and does not warn. Polling still executes when this warning is present, so
-the compiler does not silently remove process reads or other effects. Prefix an
-intentionally observation-only field with `_`; the editor's validated rename
-fix updates every shared layout declaration.
+fields count and propagate through sibling dependencies. A compatible field in
+several conditional branches produces one warning with every physical
+declaration labelled. Displaying a field through `print` or `setVariable` is an
+ordinary read and does not warn. Polling still executes when this warning is
+present, so the compiler does not silently remove process reads or other
+effects. Prefix an intentionally observation-only field with `_`; the editor's
+validated rename fix updates every declaration of the same logical field.
 
 The compiler also warns about private globals, functions, structs, and enums
 that cannot be reached from lifecycle behavior, state polling expressions, or
@@ -546,7 +502,7 @@ all warning codes. Later arguments override earlier selectors.
 The language server offers preferred quick fixes that apply the `_`
 suppression convention. For ordinary declarations, state fields, and nominal
 members, the action is a complete validated rename: references in dead helper
-code, shared layout declarations, and struct-literal labels are updated as
+code, shared conditional field declarations, and struct-literal labels are updated as
 well, name collisions gain additional underscores, and the edited program must
 still preserve every resolved declaration identity. An unused setting instead
 retains or introduces its original host key while changing only its statically
@@ -1389,18 +1345,23 @@ finite field: `Point { flag: true }` and `Point { flag: false }` cover every
 checked against the declared field type.
 
 String matches are useful for selecting exact host identities while keeping
-the dispatch exhaustive:
+the dispatch exhaustive. Assign an ordinary attachment-scoped enum global when
+the identity selects a persistent memory shape:
 
 ```text
-state ["game.exe", "game-demo.exe"] {
-    layout FullGame {},
-    layout Demo {},
+enum Build {
+    FullGame,
+    Demo,
 }
 
+let build: Build
+
+state ["game.exe", "game-demo.exe"] {}
+
 onAttach {
-    return match process.name() {
-        "game.exe" => StateLayout.FullGame,
-        "game-demo.exe" => StateLayout.Demo,
+    build = match process.name() {
+        "game.exe" => Build.FullGame,
+        "game-demo.exe" => Build.Demo,
         _ => await process.closed(),
     }
 }
@@ -1826,7 +1787,7 @@ try another. Falling through is `false`. This block is an implicit error
 boundary, so postfix `?` and `throw` also reject only the current candidate;
 they do not abort the update or prevent another PID from being tried. `None`
 remains an ordinary optional value and is not a selection result. The block is
-synchronous and runs before provider roots, `layout`, attachment-scoped
+synchronous and runs before provider roots, attachment-scoped
 globals, `current`, or `old` exist. Candidate ordering is unspecified, so the
 predicate should identify the desired process from stable process evidence.
 Scripts without this block retain the host's direct name-attachment path and
@@ -1878,7 +1839,7 @@ state runs `onStart`; a transition back to `TimerState.NotRunning` runs
 `onReset`. `onReset` can inspect attempt-scoped values before they are cleared.
 This happens before attachment and state polling, so both blocks run
 while detached as well. They may use settings and ordinary globals, but cannot
-use `process`, an emulator provider, attachment-scoped globals, `layout`,
+use `process`, an emulator provider, attachment-scoped globals,
 `current`, or `old`. They do not suspend and do not return a value.
 
 The decision actions do not invoke these blocks directly. If `start` or `reset`
@@ -2208,17 +2169,29 @@ required because new executable versions may exist beyond the versions listed
 by the script.
 
 ```text
-let executable = await process.mainModule()
-let version = executable.fileVersion() else v"0.0.0.0"
-if version == v"1.5.0.0" {
-    return StateLayout.V1500
+enum Build {
+    V1000,
+    V1500,
+}
+
+let build: Build
+
+onAttach {
+    let executable = await process.mainModule()
+    let version = executable.fileVersion() else v"0.0.0.0"
+    if version == v"1.5.0.0" {
+        build = Build.V1500
+        return
+    }
+
+    await process.closed()
 }
 ```
 
 ```text
-return match version {
-    v"1.0.0.0" => StateLayout.V1000,
-    v"1.5.0.0" => StateLayout.V1500,
+build = match version {
+    v"1.0.0.0" => Build.V1000,
+    v"1.5.0.0" => Build.V1500,
     _ => await process.closed(),
 }
 ```

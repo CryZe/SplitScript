@@ -327,9 +327,7 @@ fn is_declaration_type_colon(tokens: &[&Token], colon: usize) -> bool {
         return true;
     }
     nearest_unclosed(tokens, colon, TokenKind::LBrace, TokenKind::RBrace).is_some_and(|open| {
-        is_named_declaration_body(tokens, open, "struct")
-            || is_named_declaration_body(tokens, open, "layout")
-            || is_state_body(tokens, open)
+        is_named_declaration_body(tokens, open, "struct") || is_state_body(tokens, open)
     })
 }
 

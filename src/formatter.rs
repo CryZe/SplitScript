@@ -434,15 +434,6 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
                 self.visit_state_field(field);
             }
         }
-        if let Some(layout) = &state.layout {
-            self.break_after.insert(layout.span.end);
-        }
-        for layout in &state.layouts {
-            self.mark_separator_after(layout.span.end);
-            for field in &layout.fields {
-                self.visit_state_field(field);
-            }
-        }
         for field in &state.fields {
             self.visit_state_field(field);
         }
@@ -1715,16 +1706,6 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
             .max();
         if last_field.is_some_and(|field| last_group.is_none_or(|group| field > group)) {
             self.mark_semicolon(state.span);
-        } else if !state.layouts.is_empty() {
-            self.mark_comma(state.span);
-        }
-        for layout in &state.layouts {
-            if !layout.fields.is_empty() {
-                self.mark_semicolon(layout.span);
-            }
-            for field in &layout.fields {
-                self.visit_state_field(field);
-            }
         }
         for field in &state.fields {
             self.visit_state_field(field);
@@ -2172,21 +2153,19 @@ selectProcess {
     #[test]
     fn formats_managed_schemas_as_vertical_semicolon_delimited_declarations() {
         let source = r#"enum Edition{Base,DlcDemo}
-state"game.exe"{layout{edition:Edition}}
-onAttach{return Layout{edition:Edition.Base}}
-image"Assembly-CSharp"{namespace Game{class Player from"RuntimePlayer"{f32 health;}}class GameManager{static GameManager instance from["Instance","_instance",];i32 points from"_points";if layout.edition==Edition.Base{i32 gameState;i32 currentLevel;}if layout.edition==Edition.DlcDemo{i32 gameState from"GameState";String currentScene from"_currentScene" maxLength 64;}}}
+let edition:Edition
+state"game.exe"{}
+onAttach{edition=Edition.Base}
+image"Assembly-CSharp"{namespace Game{class Player from"RuntimePlayer"{f32 health;}}class GameManager{static GameManager instance from["Instance","_instance",];i32 points from"_points";if edition==Edition.Base{i32 gameState;i32 currentLevel;}if edition==Edition.DlcDemo{i32 gameState from"GameState";String currentScene from"_currentScene" maxLength 64;}}}
 fn identity(value:GameManager.Ref)->GameManager.Ref{return value}"#;
         let expected = r#"enum Edition {
     Base,
     DlcDemo,
 }
-state "game.exe" {
-    layout {
-        edition: Edition,
-    }
-}
+let edition: Edition
+state "game.exe" {}
 onAttach {
-    return Layout { edition: Edition.Base }
+    edition = Edition.Base
 }
 image "Assembly-CSharp" {
     namespace Game {
@@ -2197,11 +2176,11 @@ image "Assembly-CSharp" {
     class GameManager {
         static GameManager instance from ["Instance", "_instance"];
         i32 points from "_points";
-        if layout.edition == Edition.Base {
+        if edition == Edition.Base {
             i32 gameState;
             i32 currentLevel;
         }
-        if layout.edition == Edition.DlcDemo {
+        if edition == Edition.DlcDemo {
             i32 gameState from "GameState";
             String currentScene from "_currentScene" maxLength 64;
         }
@@ -3163,26 +3142,6 @@ tickRate {
     }
 
     #[test]
-    fn formats_named_state_layouts_and_their_selector() {
-        let source = r#"state "game.exe"{layout Steam{level:u32 at 0x100},layout GOG{level:u32 at 0x200}}onAttach{return StateLayout.Steam}"#;
-        let expected = r#"state "game.exe" {
-    layout Steam {
-        level: u32 at 0x100;
-    },
-    layout GOG {
-        level: u32 at 0x200;
-    },
-}
-onAttach {
-    return StateLayout.Steam
-}
-"#;
-        let formatted = format_source(source).unwrap();
-        assert_eq!(formatted, expected);
-        assert_eq!(format_source(&formatted).unwrap(), formatted);
-    }
-
-    #[test]
     fn formats_named_state_provider_alternatives() {
         let source = r#"state{provider Windows:Native["game.exe"]{level:u32 at 0x100},provider Advance:GBA{level:u32 at 0x03000010}}"#;
         let expected = r#"state {
@@ -3200,14 +3159,14 @@ onAttach {
     }
 
     #[test]
-    fn formats_attachment_layout_dimensions_as_a_nested_struct_shape() {
+    fn formats_attachment_shape_globals_and_assignments() {
         let source = r#"enum Edition{Base,Demo}
 enum Storefront{Steam,GOG}
-state "game.exe"{layout{edition:Edition,storefront:Storefront}level:u32 at 0x100}
-onAttach{return Layout{
-edition:Edition.Base,
-storefront:Storefront.Steam
-}}"#;
+let edition:Edition
+let storefront:Storefront
+state "game.exe"{level:u32 at 0x100}
+onAttach{edition=Edition.Base
+storefront=Storefront.Steam}"#;
         let expected = r#"enum Edition {
     Base,
     Demo,
@@ -3216,18 +3175,14 @@ enum Storefront {
     Steam,
     GOG,
 }
+let edition: Edition
+let storefront: Storefront
 state "game.exe" {
-    layout {
-        edition: Edition,
-        storefront: Storefront,
-    }
     level: u32 at 0x100;
 }
 onAttach {
-    return Layout {
-        edition: Edition.Base,
-        storefront: Storefront.Steam,
-    }
+    edition = Edition.Base
+    storefront = Storefront.Steam
 }
 "#;
         let formatted = format_source(source).unwrap();
@@ -3238,15 +3193,17 @@ onAttach {
     #[test]
     fn formats_shared_layout_conditions_in_state_and_managed_schemas() {
         let source = r#"enum Edition{Base,Demo}
-image "Assembly-CSharp"{class GameManager{if layout.edition==Edition.Base{static u32 level;}else{static u32 scene;}}}
-state Unity ["game.exe"]{layout{edition:Edition}if layout.edition==Edition.Base{level:u8 at 0x100;}else if layout.edition==Edition.Demo{scene:u8 at 0x200;}else{unknown:u8 at 0x300;}}"#;
+let edition:Edition
+image "Assembly-CSharp"{class GameManager{if edition==Edition.Base{static u32 level;}else{static u32 scene;}}}
+state Unity ["game.exe"]{if edition==Edition.Base{level:u8 at 0x100;}else if edition==Edition.Demo{scene:u8 at 0x200;}else{unknown:u8 at 0x300;}}"#;
         let expected = r#"enum Edition {
     Base,
     Demo,
 }
+let edition: Edition
 image "Assembly-CSharp" {
     class GameManager {
-        if layout.edition == Edition.Base {
+        if edition == Edition.Base {
             static u32 level;
         } else {
             static u32 scene;
@@ -3254,12 +3211,9 @@ image "Assembly-CSharp" {
     }
 }
 state Unity ["game.exe"] {
-    layout {
-        edition: Edition,
-    }
-    if layout.edition == Edition.Base {
+    if edition == Edition.Base {
         level: u8 at 0x100;
-    } else if layout.edition == Edition.Demo {
+    } else if edition == Edition.Demo {
         scene: u8 at 0x200;
     } else {
         unknown: u8 at 0x300;

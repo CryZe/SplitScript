@@ -66,9 +66,9 @@ pub(super) fn compile_async_action(
         crate::ast::ActionKind::OnAttach => runtime
             .lowering
             .state
-            .layout_value
-            .is_some_and(|_| runtime.lowering.explicit_layout_selection)
-            .then_some(runtime.lowering.runtime_globals.selected_layout)
+            .provider_value
+            .is_some_and(|_| runtime.lowering.explicit_shape_selection)
+            .then_some(runtime.lowering.runtime_globals.selected_provider)
             .flatten(),
         crate::ast::ActionKind::WhileAttached => Some(
             runtime

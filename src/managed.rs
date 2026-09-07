@@ -22,7 +22,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct ManagedBindingPlan {
     pub classes: Vec<ManagedClassBinding>,
-    pub automatic_layout: Option<crate::layout_selection::LayoutSelectionPlan>,
+    pub automatic_shape: Option<crate::shape_selection::ShapeSelectionPlan>,
 }
 
 /// One nominal managed class together with its metadata ownership path.
@@ -47,10 +47,10 @@ impl ManagedClassBinding {
     }
 }
 
-/// Managed fields guarded by attachment-wide layout facts.
+/// Managed fields guarded by attachment-wide shape facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ManagedConditionalBinding {
-    pub predicate: crate::semantic::ResolvedLayoutPredicate,
+    pub predicate: crate::semantic::ResolvedShapePredicate,
     pub fields: Vec<ManagedFieldBinding>,
 }
 
@@ -115,15 +115,15 @@ impl ManagedBindingPlan {
                 semantics,
             );
         }
-        let automatic_layout =
-            match crate::layout_selection::automatic_layout_selection(program, semantics) {
-                crate::layout_selection::AutomaticLayoutSelection::Available(plan) => Some(plan),
-                crate::layout_selection::AutomaticLayoutSelection::NotDeclared
-                | crate::layout_selection::AutomaticLayoutSelection::RequiresExplicit(_) => None,
+        let automatic_shape =
+            match crate::shape_selection::automatic_shape_selection(program, semantics) {
+                crate::shape_selection::AutomaticShapeSelection::Available(plan) => Some(plan),
+                crate::shape_selection::AutomaticShapeSelection::NotDeclared
+                | crate::shape_selection::AutomaticShapeSelection::RequiresExplicit(_) => None,
             };
         Self {
             classes,
-            automatic_layout,
+            automatic_shape,
         }
     }
 }
@@ -190,7 +190,7 @@ fn class_binding(
                     .first()
                     .map(|field| {
                         semantics
-                            .managed_field_layout_predicate(field.id)
+                            .managed_field_shape_predicate(field.id)
                             .cloned()
                             .unwrap_or_default()
                     })
@@ -262,6 +262,7 @@ mod tests {
             parse(
                 r#"
 enum Edition { Demo }
+let edition: Edition
 
 image "Assembly-CSharp" {
     namespace Game {
@@ -273,7 +274,7 @@ image "Assembly-CSharp" {
                 Player player;
                 i32 points from "<Points>k__BackingField";
 
-                if layout.edition == Edition.Demo {
+                if edition == Edition.Demo {
                     u16 scene;
                 }
             }
@@ -281,8 +282,8 @@ image "Assembly-CSharp" {
     }
 }
 
-state "game.exe" { layout { edition: Edition } }
-onAttach { return Layout { edition: Edition.Demo } }
+state "game.exe" {}
+onAttach { edition = Edition.Demo }
 "#,
             )
             .unwrap(),

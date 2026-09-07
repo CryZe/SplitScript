@@ -304,6 +304,7 @@ fn managed_reference_snapshot_reads_the_complete_layout_refined_shape() {
 
     let source = r#"
         enum Edition { Base, Demo }
+        let edition: Edition
 
         image "Assembly-CSharp" {
             class Player {
@@ -313,7 +314,7 @@ fn managed_reference_snapshot_reads_the_complete_layout_refined_shape() {
                 static GameManager instance;
                 Player player;
                 i32 points;
-                if layout.edition == Edition.Base {
+                if edition == Edition.Base {
                     i32 level;
                 } else {
                     address scene;
@@ -322,18 +323,17 @@ fn managed_reference_snapshot_reads_the_complete_layout_refined_shape() {
         }
 
         state Unity.il2cpp(2020) ["game.exe"] {
-            layout { edition: Edition }
             manager: GameManager = GameManager.instance?.snapshot()?;
         }
 
-        onAttach { return Layout { edition: Edition.Base } }
+        onAttach { edition = Edition.Base }
 
         whileAttached {
             print(current.manager.points)
             let player = current.manager.player
             let health = player.health else 0.0
             print(health)
-            if layout.edition == Edition.Base {
+            if edition == Edition.Base {
                 print(current.manager.level)
             } else {
                 print(current.manager.scene)
@@ -487,14 +487,14 @@ fn managed_schema_declarations_retain_their_logical_hierarchy() {
 
     let source = r#"
         enum Edition { Demo }
+        let edition: Edition
         state "game.exe" {
-            layout { edition: Edition }
         }
         image "Assembly-CSharp" {
             namespace Game {
                 class GameManager {
                     i32 points;
-                    if layout.edition == Edition.Demo {
+                    if edition == Edition.Demo {
                         String scene maxLength 64;
                     }
                 }

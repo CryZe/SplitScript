@@ -26,8 +26,9 @@ while detached, so they cannot use process or snapshot context.
   [`old`].
 - Put values in one struct or fixed array when they must succeed and advance as
   one transaction.
-- Use independent [`layout`] dimensions for independent build facts. Use named
-  layouts when each build selects one complete alternative memory shape.
+- Use independent enum globals for independent build facts. Use one enum when
+  each build selects one complete alternative memory shape. Guard conditional
+  [`state`] and managed [`class`] fields with those ordinary values.
 
 ## Choose absence, failure, retrying, or waiting
 

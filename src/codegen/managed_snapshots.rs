@@ -71,12 +71,11 @@ pub(super) fn compile(
     for (index, field) in fields.iter().enumerate() {
         let field_result = result_for(field.value_type, lowering);
         let field_type = super::semantic_type(field.value_type, lowering.semantics);
-        if let Some(predicate) = lowering.semantics.managed_field_layout_predicate(field.id) {
-            super::update::emit_layout_predicate(
+        if let Some(predicate) = lowering.semantics.managed_field_shape_predicate(field.id) {
+            super::update::emit_shape_predicate(
                 &mut function,
                 lowering.program,
                 predicate,
-                lowering.runtime_globals.selected_layout,
                 lowering.semantics,
                 lowering.gc,
                 lowering.globals,

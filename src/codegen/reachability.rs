@@ -442,7 +442,7 @@ impl Reachability {
         // storage or signatures, not only the result types of live expressions.
         let mut type_roots = Vec::new();
         if let Some(state) = &program.state {
-            if let Some(layout) = state.layout_value {
+            if let Some(layout) = state.provider_value {
                 type_roots.push(
                     semantics
                         .value_type(layout)
@@ -467,6 +467,21 @@ impl Reachability {
                 .value_type(global)
                 .expect("checked globals have types")
         }));
+        // Bare globals initialized by lifecycle or provider-generated code do
+        // not necessarily have a Wasm-IR initializer expression. They still
+        // own runtime storage, so their types must participate in GC layout
+        // reachability just like source-initialized globals do.
+        for declaration in &program.globals {
+            declaration.binding.visit_bindings(&mut |binding| {
+                if wasm_ir.contains_global(binding.id) {
+                    type_roots.push(
+                        semantics
+                            .value_type(binding.id)
+                            .expect("checked globals have types"),
+                    );
+                }
+            });
+        }
         type_roots.extend(
             program
                 .settings

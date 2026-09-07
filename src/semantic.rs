@@ -365,24 +365,22 @@ pub enum DynamicCallCallee {
 
 /// The checked source value that selects one finite declaration shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ResolvedLayoutDimension {
-    LayoutField(StructFieldId),
+pub enum ResolvedShapeDimension {
     Global(ValueId),
     StateField(ValueId),
 }
 
 /// One statically proven fact about a finite declaration-shape discriminator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ResolvedLayoutConstraint {
-    pub dimension: ResolvedLayoutDimension,
+pub struct ResolvedShapeConstraint {
+    pub dimension: ResolvedShapeDimension,
     pub variant: EnumVariantId,
 }
 
-/// Exact attachment-layout alternatives under which a conditional declaration
-/// exists. Every alternative contains one variant for each layout dimension.
+/// Exact shape alternatives under which a conditional declaration exists.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ResolvedLayoutPredicate {
-    pub alternatives: Vec<Vec<ResolvedLayoutConstraint>>,
+pub struct ResolvedShapePredicate {
+    pub alternatives: Vec<Vec<ResolvedShapeConstraint>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -413,9 +411,9 @@ pub struct SemanticModel {
     array_element_types: HashMap<ArrayTypeId, TypeId>,
     state_storage_fields: Vec<ValueId>,
     state_storage_field_by_declaration: HashMap<ValueId, ValueId>,
-    state_layout_fields: HashMap<EnumVariantId, Vec<ValueId>>,
-    conditional_state_fields: HashMap<ValueId, ResolvedLayoutPredicate>,
-    conditional_managed_fields: HashMap<ManagedFieldId, ResolvedLayoutPredicate>,
+    state_provider_fields: HashMap<EnumVariantId, Vec<ValueId>>,
+    conditional_state_fields: HashMap<ValueId, ResolvedShapePredicate>,
+    conditional_managed_fields: HashMap<ManagedFieldId, ResolvedShapePredicate>,
     state_poll_results: HashMap<ValueId, TypeId>,
     state_dependencies: HashMap<ValueId, Vec<ValueId>>,
     propagation_targets: HashMap<ExprId, TypeId>,
@@ -530,28 +528,28 @@ impl SemanticModel {
         &self.state_storage_fields
     }
 
-    pub fn state_field_layout_predicate(&self, field: ValueId) -> Option<&ResolvedLayoutPredicate> {
+    pub fn state_field_shape_predicate(&self, field: ValueId) -> Option<&ResolvedShapePredicate> {
         self.conditional_state_fields.get(&field)
     }
 
-    pub fn managed_field_layout_predicate(
+    pub fn managed_field_shape_predicate(
         &self,
         field: ManagedFieldId,
-    ) -> Option<&ResolvedLayoutPredicate> {
+    ) -> Option<&ResolvedShapePredicate> {
         self.conditional_managed_fields.get(&field)
     }
 
-    /// Maps a concrete layout declaration to the physical snapshot field that
-    /// stores it. Common fields in later layouts project to the first
-    /// declaration's slot.
+    /// Maps a concrete field declaration to the physical snapshot field that
+    /// stores it. Compatible provider or conditional alternatives project to
+    /// the first declaration's slot.
     pub fn state_storage_field(&self, field: ValueId) -> Option<ValueId> {
         self.state_storage_field_by_declaration.get(&field).copied()
     }
 
-    /// Concrete declarations read when the selected named layout is active.
-    pub fn state_layout_fields(&self, layout: EnumVariantId) -> &[ValueId] {
-        self.state_layout_fields
-            .get(&layout)
+    /// Concrete declarations read when a provider alternative is active.
+    pub fn state_provider_fields(&self, variant: EnumVariantId) -> &[ValueId] {
+        self.state_provider_fields
+            .get(&variant)
             .map(Vec::as_slice)
             .unwrap_or_default()
     }
@@ -1398,9 +1396,9 @@ pub(crate) struct SemanticBuilder {
     array_element_types: HashMap<ArrayTypeId, Type>,
     state_storage_fields: Vec<ValueId>,
     state_storage_field_by_declaration: HashMap<ValueId, ValueId>,
-    state_layout_fields: HashMap<EnumVariantId, Vec<ValueId>>,
-    conditional_state_fields: HashMap<ValueId, ResolvedLayoutPredicate>,
-    conditional_managed_fields: HashMap<ManagedFieldId, ResolvedLayoutPredicate>,
+    state_provider_fields: HashMap<EnumVariantId, Vec<ValueId>>,
+    conditional_state_fields: HashMap<ValueId, ResolvedShapePredicate>,
+    conditional_managed_fields: HashMap<ManagedFieldId, ResolvedShapePredicate>,
     state_poll_results: HashMap<ValueId, Type>,
     state_dependencies: HashMap<ValueId, Vec<ValueId>>,
     propagation_targets: HashMap<ExprId, Type>,
@@ -1575,22 +1573,22 @@ impl SemanticBuilder {
         debug_assert!(previous.is_none(), "action kinds must be unique");
     }
 
-    pub(crate) fn resolve_state_layout(
+    pub(crate) fn resolve_state_storage(
         &mut self,
         storage_fields: Vec<ValueId>,
         storage_field_by_declaration: HashMap<ValueId, ValueId>,
-        layout_fields: HashMap<EnumVariantId, Vec<ValueId>>,
+        provider_fields: HashMap<EnumVariantId, Vec<ValueId>>,
     ) {
         debug_assert!(self.state_storage_fields.is_empty());
         self.state_storage_fields = storage_fields;
         self.state_storage_field_by_declaration = storage_field_by_declaration;
-        self.state_layout_fields = layout_fields;
+        self.state_provider_fields = provider_fields;
     }
 
     pub(crate) fn resolve_conditional_state_field(
         &mut self,
         field: ValueId,
-        predicate: ResolvedLayoutPredicate,
+        predicate: ResolvedShapePredicate,
     ) {
         let previous = self.conditional_state_fields.insert(field, predicate);
         debug_assert!(previous.is_none(), "conditional state fields are unique");
@@ -1599,7 +1597,7 @@ impl SemanticBuilder {
     pub(crate) fn resolve_conditional_managed_field(
         &mut self,
         field: ManagedFieldId,
-        predicate: ResolvedLayoutPredicate,
+        predicate: ResolvedShapePredicate,
     ) {
         let previous = self.conditional_managed_fields.insert(field, predicate);
         debug_assert!(previous.is_none(), "conditional managed fields are unique");
@@ -1837,7 +1835,7 @@ impl SemanticBuilder {
             array_element_types,
             state_storage_fields,
             state_storage_field_by_declaration,
-            state_layout_fields,
+            state_provider_fields,
             conditional_state_fields,
             conditional_managed_fields,
             state_poll_results,
@@ -2146,7 +2144,7 @@ impl SemanticBuilder {
             array_element_types,
             state_storage_fields,
             state_storage_field_by_declaration,
-            state_layout_fields,
+            state_provider_fields,
             conditional_state_fields,
             conditional_managed_fields,
             state_poll_results,

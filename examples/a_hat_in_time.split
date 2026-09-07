@@ -441,8 +441,8 @@ settings {
     },
 }
 
-fn saveDataOffsets(layout) {
-    return match layout {
+fn saveDataOffsets(saveDataLayout) {
+    return match saveDataLayout {
         SaveDataLayout.DLC => SaveDataOffsets {
             root: 0x68,
             yarn: 0xf0,

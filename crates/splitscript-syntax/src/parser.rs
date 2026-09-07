@@ -10,22 +10,22 @@ use crate::{
     Token, TokenCursor, TokenKind,
     ast::{
         Action, ActionKind, ArrayPattern, ArrayTypeDecl, ArrayTypeId, AssignmentId, AsyncTypeDecl,
-        AsyncTypeId, AttachmentLayoutDecl, BinaryOp, BindingPattern, Block, CallableTypeDecl,
-        CallableTypeId, ConditionalFieldsDecl, ConstructedTypeIdAllocator, EnumDecl, EnumId,
-        EnumReference, EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, ForBinding,
-        FunctionDecl, FunctionId, InterpolatedPart, ManagedClassDecl, ManagedClassId,
-        ManagedFieldDecl, ManagedFieldId, ManagedImageDecl, ManagedImageId, ManagedItemDecl,
-        ManagedMetadataName, ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId,
-        ManagedReferenceTypeDecl, ManagedReferenceTypeId, MatchArm, MatchPattern, OptionTypeDecl,
-        OptionTypeId, Parameter, PatternBinding, PatternId, PatternNode, PointerPath,
-        PointerPathBase, Program, RangeKind, RangeTypeDecl, RangeTypeId, ResultTypeDecl,
-        ResultTypeId, SettingChoiceOption, SettingChoiceOptionId, SettingDecl, SettingExternalKey,
-        SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern,
-        Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder,
-        StateProviderAlternativeDecl, StateProviderRef, StateProviderSelectorRef, StateSource,
-        StateTransform, Stmt, StructDecl, StructField, StructFieldId, StructId, SuspensionMode,
-        TickRateDecl, TickRateValue, TypeApplicationDecl, TypeApplicationId,
-        TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
+        AsyncTypeId, BinaryOp, BindingPattern, Block, CallableTypeDecl, CallableTypeId,
+        ConditionalFieldsDecl, ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference,
+        EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, ForBinding, FunctionDecl, FunctionId,
+        InterpolatedPart, ManagedClassDecl, ManagedClassId, ManagedFieldDecl, ManagedFieldId,
+        ManagedImageDecl, ManagedImageId, ManagedItemDecl, ManagedMetadataName,
+        ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId, ManagedReferenceTypeDecl,
+        ManagedReferenceTypeId, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter,
+        PatternBinding, PatternId, PatternNode, PointerPath, PointerPathBase, Program, RangeKind,
+        RangeTypeDecl, RangeTypeId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
+        SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFamilyDecl,
+        SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span, StateDecl,
+        StateField, StateMemoryDecoder, StateProviderAlternativeDecl, StateProviderRef,
+        StateProviderSelectorRef, StateSource, StateTransform, Stmt, StructDecl, StructField,
+        StructFieldId, StructId, SuspensionMode, TickRateDecl, TickRateValue, TypeApplicationDecl,
+        TypeApplicationId, TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId,
+        VariableDecl,
     },
     diagnostic::{Diagnostic, DiagnosticFix, FixApplicability, TextEdit},
     migration::{ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
@@ -108,7 +108,6 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         next_managed_field_id: 0,
         next_pattern_id: 0,
         next_setting_choice_option_id: 0,
-        generated_structs: Vec::new(),
         struct_literals_allowed: true,
         diagnostics: Vec::new(),
         recovery_nodes: Vec::new(),
@@ -157,7 +156,6 @@ struct Parser<'a> {
     /// Domain declarations lower generated nominal structs through the same
     /// ordinary struct pipeline. They are merged by stable ID before parsing
     /// completes so downstream consumers never need a parallel type registry.
-    generated_structs: Vec<StructDecl>,
     /// Whether an immediately following `{ ... }` may form a struct literal.
     /// Header expressions disable this at their outer level so their following
     /// block remains unambiguous; nested delimiters enable it again.
@@ -465,7 +463,6 @@ impl Parser<'_> {
         program.type_names = self.type_names;
         program.type_name_spans = self.type_name_spans;
         program.type_name_occurrences = self.type_name_occurrences;
-        program.structs.append(&mut self.generated_structs);
         program
             .structs
             .sort_by_key(|structure| structure.id.index());
@@ -671,8 +668,9 @@ mod tests {
     fn parses_documented_managed_image_schemas_with_stable_member_shapes() {
         let source = r#"
             enum Edition { Base, DlcDemo }
-            state "Lunistice.exe" { layout { edition: Edition } }
-            onAttach { return Layout { edition: Edition.Base } }
+            let edition: Edition
+            state "Lunistice.exe" {}
+            onAttach { edition = Edition.Base }
 
             /// Game-specific managed metadata.
             image "Assembly-CSharp" {
@@ -688,7 +686,7 @@ mod tests {
                     static GameManager instance from ["Instance", "_instance",];
                     i32 points from "_points";
 
-                    if layout.edition == Edition.Base {
+                    if edition == Edition.Base {
                         /// State used by the base game.
                         i32 gameState;
                         i32 currentLevel;
@@ -784,38 +782,6 @@ mod tests {
             program.functions[0].return_annotation,
             Some(TypeRef::ManagedReference(id)) if id == reference.id
         ));
-    }
-
-    #[test]
-    fn rejects_per_class_layouts_with_global_dimension_guidance() {
-        let source = r#"
-            state Unity ["game.exe"] {}
-            image "Assembly-CSharp" {
-                class GameManager {
-                    layout Demo {
-                        String scene;
-                    }
-                }
-            }
-        "#;
-        let error = parse(source, lex(source, SyntaxMode::Program).unwrap())
-            .expect_err("managed classes must not create independent layouts");
-        assert_eq!(
-            error.message,
-            "managed classes use attachment-wide layout dimensions"
-        );
-
-        let source = r#"
-            state Unity ["game.exe"] {}
-            image "Assembly-CSharp" { class GameManager {} }
-            let selected: GameManager.Layout
-        "#;
-        let error = parse(source, lex(source, SyntaxMode::Program).unwrap())
-            .expect_err("managed classes must not expose nested layout types");
-        assert_eq!(
-            error.message,
-            "managed classes do not define nested layout types"
-        );
     }
 
     #[test]
@@ -1028,7 +994,10 @@ state {
         assert_eq!(state.provider_alternatives[0].processes, ["game.exe"]);
         assert_eq!(state.provider_alternatives[1].provider.name, "PS1");
         assert!(state.provider_alternatives[1].processes.is_empty());
-        let enumeration = state.layout_enum.as_ref().expect("generated provider enum");
+        let enumeration = state
+            .provider_enum
+            .as_ref()
+            .expect("generated provider enum");
         assert_eq!(enumeration.name, "StateProvider");
         assert_eq!(enumeration.variants[0].name, "Windows");
         assert_eq!(enumeration.variants[1].name, "PlayStation");
@@ -1056,86 +1025,51 @@ state {
     }
 
     #[test]
-    fn parses_named_state_layouts_and_their_generated_enum() {
-        let source = r#"
-            state "game.exe" {
-                /// Steam build.
-                layout Steam { level: u32 at 0x100 },
-                layout GOG { level: u32 at 0x200 }
-            }
-            onAttach { return StateLayout.Steam }
-        "#;
-        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
-        let state = program.state.unwrap();
-        assert!(state.fields.is_empty());
-        assert_eq!(state.layouts.len(), 2);
-        assert_eq!(state.layouts[0].fields[0].name, "level");
-        let enumeration = state.layout_enum.unwrap();
-        assert_eq!(enumeration.name, "StateLayout");
-        assert_eq!(enumeration.variants[0].name, "Steam");
-        assert_eq!(
-            enumeration.variants[0].documentation.as_deref(),
-            Some("Steam build.")
-        );
-        assert_eq!(program.actions[0].kind, ActionKind::OnAttach);
-    }
-
-    #[test]
-    fn parses_provider_independent_attachment_layout_dimensions() {
+    fn parses_provider_independent_attachment_shape_globals() {
         let source = r#"
             enum Edition { BaseGame, DlcDemo }
             enum Storefront { Steam, GOG }
+            /// Product edition.
+            let edition: Edition
+            /// Distribution channel.
+            let storefront: Storefront
 
             state Unity ["game.exe", "game-demo.exe"] {
-                /// Facts describing the selected attached build.
-                layout {
-                    /// Product edition.
-                    edition: Edition,
-                    /// Distribution channel.
-                    storefront: Storefront,
-                }
-
                 frameCount: u32 = 0
             }
 
             onAttach {
-                return Layout {
-                    edition: Edition.BaseGame,
-                    storefront: Storefront.Steam,
-                }
+                edition = Edition.BaseGame
+                storefront = Storefront.Steam
             }
         "#;
         let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
         let state = program.state.as_ref().unwrap();
-        let layout = state.layout.as_ref().expect("attachment layout");
-        let structure = &program.structs[layout.structure.index()];
-        assert_eq!(structure.name, "Layout");
-        assert_eq!(structure.fields.len(), 2);
-        assert_eq!(structure.fields[0].name, "edition");
+        assert_eq!(program.globals.len(), 2);
+        assert_eq!(program.globals[0].name, "edition");
         assert_eq!(
-            structure.fields[0].documentation.as_deref(),
+            program.globals[0].documentation.as_deref(),
             Some("Product edition.")
         );
-        assert_eq!(structure.fields[1].name, "storefront");
+        assert_eq!(program.globals[1].name, "storefront");
         assert_eq!(state.fields[0].name, "frameCount");
-        assert!(state.layout_enum.is_none());
-        assert!(state.layout_value.is_some());
+        assert!(program.globals.iter().all(|global| global.value.is_none()));
     }
 
     #[test]
     fn parses_conditional_state_and_managed_fields_against_shared_dimensions() {
         let source = r#"
             enum Edition { BaseGame, Demo }
+            let edition: Edition
             image "Assembly-CSharp" {
                 class GameManager {
-                    if layout.edition == Edition.BaseGame {
+                    if edition == Edition.BaseGame {
                         static u32 level;
                     }
                 }
             }
             state Unity ["game.exe"] {
-                layout { edition: Edition }
-                if layout.edition == Edition.Demo {
+                if edition == Edition.Demo {
                     scene: u8 at 0x100;
                 }
             }

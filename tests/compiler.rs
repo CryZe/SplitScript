@@ -57,5 +57,5 @@ mod ranges;
 mod sets;
 #[path = "compiler/snapshots.rs"]
 mod snapshots;
-#[path = "compiler/state_layouts.rs"]
-mod state_layouts;
+#[path = "compiler/state_shapes.rs"]
+mod state_shapes;

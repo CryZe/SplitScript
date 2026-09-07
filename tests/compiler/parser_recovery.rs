@@ -26,6 +26,23 @@ fn reserved_binding_names_do_not_cascade_into_later_syntax_errors() {
 }
 
 #[test]
+fn removed_layout_syntax_receives_only_ordinary_parse_errors() {
+    for source in [
+        r#"state "game.exe" { layout Steam { value: u8 at 0x100 } }"#,
+        r#"state "game.exe" { layout { edition: Edition } }"#,
+    ] {
+        let recovered = splitscript::parse_recovering(source).unwrap();
+        assert!(!recovered.diagnostics().is_empty());
+        assert!(recovered.diagnostics().iter().all(|diagnostic| {
+            diagnostic.migration_topic().is_none()
+                && diagnostic.fixes.is_empty()
+                && !diagnostic.message.contains("legacy")
+                && !diagnostic.message.contains("removed")
+        }));
+    }
+}
+
+#[test]
 fn recovering_parse_reports_multiple_errors_and_keeps_later_declarations() {
     use splitscript::compiler::syntax::RecoveryNodeKind;
 

@@ -321,9 +321,9 @@ impl CompilerDatabase {
         Ok(edit)
     }
 
-    /// Compatible declarations across named layouts expose one shared
-    /// snapshot field. Layout-specific declarations keep their own identity,
-    /// even when another layout happens to use the same spelling with a
+    /// Compatible declarations across provider or conditional alternatives expose one shared
+    /// snapshot field. Shape-specific declarations keep their own identity,
+    /// even when another branch happens to use the same spelling with a
     /// conflicting type.
     fn logical_rename_ids(
         &mut self,
@@ -332,26 +332,16 @@ impl CompilerDatabase {
         let SourceDefinitionId::Value(target) = target else {
             return Ok(vec![target]);
         };
-        let parsed = self.parse().map_err(RenameError::Diagnostics)?;
-        let Some(state) = &parsed.syntax().state else {
+        let checked = self.check().map_err(RenameError::Diagnostics)?;
+        let Some(canonical) = checked.semantics().state_storage_field(target) else {
             return Ok(vec![SourceDefinitionId::Value(target)]);
         };
-        if !state.has_named_variants() {
-            return Ok(vec![SourceDefinitionId::Value(target)]);
-        }
-        let Some(name) = state
-            .all_fields()
-            .find(|field| field.id == target)
-            .map(|field| field.name.as_str())
-        else {
+        let Some(state) = &checked.syntax().state else {
             return Ok(vec![SourceDefinitionId::Value(target)]);
         };
-        if !state.is_common_field(name) {
-            return Ok(vec![SourceDefinitionId::Value(target)]);
-        }
         Ok(state
             .all_fields()
-            .filter(|field| field.name == name)
+            .filter(|field| checked.semantics().state_storage_field(field.id) == Some(canonical))
             .map(|field| SourceDefinitionId::Value(field.id))
             .collect())
     }
@@ -413,9 +403,9 @@ impl CompilerDatabase {
         let Some(state) = &parsed.syntax().state else {
             return false;
         };
-        matches!(id, SourceDefinitionId::Value(value) if state.layout_value == Some(value))
+        matches!(id, SourceDefinitionId::Value(value) if state.provider_value == Some(value))
             || matches!(id, SourceDefinitionId::Enum(enumeration)
-                if state.layout_enum.as_ref().is_some_and(|layout| layout.id == enumeration))
+                if state.provider_enum.as_ref().is_some_and(|provider| provider.id == enumeration))
     }
 }
 

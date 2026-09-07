@@ -88,20 +88,6 @@ pub(super) fn complete_top_level(source: &str, syntax: &Program, offset: usize) 
         add_catalog_snippet(&mut builder, item, &format!("{} {{\n\t$0\n}}", item.name));
     }
 
-    // Named layouts need an onAttach selector. Preserve the more useful
-    // generated selector over the generic empty lifecycle snippet.
-    if let Some(state) = syntax
-        .state
-        .as_ref()
-        .filter(|state| state.provider.is_none() && !state.layouts.is_empty())
-        && !syntax
-            .actions
-            .iter()
-            .any(|action| action.kind == ActionKind::OnAttach)
-    {
-        builder.add_scoped(super::layout_selector_completion(state));
-    }
-
     builder.finish()
 }
 

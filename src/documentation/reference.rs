@@ -2574,7 +2574,7 @@ mod tests {
             .expect("onAttach has a language page");
         for related in [
             "[state](state.md)",
-            "[layout](layout.md)",
+            "[conditional fields](conditional-fields.md)",
             "[await](await.md)",
             "[retry](retry.md)",
             "[onStateReady](on-state-ready.md)",
@@ -2713,7 +2713,7 @@ mod tests {
     }
 
     #[test]
-    fn attachment_and_layout_pages_explain_exact_names_and_version_selection() {
+    fn attachment_and_conditional_field_pages_explain_exact_names_and_build_selection() {
         let reference = DocumentationReference::default();
         let state = reference
             .page("/language/state.md")
@@ -2726,15 +2726,15 @@ mod tests {
         assert!(state.markdown.contains("Try alternate executable names"));
         assert!(state.markdown.contains("Support multiple game builds"));
 
-        let layout = reference
-            .page("/language/layout.md")
-            .expect("layout has a language page");
+        let conditional_fields = reference
+            .page("/language/conditional-fields.md")
+            .expect("conditional fields have a language page");
         assert!(
-            layout
+            conditional_fields
                 .markdown
                 .contains("Select and refine a supported build")
         );
-        assert!(layout.markdown.contains("unsupported build"));
+        assert!(conditional_fields.markdown.contains("ordinary enum value"));
 
         let native = reference
             .index()
@@ -2819,7 +2819,7 @@ mod tests {
             "`T.Ref` denotes a live remote object reference",
             "no partially populated object escapes",
             "without allocating a GC object",
-            "Conditional fields follow the refined attachment",
+            "Put build-specific fields in an",
             "retained only when used",
             "metadata traversal remains private",
         ] {
@@ -2833,7 +2833,7 @@ mod tests {
         assert!(
             metadata_names
                 .markdown
-                .contains("do not create a public layout")
+                .contains("do not create a source-visible shape discriminator")
         );
     }
 

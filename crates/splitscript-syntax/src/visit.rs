@@ -214,12 +214,7 @@ pub fn walk_state<'ast, V: Visitor<'ast>>(visitor: &mut V, state: &'ast StateDec
             visitor.visit_state_field(field);
         }
     }
-    for layout in &state.layouts {
-        for field in &layout.fields {
-            visitor.visit_state_field(field);
-        }
-    }
-    if let Some(enumeration) = &state.layout_enum {
+    if let Some(enumeration) = &state.provider_enum {
         visitor.visit_enum(enumeration);
     }
 }
@@ -732,12 +727,7 @@ pub fn walk_state_mut<F: Folder>(folder: &mut F, state: &mut StateDecl) {
             folder.fold_state_field(field);
         }
     }
-    for layout in &mut state.layouts {
-        for field in &mut layout.fields {
-            folder.fold_state_field(field);
-        }
-    }
-    if let Some(enumeration) = &mut state.layout_enum {
+    if let Some(enumeration) = &mut state.provider_enum {
         folder.fold_enum(enumeration);
     }
 }

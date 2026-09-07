@@ -19,7 +19,7 @@ use super::{
     GcLayout, STATE_TYPE, Type,
     data_plan::StringPool,
     emit_result_error, emit_typed_struct_get,
-    global_plan::{ATTACH_LAYOUT_SELECTED, ATTACH_READY, ATTACH_REJECTED, RuntimeGlobals},
+    global_plan::{ATTACH_PREPARED, ATTACH_READY, ATTACH_REJECTED, RuntimeGlobals},
     imports::Abi,
     managed_state_reads::ManagedStateReadCache,
     memarg,
@@ -43,7 +43,7 @@ pub(super) struct UpdateContext<'a> {
     pub managed_state_reads: &'a ManagedStateReadCache,
     pub pointer_prefixes: &'a PointerPrefixPlan,
     pub scratch: RuntimeScratch,
-    pub explicit_layout_selection: bool,
+    pub explicit_shape_selection: bool,
     pub globals: &'a HashMap<ValueId, u32>,
     pub global_types: &'a HashMap<ValueId, Type>,
     pub attachment_globals: &'a [ValueId],
@@ -586,9 +586,11 @@ pub(super) fn compile_update(
             .instruction(&Instruction::I32Const(0))
             .instruction(&Instruction::GlobalSet(preparation.ready_global));
     }
-    if let (Some(selected), Some(layout_value)) = (globals.selected_layout, state.layout_value) {
-        let layout_type = lowering.global_types[&layout_value];
-        emit_storage_default(&mut function, lowering.gc.val_type(layout_type));
+    if let (Some(selected), Some(provider_value)) =
+        (globals.selected_provider, state.provider_value)
+    {
+        let provider_type = lowering.global_types[&provider_value];
+        emit_storage_default(&mut function, lowering.gc.val_type(provider_type));
         function.instruction(&Instruction::GlobalSet(selected));
     }
     for value in lowering.attachment_globals {
@@ -620,10 +622,10 @@ pub(super) fn compile_update(
 
     if !lowering.provider_alternatives.is_empty() {
         let selected = globals
-            .selected_layout
+            .selected_provider
             .expect("multi-provider state has selected-provider storage");
         let enumeration = state
-            .layout_enum
+            .provider_enum
             .as_ref()
             .expect("multi-provider state generates StateProvider");
         for (variant_index, alternative) in lowering.provider_alternatives.iter().enumerate() {
@@ -799,25 +801,25 @@ pub(super) fn compile_update(
             .instruction(&Instruction::End);
     }
 
-    let automatic_layout = if lowering.explicit_layout_selection {
+    let automatic_shape = if lowering.explicit_shape_selection {
         None
     } else {
-        lowering.managed.automatic_layout.as_ref().filter(|plan| {
+        lowering.managed.automatic_shape.as_ref().filter(|plan| {
             plan.evidence_fields.is_empty()
                 || semantics.state_provider() == Some(crate::stdlib::StdlibStateProviderId::Unity)
         })
     };
-    if let Some(plan) = automatic_layout {
+    if let Some(plan) = automatic_shape {
         function
             .instruction(&Instruction::GlobalGet(globals.attach_ready))
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty));
-        emit_automatic_layout_selection(&mut function, program, plan, lowering);
+        emit_automatic_shape_selection(&mut function, program, plan, lowering);
         function
             .instruction(&Instruction::GlobalGet(globals.attach_ready))
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty));
-        emit_automatic_layout_failure_report(&mut function, strings, program, plan, lowering);
+        emit_automatic_shape_failure_report(&mut function, strings, program, plan, lowering);
         function
             .instruction(&Instruction::I32Const(ATTACH_REJECTED))
             .instruction(&Instruction::GlobalSet(globals.attach_ready))
@@ -825,7 +827,7 @@ pub(super) fn compile_update(
             .instruction(&Instruction::End)
             .instruction(&Instruction::I32Const(
                 if actions.contains_key(&ActionKind::OnAttach) {
-                    ATTACH_LAYOUT_SELECTED
+                    ATTACH_PREPARED
                 } else {
                     ATTACH_READY
                 },
@@ -835,7 +837,7 @@ pub(super) fn compile_update(
         if let Some(on_attach) = actions.get(&ActionKind::OnAttach) {
             function
                 .instruction(&Instruction::GlobalGet(globals.attach_ready))
-                .instruction(&Instruction::I32Const(ATTACH_LAYOUT_SELECTED))
+                .instruction(&Instruction::I32Const(ATTACH_PREPARED))
                 .instruction(&Instruction::I32Eq)
                 .instruction(&Instruction::If(BlockType::Empty))
                 .instruction(&Instruction::GlobalGet(globals.process))
@@ -912,17 +914,16 @@ pub(super) fn compile_update(
     function
         .instruction(&Instruction::StructNewDefault(STATE_TYPE))
         .instruction(&Instruction::LocalSet(candidate_state));
-    if !state.has_named_variants() {
+    if !state.has_provider_alternatives() {
         let mut prefix_emission = PrefixEmissionState::default();
         for field in state_dependency_order(&all_fields, semantics) {
             let read_index = read_indices[&field.id];
-            let predicate = semantics.state_field_layout_predicate(field.id);
+            let predicate = semantics.state_field_shape_predicate(field.id);
             if let Some(predicate) = predicate {
-                emit_layout_predicate(
+                emit_shape_predicate(
                     &mut function,
                     program,
                     predicate,
-                    lowering.runtime_globals.selected_layout,
                     lowering.semantics,
                     lowering.gc,
                     lowering.globals,
@@ -948,13 +949,13 @@ pub(super) fn compile_update(
         }
     } else {
         let selected = globals
-            .selected_layout
-            .expect("named layouts have selected-layout storage");
+            .selected_provider
+            .expect("provider alternatives have discriminator storage");
         let enumeration = state
-            .layout_enum
+            .provider_enum
             .as_ref()
-            .expect("named layouts generate a typed enum");
-        for (layout_index, (_, fields)) in state.variant_fields().enumerate() {
+            .expect("provider alternatives generate a typed enum");
+        for (provider_index, (_, fields)) in state.provider_variant_fields().enumerate() {
             let mut prefix_emission = PrefixEmissionState::default();
             function
                 .instruction(&Instruction::GlobalGet(selected))
@@ -963,11 +964,11 @@ pub(super) fn compile_update(
                     struct_type_index: lowering.gc.index(Type::Enum(enumeration.id)),
                     field_index: 0,
                 })
-                .instruction(&Instruction::I32Const(layout_index as i32))
+                .instruction(&Instruction::I32Const(provider_index as i32))
                 .instruction(&Instruction::I32Eq)
                 .instruction(&Instruction::If(BlockType::Empty));
-            let layout_fields = fields.iter().collect::<Vec<_>>();
-            for field in state_dependency_order(&layout_fields, semantics) {
+            let provider_fields = fields.iter().collect::<Vec<_>>();
+            for field in state_dependency_order(&provider_fields, semantics) {
                 let read_index = read_indices[&field.id];
                 emit_state_field_poll(
                     &mut function,
@@ -1173,11 +1174,11 @@ fn emit_return_if_attachment_rejected(function: &mut Function, globals: RuntimeG
         .instruction(&Instruction::End);
 }
 
-fn emit_automatic_layout_failure_report(
+fn emit_automatic_shape_failure_report(
     function: &mut Function,
     strings: &StringPool,
     program: &Program,
-    plan: &crate::layout_selection::LayoutSelectionPlan,
+    plan: &crate::shape_selection::ShapeSelectionPlan,
     lowering: &UpdateContext<'_>,
 ) {
     let report = plan.failure_report(program);
@@ -1189,7 +1190,7 @@ fn emit_automatic_layout_failure_report(
         .structs
         .iter()
         .find(|structure| structure.name == crate::stdlib::PROVIDER_BINDINGS_TYPE)
-        .expect("managed layout evidence has generated bindings");
+        .expect("managed shape evidence has generated bindings");
     emit_runtime_message(function, strings, &report.observed_present, lowering.abi);
     for evidence in &report.evidence {
         emit_layout_evidence_condition(
@@ -1249,7 +1250,7 @@ fn emit_layout_evidence_condition(
         .iter()
         .enumerate()
         .find(|(_, candidate)| candidate.name == name)
-        .expect("layout evidence has generated presence storage");
+        .expect("shape evidence has generated presence storage");
     let field_type = struct_field_type(declaration.id, lowering.semantics);
     function
         .instruction(&Instruction::GlobalGet(bindings_global))
@@ -1359,22 +1360,20 @@ fn emit_timer_lifecycle_events(
         .instruction(&Instruction::End);
 }
 
-pub(super) fn emit_layout_predicate(
+pub(super) fn emit_shape_predicate(
     function: &mut Function,
     program: &Program,
-    predicate: &crate::semantic::ResolvedLayoutPredicate,
-    selected_layout: Option<u32>,
+    predicate: &crate::semantic::ResolvedShapePredicate,
     semantics: &SemanticModel,
     gc: &GcLayout,
     globals: &HashMap<ValueId, u32>,
     state: PredicateState,
 ) {
     for (alternative_index, alternative) in predicate.alternatives.iter().enumerate() {
-        emit_layout_constraints(
+        emit_shape_constraints(
             function,
             program,
             alternative,
-            selected_layout,
             semantics,
             gc,
             globals,
@@ -1389,11 +1388,10 @@ pub(super) fn emit_layout_predicate(
     }
 }
 
-fn emit_layout_constraints(
+fn emit_shape_constraints(
     function: &mut Function,
     program: &Program,
-    constraints: &[crate::semantic::ResolvedLayoutConstraint],
-    selected_layout: Option<u32>,
+    constraints: &[crate::semantic::ResolvedShapeConstraint],
     semantics: &SemanticModel,
     gc: &GcLayout,
     globals: &HashMap<ValueId, u32>,
@@ -1403,69 +1401,32 @@ fn emit_layout_constraints(
         function.instruction(&Instruction::I32Const(1));
         return;
     }
-    let state = program
-        .state
-        .as_ref()
-        .expect("state polling has a state declaration");
     for (index, constraint) in constraints.iter().enumerate() {
         let field_type = match constraint.dimension {
-            crate::semantic::ResolvedLayoutDimension::LayoutField(field) => semantic_type(
-                semantics
-                    .struct_field_type(field)
-                    .expect("layout dimensions have checked enum types"),
-                semantics,
-            ),
-            crate::semantic::ResolvedLayoutDimension::Global(value) => value_type(value, semantics),
-            crate::semantic::ResolvedLayoutDimension::StateField(value) => {
+            crate::semantic::ResolvedShapeDimension::Global(value) => value_type(value, semantics),
+            crate::semantic::ResolvedShapeDimension::StateField(value) => {
                 value_type(value, semantics)
             }
         };
         let Type::Enum(enumeration) = field_type else {
-            unreachable!("validated layout dimensions are source enums")
+            unreachable!("validated shape dimensions are source enums")
         };
         let enumeration_decl = program
             .enum_declarations()
             .find(|candidate| candidate.id == enumeration)
-            .expect("layout dimension enums belong to the source program");
+            .expect("shape dimension enums belong to the source program");
         let variant_index = enumeration_decl
             .variants
             .iter()
             .position(|variant| variant.id == constraint.variant)
-            .expect("layout constraints refer to variants of their dimension")
+            .expect("shape constraints refer to variants of their dimension")
             as i32;
 
         match constraint.dimension {
-            crate::semantic::ResolvedLayoutDimension::LayoutField(field) => {
-                let layout = state
-                    .layout
-                    .as_ref()
-                    .expect("legacy layout constraints require attachment layout storage");
-                let structure = program
-                    .structs
-                    .get(layout.structure.index())
-                    .expect("attachment Layout is an ordinary struct");
-                let field_index = structure
-                    .fields
-                    .iter()
-                    .position(|candidate| candidate.id == field)
-                    .expect("layout constraints refer to Layout fields")
-                    as u32;
-                let selected = selected_layout
-                    .expect("legacy layout constraints have selected-layout storage");
-                function
-                    .instruction(&Instruction::GlobalGet(selected))
-                    .instruction(&Instruction::RefAsNonNull);
-                emit_typed_struct_get(
-                    function,
-                    gc.index(Type::Struct(layout.structure)),
-                    field_index,
-                    field_type,
-                );
-            }
-            crate::semantic::ResolvedLayoutDimension::Global(value) => {
+            crate::semantic::ResolvedShapeDimension::Global(value) => {
                 function.instruction(&Instruction::GlobalGet(globals[&value]));
             }
-            crate::semantic::ResolvedLayoutDimension::StateField(value) => {
+            crate::semantic::ResolvedShapeDimension::StateField(value) => {
                 match state_snapshot {
                     PredicateState::Local(snapshot) => {
                         function.instruction(&Instruction::LocalGet(snapshot));
@@ -1516,11 +1477,10 @@ fn emit_managed_field_presence_validation(
 
     for class in &lowering.managed.classes {
         for group in &class.conditional_fields {
-            emit_layout_predicate(
+            emit_shape_predicate(
                 function,
                 program,
                 &group.predicate,
-                lowering.runtime_globals.selected_layout,
                 lowering.semantics,
                 lowering.gc,
                 lowering.globals,
@@ -1560,10 +1520,10 @@ fn emit_managed_field_presence_validation(
     }
 }
 
-fn emit_automatic_layout_selection(
+fn emit_automatic_shape_selection(
     function: &mut Function,
     program: &Program,
-    plan: &crate::layout_selection::LayoutSelectionPlan,
+    plan: &crate::shape_selection::ShapeSelectionPlan,
     lowering: &UpdateContext<'_>,
 ) {
     use crate::stdlib::{PROVIDER_BINDINGS_TYPE, managed_field_presence_name};
@@ -1572,19 +1532,14 @@ fn emit_automatic_layout_selection(
         let global = lowering
             .runtime_globals
             .provider_preparation_value
-            .expect("managed layout evidence has provider preparation storage");
+            .expect("managed shape evidence has provider preparation storage");
         let structure = program
             .structs
             .iter()
             .find(|structure| structure.name == PROVIDER_BINDINGS_TYPE)
-            .expect("managed layout evidence has generated bindings");
+            .expect("managed shape evidence has generated bindings");
         (global, structure)
     });
-    let legacy_layout = program
-        .state
-        .as_ref()
-        .and_then(|state| state.layout.as_ref());
-
     for candidate in &plan.candidates {
         if let Some((bindings_global, bindings_struct)) = bindings {
             for (index, field) in plan.evidence_fields.iter().enumerate() {
@@ -1594,7 +1549,7 @@ fn emit_automatic_layout_selection(
                     .iter()
                     .enumerate()
                     .find(|(_, candidate)| candidate.name == name)
-                    .expect("layout evidence has generated presence storage");
+                    .expect("shape evidence has generated presence storage");
                 let field_type = struct_field_type(declaration.id, lowering.semantics);
                 function
                     .instruction(&Instruction::GlobalGet(bindings_global))
@@ -1619,12 +1574,12 @@ fn emit_automatic_layout_selection(
         for (dimension, variant) in plan.dimensions.iter().zip(&candidate.variants) {
             let enumeration = program
                 .enum_declaration(dimension.enumeration)
-                .expect("layout dimension enum belongs to the source program");
+                .expect("shape dimension enum belongs to the source program");
             let variant_index = enumeration
                 .variants
                 .iter()
                 .position(|candidate| candidate.id == *variant)
-                .expect("layout candidate uses a declared variant");
+                .expect("shape candidate uses a declared variant");
             function.instruction(&Instruction::I32Const(variant_index as i32));
             for _ in &enumeration.variants {
                 function.instruction(&Instruction::I32Const(0));
@@ -1632,24 +1587,12 @@ fn emit_automatic_layout_selection(
             function.instruction(&Instruction::StructNew(
                 lowering.gc.index(Type::Enum(enumeration.id)),
             ));
-            if let crate::semantic::ResolvedLayoutDimension::Global(value) = dimension.dimension {
+            if let crate::semantic::ResolvedShapeDimension::Global(value) = dimension.dimension {
                 function.instruction(&Instruction::GlobalSet(lowering.globals[&value]));
             }
         }
-        if let Some(layout) = legacy_layout {
-            function
-                .instruction(&Instruction::StructNew(
-                    lowering.gc.index(Type::Struct(layout.structure)),
-                ))
-                .instruction(&Instruction::GlobalSet(
-                    lowering
-                        .runtime_globals
-                        .selected_layout
-                        .expect("legacy automatic selection has layout storage"),
-                ));
-        }
         function
-            .instruction(&Instruction::I32Const(ATTACH_LAYOUT_SELECTED))
+            .instruction(&Instruction::I32Const(ATTACH_PREPARED))
             .instruction(&Instruction::GlobalSet(
                 lowering.runtime_globals.attach_ready,
             ))
@@ -1689,11 +1632,11 @@ fn emit_provider_selection(
         .instruction(&Instruction::GlobalSet(selected));
 }
 
-fn predicate_uses_state(predicate: &crate::semantic::ResolvedLayoutPredicate) -> bool {
+fn predicate_uses_state(predicate: &crate::semantic::ResolvedShapePredicate) -> bool {
     predicate.alternatives.iter().flatten().any(|constraint| {
         matches!(
             constraint.dimension,
-            crate::semantic::ResolvedLayoutDimension::StateField(_)
+            crate::semantic::ResolvedShapeDimension::StateField(_)
         )
     })
 }
@@ -1716,7 +1659,7 @@ fn emit_dynamic_shape_transition_seeding(
         .iter()
         .flat_map(|group| &group.fields)
         .filter_map(|field| {
-            let predicate = lowering.semantics.state_field_layout_predicate(field.id)?;
+            let predicate = lowering.semantics.state_field_shape_predicate(field.id)?;
             predicate_uses_state(predicate).then_some((field, predicate))
         })
         .collect::<Vec<_>>();
@@ -1730,21 +1673,19 @@ fn emit_dynamic_shape_transition_seeding(
         ))
         .instruction(&Instruction::If(BlockType::Empty));
     for (field, predicate) in fields {
-        emit_layout_predicate(
+        emit_shape_predicate(
             function,
             program,
             predicate,
-            lowering.runtime_globals.selected_layout,
             lowering.semantics,
             lowering.gc,
             lowering.globals,
             PredicateState::Local(candidate_state),
         );
-        emit_layout_predicate(
+        emit_shape_predicate(
             function,
             program,
             predicate,
-            lowering.runtime_globals.selected_layout,
             lowering.semantics,
             lowering.gc,
             lowering.globals,
@@ -1773,7 +1714,7 @@ fn emit_dynamic_shape_transition_seeding(
 }
 
 /// Stable topological order for the physical fields active in one state
-/// layout. Independent declarations retain source order; dependencies are
+/// shape. Independent declarations retain source order; dependencies are
 /// emitted before the candidate-state reads that consume them.
 fn state_dependency_order<'a>(
     fields: &[&'a StateField],
@@ -1824,7 +1765,7 @@ fn emit_state_field_poll(
     function: &mut Function,
     poll: StateFieldPoll,
     prefix_emission: &mut PrefixEmissionState,
-    predicate: Option<&crate::semantic::ResolvedLayoutPredicate>,
+    predicate: Option<&crate::semantic::ResolvedShapePredicate>,
     context: &SnapshotPollContext<'_>,
 ) {
     let StateFieldPoll {
@@ -1958,11 +1899,10 @@ fn emit_state_field_poll(
         ))
         .instruction(&Instruction::I32Eqz);
     if let Some(predicate) = predicate.filter(|predicate| predicate_uses_state(predicate)) {
-        emit_layout_predicate(
+        emit_shape_predicate(
             function,
             context.program,
             predicate,
-            lowering.runtime_globals.selected_layout,
             lowering.semantics,
             lowering.gc,
             lowering.globals,

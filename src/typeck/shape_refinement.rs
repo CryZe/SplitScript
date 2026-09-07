@@ -1,6 +1,6 @@
-//! Symbolic refinement for attachment-wide layout dimensions.
+//! Symbolic refinement for finite attachment-shape dimensions.
 //!
-//! Layout conditions are ordinary boolean expressions in the syntax tree,
+//! Shape conditions are ordinary boolean expressions in the syntax tree,
 //! but declarations deliberately accept only predicates the compiler can
 //! prove statically. Keeping the canonical facts here lets state fields,
 //! managed metadata, function effects, and code generation share one model.
@@ -15,21 +15,21 @@ use crate::{
 
 use super::{
     Checker,
-    declarations::{LayoutConstraint, LayoutDimension, LayoutPredicate},
+    declarations::{ShapeConstraint, ShapeDimension, ShapePredicate},
 };
 
 impl Checker {
     pub(super) fn is_attachment_shape_global(&self, value: crate::ast::ValueId) -> bool {
-        self.layout_dimensions
-            .contains(&LayoutDimension::Global(value))
+        self.shape_dimensions
+            .contains(&ShapeDimension::Global(value))
     }
 
     /// Extracts a conjunction of enum-variant facts from an arbitrary
     /// condition. Returning `None` merely means that the expression does not
-    /// refine layout-dependent declarations.
-    pub(super) fn layout_constraints(&self, expression: &Expr) -> Option<Vec<LayoutConstraint>> {
+    /// refine shape-dependent declarations.
+    pub(super) fn shape_constraints(&self, expression: &Expr) -> Option<Vec<ShapeConstraint>> {
         let mut constraints = Vec::new();
-        self.collect_layout_constraints(expression, &mut constraints)?;
+        self.collect_shape_constraints(expression, &mut constraints)?;
         let mut dimensions = HashMap::new();
         for constraint in &constraints {
             if dimensions
@@ -39,34 +39,34 @@ impl Checker {
                 return None;
             }
         }
-        constraints.sort_by_key(|constraint| layout_dimension_sort_key(constraint.dimension));
+        constraints.sort_by_key(|constraint| shape_dimension_sort_key(constraint.dimension));
         constraints.dedup();
         Some(constraints)
     }
 
-    pub(super) fn layout_match_constraints(
+    pub(super) fn shape_match_constraints(
         &self,
         value: &Expr,
         pattern: &MatchPattern,
-    ) -> Option<Vec<LayoutConstraint>> {
-        self.layout_is_constraint_atom(value, pattern)
+    ) -> Option<Vec<ShapeConstraint>> {
+        self.shape_is_constraint_atom(value, pattern)
             .map(|constraint| vec![constraint])
     }
 
     /// Derives the facts established by the false branch when that complement
-    /// is itself one exact layout assignment. At present this is possible for
+    /// is itself one exact shape assignment. At present this is possible for
     /// a single equality over a two-variant enum. Broader predicates would
     /// require a disjunction rather than the canonical conjunction represented
-    /// by [`LayoutConstraint`].
-    pub(super) fn inverse_layout_constraints(
+    /// by [`ShapeConstraint`].
+    pub(super) fn inverse_shape_constraints(
         &self,
         expression: &Expr,
-    ) -> Option<Vec<LayoutConstraint>> {
-        let constraints = self.layout_constraints(expression)?;
+    ) -> Option<Vec<ShapeConstraint>> {
+        let constraints = self.shape_constraints(expression)?;
         let [constraint] = constraints.as_slice() else {
             return None;
         };
-        let enum_id = self.layout_dimension_enum(constraint.dimension)?;
+        let enum_id = self.shape_dimension_enum(constraint.dimension)?;
         let enumeration = self
             .declarations
             .enums
@@ -79,52 +79,52 @@ impl Checker {
             .variants
             .iter()
             .find(|variant| variant.id != constraint.variant)?;
-        Some(vec![LayoutConstraint {
+        Some(vec![ShapeConstraint {
             dimension: constraint.dimension,
             variant: variant.id,
         }])
     }
 
-    /// Returns layout facts that are necessarily true whenever `expression`
+    /// Returns shape facts that are necessarily true whenever `expression`
     /// is true. Unlike declaration predicates, ordinary boolean expressions
     /// may contain unrelated conditions; a conjunction still preserves every
-    /// layout fact contributed by either side.
-    pub(super) fn truthy_layout_constraints(&self, expression: &Expr) -> Vec<LayoutConstraint> {
+    /// shape fact contributed by either side.
+    pub(super) fn truthy_shape_constraints(&self, expression: &Expr) -> Vec<ShapeConstraint> {
         let mut candidates = Vec::new();
-        self.collect_truthy_layout_constraints(expression, &mut candidates);
+        self.collect_truthy_shape_constraints(expression, &mut candidates);
         canonical_constraints(candidates)
     }
 
-    /// Returns layout facts that are necessarily true whenever `expression`
+    /// Returns shape facts that are necessarily true whenever `expression`
     /// is false. A disjunction must have every operand false, so exact
     /// two-variant complements remain available through an entire `||` chain.
-    pub(super) fn falsy_layout_constraints(&self, expression: &Expr) -> Vec<LayoutConstraint> {
+    pub(super) fn falsy_shape_constraints(&self, expression: &Expr) -> Vec<ShapeConstraint> {
         let mut candidates = Vec::new();
-        self.collect_falsy_layout_constraints(expression, &mut candidates);
+        self.collect_falsy_shape_constraints(expression, &mut candidates);
         canonical_constraints(candidates)
     }
 
-    /// Resolves flat parser branches into exact, mutually exclusive layout
-    /// alternatives. A branch introduced by `else` starts with the layouts
+    /// Resolves flat parser branches into exact, mutually exclusive shape
+    /// alternatives. A branch introduced by `else` starts with the shapes
     /// left unmatched by the preceding branches in the same chain.
-    pub(super) fn layout_branch_predicates<Field>(
+    pub(super) fn shape_branch_predicates<Field>(
         &mut self,
         groups: &[ConditionalFieldsDecl<Field>],
-    ) -> Vec<LayoutPredicate> {
+    ) -> Vec<ShapePredicate> {
         for condition in groups.iter().filter_map(|group| group.condition.as_ref()) {
-            self.collect_declared_layout_dimensions(condition);
+            self.collect_declared_shape_dimensions(condition);
         }
-        let universe = self.layout_assignments();
+        let universe = self.shape_assignments();
         if universe.is_empty() && !groups.is_empty() {
             self.errors.push(
                 Diagnostic::type_error(
-                    "conditional fields require a bounded attachment layout",
+                    "conditional fields require a bounded attachment shape",
                     groups[0].keyword_span,
                 )
-                .with_primary_label("this conditional declaration needs exact layout branches")
+                .with_primary_label("this conditional declaration needs exact shape branches")
                 .with_note(format!(
-                    "conditional layout declarations support at most {} layout combinations",
-                    crate::layout_selection::MAX_ENUMERATED_LAYOUT_COMBINATIONS,
+                    "conditional declarations support at most {} shape combinations",
+                    crate::shape_selection::MAX_ENUMERATED_SHAPE_COMBINATIONS,
                 )),
             );
         }
@@ -139,7 +139,7 @@ impl Checker {
                 let selected = remaining
                     .iter()
                     .filter(|assignment| {
-                        self.evaluate_layout_condition(condition, assignment)
+                        self.evaluate_shape_condition(condition, assignment)
                             .unwrap_or_else(|| {
                                 understood = false;
                                 false
@@ -150,11 +150,11 @@ impl Checker {
                 if !understood {
                     self.errors.push(
                         Diagnostic::type_error(
-                            "conditional fields need a statically decidable layout predicate",
+                            "conditional fields need a statically decidable shape predicate",
                             condition.span,
                         )
                         .with_primary_label(
-                            "test layout dimensions with enum variants using `is`, `==`, or `!=` and combine them with `&&`, `||`, or `!`",
+                            "test shape variables with enum variants using `is`, `==`, or `!=` and combine them with `&&`, `||`, or `!`",
                         ),
                     );
                 }
@@ -163,40 +163,40 @@ impl Checker {
                 remaining.clone()
             };
             remaining.retain(|assignment| !selected.contains(assignment));
-            predicates.push(LayoutPredicate {
+            predicates.push(ShapePredicate {
                 alternatives: selected,
             });
         }
         predicates
     }
 
-    pub(super) fn with_layout_constraints<T>(
+    pub(super) fn with_shape_constraints<T>(
         &mut self,
-        constraints: Option<&[LayoutConstraint]>,
+        constraints: Option<&[ShapeConstraint]>,
         operation: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        let predicate = constraints.map(|constraints| LayoutPredicate {
+        let predicate = constraints.map(|constraints| ShapePredicate {
             alternatives: self
-                .layout_assignments()
+                .shape_assignments()
                 .into_iter()
                 .filter(|assignment| assignment_satisfies_constraints(assignment, constraints))
                 .collect(),
         });
-        self.with_layout_predicate(predicate.as_ref(), operation)
+        self.with_shape_predicate(predicate.as_ref(), operation)
     }
 
-    pub(super) fn with_layout_predicate<T>(
+    pub(super) fn with_shape_predicate<T>(
         &mut self,
-        predicate: Option<&LayoutPredicate>,
+        predicate: Option<&ShapePredicate>,
         operation: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        let previous = self.active_layouts.clone();
+        let previous = self.active_shapes.clone();
         if let Some(predicate) = predicate {
-            let active = self.active_layouts.as_ref().map_or_else(
-                || self.layout_assignments(),
+            let active = self.active_shapes.as_ref().map_or_else(
+                || self.shape_assignments(),
                 |active| active.alternatives.clone(),
             );
-            self.active_layouts = Some(LayoutPredicate {
+            self.active_shapes = Some(ShapePredicate {
                 alternatives: active
                     .into_iter()
                     .filter(|assignment| predicate_matches_assignment(predicate, assignment))
@@ -204,32 +204,32 @@ impl Checker {
             });
         }
         let output = operation(self);
-        self.active_layouts = previous;
+        self.active_shapes = previous;
         output
     }
 
-    pub(super) fn layout_predicate_satisfied(&self, required: &LayoutPredicate) -> bool {
-        self.active_layout_assignments()
+    pub(super) fn shape_predicate_satisfied(&self, required: &ShapePredicate) -> bool {
+        self.active_shape_assignments()
             .iter()
             .all(|assignment| predicate_matches_assignment(required, assignment))
     }
 
-    pub(super) fn layout_predicates_cover_all<'a>(
+    pub(super) fn shape_predicates_cover_all<'a>(
         &self,
-        predicates: impl IntoIterator<Item = &'a LayoutPredicate>,
+        predicates: impl IntoIterator<Item = &'a ShapePredicate>,
     ) -> bool {
         let predicates = predicates.into_iter().collect::<Vec<_>>();
-        self.layout_assignments().iter().all(|assignment| {
+        self.shape_assignments().iter().all(|assignment| {
             predicates
                 .iter()
                 .any(|predicate| predicate_matches_assignment(predicate, assignment))
         })
     }
 
-    fn collect_layout_constraints(
+    fn collect_shape_constraints(
         &self,
         expression: &Expr,
-        output: &mut Vec<LayoutConstraint>,
+        output: &mut Vec<ShapeConstraint>,
     ) -> Option<()> {
         match &expression.kind {
             ExprKind::Binary {
@@ -237,28 +237,28 @@ impl Checker {
                 left,
                 right,
             } => {
-                self.collect_layout_constraints(left, output)?;
-                self.collect_layout_constraints(right, output)
+                self.collect_shape_constraints(left, output)?;
+                self.collect_shape_constraints(right, output)
             }
             ExprKind::Binary {
                 op: BinaryOp::Eq,
                 left,
                 right,
             } => self
-                .layout_constraint_atom(left, right)
-                .or_else(|| self.layout_constraint_atom(right, left))
+                .shape_constraint_atom(left, right)
+                .or_else(|| self.shape_constraint_atom(right, left))
                 .map(|constraint| output.push(constraint)),
             ExprKind::Is { value, pattern, .. } => self
-                .layout_is_constraint_atom(value, &pattern.kind)
+                .shape_is_constraint_atom(value, &pattern.kind)
                 .map(|constraint| output.push(constraint)),
             _ => None,
         }
     }
 
-    fn collect_truthy_layout_constraints(
+    fn collect_truthy_shape_constraints(
         &self,
         expression: &Expr,
-        output: &mut Vec<LayoutConstraint>,
+        output: &mut Vec<ShapeConstraint>,
     ) {
         match &expression.kind {
             ExprKind::Binary {
@@ -266,8 +266,8 @@ impl Checker {
                 left,
                 right,
             } => {
-                self.collect_truthy_layout_constraints(left, output);
-                self.collect_truthy_layout_constraints(right, output);
+                self.collect_truthy_shape_constraints(left, output);
+                self.collect_truthy_shape_constraints(right, output);
             }
             ExprKind::Binary {
                 op: BinaryOp::Eq,
@@ -275,14 +275,14 @@ impl Checker {
                 right,
             } => {
                 if let Some(constraint) = self
-                    .layout_constraint_atom(left, right)
-                    .or_else(|| self.layout_constraint_atom(right, left))
+                    .shape_constraint_atom(left, right)
+                    .or_else(|| self.shape_constraint_atom(right, left))
                 {
                     output.push(constraint);
                 }
             }
             ExprKind::Is { value, pattern, .. } => {
-                if let Some(constraint) = self.layout_is_constraint_atom(value, &pattern.kind) {
+                if let Some(constraint) = self.shape_is_constraint_atom(value, &pattern.kind) {
                     output.push(constraint);
                 }
             }
@@ -290,10 +290,10 @@ impl Checker {
         }
     }
 
-    fn collect_falsy_layout_constraints(
+    fn collect_falsy_shape_constraints(
         &self,
         expression: &Expr,
-        output: &mut Vec<LayoutConstraint>,
+        output: &mut Vec<ShapeConstraint>,
     ) {
         if let ExprKind::Binary {
             op: BinaryOp::Or,
@@ -301,20 +301,20 @@ impl Checker {
             right,
         } = &expression.kind
         {
-            self.collect_falsy_layout_constraints(left, output);
-            self.collect_falsy_layout_constraints(right, output);
-        } else if let Some(constraints) = self.inverse_layout_constraints(expression) {
+            self.collect_falsy_shape_constraints(left, output);
+            self.collect_falsy_shape_constraints(right, output);
+        } else if let Some(constraints) = self.inverse_shape_constraints(expression) {
             output.extend(constraints);
         }
     }
 
-    fn layout_constraint_atom(&self, dimension: &Expr, variant: &Expr) -> Option<LayoutConstraint> {
+    fn shape_constraint_atom(&self, dimension: &Expr, variant: &Expr) -> Option<ShapeConstraint> {
         let dimension_path = expression_path(dimension)?;
         let variant_path = expression_path(variant)?;
         let [enum_name, variant_name] = variant_path.as_slice() else {
             return None;
         };
-        let (dimension, enum_id) = self.resolve_layout_dimension(&dimension_path)?;
+        let (dimension, enum_id) = self.resolve_shape_dimension(&dimension_path)?;
         let enumeration = self
             .declarations
             .enums
@@ -324,17 +324,17 @@ impl Checker {
             .variants
             .iter()
             .find(|variant| variant.name == *variant_name)?;
-        Some(LayoutConstraint {
+        Some(ShapeConstraint {
             dimension,
             variant: variant.id,
         })
     }
 
-    fn layout_is_constraint_atom(
+    fn shape_is_constraint_atom(
         &self,
         dimension: &Expr,
         pattern: &MatchPattern,
-    ) -> Option<LayoutConstraint> {
+    ) -> Option<ShapeConstraint> {
         let MatchPattern::Enum {
             enumeration,
             variant,
@@ -344,7 +344,7 @@ impl Checker {
             return None;
         };
         let dimension_path = expression_path(dimension)?;
-        let (dimension, enum_id) = self.resolve_layout_dimension(&dimension_path)?;
+        let (dimension, enum_id) = self.resolve_shape_dimension(&dimension_path)?;
         let enumeration_decl = self
             .declarations
             .enums
@@ -354,87 +354,69 @@ impl Checker {
             .variants
             .iter()
             .find(|candidate| candidate.name == *variant)?;
-        Some(LayoutConstraint {
+        Some(ShapeConstraint {
             dimension,
             variant: variant.id,
         })
     }
 
-    fn resolve_layout_dimension(
+    fn resolve_shape_dimension(
         &self,
         path: &[&str],
-    ) -> Option<(LayoutDimension, crate::ast::EnumId)> {
+    ) -> Option<(ShapeDimension, crate::ast::EnumId)> {
         match path {
-            ["layout", dimension_name] => {
-                let layout = self
-                    .declarations
-                    .structs
-                    .iter()
-                    .find(|structure| structure.name == "Layout")?;
-                let field = layout
-                    .fields
-                    .iter()
-                    .find(|field| field.name == *dimension_name)?;
-                let ResolvedTypeRef::Enum(enum_id) = self.resolutions.type_ref(field.ty)? else {
-                    return None;
-                };
-                Some((LayoutDimension::LayoutField(field.id), enum_id))
-            }
             [name] => {
                 if let Some(binding) = self.declarations.globals.get(*name) {
                     let value = binding.id?;
+                    let ty = self.inference.shallow_readonly(binding.ty);
                     let ResolvedTypeRef::Enum(enum_id) =
-                        binding.ty.to_ref(self.inference.type_store())
+                        ty.try_to_ref(self.inference.type_store())?
                     else {
                         return None;
                     };
-                    return Some((LayoutDimension::Global(value), enum_id));
+                    return Some((ShapeDimension::Global(value), enum_id));
                 }
                 let (value, ty) = self.declarations.state_fields.get(*name).copied()?;
-                let ResolvedTypeRef::Enum(enum_id) = ty.to_ref(self.inference.type_store()) else {
+                let ty = self.inference.shallow_readonly(ty);
+                let ResolvedTypeRef::Enum(enum_id) = ty.try_to_ref(self.inference.type_store())?
+                else {
                     return None;
                 };
-                Some((LayoutDimension::StateField(value), enum_id))
+                Some((ShapeDimension::StateField(value), enum_id))
             }
             ["current", name] => {
                 let (value, ty) = self.declarations.state_fields.get(*name).copied()?;
-                let ResolvedTypeRef::Enum(enum_id) = ty.to_ref(self.inference.type_store()) else {
+                let ty = self.inference.shallow_readonly(ty);
+                let ResolvedTypeRef::Enum(enum_id) = ty.try_to_ref(self.inference.type_store())?
+                else {
                     return None;
                 };
-                Some((LayoutDimension::StateField(value), enum_id))
+                Some((ShapeDimension::StateField(value), enum_id))
             }
             _ => None,
         }
     }
 
-    fn layout_dimension_enum(&self, dimension: LayoutDimension) -> Option<crate::ast::EnumId> {
+    fn shape_dimension_enum(&self, dimension: ShapeDimension) -> Option<crate::ast::EnumId> {
         match dimension {
-            LayoutDimension::LayoutField(field_id) => {
-                let layout = self
-                    .declarations
-                    .structs
-                    .iter()
-                    .find(|structure| structure.name == "Layout")?;
-                let field = layout.fields.iter().find(|field| field.id == field_id)?;
-                let ResolvedTypeRef::Enum(enum_id) = self.resolutions.type_ref(field.ty)? else {
-                    return None;
-                };
-                Some(enum_id)
-            }
-            LayoutDimension::Global(value) => {
+            ShapeDimension::Global(value) => {
                 let ty = self
                     .declarations
                     .globals
                     .values()
                     .find_map(|binding| (binding.id == Some(value)).then_some(binding.ty))?;
-                let ResolvedTypeRef::Enum(enum_id) = ty.to_ref(self.inference.type_store()) else {
+                let ty = self.inference.shallow_readonly(ty);
+                let ResolvedTypeRef::Enum(enum_id) = ty.try_to_ref(self.inference.type_store())?
+                else {
                     return None;
                 };
                 Some(enum_id)
             }
-            LayoutDimension::StateField(value) => {
+            ShapeDimension::StateField(value) => {
                 let ty = self.declarations.state_fields_by_id.get(&value).copied()?;
-                let ResolvedTypeRef::Enum(enum_id) = ty.to_ref(self.inference.type_store()) else {
+                let ty = self.inference.shallow_readonly(ty);
+                let ResolvedTypeRef::Enum(enum_id) = ty.try_to_ref(self.inference.type_store())?
+                else {
                     return None;
                 };
                 Some(enum_id)
@@ -442,28 +424,23 @@ impl Checker {
         }
     }
 
-    fn collect_declared_layout_dimensions(&mut self, expression: &Expr) {
+    fn collect_declared_shape_dimensions(&mut self, expression: &Expr) {
         let mut paths = Vec::new();
         collect_expression_paths(expression, &mut paths);
         for path in paths {
-            let Some((dimension, _)) = self.resolve_layout_dimension(&path) else {
+            let Some((dimension, _)) = self.resolve_shape_dimension(&path) else {
                 continue;
             };
-            if !self.layout_dimensions.contains(&dimension) {
-                self.layout_dimensions.push(dimension);
+            if !self.shape_dimensions.contains(&dimension) {
+                self.shape_dimensions.push(dimension);
             }
         }
     }
 
-    fn layout_assignments(&self) -> Vec<Vec<LayoutConstraint>> {
-        let layout = self
-            .declarations
-            .structs
-            .iter()
-            .find(|structure| structure.name == "Layout");
+    fn shape_assignments(&self) -> Vec<Vec<ShapeConstraint>> {
         let mut assignments = vec![Vec::new()];
-        for field in layout.into_iter().flat_map(|layout| &layout.fields) {
-            let Some(ResolvedTypeRef::Enum(enum_id)) = self.resolutions.type_ref(field.ty) else {
+        for dimension in &self.shape_dimensions {
+            let Some(enum_id) = self.shape_dimension_enum(*dimension) else {
                 return Vec::new();
             };
             let Some(enumeration) = self
@@ -478,7 +455,7 @@ impl Checker {
                 .len()
                 .checked_mul(enumeration.variants.len())
                 .is_none_or(|count| {
-                    count > crate::layout_selection::MAX_ENUMERATED_LAYOUT_COMBINATIONS
+                    count > crate::shape_selection::MAX_ENUMERATED_SHAPE_COMBINATIONS
                 })
             {
                 return Vec::new();
@@ -488,45 +465,7 @@ impl Checker {
                 .flat_map(|assignment| {
                     enumeration.variants.iter().map(move |variant| {
                         let mut assignment = assignment.clone();
-                        assignment.push(LayoutConstraint {
-                            dimension: LayoutDimension::LayoutField(field.id),
-                            variant: variant.id,
-                        });
-                        assignment
-                    })
-                })
-                .collect();
-        }
-        for dimension in &self.layout_dimensions {
-            if matches!(dimension, LayoutDimension::LayoutField(_)) {
-                continue;
-            }
-            let Some(enum_id) = self.layout_dimension_enum(*dimension) else {
-                return Vec::new();
-            };
-            let Some(enumeration) = self
-                .declarations
-                .enums
-                .iter()
-                .find(|enumeration| enumeration.id == enum_id)
-            else {
-                return Vec::new();
-            };
-            if assignments
-                .len()
-                .checked_mul(enumeration.variants.len())
-                .is_none_or(|count| {
-                    count > crate::layout_selection::MAX_ENUMERATED_LAYOUT_COMBINATIONS
-                })
-            {
-                return Vec::new();
-            }
-            assignments = assignments
-                .into_iter()
-                .flat_map(|assignment| {
-                    enumeration.variants.iter().map(move |variant| {
-                        let mut assignment = assignment.clone();
-                        assignment.push(LayoutConstraint {
+                        assignment.push(ShapeConstraint {
                             dimension: *dimension,
                             variant: variant.id,
                         });
@@ -538,44 +477,44 @@ impl Checker {
         assignments
     }
 
-    fn active_layout_assignments(&self) -> Vec<Vec<LayoutConstraint>> {
-        self.active_layouts.as_ref().map_or_else(
-            || self.layout_assignments(),
+    fn active_shape_assignments(&self) -> Vec<Vec<ShapeConstraint>> {
+        self.active_shapes.as_ref().map_or_else(
+            || self.shape_assignments(),
             |active| active.alternatives.clone(),
         )
     }
 
-    fn evaluate_layout_condition(
+    fn evaluate_shape_condition(
         &self,
         expression: &Expr,
-        assignment: &[LayoutConstraint],
+        assignment: &[ShapeConstraint],
     ) -> Option<bool> {
         match &expression.kind {
             ExprKind::Bool(value) => Some(*value),
             ExprKind::Unary {
                 op: UnaryOp::Not,
                 expr,
-            } => Some(!self.evaluate_layout_condition(expr, assignment)?),
+            } => Some(!self.evaluate_shape_condition(expr, assignment)?),
             ExprKind::Binary { op, left, right } => match op {
                 BinaryOp::And => Some(
-                    self.evaluate_layout_condition(left, assignment)?
-                        && self.evaluate_layout_condition(right, assignment)?,
+                    self.evaluate_shape_condition(left, assignment)?
+                        && self.evaluate_shape_condition(right, assignment)?,
                 ),
                 BinaryOp::Or => Some(
-                    self.evaluate_layout_condition(left, assignment)?
-                        || self.evaluate_layout_condition(right, assignment)?,
+                    self.evaluate_shape_condition(left, assignment)?
+                        || self.evaluate_shape_condition(right, assignment)?,
                 ),
                 BinaryOp::Eq | BinaryOp::Ne => {
                     let constraint = self
-                        .layout_constraint_atom(left, right)
-                        .or_else(|| self.layout_constraint_atom(right, left))?;
+                        .shape_constraint_atom(left, right)
+                        .or_else(|| self.shape_constraint_atom(right, left))?;
                     let equal = assignment.contains(&constraint);
                     Some(if *op == BinaryOp::Eq { equal } else { !equal })
                 }
                 _ => None,
             },
             ExprKind::Is { value, pattern, .. } => {
-                let constraint = self.layout_is_constraint_atom(value, &pattern.kind)?;
+                let constraint = self.shape_is_constraint_atom(value, &pattern.kind)?;
                 Some(assignment.contains(&constraint))
             }
             _ => None,
@@ -583,7 +522,7 @@ impl Checker {
     }
 }
 
-fn canonical_constraints(candidates: Vec<LayoutConstraint>) -> Vec<LayoutConstraint> {
+fn canonical_constraints(candidates: Vec<ShapeConstraint>) -> Vec<ShapeConstraint> {
     let mut dimensions = HashMap::new();
     for constraint in candidates {
         dimensions
@@ -598,24 +537,23 @@ fn canonical_constraints(candidates: Vec<LayoutConstraint>) -> Vec<LayoutConstra
     let mut constraints = dimensions
         .into_iter()
         .filter_map(|(dimension, variant)| {
-            variant.map(|variant| LayoutConstraint { dimension, variant })
+            variant.map(|variant| ShapeConstraint { dimension, variant })
         })
         .collect::<Vec<_>>();
-    constraints.sort_by_key(|constraint| layout_dimension_sort_key(constraint.dimension));
+    constraints.sort_by_key(|constraint| shape_dimension_sort_key(constraint.dimension));
     constraints
 }
 
-fn layout_dimension_sort_key(dimension: LayoutDimension) -> (u8, usize) {
+fn shape_dimension_sort_key(dimension: ShapeDimension) -> (u8, usize) {
     match dimension {
-        LayoutDimension::LayoutField(field) => (0, field.index()),
-        LayoutDimension::Global(value) => (1, value.index()),
-        LayoutDimension::StateField(value) => (2, value.index()),
+        ShapeDimension::Global(value) => (0, value.index()),
+        ShapeDimension::StateField(value) => (1, value.index()),
     }
 }
 
 fn predicate_matches_assignment(
-    predicate: &LayoutPredicate,
-    assignment: &[LayoutConstraint],
+    predicate: &ShapePredicate,
+    assignment: &[ShapeConstraint],
 ) -> bool {
     predicate.alternatives.iter().any(|alternative| {
         alternative
@@ -641,8 +579,8 @@ fn collect_expression_paths<'a>(expression: &'a Expr, output: &mut Vec<Vec<&'a s
 }
 
 fn assignment_satisfies_constraints(
-    assignment: &[LayoutConstraint],
-    constraints: &[LayoutConstraint],
+    assignment: &[ShapeConstraint],
+    constraints: &[ShapeConstraint],
 ) -> bool {
     constraints
         .iter()

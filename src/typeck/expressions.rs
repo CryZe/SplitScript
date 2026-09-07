@@ -15,7 +15,7 @@ use crate::{
         ResolvedWrapperPattern,
     },
     signature::parse_signature,
-    stdlib::{RuntimeRepresentation, StdlibCapabilityId, StdlibTypeId},
+    stdlib::{RuntimeRepresentation, StdlibCapabilityId, StdlibTypeConstructorId, StdlibTypeId},
     types::{EnumTypeId, TypeKind},
 };
 
@@ -293,8 +293,12 @@ impl Checker {
                     (id, element)
                 };
                 if elements.is_empty() {
-                    self.inferred_empty_collections
-                        .push((element_type, expr.span, "array"));
+                    self.inferred_empty_collections.push((
+                        element_type,
+                        expr.span,
+                        "element",
+                        "array",
+                    ));
                 }
                 if let Some(expected_length) = self.inference.array_length(id)
                     && elements.len() != expected_length as usize
@@ -1168,7 +1172,7 @@ impl Checker {
                 index,
                 bracket_span,
             } => {
-                let element = self.indexed_element_type(receiver, index, *bracket_span)?;
+                let element = self.indexed_element_type(receiver, index, expr.id, *bracket_span)?;
                 self.expect_expression(expr.id, element, expected, expr.span)?
             }
             ExprKind::Unary { op, expr: inner } => match op {
@@ -1848,6 +1852,106 @@ impl Checker {
     ) -> CheckedPattern {
         match pattern {
             MatchPattern::Struct { name, fields, .. } => {
+                let contextual = self.shallow_type(value_type);
+                let application = match contextual {
+                    Type::Application(application) => Some(application),
+                    Type::Known(id) => match self.inference.type_store().kind(id) {
+                        TypeKind::Application { layout, .. } => Some(*layout),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(application) = application {
+                    let constructor = self.inference.application_constructor(application);
+                    let declaration = self.standard_library.type_constructor(constructor);
+                    if name
+                        .as_ref()
+                        .is_some_and(|name| name.as_str() != declaration.name)
+                    {
+                        // A contextual generic struct only applies when an
+                        // explicit name agrees with that context. Continue
+                        // into ordinary source-struct diagnostics otherwise.
+                    } else {
+                        let declared_fields = self
+                            .standard_library
+                            .fields_of_constructor(constructor)
+                            .filter(|field| {
+                                field.visibility == crate::stdlib::FieldVisibility::Public
+                            })
+                            .copied()
+                            .collect::<Vec<_>>();
+                        if !declared_fields.is_empty() {
+                            let arguments =
+                                self.inference.application_arguments(application).to_vec();
+                            let variables = declaration
+                                .parameters
+                                .iter()
+                                .zip(arguments)
+                                .map(|(parameter, argument)| (parameter.name, argument))
+                                .collect::<HashMap<_, _>>();
+                            self.semantics.resolve_struct_pattern(
+                                pattern_id,
+                                ResolvedStructId::StandardConstructor(application),
+                            );
+                            let mut seen = HashSet::new();
+                            let mut resolved_fields = Vec::with_capacity(fields.len());
+                            let mut coverage = Vec::with_capacity(fields.len());
+                            for pattern_field in fields {
+                                if !seen.insert(pattern_field.name.clone()) {
+                                    self.error(
+                                        format!(
+                                            "duplicate struct pattern field `{}`",
+                                            pattern_field.name
+                                        ),
+                                        pattern_field.name_span,
+                                    );
+                                    continue;
+                                }
+                                let Some(field) = declared_fields
+                                    .iter()
+                                    .find(|field| field.name == pattern_field.name)
+                                else {
+                                    self.error(
+                                        format!(
+                                            "struct `{}` has no field `{}`",
+                                            declaration.name, pattern_field.name
+                                        ),
+                                        pattern_field.name_span,
+                                    );
+                                    continue;
+                                };
+                                let field_type = self.catalog_type(field.ty, &variables);
+                                let checked = self.check_pattern(
+                                    &pattern_field.pattern.kind,
+                                    pattern_field.pattern.id,
+                                    field_type,
+                                    pattern_field.pattern.span,
+                                );
+                                resolved_fields.push(ResolvedStructFieldId::Standard(field.id));
+                                coverage.push((
+                                    ResolvedStructFieldId::Standard(field.id),
+                                    field.name.to_owned(),
+                                    checked.coverage,
+                                ));
+                            }
+                            self.semantics
+                                .resolve_struct_pattern_fields(pattern_id, resolved_fields);
+                            coverage.sort_by_key(|(field, _, _)| {
+                                declared_fields
+                                    .iter()
+                                    .position(|declared| {
+                                        *field == ResolvedStructFieldId::Standard(declared.id)
+                                    })
+                                    .unwrap_or(usize::MAX)
+                            });
+                            return CheckedPattern::new(PatternCoverage::Struct {
+                                structure: ResolvedStructId::StandardConstructor(application),
+                                name: declaration.name.to_owned(),
+                                fields: coverage,
+                            });
+                        }
+                    }
+                }
                 let declaration = if let Some(name) = name {
                     let Some(declaration) = self
                         .declarations
@@ -1921,7 +2025,7 @@ impl Checker {
                         .expect("contextual source struct types have declarations")
                 };
                 self.semantics
-                    .resolve_struct_pattern(pattern_id, declaration.id);
+                    .resolve_struct_pattern(pattern_id, ResolvedStructId::Source(declaration.id));
                 let mut seen = HashSet::new();
                 let mut resolved_fields = Vec::with_capacity(fields.len());
                 let mut coverage = Vec::with_capacity(fields.len());
@@ -1953,7 +2057,7 @@ impl Checker {
                         self.syntax_type(field.ty),
                         pattern_field.pattern.span,
                     );
-                    resolved_fields.push(field.id);
+                    resolved_fields.push(ResolvedStructFieldId::Source(field.id));
                     coverage.push((field.id, field.name.clone(), checked.coverage));
                 }
                 self.semantics
@@ -1963,9 +2067,14 @@ impl Checker {
                 // not depend on the order chosen in source.
                 coverage.sort_by_key(|(field, _, _)| *field);
                 CheckedPattern::new(PatternCoverage::Struct {
-                    structure: declaration.id,
+                    structure: ResolvedStructId::Source(declaration.id),
                     name: declaration.name,
-                    fields: coverage,
+                    fields: coverage
+                        .into_iter()
+                        .map(|(field, name, coverage)| {
+                            (ResolvedStructFieldId::Source(field), name, coverage)
+                        })
+                        .collect(),
                 })
             }
             MatchPattern::Enum {
@@ -2471,6 +2580,7 @@ impl Checker {
         &mut self,
         receiver: &Expr,
         index: &Expr,
+        expression: ExprId,
         bracket_span: Span,
     ) -> Option<Type> {
         let receiver_ty = self.expr(receiver, None)?;
@@ -2482,8 +2592,20 @@ impl Checker {
             self.expr(index, None);
             return None;
         }
+        let receiver_ty = self.shallow_type(receiver_ty);
+        if let Type::Application(application) = receiver_ty
+            && self.inference.application_constructor(application) == StdlibTypeConstructorId::Map
+        {
+            return self.resolve_map_index(
+                receiver_ty,
+                receiver.id,
+                index,
+                expression,
+                bracket_span,
+            );
+        }
         if matches!(
-            self.shallow_type(receiver_ty),
+            receiver_ty,
             Type::Known(id)
                 if matches!(self.inference.type_store().kind(id), TypeKind::SettingsView)
         ) {
@@ -2521,7 +2643,7 @@ impl Checker {
             self.errors.push(diagnostic);
             return None;
         }
-        let element = match self.shallow_type(receiver_ty) {
+        let element = match receiver_ty {
             Type::Array(array) => self.inference.array_element(array),
             Type::Known(id) => match self.inference.type_store().kind(id) {
                 crate::types::TypeKind::Array { element, .. } => Type::Known(*element),

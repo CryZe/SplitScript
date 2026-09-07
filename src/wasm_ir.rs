@@ -339,8 +339,8 @@ pub struct MatchArm {
 #[derive(Debug, Clone)]
 pub enum LoweredPattern {
     Struct {
-        structure: crate::ast::StructId,
-        fields: Vec<(crate::ast::StructFieldId, LoweredPattern)>,
+        structure: crate::semantic::ResolvedStructId,
+        fields: Vec<(crate::semantic::ResolvedStructFieldId, LoweredPattern)>,
     },
     Enum {
         enumeration: EnumTypeId,
@@ -1524,10 +1524,19 @@ fn lower_expression(
                 members: members.clone(),
             }
         }
-        TypedExpressionKind::Index { receiver, index } => ExpressionKind::Index {
-            receiver: *receiver,
-            index: *index,
-        },
+        TypedExpressionKind::Index { receiver, index } => {
+            if let Some(ExpressionResolution::Call(target)) = &expression.resolution {
+                ExpressionKind::Call {
+                    target: lower_call_target(target, typed_hir, semantics),
+                    arguments: vec![*index],
+                }
+            } else {
+                ExpressionKind::Index {
+                    receiver: *receiver,
+                    index: *index,
+                }
+            }
+        }
         TypedExpressionKind::Unary {
             op,
             expression: operand,
@@ -1957,18 +1966,34 @@ fn lower_index_assignment_operation(
         expression: target,
         members: Vec::new(),
     };
-    match &mut call {
+    replace_call_receiver(&mut call, receiver);
+    AssignmentOperation::Call(call)
+}
+
+fn replace_call_receiver(call: &mut CallTarget, receiver: ResolvedReceiver) {
+    match call {
         CallTarget::UserMethod {
+            receiver: call_receiver,
+            ..
+        }
+        | CallTarget::CapabilityRequirement {
+            receiver: call_receiver,
+            ..
+        }
+        | CallTarget::DefaultDisplay {
             receiver: call_receiver,
             ..
         } => *call_receiver = receiver,
         CallTarget::Intrinsic {
             receiver: Some(call_receiver),
             ..
+        }
+        | CallTarget::LibraryOverload {
+            receiver: Some(call_receiver),
+            ..
         } => *call_receiver = receiver,
-        _ => unreachable!("compound indexed assignments resolve binary methods"),
+        _ => unreachable!("receiver-bound compiler-generated calls retain a receiver"),
     }
-    AssignmentOperation::Call(call)
 }
 
 /// Builds the ordinary protocol call used when `for` consumes an existing
@@ -4219,29 +4244,112 @@ fn lower_async_statements(
                     normalize_expression_suspensions(*value, typed_hir, semantics, wasm_ir);
                 let target_type = wasm_ir.effective_expression_type(*target);
                 let target_source = wasm_ir.expression(*target).and_then(|target| target.source);
-                let lowered_target = wasm_ir.push_generated_expression(
-                    target_type,
-                    ExpressionKind::Index {
-                        receiver: receiver_read,
-                        index: index_read,
-                    },
-                    None,
-                    target_source,
-                );
+                let lowered_target = if let Some(getter) = semantics.call(*target) {
+                    let mut getter = lower_call_target(getter, typed_hir, semantics);
+                    replace_call_receiver(
+                        &mut getter,
+                        ResolvedReceiver::Expression {
+                            expression: receiver_read,
+                            members: Vec::new(),
+                        },
+                    );
+                    wasm_ir.push_generated_expression(
+                        target_type,
+                        ExpressionKind::Call {
+                            target: getter,
+                            arguments: vec![index_read],
+                        },
+                        None,
+                        target_source,
+                    )
+                } else {
+                    wasm_ir.push_generated_expression(
+                        target_type,
+                        ExpressionKind::Index {
+                            receiver: receiver_read,
+                            index: index_read,
+                        },
+                        None,
+                        target_source,
+                    )
+                };
 
-                result.statements.insert(
-                    0,
-                    Statement::IndexStore {
-                        target: lowered_target,
-                        operation: lower_index_assignment_operation(
-                            assignment,
-                            lowered_target,
-                            typed_hir,
-                            semantics,
-                        ),
-                        value: normalized_value.value,
-                    },
+                let operation = lower_index_assignment_operation(
+                    assignment,
+                    lowered_target,
+                    typed_hir,
+                    semantics,
                 );
+                if let Some(setter) = &assignment.setter {
+                    let updated = match operation {
+                        AssignmentOperation::Call(target) => wasm_ir.push_generated_expression(
+                            target_type,
+                            ExpressionKind::Call {
+                                target,
+                                arguments: vec![normalized_value.value],
+                            },
+                            None,
+                            target_source,
+                        ),
+                        AssignmentOperation::Primitive(op) => wasm_ir.push_generated_expression(
+                            target_type,
+                            ExpressionKind::Binary {
+                                op,
+                                left: lowered_target,
+                                right: normalized_value.value,
+                            },
+                            None,
+                            target_source,
+                        ),
+                    };
+                    let mut setter = lower_call_target(setter, typed_hir, semantics);
+                    replace_call_receiver(
+                        &mut setter,
+                        ResolvedReceiver::Expression {
+                            expression: receiver_read,
+                            members: Vec::new(),
+                        },
+                    );
+                    let result_type = assignment
+                        .setter
+                        .as_ref()
+                        .and_then(|call| match call {
+                            crate::semantic::ResolvedCall::StandardLibrary {
+                                signature, ..
+                            }
+                            | crate::semantic::ResolvedCall::UserFunction { signature, .. }
+                            | crate::semantic::ResolvedCall::UserMethod { signature, .. } => {
+                                signature.last().copied()
+                            }
+                            _ => None,
+                        })
+                        .expect("Map setter calls have a concrete result type");
+                    let setter_call = wasm_ir.push_generated_expression(
+                        result_type,
+                        ExpressionKind::Call {
+                            target: setter,
+                            arguments: vec![index_read, updated],
+                        },
+                        None,
+                        target_source,
+                    );
+                    result.statements.insert(
+                        0,
+                        Statement::Evaluate {
+                            expression: setter_call,
+                            discard_result: true,
+                        },
+                    );
+                } else {
+                    result.statements.insert(
+                        0,
+                        Statement::IndexStore {
+                            target: lowered_target,
+                            operation,
+                            value: normalized_value.value,
+                        },
+                    );
+                }
                 result = wrap_async_expression_steps(
                     normalized_value.steps,
                     result,

@@ -326,6 +326,12 @@ impl Checker {
                 } else if let Some(operand_type) = self.unify(element_type, right_type, *span) {
                     self.require_binary_operand(*op, operand_type, *span);
                 }
+                if let crate::ast::ExprKind::Index { receiver, .. } = &target.kind
+                    && let Some(receiver_type) =
+                        self.semantics.inferred_expression_type(receiver.id)
+                {
+                    self.resolve_map_index_setter(*id, receiver_type, receiver.id);
+                }
             }
             Stmt::If {
                 condition,
@@ -472,6 +478,10 @@ impl Checker {
                         } else if self.standard_library.type_constructor_has_capability(
                             constructor, iterable_capability,
                         ) {
+                            // Arrays, sets, and ranges have dedicated loop
+                            // lowering. Ordinary constructed `Iterable` values
+                            // use their declared iterator protocol.
+                            converts_iterable = matches!(iterable_ty, Type::Application(_));
                         } else {
                             return None;
                         }

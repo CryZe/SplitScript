@@ -32,7 +32,10 @@ use crate::{
     hir::ExpressionResolution,
     language::LanguageItemId,
     lexer::{Token, TokenKind},
-    semantic::{ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue, SemanticModel},
+    semantic::{
+        ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedStructFieldId,
+        ResolvedStructId, ResolvedValue, SemanticModel,
+    },
     stdlib::{StandardLibrary, StdlibItemId, StdlibSymbolId},
     syntax::SourceDocument,
     visit::{self, Visitor},
@@ -975,7 +978,7 @@ impl DefinitionCollector<'_> {
             MatchPattern::Struct {
                 name_span, fields, ..
             } => {
-                if let Some((structure, name_span)) =
+                if let Some((ResolvedStructId::Source(structure), name_span)) =
                     self.semantics.struct_pattern(pattern_id).zip(*name_span)
                 {
                     self.add_reference(SourceDefinitionId::Struct(structure), name_span);
@@ -985,7 +988,12 @@ impl DefinitionCollector<'_> {
                     .struct_pattern_fields(pattern_id)
                     .unwrap_or_default();
                 for (field, resolved) in fields.iter().zip(resolved) {
-                    self.add_reference(SourceDefinitionId::StructField(*resolved), field.name_span);
+                    if let ResolvedStructFieldId::Source(resolved) = resolved {
+                        self.add_reference(
+                            SourceDefinitionId::StructField(*resolved),
+                            field.name_span,
+                        );
+                    }
                     self.add_pattern_references(
                         &field.pattern.kind,
                         field.pattern.id,

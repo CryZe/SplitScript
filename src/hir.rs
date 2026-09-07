@@ -292,14 +292,14 @@ pub struct TypedBindingPattern {
 
 #[derive(Debug, Clone)]
 pub struct TypedStructPatternField {
-    pub field: crate::ast::StructFieldId,
+    pub field: ResolvedStructFieldId,
     pub pattern: TypedPatternNode,
 }
 
 #[derive(Debug, Clone)]
 pub enum TypedPattern {
     Struct {
-        structure: crate::ast::StructId,
+        structure: ResolvedStructId,
         fields: Vec<TypedStructPatternField>,
     },
     Enum {
@@ -532,6 +532,7 @@ pub struct ResolvedAssignment {
 pub struct ResolvedIndexAssignment {
     pub id: AssignmentId,
     pub operator: ResolvedCall,
+    pub setter: Option<ResolvedCall>,
     pub span: Span,
 }
 
@@ -2025,6 +2026,7 @@ fn lower_block(
                                     .assignment_call(*id)
                                     .expect("checked indexed assignments have resolved operators")
                                     .clone(),
+                                setter: semantics.index_assignment_setter(*id).cloned(),
                                 span: *span,
                             },
                             target: target.id,

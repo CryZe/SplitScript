@@ -340,15 +340,15 @@ fn bind_function_generics(checker: &mut Checker, program: &Program) -> FunctionG
 impl Checker {
     pub(super) fn diagnose_ambiguous_empty_collections(&mut self) {
         let collections = self.inferred_empty_collections.clone();
-        for (element, span, collection) in collections {
-            if self.inference.is_unbound_without_default(element) {
+        for (ty, span, part, collection) in collections {
+            if self.inference.is_unbound_without_default(ty) {
                 self.error(
                     format!(
-                        "cannot infer the element type of this empty {collection}; use it where the element type is known or add an explicit type annotation"
+                        "cannot infer the {part} type of this empty {collection}; use it where the type is known or add explicit type arguments"
                     ),
                     span,
                 );
-                self.inference.recover_unbound_type(element);
+                self.inference.recover_unbound_type(ty);
             }
         }
     }

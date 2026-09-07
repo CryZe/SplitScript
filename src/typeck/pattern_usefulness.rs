@@ -2,7 +2,11 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use crate::{inference::Type, semantic::ResolvedEnumVariantId, stdlib::StdlibTypeId};
+use crate::{
+    inference::Type,
+    semantic::{ResolvedEnumVariantId, ResolvedStructFieldId, ResolvedStructId},
+    stdlib::{FieldVisibility, StdlibTypeId},
+};
 
 use super::Checker;
 
@@ -35,9 +39,9 @@ pub(super) enum PatternCoverage {
         payload: Box<Self>,
     },
     Struct {
-        structure: crate::ast::StructId,
+        structure: ResolvedStructId,
         name: String,
-        fields: Vec<(crate::ast::StructFieldId, String, Self)>,
+        fields: Vec<(ResolvedStructFieldId, String, Self)>,
     },
     Bool(bool),
     Char(char),
@@ -136,8 +140,9 @@ enum PatternConstructor {
         name: String,
     },
     Struct {
-        structure: crate::ast::StructId,
+        structure: ResolvedStructId,
         name: String,
+        fields: Vec<(ResolvedStructFieldId, String, Type)>,
     },
     Bool(bool),
     Char(char),
@@ -161,6 +166,12 @@ enum Inhabitedness {
     Known(bool),
 }
 
+type StructPatternShape = (
+    ResolvedStructId,
+    String,
+    Vec<(ResolvedStructFieldId, String, Type)>,
+);
+
 impl PatternConstructor {
     fn of(pattern: &PatternCoverage) -> Option<Self> {
         match pattern {
@@ -173,6 +184,7 @@ impl PatternConstructor {
             } => Some(Self::Struct {
                 structure: *structure,
                 name: name.clone(),
+                fields: Vec::new(),
             }),
             PatternCoverage::Bool(value) => Some(Self::Bool(*value)),
             PatternCoverage::Char(value) => Some(Self::Char(*value)),
@@ -195,9 +207,92 @@ impl PatternConstructor {
             | PatternCoverage::Invalid(_) => None,
         }
     }
+
+    fn same_identity(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Struct {
+                    structure: left, ..
+                },
+                Self::Struct {
+                    structure: right, ..
+                },
+            ) => left == right,
+            _ => self == other,
+        }
+    }
 }
 
 impl Checker {
+    fn struct_pattern_shape(&mut self, ty: Type) -> Option<StructPatternShape> {
+        let ty = self.shallow_type(ty);
+        if let Some(structure) = self.source_struct_id(ty) {
+            let declaration = self
+                .declarations
+                .structs
+                .iter()
+                .find(|declaration| declaration.id == structure)?
+                .clone();
+            let fields = declaration
+                .fields
+                .iter()
+                .map(|field| {
+                    (
+                        ResolvedStructFieldId::Source(field.id),
+                        field.name.clone(),
+                        self.syntax_type(field.ty),
+                    )
+                })
+                .collect();
+            return Some((
+                ResolvedStructId::Source(structure),
+                declaration.name,
+                fields,
+            ));
+        }
+
+        let application = match ty {
+            Type::Application(application) => application,
+            Type::Known(id) => match self.inference.type_store().kind(id) {
+                crate::types::TypeKind::Application { layout, .. } => *layout,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let constructor = self.inference.application_constructor(application);
+        let declaration = *self.standard_library.type_constructor(constructor);
+        let variables = declaration
+            .parameters
+            .iter()
+            .zip(self.inference.application_arguments(application).to_vec())
+            .map(|(parameter, argument)| (parameter.name, argument))
+            .collect::<HashMap<_, _>>();
+        let fields = self
+            .standard_library
+            .fields_of_constructor(constructor)
+            .filter(|field| field.visibility == FieldVisibility::Public)
+            .copied()
+            .collect::<Vec<_>>();
+        if fields.is_empty() {
+            return None;
+        }
+        let fields = fields
+            .into_iter()
+            .map(|field| {
+                (
+                    ResolvedStructFieldId::Standard(field.id),
+                    field.name.to_owned(),
+                    self.catalog_type(field.ty, &variables),
+                )
+            })
+            .collect();
+        Some((
+            ResolvedStructId::StandardConstructor(application),
+            declaration.name.to_owned(),
+            fields,
+        ))
+    }
+
     /// Computes the least fixed point of source-value construction. Encountering
     /// a recursive type again does not by itself prove a value exists: a cycle
     /// becomes inhabited only when another path reaches a concrete constructor
@@ -288,29 +383,28 @@ impl Checker {
                     PatternConstructor::IteratorEnd,
                 ])
             }
-            Type::Known(_) if self.source_struct_id(ty).is_some() => {
-                let structure = self.source_struct_id(ty).unwrap();
-                let declaration = self
-                    .declarations
-                    .structs
-                    .iter()
-                    .find(|declaration| declaration.id == structure)?;
-                Some(vec![PatternConstructor::Struct {
-                    structure,
-                    name: declaration.name.clone(),
-                }])
-            }
-            Type::Known(_) => self.enum_info_for_type(ty).map(|(_, enumeration)| {
-                enumeration
-                    .variants
-                    .into_iter()
-                    .map(|variant| PatternConstructor::Enum {
-                        variant: variant.id,
-                        name: variant.name,
+            other => {
+                if let Some((structure, name, fields)) = self.struct_pattern_shape(other) {
+                    Some(vec![PatternConstructor::Struct {
+                        structure,
+                        name,
+                        fields,
+                    }])
+                } else if matches!(other, Type::Known(_)) {
+                    self.enum_info_for_type(other).map(|(_, enumeration)| {
+                        enumeration
+                            .variants
+                            .into_iter()
+                            .map(|variant| PatternConstructor::Enum {
+                                variant: variant.id,
+                                name: variant.name,
+                            })
+                            .collect()
                     })
-                    .collect()
-            }),
-            _ => None,
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -332,19 +426,9 @@ impl Checker {
                 .and_then(|variant| variant.payload)
                 .into_iter()
                 .collect(),
-            PatternConstructor::Struct { structure, .. } => self
-                .declarations
-                .structs
-                .iter()
-                .find(|declaration| declaration.id == *structure)
-                .map(|declaration| {
-                    declaration
-                        .fields
-                        .iter()
-                        .map(|field| self.syntax_type(field.ty))
-                        .collect()
-                })
-                .unwrap_or_default(),
+            PatternConstructor::Struct { fields, .. } => {
+                fields.iter().map(|(_, _, ty)| *ty).collect()
+            }
             PatternConstructor::OptionSome => match ty {
                 Type::Option(option) => vec![self.inference.option_value(option)],
                 _ => Vec::new(),
@@ -391,26 +475,20 @@ impl Checker {
                 .collect(),
             (
                 PatternCoverage::Struct { fields, .. },
-                PatternConstructor::Struct { structure, .. },
-            ) => self
-                .declarations
-                .structs
+                PatternConstructor::Struct {
+                    fields: declared_fields,
+                    ..
+                },
+            ) => declared_fields
                 .iter()
-                .find(|declaration| declaration.id == *structure)
-                .map(|declaration| {
-                    declaration
-                        .fields
+                .map(|(field, _, _)| {
+                    fields
                         .iter()
-                        .map(|field| {
-                            fields
-                                .iter()
-                                .find(|(candidate, _, _)| *candidate == field.id)
-                                .map(|(_, _, pattern)| pattern.clone())
-                                .unwrap_or(PatternCoverage::Irrefutable)
-                        })
-                        .collect()
+                        .find(|(candidate, _, _)| candidate == field)
+                        .map(|(_, _, pattern)| pattern.clone())
+                        .unwrap_or(PatternCoverage::Irrefutable)
                 })
-                .unwrap_or_default(),
+                .collect(),
             (PatternCoverage::OptionSome(payload), PatternConstructor::OptionSome)
             | (PatternCoverage::IteratorItem(payload), PatternConstructor::IteratorItem)
             | (PatternCoverage::ResultSuccess(payload), PatternConstructor::ResultSuccess)
@@ -452,7 +530,9 @@ impl Checker {
                     continue;
                 }
                 if head.is_irrefutable()
-                    || PatternConstructor::of(&head).as_ref() == Some(constructor)
+                    || PatternConstructor::of(&head)
+                        .as_ref()
+                        .is_some_and(|head| head.same_identity(constructor))
                 {
                     let mut row = self.pattern_constructor_arguments(&head, constructor, arity);
                     row.extend_from_slice(tail);
@@ -496,21 +576,16 @@ impl Checker {
                         .unwrap_or(PatternCoverage::Irrefutable),
                 ),
             },
-            PatternConstructor::Struct { structure, name } => {
-                let fields = self
-                    .declarations
-                    .structs
+            PatternConstructor::Struct {
+                structure,
+                name,
+                fields,
+            } => {
+                let fields = fields
                     .iter()
-                    .find(|declaration| declaration.id == *structure)
-                    .map(|declaration| {
-                        declaration
-                            .fields
-                            .iter()
-                            .zip(arguments)
-                            .map(|(field, pattern)| (field.id, field.name.clone(), pattern))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                    .zip(arguments)
+                    .map(|((field, name, _), pattern)| (*field, name.clone(), pattern))
+                    .collect();
                 PatternCoverage::Struct {
                     structure: *structure,
                     name: name.clone(),
@@ -913,7 +988,17 @@ impl Checker {
             return self.useful_integer_witness(matrix, interval, tail, remaining_types, domain);
         }
 
-        if let Some(constructor) = PatternConstructor::of(head) {
+        if let Some(mut constructor) = PatternConstructor::of(head) {
+            if matches!(constructor, PatternConstructor::Struct { .. })
+                && let Some(domain_constructor) =
+                    self.pattern_constructors(ty).and_then(|constructors| {
+                        constructors
+                            .into_iter()
+                            .find(|candidate| candidate.same_identity(&constructor))
+                    })
+            {
+                constructor = domain_constructor;
+            }
             let argument_types = self.pattern_constructor_argument_types(&constructor, ty);
             let arity = argument_types.len();
             let specialized = self.specialize_pattern_matrix(matrix, &constructor, arity);

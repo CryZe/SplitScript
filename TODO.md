@@ -737,7 +737,7 @@ concepts rather than maintaining a parallel inventory.
   lowering rather than adding a mutable `MemoryWatcherList` compatibility
   object. Bring this language and state-model decision back for approval before
   implementation.
-- [ ] Design and implement one typed associative `Map<K, V>` now that the MGS
+- [x] Design and implement one typed associative `Map<K, V>` now that the MGS
   signature/checker dispatch, MGS2 room callbacks, Halo objective guards,
   Bully route tables, and Uncharted Waters route data demonstrate genuine
   runtime key-to-value lookup. The proposal must compare an equality-backed
@@ -746,9 +746,21 @@ concepts rather than maintaining a parallel inventory.
   versus insertion, `get`/absence and indexing semantics, removal, iteration
   order, mutation-during-iteration behavior, inference, structural
   Debug/Display, and reachability-driven code generation. Use `Map`, not a C#
-  `Dictionary` alias; add focused `Dictionary` / `IDictionary` / `HashMap`
-  migration guidance once the canonical API is approved. Keep heterogeneous
-  `ExpandoObject` data and runtime settings registration as separate designs.
+  `Dictionary` alias. The approved implementation is an equality-backed,
+  insertion-ordered, stable-identity GC container with `new`, `length`,
+  `isEmpty`, `containsKey`, `insert`, indexed read/write (including compound
+  assignment), `remove`, `clear`, and entry iteration. Indexing traps for a
+  missing key. There is deliberately no `get`: callers that care about absence
+  use `containsKey`, which keeps optional values unambiguous. Iteration yields
+  structurally destructurable `MapEntry<K, V>` values and supports
+  `for { key, value } in map`; replacement preserves order while structural
+  mutation invalidates active iteration. Type inference, lazy structural Debug,
+  editor completion, generic standard-library pattern usefulness, runtime
+  behavior, and reachability-driven code generation are covered. Keep focused
+  `Dictionary` / `IDictionary` / `HashMap` migration guidance as a separate
+  follow-up if port evidence shows that generic unknown-name diagnostics are
+  insufficient. Keep heterogeneous `ExpandoObject` data and runtime settings
+  registration as separate designs.
 - [ ] Design the canonical representation for runtime-varying watched value
   types using the FNaF Security Breach interactible rules as the acceptance
   case. Compare a source-authored enum/tag plus typed optional payloads with a

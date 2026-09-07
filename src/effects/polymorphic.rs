@@ -243,10 +243,15 @@ impl<'a> Evaluator<'a> {
             }
             TypedPattern::Struct { fields, .. } => {
                 for field in fields {
-                    self.bind_pattern_value(
-                        &field.pattern,
-                        value.project(&[ResolvedMember::StructField(field.field)]),
-                    );
+                    let member = match field.field {
+                        crate::semantic::ResolvedStructFieldId::Source(field) => {
+                            ResolvedMember::StructField(field)
+                        }
+                        crate::semantic::ResolvedStructFieldId::Standard(field) => {
+                            ResolvedMember::StandardField(field)
+                        }
+                    };
+                    self.bind_pattern_value(&field.pattern, value.project(&[member]));
                 }
             }
             TypedPattern::Enum {

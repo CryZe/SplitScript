@@ -267,6 +267,30 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
                         },
                     ..
                 }
+                | super::CallTarget::LibraryOverload {
+                    receiver:
+                        Some(crate::semantic::ResolvedReceiver::Expression {
+                            expression: receiver,
+                            ..
+                        }),
+                    ..
+                }
+                | super::CallTarget::CapabilityRequirement {
+                    receiver:
+                        crate::semantic::ResolvedReceiver::Expression {
+                            expression: receiver,
+                            ..
+                        },
+                    ..
+                }
+                | super::CallTarget::DefaultDisplay {
+                    receiver:
+                        crate::semantic::ResolvedReceiver::Expression {
+                            expression: receiver,
+                            ..
+                        },
+                    ..
+                }
                 | super::CallTarget::ManagedSnapshot {
                     receiver:
                         crate::semantic::ResolvedReceiver::Expression {

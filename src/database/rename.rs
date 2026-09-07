@@ -471,6 +471,8 @@ impl StructShorthandCollector<'_> {
                 for (field, resolved_field) in fields.iter().zip(resolved) {
                     if field.shorthand
                         && let MatchPattern::Binding(binding) = &field.pattern.kind
+                        && let crate::semantic::ResolvedStructFieldId::Source(resolved_field) =
+                            resolved_field
                     {
                         self.references.push(StructShorthandReference {
                             span: field.name_span,

@@ -837,7 +837,13 @@ fn seed_library_body_signature(
                 .associated_type(receiver, capability, associated.name);
             variables.insert(associated.name, value);
         }
-    } else if let StdlibOwner::TypeConstructor(constructor) = item.owner {
+    } else if let StdlibOwner::TypeConstructor(constructor) = item.owner
+        && matches!(item.kind, ItemKind::Method { .. })
+    {
+        // Associated types depend on the concrete owner parameters. Static
+        // constructors such as `Map.new<A, B>` are ordinary functions and do
+        // not have an instantiated owner whose associated types could be
+        // projected while checking their generic body.
         for associated in checker
             .standard_library
             .type_constructor(constructor)

@@ -45,6 +45,8 @@ mod file_runtime;
 mod inference_language;
 #[path = "compiler/iterators.rs"]
 mod iterators;
+#[path = "compiler/maps.rs"]
+mod maps;
 #[path = "compiler/parser_recovery.rs"]
 mod parser_recovery;
 #[path = "compiler/port_review.rs"]

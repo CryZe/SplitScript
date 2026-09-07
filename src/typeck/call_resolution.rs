@@ -33,6 +33,75 @@ use super::{
 };
 
 impl Checker {
+    /// Resolves compiler-owned indexing syntax through the private `Map.at`
+    /// catalog method. Keeping the operation in the catalog gives indexing the
+    /// same generic specialization, reachability, and effect handling as an
+    /// ordinary standard-library call without exposing an awkward public
+    /// lookup method.
+    pub(super) fn resolve_map_index(
+        &mut self,
+        receiver_type: Type,
+        receiver: ExprId,
+        index: &Expr,
+        expression: ExprId,
+        span: Span,
+    ) -> Option<Type> {
+        let standard_library = self.standard_library.clone();
+        let candidate = standard_library
+            .method_candidates_including_private("at")
+            .into_iter()
+            .find(|candidate| candidate.item.id == StdlibItemId::MapAt)
+            .expect("the bundled Map type declares its private indexing method");
+        self.catalog_call(
+            &candidate,
+            Some(MethodReceiver {
+                ty: receiver_type,
+                value: ResolvedReceiver::Expression {
+                    expression: receiver,
+                    members: Vec::new(),
+                },
+            }),
+            &[],
+            std::slice::from_ref(index),
+            None,
+            expression,
+            span,
+        )
+    }
+
+    /// Records the private protocol operation used to write through Map
+    /// indexing. Compound assignment lowers to one getter, one operator call,
+    /// and this setter while preserving the language's evaluate-once rule for
+    /// the receiver and key.
+    pub(super) fn resolve_map_index_setter(
+        &mut self,
+        assignment: crate::ast::AssignmentId,
+        receiver_type: Type,
+        receiver: ExprId,
+    ) {
+        let Type::Application(application) = self.shallow_type(receiver_type) else {
+            return;
+        };
+        if self.inference.application_constructor(application) != StdlibTypeConstructorId::Map {
+            return;
+        }
+        let arguments = self.inference.application_arguments(application).to_vec();
+        let none = self.core_type(crate::stdlib::CoreTypeId::None);
+        self.semantics.resolve_index_assignment_setter(
+            assignment,
+            PendingResolvedCall::StandardLibrary {
+                item: StdlibItemId::MapSet,
+                type_arguments: arguments.clone(),
+                signature: vec![receiver_type, arguments[0], arguments[1], none],
+                receiver: Some(ResolvedReceiver::Expression {
+                    expression: receiver,
+                    members: Vec::new(),
+                }),
+                receiver_type: Some(receiver_type),
+            },
+        );
+    }
+
     /// Resolves unary syntax through a catalog-declared zero-argument method.
     pub(super) fn resolve_unary_operator(
         &mut self,
@@ -696,11 +765,12 @@ impl Checker {
                     span,
                 );
             }
-            let method_candidates = if self.is_library_function() {
-                standard_library.method_candidates_including_private(method)
-            } else {
-                standard_library.method_candidates(method)
-            };
+            let method_candidates =
+                if self.is_library_function() || name_span.start == name_span.end {
+                    standard_library.method_candidates_including_private(method)
+                } else {
+                    standard_library.method_candidates(method)
+                };
             let mut candidates = method_candidates
                 .into_iter()
                 .filter(|candidate| self.catalog_candidate_may_apply(candidate, receiver_type))
@@ -875,7 +945,7 @@ impl Checker {
                 span,
             );
         }
-        let method_candidates = if self.is_library_function() {
+        let method_candidates = if self.is_library_function() || name_span.start == name_span.end {
             standard_library.method_candidates_including_private(method)
         } else {
             standard_library.method_candidates(method)
@@ -1437,7 +1507,13 @@ impl Checker {
         }
         if item.id == StdlibItemId::SetNew && explicit_type_arguments.is_empty() {
             self.inferred_empty_collections
-                .push((variables["U"], span, "set"));
+                .push((variables["U"], span, "element", "set"));
+        }
+        if item.id == StdlibItemId::MapNew && explicit_type_arguments.is_empty() {
+            self.inferred_empty_collections
+                .push((variables["A"], span, "key", "map"));
+            self.inferred_empty_collections
+                .push((variables["B"], span, "value", "map"));
         }
         let mut concrete_signature = Vec::new();
         if let Some(receiver) = &receiver {

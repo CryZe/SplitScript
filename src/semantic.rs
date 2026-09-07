@@ -9,7 +9,10 @@ use crate::{
         StructFieldId, StructId, TypeApplicationId, ValueId,
     },
     inference::Type,
-    stdlib::{StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibTypeId, StdlibVariantId},
+    stdlib::{
+        StandardLibrary, StdlibFieldId, StdlibItemId, StdlibStateProviderId,
+        StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId, TypeRef as CatalogTypeRef,
+    },
     types::{
         ResolvedArrayType, ResolvedCallableType, ResolvedConstructedTypes,
         ResolvedConstructedTypesMut, ResolvedOptionType, ResolvedRangeType, ResolvedResultType,
@@ -424,12 +427,13 @@ pub struct SemanticModel {
     enum_variants: HashMap<ExprId, ResolvedEnumVariantId>,
     pattern_variants: HashMap<PatternId, ResolvedEnumVariantId>,
     wrapper_patterns: HashMap<PatternId, ResolvedWrapperPattern>,
-    struct_patterns: HashMap<PatternId, StructId>,
-    struct_pattern_fields: HashMap<PatternId, Vec<StructFieldId>>,
+    struct_patterns: HashMap<PatternId, ResolvedStructId>,
+    struct_pattern_fields: HashMap<PatternId, Vec<ResolvedStructFieldId>>,
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
     assignments: HashMap<AssignmentId, ValueId>,
     assignment_calls: HashMap<AssignmentId, ResolvedCall>,
+    index_assignment_setters: HashMap<AssignmentId, ResolvedCall>,
     value_conversions: HashMap<ExprId, ValueConversion>,
     visible_expression_count: Option<usize>,
 }
@@ -774,6 +778,12 @@ impl SemanticModel {
                     }
                 {
                     ty
+                } else if let Some(existing) = self.types.iter().find_map(|(id, kind)| {
+                    matches!(kind, TypeKind::Array { element: candidate, length: candidate_length, .. }
+                        if *candidate == element && *candidate_length == length)
+                    .then_some(id)
+                }) {
+                    existing
                 } else {
                     let layout = ids.array();
                     constructed.arrays.push(ResolvedArrayType {
@@ -926,6 +936,15 @@ impl SemanticModel {
                     .collect::<Vec<_>>();
                 if specialized_arguments == arguments {
                     ty
+                } else if let Some(existing) = self.types.iter().find_map(|(id, kind)| {
+                    matches!(kind, TypeKind::Application {
+                        constructor: candidate,
+                        arguments: candidate_arguments,
+                        ..
+                    } if *candidate == constructor && *candidate_arguments == specialized_arguments)
+                    .then_some(id)
+                }) {
+                    existing
                 } else {
                     let layout = ids.application();
                     constructed
@@ -1001,6 +1020,277 @@ impl SemanticModel {
         self.specialized_types
             .insert((instance.clone(), ty), specialized);
         specialized
+    }
+
+    /// Materializes the concrete semantic layout named by a catalog type.
+    ///
+    /// Generic standard-library structs may themselves contain constructed
+    /// fields (for example, `Map<K, V>` owns `[MapEntry<K, V>]`). Type checking
+    /// only needs the outer declaration, while the GC backend needs every
+    /// nested nominal layout. This is the single post-inference constructor for
+    /// those nested shapes.
+    pub(crate) fn materialize_catalog_type(
+        &mut self,
+        ty: CatalogTypeRef,
+        variables: &HashMap<&'static str, TypeId>,
+        ids: &mut crate::ast::ConstructedTypeIdAllocator,
+        constructed: &mut ResolvedConstructedTypesMut<'_>,
+        library: &StandardLibrary,
+    ) -> TypeId {
+        match ty {
+            CatalogTypeRef::Core(core) => self.types.id_for_core(core),
+            CatalogTypeRef::Standard(standard) => self.types.id_for_standard(standard),
+            CatalogTypeRef::Parameter(name) | CatalogTypeRef::Associated(name) => variables[&name],
+            CatalogTypeRef::Async(value) => {
+                let value =
+                    self.materialize_catalog_type(*value, variables, ids, constructed, library);
+                if let Some(existing) = self.types.iter().find_map(|(id, kind)| {
+                    matches!(kind, TypeKind::Async { value: candidate, .. } if *candidate == value)
+                        .then_some(id)
+                }) {
+                    return existing;
+                }
+                let layout = ids.async_value();
+                constructed.asyncs.push(crate::types::ResolvedAsyncType {
+                    id: layout,
+                    value: self.resolved_type_ref(value),
+                });
+                self.types.intern(TypeKind::Async { layout, value })
+            }
+            CatalogTypeRef::FixedArray { element, length } => {
+                let element =
+                    self.materialize_catalog_type(*element, variables, ids, constructed, library);
+                self.materialize_catalog_array(element, Some(length), ids, constructed)
+            }
+            CatalogTypeRef::Callable { parameters, result } => {
+                let parameters = parameters
+                    .iter()
+                    .map(|parameter| {
+                        self.materialize_catalog_type(
+                            *parameter,
+                            variables,
+                            ids,
+                            constructed,
+                            library,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let result =
+                    self.materialize_catalog_type(*result, variables, ids, constructed, library);
+                if let Some(existing) = self.types.iter().find_map(|(id, kind)| {
+                    matches!(kind, TypeKind::Callable { parameters: candidate_parameters, result: candidate_result, .. }
+                        if *candidate_parameters == parameters && *candidate_result == result)
+                    .then_some(id)
+                }) {
+                    return existing;
+                }
+                let layout = ids.callable();
+                constructed.callables.push(ResolvedCallableType {
+                    id: layout,
+                    parameters: parameters
+                        .iter()
+                        .map(|parameter| self.resolved_type_ref(*parameter))
+                        .collect(),
+                    result: self.resolved_type_ref(result),
+                });
+                self.types.intern(TypeKind::Callable {
+                    layout,
+                    parameters,
+                    result,
+                })
+            }
+            CatalogTypeRef::Application {
+                constructor,
+                arguments,
+            } => {
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| {
+                        self.materialize_catalog_type(
+                            *argument,
+                            variables,
+                            ids,
+                            constructed,
+                            library,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if let Some(existing) = self.types.iter().find_map(|(id, kind)| {
+                    let matches = match kind {
+                        TypeKind::Array {
+                            element,
+                            length: None,
+                            ..
+                        } => {
+                            constructor == StdlibTypeConstructorId::Array
+                                && arguments.as_slice() == [*element]
+                        }
+                        TypeKind::Option { value, .. } => {
+                            constructor == StdlibTypeConstructorId::Option
+                                && arguments.as_slice() == [*value]
+                        }
+                        TypeKind::Result { value, .. } => {
+                            constructor == StdlibTypeConstructorId::Result
+                                && arguments.as_slice() == [*value]
+                        }
+                        TypeKind::Set { element, .. } => {
+                            constructor == StdlibTypeConstructorId::Set
+                                && arguments.as_slice() == [*element]
+                        }
+                        TypeKind::Range { bound, kind, .. } => {
+                            let expected = match kind {
+                                crate::ast::RangeKind::Exclusive => {
+                                    StdlibTypeConstructorId::ExclusiveRange
+                                }
+                                crate::ast::RangeKind::Inclusive => {
+                                    StdlibTypeConstructorId::InclusiveRange
+                                }
+                            };
+                            constructor == expected && arguments.as_slice() == [*bound]
+                        }
+                        TypeKind::Application {
+                            constructor: candidate,
+                            arguments: candidate_arguments,
+                            ..
+                        } => *candidate == constructor && *candidate_arguments == arguments,
+                        _ => false,
+                    };
+                    matches.then_some(id)
+                }) {
+                    return existing;
+                }
+                match constructor {
+                    StdlibTypeConstructorId::Array => {
+                        self.materialize_catalog_array(arguments[0], None, ids, constructed)
+                    }
+                    StdlibTypeConstructorId::Option => {
+                        let layout = ids.option();
+                        let value = arguments[0];
+                        constructed.options.push(ResolvedOptionType {
+                            id: layout,
+                            value: self.resolved_type_ref(value),
+                        });
+                        self.types.intern(TypeKind::Option { layout, value })
+                    }
+                    StdlibTypeConstructorId::Result => {
+                        let layout = ids.result();
+                        let value = arguments[0];
+                        constructed.results.push(ResolvedResultType {
+                            id: layout,
+                            value: self.resolved_type_ref(value),
+                        });
+                        self.types.intern(TypeKind::Result { layout, value })
+                    }
+                    StdlibTypeConstructorId::Set => {
+                        let element = arguments[0];
+                        let backing_type =
+                            self.materialize_catalog_array(element, None, ids, constructed);
+                        let backing = match self.types.kind(backing_type) {
+                            TypeKind::Array { layout, .. } => *layout,
+                            _ => unreachable!(),
+                        };
+                        let layout = ids.application();
+                        constructed.sets.push(ResolvedSetType {
+                            id: layout,
+                            element: self.resolved_type_ref(element),
+                            backing,
+                        });
+                        self.types.intern(TypeKind::Set {
+                            layout,
+                            element,
+                            backing,
+                        })
+                    }
+                    StdlibTypeConstructorId::ExclusiveRange
+                    | StdlibTypeConstructorId::InclusiveRange => {
+                        let bound = arguments[0];
+                        let kind = if constructor == StdlibTypeConstructorId::ExclusiveRange {
+                            crate::ast::RangeKind::Exclusive
+                        } else {
+                            crate::ast::RangeKind::Inclusive
+                        };
+                        let layout = ids.range();
+                        constructed.ranges.push(ResolvedRangeType {
+                            id: layout,
+                            bound: self.resolved_type_ref(bound),
+                            kind,
+                        });
+                        self.types.intern(TypeKind::Range {
+                            layout,
+                            bound,
+                            kind,
+                        })
+                    }
+                    _ => {
+                        let layout = ids.application();
+                        constructed
+                            .applications
+                            .push(crate::types::ResolvedApplicationType {
+                                id: layout,
+                                constructor,
+                                arguments: arguments
+                                    .iter()
+                                    .map(|argument| self.resolved_type_ref(*argument))
+                                    .collect(),
+                            });
+                        let result = self.types.intern(TypeKind::Application {
+                            layout,
+                            constructor,
+                            arguments: arguments.clone(),
+                        });
+
+                        // Materialize fields immediately so nested applications
+                        // are complete before reachability asks for their GC
+                        // dependencies.
+                        let declaration = library.type_constructor(constructor);
+                        let field_variables = declaration
+                            .parameters
+                            .iter()
+                            .zip(&arguments)
+                            .map(|(parameter, argument)| (parameter.name, *argument))
+                            .collect::<HashMap<_, _>>();
+                        for field in library.fields_of_constructor(constructor) {
+                            self.materialize_catalog_type(
+                                field.ty,
+                                &field_variables,
+                                ids,
+                                constructed,
+                                library,
+                            );
+                        }
+                        result
+                    }
+                }
+            }
+        }
+    }
+
+    fn materialize_catalog_array(
+        &mut self,
+        element: TypeId,
+        length: Option<u32>,
+        ids: &mut crate::ast::ConstructedTypeIdAllocator,
+        constructed: &mut ResolvedConstructedTypesMut<'_>,
+    ) -> TypeId {
+        if let Some(existing) = self.types.iter().find_map(|(id, kind)| {
+            matches!(kind, TypeKind::Array { element: candidate, length: candidate_length, .. }
+                if *candidate == element && *candidate_length == length)
+            .then_some(id)
+        }) {
+            return existing;
+        }
+        let layout = ids.array();
+        constructed.arrays.push(ResolvedArrayType {
+            id: layout,
+            element: self.resolved_type_ref(element),
+            length,
+        });
+        self.array_element_types.insert(layout, element);
+        self.types.intern(TypeKind::Array {
+            layout,
+            element,
+            length,
+        })
     }
 
     fn resolved_type_ref(&self, ty: TypeId) -> crate::types::ResolvedTypeRef {
@@ -1189,6 +1479,105 @@ impl SemanticModel {
         self.standard_field_types.get(&field).copied()
     }
 
+    /// Resolves a catalog type after substituting concrete constructor or
+    /// function type arguments. All aggregate layouts are materialized during
+    /// semantic finalization, so later compiler stages and editor tooling can
+    /// share this read-only lookup instead of each reimplementing catalog
+    /// substitution.
+    pub fn instantiated_catalog_type(
+        &self,
+        ty: CatalogTypeRef,
+        variables: &HashMap<&'static str, TypeId>,
+    ) -> Option<TypeId> {
+        match ty {
+            CatalogTypeRef::Core(core) => Some(self.types.id_for_core(core)),
+            CatalogTypeRef::Standard(standard) => Some(self.types.id_for_standard(standard)),
+            CatalogTypeRef::Parameter(name) | CatalogTypeRef::Associated(name) => {
+                variables.get(name).copied()
+            }
+            CatalogTypeRef::Async(value) => {
+                let value = self.instantiated_catalog_type(*value, variables)?;
+                self.types.iter().find_map(|(id, kind)| {
+                    matches!(kind, TypeKind::Async { value: candidate, .. } if *candidate == value)
+                        .then_some(id)
+                })
+            }
+            CatalogTypeRef::FixedArray { element, length } => {
+                let element = self.instantiated_catalog_type(*element, variables)?;
+                self.types.iter().find_map(|(id, kind)| {
+                    matches!(kind, TypeKind::Array {
+                        element: candidate,
+                        length: candidate_length,
+                        ..
+                    } if *candidate == element && *candidate_length == Some(length))
+                    .then_some(id)
+                })
+            }
+            CatalogTypeRef::Callable { parameters, result } => {
+                let parameters = parameters
+                    .iter()
+                    .map(|parameter| self.instantiated_catalog_type(*parameter, variables))
+                    .collect::<Option<Vec<_>>>()?;
+                let result = self.instantiated_catalog_type(*result, variables)?;
+                self.types.iter().find_map(|(id, kind)| {
+                    matches!(kind, TypeKind::Callable {
+                        parameters: candidate_parameters,
+                        result: candidate_result,
+                        ..
+                    } if *candidate_parameters == parameters && *candidate_result == result)
+                    .then_some(id)
+                })
+            }
+            CatalogTypeRef::Application {
+                constructor,
+                arguments,
+            } => {
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.instantiated_catalog_type(*argument, variables))
+                    .collect::<Option<Vec<_>>>()?;
+                self.types.iter().find_map(|(id, kind)| {
+                    let matches = match kind {
+                        TypeKind::Array { element, .. } => {
+                            constructor == StdlibTypeConstructorId::Array
+                                && arguments.as_slice() == [*element]
+                        }
+                        TypeKind::Option { value, .. } => {
+                            constructor == StdlibTypeConstructorId::Option
+                                && arguments.as_slice() == [*value]
+                        }
+                        TypeKind::Result { value, .. } => {
+                            constructor == StdlibTypeConstructorId::Result
+                                && arguments.as_slice() == [*value]
+                        }
+                        TypeKind::Set { element, .. } => {
+                            constructor == StdlibTypeConstructorId::Set
+                                && arguments.as_slice() == [*element]
+                        }
+                        TypeKind::Range { bound, kind, .. } => {
+                            let expected = match kind {
+                                crate::ast::RangeKind::Exclusive => {
+                                    StdlibTypeConstructorId::ExclusiveRange
+                                }
+                                crate::ast::RangeKind::Inclusive => {
+                                    StdlibTypeConstructorId::InclusiveRange
+                                }
+                            };
+                            constructor == expected && arguments.as_slice() == [*bound]
+                        }
+                        TypeKind::Application {
+                            constructor: candidate,
+                            arguments: candidate_arguments,
+                            ..
+                        } => *candidate == constructor && *candidate_arguments == arguments,
+                        _ => false,
+                    };
+                    matches.then_some(id)
+                })
+            }
+        }
+    }
+
     pub fn enum_variant_payload(&self, variant: EnumVariantId) -> Option<TypeId> {
         self.enum_variant_payloads.get(&variant).copied().flatten()
     }
@@ -1249,11 +1638,11 @@ impl SemanticModel {
         self.struct_literals.get(&expression).copied()
     }
 
-    pub fn struct_pattern(&self, pattern: PatternId) -> Option<StructId> {
+    pub fn struct_pattern(&self, pattern: PatternId) -> Option<ResolvedStructId> {
         self.struct_patterns.get(&pattern).copied()
     }
 
-    pub fn struct_pattern_fields(&self, pattern: PatternId) -> Option<&[StructFieldId]> {
+    pub fn struct_pattern_fields(&self, pattern: PatternId) -> Option<&[ResolvedStructFieldId]> {
         self.struct_pattern_fields.get(&pattern).map(Vec::as_slice)
     }
 
@@ -1283,6 +1672,10 @@ impl SemanticModel {
 
     pub fn assignment_call(&self, assignment: AssignmentId) -> Option<&ResolvedCall> {
         self.assignment_calls.get(&assignment)
+    }
+
+    pub fn index_assignment_setter(&self, assignment: AssignmentId) -> Option<&ResolvedCall> {
+        self.index_assignment_setters.get(&assignment)
     }
 
     pub fn assignment_targets(&self) -> impl Iterator<Item = (AssignmentId, ValueId)> + '_ {
@@ -1409,12 +1802,13 @@ pub(crate) struct SemanticBuilder {
     enum_variants: HashMap<ExprId, ResolvedEnumVariantId>,
     pattern_variants: HashMap<PatternId, ResolvedEnumVariantId>,
     wrapper_patterns: HashMap<PatternId, ResolvedWrapperPattern>,
-    struct_patterns: HashMap<PatternId, StructId>,
-    struct_pattern_fields: HashMap<PatternId, Vec<StructFieldId>>,
+    struct_patterns: HashMap<PatternId, ResolvedStructId>,
+    struct_pattern_fields: HashMap<PatternId, Vec<ResolvedStructFieldId>>,
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
     assignments: HashMap<AssignmentId, ValueId>,
     assignment_calls: HashMap<AssignmentId, PendingResolvedCall>,
+    index_assignment_setters: HashMap<AssignmentId, PendingResolvedCall>,
     value_conversions: HashMap<ExprId, PendingValueConversion>,
 }
 
@@ -1551,6 +1945,18 @@ impl SemanticBuilder {
         debug_assert!(
             previous.is_none(),
             "assignment operator call must be unique"
+        );
+    }
+
+    pub(crate) fn resolve_index_assignment_setter(
+        &mut self,
+        assignment: AssignmentId,
+        call: PendingResolvedCall,
+    ) {
+        let previous = self.index_assignment_setters.insert(assignment, call);
+        debug_assert!(
+            previous.is_none(),
+            "indexed-assignment setter call must be unique"
         );
     }
 
@@ -1708,7 +2114,11 @@ impl SemanticBuilder {
         debug_assert!(previous.is_none(), "struct expression IDs must be unique");
     }
 
-    pub(crate) fn resolve_struct_pattern(&mut self, pattern: PatternId, structure: StructId) {
+    pub(crate) fn resolve_struct_pattern(
+        &mut self,
+        pattern: PatternId,
+        structure: ResolvedStructId,
+    ) {
         let previous = self.struct_patterns.insert(pattern, structure);
         debug_assert!(previous.is_none(), "struct pattern IDs must be unique");
     }
@@ -1716,7 +2126,7 @@ impl SemanticBuilder {
     pub(crate) fn resolve_struct_pattern_fields(
         &mut self,
         pattern: PatternId,
-        fields: Vec<StructFieldId>,
+        fields: Vec<ResolvedStructFieldId>,
     ) {
         let previous = self.struct_pattern_fields.insert(pattern, fields);
         debug_assert!(previous.is_none(), "struct pattern IDs must be unique");
@@ -1854,6 +2264,7 @@ impl SemanticBuilder {
             setting_choice_options,
             assignments,
             assignment_calls,
+            index_assignment_setters,
             value_conversions,
         } = self;
         // WebAssembly GC layouts are nominal. Keep every allocated constructed
@@ -1880,7 +2291,7 @@ impl SemanticBuilder {
         for application in applications {
             types.intern_inferred(Type::Application(application.id), constructed);
         }
-        let (calls, assignment_calls) = {
+        let (calls, assignment_calls, index_assignment_setters) = {
             let mut finish_call = |call| match call {
                 PendingResolvedCall::UserFunction {
                     function,
@@ -1987,7 +2398,11 @@ impl SemanticBuilder {
                 .into_iter()
                 .map(|(assignment, call)| (assignment, finish_call(call)))
                 .collect();
-            (calls, assignment_calls)
+            let index_assignment_setters = index_assignment_setters
+                .into_iter()
+                .map(|(assignment, call)| (assignment, finish_call(call)))
+                .collect();
+            (calls, assignment_calls, index_assignment_setters)
         };
         let function_values = function_values
             .into_iter()
@@ -2163,6 +2578,7 @@ impl SemanticBuilder {
             setting_choice_options,
             assignments,
             assignment_calls,
+            index_assignment_setters,
             value_conversions,
             visible_expression_count: None,
         }

@@ -4,17 +4,17 @@
 //! completion grammars. Editor frontends receive already-filtered candidates;
 //! they do not need to duplicate the pattern grammar or semantic type model.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::{
-    ast::{Expr, ExprKind, StructId},
+    ast::{Expr, ExprKind},
     database::{CompilerDatabase, SemanticQueryResult, SemanticSnapshot},
     documentation::{language_item_uri, symbol_uri},
     language::{LanguageCatalog, LanguageItemId},
     lexer::{Token, TokenKind},
     stdlib::{
-        CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibSymbolId, StdlibTypeConstructorId,
-        StdlibTypeId,
+        CoreTypeId, FieldVisibility, StandardLibrary, StdlibCapabilityId, StdlibSymbolId,
+        StdlibTypeConstructorId, StdlibTypeId,
     },
     type_display::display_type,
     types::{TypeId, TypeKind},
@@ -235,9 +235,88 @@ enum PatternSite {
         rest_available: bool,
     },
     StructFields {
-        structure: StructId,
+        structure: TypeId,
         used: BTreeSet<String>,
     },
+}
+
+struct PatternStructField {
+    name: String,
+    ty: TypeId,
+    documentation: Option<String>,
+    documentation_uri: Option<String>,
+}
+
+struct PatternStruct {
+    name: String,
+    documentation: Option<String>,
+    fields: Vec<PatternStructField>,
+}
+
+fn contextual_struct(expected: TypeId, snapshot: &SemanticSnapshot) -> Option<PatternStruct> {
+    match snapshot.semantics().types().kind(expected) {
+        TypeKind::Struct(structure) => {
+            let declaration = snapshot
+                .syntax()
+                .structs
+                .iter()
+                .find(|candidate| candidate.id == *structure)?;
+            let fields = declaration
+                .fields
+                .iter()
+                .map(|field| {
+                    Some(PatternStructField {
+                        name: field.name.clone(),
+                        ty: snapshot.semantics().struct_field_type(field.id)?,
+                        documentation: field.documentation.clone(),
+                        documentation_uri: None,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(PatternStruct {
+                name: declaration.name.clone(),
+                documentation: declaration.documentation.clone(),
+                fields,
+            })
+        }
+        TypeKind::Application {
+            constructor,
+            arguments,
+            ..
+        } => {
+            let library = snapshot.context().standard_library();
+            let declaration = library.type_constructor(*constructor);
+            let variables = declaration
+                .parameters
+                .iter()
+                .zip(arguments)
+                .map(|(parameter, argument)| (parameter.name, *argument))
+                .collect::<HashMap<_, _>>();
+            let fields = library
+                .fields_of_constructor(*constructor)
+                .filter(|field| field.visibility == FieldVisibility::Public)
+                .map(|field| {
+                    Some(PatternStructField {
+                        name: field.name.to_owned(),
+                        ty: snapshot
+                            .semantics()
+                            .instantiated_catalog_type(field.ty, &variables)?,
+                        documentation: Some(render_documentation(&field.documentation)),
+                        documentation_uri: Some(symbol_uri(
+                            StdlibSymbolId::Field(field.id),
+                            &library,
+                        )),
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            (!fields.is_empty()).then(|| PatternStruct {
+                name: declaration.name.to_owned(),
+                documentation: Some(render_documentation(&declaration.documentation)),
+                fields,
+            })
+        }
+        _ => None,
+    }
 }
 
 fn enclosing_match<'ast>(
@@ -382,14 +461,7 @@ fn analyze_pattern_prefix(
             }
         }
         TokenKind::LBrace => {
-            let TypeKind::Struct(structure) = snapshot.semantics().types().kind(expected) else {
-                return None;
-            };
-            let declaration = snapshot
-                .syntax()
-                .structs
-                .iter()
-                .find(|candidate| candidate.id == *structure)?;
+            let declaration = contextual_struct(expected, snapshot)?;
             if let Some(token) = tokens[..open].last() {
                 let TokenKind::Ident(name) = &token.kind else {
                     return None;
@@ -414,14 +486,13 @@ fn analyze_pattern_prefix(
                     _ => None,
                 })?;
                 let field = declaration.fields.iter().find(|field| field.name == name)?;
-                let field_type = snapshot.semantics().struct_field_type(field.id)?;
-                analyze_pattern_prefix(&tail[colon + 1..], field_type, snapshot)
+                analyze_pattern_prefix(&tail[colon + 1..], field.ty, snapshot)
             } else {
                 if let Some(TokenKind::Ident(name)) = tail.first().map(|token| &token.kind) {
                     used.insert(name.clone());
                 }
                 Some(PatternSite::StructFields {
-                    structure: *structure,
+                    structure: expected,
                     used,
                 })
             }
@@ -686,13 +757,8 @@ fn add_value_patterns(
                 ));
             }
         }
-        TypeKind::Struct(structure) => {
-            let Some(declaration) = snapshot
-                .syntax()
-                .structs
-                .iter()
-                .find(|candidate| candidate.id == *structure)
-            else {
+        TypeKind::Struct(_) => {
+            let Some(declaration) = contextual_struct(expected, snapshot) else {
                 return;
             };
             let fields = declaration
@@ -739,6 +805,45 @@ fn add_value_patterns(
                 None,
             ));
         }
+        TypeKind::Application { .. } => {
+            let Some(declaration) = contextual_struct(expected, snapshot) else {
+                return;
+            };
+            let fields = declaration
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(index, field)| {
+                    if binding_pattern {
+                        field.name.clone()
+                    } else {
+                        format!("{}: ${{{}:_}}", field.name, index + 1)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let anonymous_insert = format!("{{ {fields} }}");
+            builder.add(pattern_item(
+                "struct fields",
+                &anonymous_insert,
+                !binding_pattern,
+                &detail,
+                Some(format!(
+                    "Destructures `{}` using the struct type supplied by this context.",
+                    declaration.name
+                )),
+                None,
+            ));
+            let named_insert = format!("{} {{ {fields} }}", declaration.name);
+            builder.add(pattern_item(
+                &declaration.name,
+                &named_insert,
+                !binding_pattern,
+                &detail,
+                declaration.documentation,
+                None,
+            ));
+        }
         TypeKind::Array {
             length: Some(length),
             ..
@@ -779,28 +884,19 @@ fn add_array_rest_pattern(builder: &mut CompletionBuilder, label: &str, insert: 
 
 fn add_struct_fields(
     builder: &mut CompletionBuilder,
-    structure: StructId,
+    structure: TypeId,
     used: &BTreeSet<String>,
     binding_pattern: bool,
     snapshot: &SemanticSnapshot,
 ) {
-    let Some(declaration) = snapshot
-        .syntax()
-        .structs
-        .iter()
-        .find(|candidate| candidate.id == structure)
-    else {
+    let Some(declaration) = contextual_struct(structure, snapshot) else {
         return;
     };
     for field in &declaration.fields {
         if used.contains(&field.name) {
             continue;
         }
-        let detail = snapshot
-            .semantics()
-            .struct_field_type(field.id)
-            .map(|ty| format!("{}: {}", field.name, display_type(ty, snapshot)))
-            .unwrap_or_else(|| format!("{} field", declaration.name));
+        let detail = format!("{}: {}", field.name, display_type(field.ty, snapshot));
         let insert = if binding_pattern {
             field.name.clone()
         } else {
@@ -812,7 +908,7 @@ fn add_struct_fields(
             !binding_pattern,
             &detail,
             field.documentation.clone(),
-            None,
+            field.documentation_uri.clone(),
         ));
     }
 }

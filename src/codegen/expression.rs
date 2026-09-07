@@ -924,31 +924,93 @@ fn compile_projected_pattern(
     let mut bindings = Vec::new();
     match pattern {
         wasm_ir::LoweredPattern::Struct { structure, fields } => {
-            let declaration = context
-                .structs
-                .iter()
-                .find(|declaration| declaration.id == *structure)
-                .expect("checked struct patterns have declarations");
             function.instruction(&Instruction::I32Const(1));
-            for (field, pattern) in fields {
-                let (index, declared) = declaration
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .find(|(_, declared)| declared.id == *field)
-                    .expect("checked struct pattern fields belong to their struct");
-                let field_value = value.field(
-                    value.ty,
-                    index as u32,
-                    struct_field_type(declared.id, context.semantics),
-                );
-                bindings.extend(compile_projected_pattern(
-                    function,
-                    pattern,
-                    &field_value,
-                    context,
-                ));
-                function.instruction(&Instruction::I32And);
+            match structure {
+                ResolvedStructId::Source(structure) => {
+                    let declaration = context
+                        .structs
+                        .iter()
+                        .find(|declaration| declaration.id == *structure)
+                        .expect("checked struct patterns have declarations");
+                    for (field, pattern) in fields {
+                        let ResolvedStructFieldId::Source(field) = field else {
+                            unreachable!("source struct patterns use source fields")
+                        };
+                        let (index, declared) = declaration
+                            .fields
+                            .iter()
+                            .enumerate()
+                            .find(|(_, declared)| declared.id == *field)
+                            .expect("checked struct pattern fields belong to their struct");
+                        let field_value = value.field(
+                            value.ty,
+                            index as u32,
+                            struct_field_type(declared.id, context.semantics),
+                        );
+                        bindings.extend(compile_projected_pattern(
+                            function,
+                            pattern,
+                            &field_value,
+                            context,
+                        ));
+                        function.instruction(&Instruction::I32And);
+                    }
+                }
+                ResolvedStructId::StandardConstructor(application) => {
+                    let (constructor, arguments) = context
+                        .semantics
+                        .types()
+                        .iter()
+                        .find_map(|(_, kind)| match kind {
+                            crate::types::TypeKind::Application {
+                                layout,
+                                constructor,
+                                arguments,
+                            } if *layout == *application => Some((*constructor, arguments.clone())),
+                            _ => None,
+                        })
+                        .expect("constructed struct patterns retain their arguments");
+                    let declaration = context.standard_library.type_constructor(constructor);
+                    let variables = declaration
+                        .parameters
+                        .iter()
+                        .zip(arguments)
+                        .map(|(parameter, argument)| (parameter.name, argument))
+                        .collect::<std::collections::HashMap<_, _>>();
+                    let declared_fields = context
+                        .standard_library
+                        .fields_of_constructor(constructor)
+                        .collect::<Vec<_>>();
+                    for (field, pattern) in fields {
+                        let ResolvedStructFieldId::Standard(field) = field else {
+                            unreachable!("standard struct patterns use standard fields")
+                        };
+                        let (index, declared) = declared_fields
+                            .iter()
+                            .enumerate()
+                            .find(|(_, declared)| declared.id == *field)
+                            .expect("checked constructed pattern fields belong to their struct");
+                        let field_type = semantic_type(
+                            super::gc_types::instantiated_catalog_type(
+                                declared.ty,
+                                &variables,
+                                context.semantics,
+                            ),
+                            context.semantics,
+                        );
+                        let field_value = value.field(value.ty, index as u32, field_type);
+                        bindings.extend(compile_projected_pattern(
+                            function,
+                            pattern,
+                            &field_value,
+                            context,
+                        ));
+                        function.instruction(&Instruction::I32And);
+                    }
+                }
+                ResolvedStructId::Standard(_) => {
+                    unreachable!("non-generic standard structs are not pattern declarations")
+                }
             }
         }
         wasm_ir::LoweredPattern::Enum {

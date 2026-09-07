@@ -3885,6 +3885,287 @@ typeConstructor Set<T: Equatable> {
     fn clear() -> None;
 }
 
+/// Stores one key-value pair yielded while iterating a [`Map`].
+///
+/// Both fields are immutable snapshots. A later replacement in the source map
+/// does not change an entry that was already yielded.
+///
+/// # Example
+///
+/// Destructure a map entry
+///
+/// ```splitscript
+/// let routes = Map.new<String, u32>()
+/// routes["Atrium"] = 12
+/// for { key, value } in routes {
+///     print(`{key}: {value}`)
+/// }
+/// ```
+@capabilities(Debug)
+typeConstructor MapEntry<K, V> {
+    /// Key stored by this entry.
+    ///
+    /// The key is the same value that was supplied when the entry was inserted.
+    ///
+    /// # Example
+    ///
+    /// Read an entry key
+    ///
+    /// ```splitscript
+    /// let routes = Map.new<String, u32>()
+    /// routes["Atrium"] = 12
+    /// for entry in routes {
+    ///     print(entry.key)
+    /// }
+    /// ```
+    key: K,
+    /// Value stored by this entry.
+    ///
+    /// Replacing the corresponding map entry later does not mutate this value.
+    ///
+    /// # Example
+    ///
+    /// Read an entry value
+    ///
+    /// ```splitscript
+    /// let routes = Map.new<String, u32>()
+    /// routes["Atrium"] = 12
+    /// for entry in routes {
+    ///     print(entry.value)
+    /// }
+    /// ```
+    value: V,
+}
+
+/// Stores an insertion-ordered association from unique keys to values.
+///
+/// Keys are compared with [`Equatable`]. The representation is tuned for the
+/// small and medium lookup tables common in autosplitters; no complexity
+/// guarantee is part of the API. The map retains its identity and contents
+/// across ticks, so aliases observe every mutation. Indexing returns the
+/// stored value and traps when the key is absent; use [`Map.containsKey`] first
+/// when absence is expected. This keeps maps whose values are themselves
+/// optional unambiguous without adding another lookup operation.
+///
+/// # Example
+///
+/// Store and read route metadata
+///
+/// ```splitscript
+/// let routes = Map.new<String, u32>()
+/// routes["Atrium"] = 12
+/// if routes.containsKey("Atrium") {
+///     print(routes["Atrium"])
+/// }
+/// ```
+@capabilities(Debug, Iterable)
+typeConstructor Map<K: Equatable, V> {
+    /// Entry yielded during iteration.
+    type Item = MapEntry<K, V>;
+    /// Cursor created for this map.
+    type Iterator = ArrayIterator<MapEntry<K, V>>;
+
+    /// Insertion-ordered entry storage.
+    private entries: [MapEntry<K, V>],
+
+    /// Creates an empty map.
+    ///
+    /// The key and value types may be written explicitly or inferred from
+    /// later operations.
+    ///
+    /// # Example
+    ///
+    /// Create a route lookup
+    ///
+    /// ```splitscript
+    /// let routes = Map.new<String, u32>()
+    /// ```
+    static fn new<A: Equatable, B>() -> Map<A, B> {
+        return Map { entries: [] }
+    }
+
+    /// Returns the number of stored key-value pairs.
+    ///
+    /// Replacing an existing key does not increase the count.
+    ///
+    /// # Example
+    ///
+    /// Count route entries
+    ///
+    /// ```splitscript
+    /// let routes = Map.new<String, u32>()
+    /// routes["Atrium"] = 12
+    /// let count = routes.length()
+    /// ```
+    fn length() -> u32 {
+        return self.entries.length()
+    }
+
+    /// Reports whether this map contains no entries.
+    ///
+    /// A newly created or cleared map is empty.
+    ///
+    /// # Example
+    ///
+    /// Check a new map
+    ///
+    /// ```splitscript
+    /// let routes = Map.new<String, u32>()
+    /// let empty = routes.isEmpty()
+    /// ```
+    fn isEmpty() -> bool {
+        return self.entries.isEmpty()
+    }
+
+    /// Reports whether an equal key is present.
+    ///
+    /// Values do not participate in this lookup.
+    ///
+    /// # Example
+    ///
+    /// Check a route key
+    ///
+    /// ```splitscript
+    /// let routes = Map.new<String, u32>()
+    /// routes["Atrium"] = 12
+    /// let known = routes.containsKey("Atrium")
+    /// ```
+    fn containsKey(
+        /// Key to find.
+        key: K,
+    ) -> bool {
+        let index = 0
+        while index < self.entries.length() {
+            if self.entries[index].key == key {
+                return true
+            }
+            index += 1
+        }
+        return false
+    }
+
+    // Implements map indexing. A missing key traps, matching out-of-bounds
+    // array indexing.
+    private fn at(key: K) -> V {
+        let index = 0
+        while index < self.entries.length() {
+            let entry = self.entries[index]
+            if entry.key == key {
+                return entry.value
+            }
+            index += 1
+        }
+        // Deliberately perform one out-of-bounds array access to produce the
+        // same deterministic trap used by missing array indices.
+        return self.entries[self.entries.length()].value
+    }
+
+    /// Inserts a key-value pair or replaces the value for an existing key.
+    ///
+    /// Returns `true` when a new key was inserted and `false` when an existing
+    /// entry was replaced. Replacement preserves insertion order.
+    ///
+    /// # Example
+    ///
+    /// Distinguish insertion from replacement
+    ///
+    /// ```splitscript
+    /// let routes = Map.new<String, u32>()
+    /// let inserted = routes.insert("Atrium", 12)
+    /// let replaced = routes.insert("Atrium", 14)
+    /// ```
+    fn insert(
+        /// Key to insert or replace.
+        key: K,
+        /// Value to store for the key.
+        value: V,
+    ) -> bool {
+        let index = 0
+        while index < self.entries.length() {
+            if self.entries[index].key == key {
+                self.entries[index] = MapEntry { key, value }
+                return false
+            }
+            index += 1
+        }
+        self.entries.push(MapEntry { key, value })
+        return true
+    }
+
+    // Implements map indexed assignment without exposing a second public
+    // insertion convention alongside `map[key] = value` and `insert`.
+    private fn set(
+        key: K,
+        value: V,
+    ) -> None {
+        self.insert(key, value)
+    }
+
+    /// Removes the entry for a key when present.
+    ///
+    /// Returns whether an entry was removed. Later entries retain their
+    /// relative insertion order.
+    ///
+    /// # Example
+    ///
+    /// Remove a completed route
+    ///
+    /// ```splitscript
+    /// let routes = Map.new<String, u32>()
+    /// routes["Atrium"] = 12
+    /// let removed = routes.remove("Atrium")
+    /// ```
+    fn remove(
+        /// Key whose entry should be removed.
+        key: K,
+    ) -> bool {
+        let index = 0
+        while index < self.entries.length() {
+            if self.entries[index].key == key {
+                self.entries.removeAt(index)
+                return true
+            }
+            index += 1
+        }
+        return false
+    }
+
+    /// Removes every entry while preserving this map's identity.
+    ///
+    /// Every alias observes the cleared contents.
+    ///
+    /// # Example
+    ///
+    /// Clear route metadata
+    ///
+    /// ```splitscript
+    /// let routes = Map.new<String, u32>()
+    /// routes["Atrium"] = 12
+    /// routes.clear()
+    /// ```
+    fn clear() -> None {
+        self.entries.clear()
+    }
+
+    /// Creates an insertion-order cursor over this map's entries.
+    ///
+    /// Structural mutation through insertion of a new key, removal, or clearing
+    /// invalidates the cursor through the backing array's ordinary iterator
+    /// rules. Replacing an existing value preserves the cursor and order.
+    ///
+    /// # Example
+    ///
+    /// Create a map cursor
+    ///
+    /// ```splitscript
+    /// let routes = Map.new<String, u32>()
+    /// let iterator = routes.iterator()
+    /// ```
+    fn iterator() -> ArrayIterator<MapEntry<K, V>> {
+        return self.entries.iterator()
+    }
+}
+
 /// Represents a value that may be absent.
 ///
 /// Write [`T?`] to make any value type optional.

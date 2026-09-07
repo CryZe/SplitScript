@@ -1727,7 +1727,7 @@ split {
 }
 ```
 
-[`insert`] returns true only for a new value. The set object and its contents
+[`Set.insert`] returns true only for a new value. The set object and its contents
 persist across ticks and detachments until explicitly cleared or the script is
 unloaded. Clear it at the lifecycle boundary that matches the original source:
 [`onAttach`] for per-process state, or a detected timer-start transition for

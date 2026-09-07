@@ -64,10 +64,89 @@ pub(super) fn compile(inputs: &DisplayInputs<'_>) -> Vec<Function> {
                     constructor: StdlibTypeConstructorId::IteratorStep,
                     arguments,
                 } => compile_iterator_step(*layout, arguments[0], inputs),
+                TypeKind::Application {
+                    layout,
+                    constructor: StdlibTypeConstructorId::MapEntry,
+                    arguments,
+                } => compile_catalog_struct(
+                    *layout,
+                    StdlibTypeConstructorId::MapEntry,
+                    arguments,
+                    inputs,
+                ),
+                TypeKind::Application {
+                    layout,
+                    constructor: StdlibTypeConstructorId::Map,
+                    arguments,
+                } => compile_map(*layout, arguments, inputs),
                 kind => unreachable!("derived Debug implementation for {kind:?}"),
             }
         })
         .collect()
+}
+
+fn catalog_type_variables(
+    constructor: StdlibTypeConstructorId,
+    arguments: &[TypeId],
+    inputs: &DisplayInputs<'_>,
+) -> HashMap<&'static str, TypeId> {
+    inputs
+        .gc
+        .standard_library
+        .type_constructor(constructor)
+        .parameters
+        .iter()
+        .zip(arguments)
+        .map(|(parameter, argument)| (parameter.name, *argument))
+        .collect()
+}
+
+fn compile_catalog_struct(
+    application: crate::ast::TypeApplicationId,
+    constructor: StdlibTypeConstructorId,
+    arguments: &[TypeId],
+    inputs: &DisplayInputs<'_>,
+) -> Function {
+    let mut function = Function::new([]);
+    begin_recursion_guard(&mut function, inputs);
+    let declaration = inputs.gc.standard_library.type_constructor(constructor);
+    let variables = catalog_type_variables(constructor, arguments, inputs);
+    let fields = inputs
+        .gc
+        .standard_library
+        .fields_of_constructor(constructor)
+        .collect::<Vec<_>>();
+    emit_string_literal(
+        &mut function,
+        &format!("{} {{\n", declaration.name),
+        inputs.gc,
+    );
+    for (field_index, field) in fields.iter().enumerate() {
+        emit_string_literal(&mut function, &format!("    {}: ", field.name), inputs.gc);
+        let field_type_id = inputs
+            .semantics
+            .instantiated_catalog_type(field.ty, &variables)
+            .expect("concrete catalog struct fields have semantic layouts");
+        let field_type = semantic_type(field_type_id, inputs.semantics);
+        function
+            .instruction(&Instruction::LocalGet(0))
+            .instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(
+            &mut function,
+            inputs.gc.index(Type::Application(application)),
+            field_index as u32,
+            field_type,
+        );
+        emit_value(&mut function, field_type_id, field_type, inputs);
+        function.instruction(&Instruction::Call(
+            inputs.helpers.function(RuntimeHelperId::IndentDisplay),
+        ));
+        emit_string_literal(&mut function, ",\n", inputs.gc);
+    }
+    emit_string_literal(&mut function, "}", inputs.gc);
+    join_pieces(&mut function, 2 + fields.len() as u32 * 3, inputs);
+    finish_recursion_guard(&mut function, inputs);
+    function
 }
 
 fn compile_struct(structure: &StructuralType, inputs: &DisplayInputs<'_>) -> Function {
@@ -225,6 +304,148 @@ fn compile_set(
         },
         inputs,
     )
+}
+
+fn compile_map(
+    map: crate::ast::TypeApplicationId,
+    arguments: &[TypeId],
+    inputs: &DisplayInputs<'_>,
+) -> Function {
+    let variables = catalog_type_variables(StdlibTypeConstructorId::Map, arguments, inputs);
+    let entries_field = inputs
+        .gc
+        .standard_library
+        .fields_of_constructor(StdlibTypeConstructorId::Map)
+        .next()
+        .expect("Map has its private entries field");
+    let entries_type = inputs
+        .semantics
+        .instantiated_catalog_type(entries_field.ty, &variables)
+        .expect("Map.entries has a concrete semantic layout");
+    let TypeKind::Array {
+        layout: entries_array,
+        element: entry_type,
+        ..
+    } = inputs.semantics.types().kind(entries_type)
+    else {
+        unreachable!("Map.entries is an array")
+    };
+    let TypeKind::Application {
+        layout: entry_layout,
+        constructor: StdlibTypeConstructorId::MapEntry,
+        arguments: entry_arguments,
+    } = inputs.semantics.types().kind(*entry_type)
+    else {
+        unreachable!("Map.entries contains MapEntry values")
+    };
+    let key = entry_arguments[0];
+    let value = entry_arguments[1];
+    let key_backend = semantic_type(key, inputs.semantics);
+    let value_backend = semantic_type(value, inputs.semantics);
+    let (strings, string_storage) = string_array(inputs);
+    let mut function = Function::new([
+        (2, ValType::I32),
+        (1, inputs.gc.val_type(Type::ArrayStorage(string_storage))),
+        (1, inputs.gc.val_type(Type::Application(*entry_layout))),
+    ]);
+    let index = 1;
+    let length = 2;
+    let pieces = 3;
+    let entry = 4;
+    let map_index = inputs.gc.index(Type::Application(map));
+    let entry_index = inputs.gc.index(Type::Application(*entry_layout));
+
+    begin_recursion_guard(&mut function, inputs);
+    function
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull);
+    emit_typed_struct_get(&mut function, map_index, 0, Type::Array(*entries_array));
+    array_value::emit_length(&mut function, inputs.gc, *entries_array);
+    function
+        .instruction(&Instruction::LocalSet(length))
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::ArrayNewDefault(
+            inputs.gc.index(Type::ArrayStorage(string_storage)),
+        ))
+        .instruction(&Instruction::LocalSet(pieces));
+    set_piece_literal(&mut function, pieces, 0, "Map {\n", inputs);
+    function
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull);
+    emit_typed_struct_get(&mut function, map_index, 0, Type::Array(*entries_array));
+    array_value::emit_backing(&mut function, inputs.gc, *entries_array);
+    function.instruction(&Instruction::LocalGet(index));
+    emit_array_get(
+        &mut function,
+        inputs.gc.index(Type::ArrayStorage(*entries_array)),
+        Type::Application(*entry_layout),
+        inputs.gc,
+    );
+    function.instruction(&Instruction::LocalSet(entry));
+
+    function
+        .instruction(&Instruction::LocalGet(pieces))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalGet(entry))
+        .instruction(&Instruction::RefAsNonNull);
+    emit_typed_struct_get(&mut function, entry_index, 0, key_backend);
+    emit_value(&mut function, key, key_backend, inputs);
+    emit_string_literal(&mut function, ": ", inputs.gc);
+    function
+        .instruction(&Instruction::LocalGet(entry))
+        .instruction(&Instruction::RefAsNonNull);
+    emit_typed_struct_get(&mut function, entry_index, 1, value_backend);
+    emit_value(&mut function, value, value_backend, inputs);
+    join_pieces(&mut function, 3, inputs);
+    function
+        .instruction(&Instruction::Call(
+            inputs.helpers.function(RuntimeHelperId::WrapDebugEntry),
+        ))
+        .instruction(&Instruction::ArraySet(
+            inputs.gc.index(Type::ArrayStorage(string_storage)),
+        ))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(pieces))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add);
+    emit_string_literal(&mut function, "}", inputs.gc);
+    function
+        .instruction(&Instruction::ArraySet(
+            inputs.gc.index(Type::ArrayStorage(string_storage)),
+        ))
+        .instruction(&Instruction::LocalGet(pieces))
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::I32Add);
+    array_value::emit_wrap_loaded(&mut function, inputs.gc.index(Type::Array(strings)));
+    function
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            inputs.gc.standard_index(StdlibTypeId::String),
+        )))
+        .instruction(&Instruction::Call(
+            inputs.helpers.function(RuntimeHelperId::JoinStrings),
+        ));
+    finish_recursion_guard(&mut function, inputs);
+    function
 }
 
 fn compile_sequence(

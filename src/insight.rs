@@ -834,9 +834,7 @@ fn state_field_shape_availability(
         .filter(|candidate| semantics.state_storage_field(candidate.id) == Some(storage))
     {
         found = true;
-        let Some(predicate) = semantics.state_field_shape_predicate(candidate.id) else {
-            return None;
-        };
+        let predicate = semantics.state_field_shape_predicate(candidate.id)?;
         alternatives.extend(predicate.alternatives.iter().cloned());
     }
     found.then_some(crate::semantic::ResolvedShapePredicate { alternatives })

@@ -1,0 +1,32 @@
+state "game.exe" {}
+
+let routes = Map.new<String, u32>()
+let tick = 0
+
+whileAttached {
+    tick += 1
+    if tick == 1 {
+        let alias = routes
+        let first = routes.insert("Atrium", 12)
+        let second = routes.insert("Vault", 20)
+        let replaced = routes.insert("Atrium", 14)
+        routes["Atrium"] += 2
+        alias["Tower"] = 30
+        setVariable(
+            "Map First Tick",
+            `{first},{second},{replaced},{routes.length()},{routes["Atrium"]},{routes.containsKey("Tower")}`,
+        )
+        setVariable("Map Debug", `{routes}`)
+    } else if tick == 2 {
+        for { key, value } in routes {
+            print(`{key}:{value}`)
+        }
+        let removed = routes.remove("Vault")
+        let missing = routes.remove("missing")
+        routes.clear()
+        setVariable(
+            "Map Second Tick",
+            `{removed},{missing},{routes.length()},{routes.isEmpty()}`,
+        )
+    }
+}

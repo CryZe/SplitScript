@@ -529,6 +529,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/map_runtime.split",
+        output: "map_runtime.wasm",
+        profile: "release",
+        harness: "tests/map_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "examples/openjk_speed.split",
         output: "openjk_speed.wasm",
         profile: "release",

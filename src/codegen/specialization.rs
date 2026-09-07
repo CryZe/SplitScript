@@ -103,6 +103,46 @@ pub(super) fn materialize(
             }
         }
     }
+
+    // Generic catalog structs can own further constructed values that never
+    // appear explicitly in source or a function signature. Materialize this
+    // transitive field closure before reachability and GC layout planning.
+    let mut application_index = 0;
+    while application_index < constructed.applications.len() {
+        let application = constructed.applications[application_index].clone();
+        application_index += 1;
+        let arguments = semantics
+            .types()
+            .iter()
+            .find_map(|(_, kind)| match kind {
+                crate::types::TypeKind::Application {
+                    layout, arguments, ..
+                } if *layout == application.id => Some(arguments.clone()),
+                _ => None,
+            })
+            .expect("materialized applications retain semantic arguments");
+        let declaration = wasm
+            .standard_library()
+            .type_constructor(application.constructor);
+        let variables = declaration
+            .parameters
+            .iter()
+            .zip(arguments)
+            .map(|(parameter, argument)| (parameter.name, argument))
+            .collect::<HashMap<_, _>>();
+        for field in wasm
+            .standard_library()
+            .fields_of_constructor(application.constructor)
+        {
+            semantics.materialize_catalog_type(
+                field.ty,
+                &variables,
+                &mut ids,
+                &mut constructed,
+                wasm.standard_library(),
+            );
+        }
+    }
 }
 
 fn expressions_by_owner(

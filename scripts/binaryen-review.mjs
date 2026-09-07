@@ -5,7 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { performance } from "node:perf_hooks";
 
-const [optimizer, compiler = "target/release/splitc.exe", output = "target/performance-review/binaryen-132"] = process.argv.slice(2);
+const [optimizer, compiler = "target/max-opt/splitc.exe", output = "target/performance-review/binaryen-132"] = process.argv.slice(2);
 if (!optimizer) throw new Error("usage: node scripts/binaryen-review.mjs <wasm-opt> [splitc] [output-directory]");
 fs.mkdirSync(output, { recursive: true });
 

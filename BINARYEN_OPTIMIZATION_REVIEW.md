@@ -251,7 +251,7 @@ target in [PERFORMANCE_PLAN.md](PERFORMANCE_PLAN.md).
 From the repository root, after building `splitc`:
 
 ```powershell
-cargo build --release --bin splitc
+cargo build --profile max-opt --bin splitc
 node scripts/binaryen-review.mjs C:\Projekte\binaryen\bin\wasm-opt.exe
 ```
 

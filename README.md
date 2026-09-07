@@ -108,9 +108,23 @@ Run the complete repository check before committing compiler or tooling work:
 cargo xtask check
 ```
 
-It checks formatting and Clippy, runs Rust and VS Code tests, compiles and
+Build distribution executables with:
+
+```console
+cargo build --profile max-opt --bin splitc --bin splitls
+```
+
+Outputs are in `target/max-opt`. This profile inherits release
+and adds full LTO, one code generation unit, aborting panics, and symbol stripping.
+It takes longer to build the compiler itself and targets compiler runtime speed
+and distribution size. Ordinary `--release` builds retain Cargo's defaults.
+Benchmark it with `cargo run --profile max-opt --example compiler_baseline -- 200`.
+
+The repository check covers formatting and Clippy, runs Rust and VS Code tests, compiles and
 validates debug/release modules, and executes the maintained host-runtime
 fixtures. Generated artifacts remain under ignored build directories.
+The verification matrix exercises the `max-opt` native and embedded compilers
+used for distribution; Rust unit and integration tests still use the test profile.
 It also renders the documentation site in memory and rejects broken pages,
 links, or anchors. `cargo xtask docs` writes a local preview to the ignored
 `target/generated-docs` directory; CI regenerates and publishes that output.

@@ -1061,6 +1061,125 @@ tests, 420 compiler-library tests (one manual benchmark ignored), 621 compiler
 integration tests, editor/browser workers, the embedded Wasm compiler, generated
 Wasm validation, and host-runtime fixtures.
 
+## 2026-09-08 distribution profile and field-read experiment
+
+### Retained change: Rust `max-opt`
+
+The user requested a separate distribution profile rather than modifying
+ordinary release. `max-opt` inherits release and enables full LTO, one code
+generation unit, `panic = "abort"`, and symbol stripping. Production VSIX builds
+and the repository verification matrix select it for the embedded compiler;
+the matrix also builds `splitc` and `splitls` with it and uses that `splitc` for
+generated-module runtime verification. Development extension builds continue
+to use release. The existing CI jobs inherit these choices through xtask and
+the extension's production build script.
+
+Benchmark the compiler with:
+
+```console
+cargo run --profile max-opt --example compiler_baseline -- 200
+```
+
+This is the Rust compiler build profile. The harness continues to request
+SplitScript release output and now prints its actual debug-assertion setting
+rather than incorrectly identifying every build as Rust release.
+
+The saved native CLI built from `5f50ac1` decreases from 10,820,096 bytes with
+release to 6,303,232 bytes with `max-opt` (41.7%). Both commands also built the
+benchmark example. All nine release script fixtures are **byte-identical**
+between those compiler executables, including metadata. Script sizes therefore
+remain those of the preceding unary-GC batch, including 30,565-byte Lunistice
+and 45,113-byte Minish Cap; this profile optimizes the compiler's own executable.
+
+Native harness measurements use Rust 1.98.1 on Windows x86-64, 32 logical CPUs,
+50 measured samples after 20 warmups, with no simultaneous build or test. These
+two runs use the same unchanged compiler source and different Rust profiles:
+
+| Fixture | Release median | `max-opt` median | Release p95 | `max-opt` p95 |
+| --- | ---: | ---: | ---: | ---: |
+| minimal | 49.07 ms | 48.60 ms | 50.24 ms | 50.23 ms |
+| Lunistice | 56.44 ms | 55.96 ms | 58.17 ms | 59.11 ms |
+| cancellation | 47.37 ms | 47.49 ms | 49.92 ms | 50.00 ms |
+| settings | 50.27 ms | 49.90 ms | 52.08 ms | 51.26 ms |
+
+These native timings are approximately equal, given measurement noise; no
+native compiler speedup is established for the retained change. The cached-
+dependency rebuild of `splitc` plus the benchmark took 26.11 seconds with
+release and 1 minute 59 seconds with `max-opt`. This is an intentional build-
+time/distribution-size tradeoff. Ordinary release settings remain unchanged.
+
+The final embedded compiler falls from 8,882,426 to **6,345,753 bytes**, saving
+2,536,673 bytes (28.6%). A separate Node 24 run uses the service ABI, 20 warmups
+and 50 measured compilations per fixture, with synchronous Wasm compilation
+and a single thread. It includes request/response handling:
+
+| Fixture | Release median | `max-opt` median | Release p95 | `max-opt` p95 |
+| --- | ---: | ---: | ---: | ---: |
+| minimal | 57.09 ms | 54.82 ms | 60.00 ms | 57.03 ms |
+| Lunistice | 67.52 ms | 65.77 ms | 70.34 ms | 68.40 ms |
+
+This sample is modestly faster; the size reduction is the stronger result.
+Instantiation was about 14 ms for both artifacts in this run, excluding the
+first source compilation. This is not a browser-startup benchmark. The final
+native CI build produced a 6,303,232-byte `splitc` and 4,324,864-byte `splitls`.
+The first final-profile embedded build took 1 minute 46 seconds, including its
+dependency rebuild. Native and embedded artifacts use identical compiler source.
+
+Full `cargo xtask check` passed, including formatting, Clippy, documentation,
+98 syntax tests, 420 library tests (one manual benchmark ignored), all 621
+compiler integration tests, editor/browser workers, Wasm validation, and the
+host-runtime matrix executed through the `max-opt` compiler.
+
+Production `npm run package:vsix` also passed. The 1.93 MB VSIX contains the
+6,345,753-byte `max-opt` compiler, verified by matching its archived SHA-256
+against the Cargo artifact. Production Node compiler/LSP workers and browser
+bundles passed their runtime checks. The compiler-worker test used a separately
+bundled test client because production ships that client inside the extension
+bundle rather than as the loose file expected by the development harness.
+
+### Deferred experiment: typed unary field reads
+
+Removing 68 assertions immediately before typed field-read helpers saved 146
+bytes in Lunistice (145 instructions plus one body-length byte), 252 in Minish
+Cap, 186 in Mono, 18 in managed instances, 5 in cancellation, 3 in settings,
+and 37 in maps. Set and debug-profile controls kept identical non-custom
+sections. All nine outputs validated, complete WAT differences contained only
+the intended unary null assertions, and thirteen release runtime traces matched.
+A focused debug/release test of packed fields, receiver effects, captures,
+destructuring, and equality also passed during the experiment.
+
+However, three native release comparisons showed a repeatable slowdown:
+
+| Fixture | Saved before → experimental after (100 samples) | Reverse-order repeat (50 samples) | Freshly rebuilt before → after (50 samples) |
+| --- | ---: | ---: | ---: |
+| minimal | 48.13 → 52.24 ms | 49.00 → 52.44 ms | 49.07 → 52.52 ms |
+| Lunistice | 57.05 → 62.06 ms | 56.45 → 60.95 ms | 56.44 → 61.39 ms |
+| cancellation | 47.90 → 51.59 ms | 47.37 → 51.08 ms | 47.37 → 51.91 ms |
+| settings | 50.54 → 54.23 ms | 49.82 → 53.73 ms | 50.27 → 53.92 ms |
+
+All runs use 20 warmups. A frontend-only 50-sample run also regressed: minimal
+24.79 → 28.61 ms, Lunistice 30.10 → 35.51 ms, cancellation 25.35 → 29.59 ms,
+settings 26.70 → 30.38 ms. This path never emits Wasm, so extra encoder work
+does not explain the difference. Native optimization/code-layout effects are
+a hypothesis, not an isolated cause.
+
+A same-profile `max-opt` comparison instead improved from
+48.60/55.96/47.49/49.90 ms to 46.41/52.98/44.02/46.41 ms. That does not resolve
+the ordinary release regression. The typed-read cleanup and its temporary
+test were reverted; this batch does **not** claim their output-size savings or
+their `max-opt` speedup. The latency priority outweighs these small size wins.
+
+Before the separate-profile request, a command-line-only single-codegen-unit
+probe on the experimental source produced an 8,942,080-byte native CLI and a
+6,487,307-byte embedded compiler, versus 8,882,426 bytes for the prior embedded
+release compiler. Its native medians were 48.03/56.11/47.14/50.13 ms. These
+exploratory artifacts are not the final profile and did not change Cargo's
+ordinary release configuration.
+
+Evidence is retained under ignored `target/performance-review/typed-gc-*` and
+`max-opt-*` files, including a patch for the deferred experiment. Future work
+should reproduce latency in both Rust profiles before reviving that cleanup.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

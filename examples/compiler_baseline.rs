@@ -1,6 +1,7 @@
 //! Repeatable local compile-time and generated-Wasm-size baseline.
 //!
 //! Run with `cargo run --release --example compiler_baseline -- 200`.
+//! Use `--profile max-opt` instead of `--release` to benchmark the packaged compiler.
 //! Append `--frontend` to measure parsing, library augmentation, and declaration
 //! resolution without type checking or Wasm generation (including result drop).
 
@@ -34,7 +35,7 @@ fn main() {
     };
     assert!(arguments.next().is_none(), "too many baseline arguments");
 
-    println!("rust_harness_profile=release");
+    println!("rust_debug_assertions={}", cfg!(debug_assertions));
     println!(
         "splitscript_profile={}",
         if frontend { "n/a" } else { "release" }

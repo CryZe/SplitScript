@@ -489,6 +489,36 @@ Next opportunities remain consumer contracts in shared load helpers, ordinary
 function terminal fallbacks, and measured GC type planning. Compiler latency
 work should continue to target repeated checking/augmentation rather than RAM.
 
+## Distribution profile and deferred field-read experiment
+
+Added the user-requested Rust `max-opt` profile, inheriting release with full
+LTO, one code generation unit, aborting panics, and symbol stripping. The main
+release profile retains Cargo defaults. Production VSIX builds and the CI
+verification matrix use `max-opt`; development extension builds use release.
+The matrix builds both native executables and validates the native and embedded
+distribution compilers. Benchmark commands can select either Rust profile,
+independently of the generated script's debug/release profile.
+
+The retained profile reduces the native CLI from 10.82 to 6.30 MB and the
+embedded compiler from 8.88 to 6.35 MB. Native benchmark medians are roughly
+equal; the embedded sample is modestly faster. All nine script artifacts are
+byte-identical between the Rust profiles. Full `cargo xtask check` passed.
+
+The next typed-field cleanup was measured but **not retained**. Removing 68
+adjacent unary assertions saved 146 bytes in Lunistice, 252 in Minish Cap, and
+186 in Mono, with matching validation and runtime traces. However, the ordinary
+release compiler ran roughly 7–9% slower across repeated runs and a freshly
+rebuilt baseline. The frontend-only path also slowed down, so the underlying
+native-code cause is not isolated. A same-profile `max-opt` comparison instead
+improved, but that does not resolve the ordinary release regression. Keep the
+existing code until this tradeoff is understood; compiler latency is higher
+priority than these small additional script-size savings.
+
+All experimental measurements, including the single-codegen-unit probe, are
+recorded in [baselines](docs/BASELINES.md). Continue with the larger parsing and
+checking reuse opportunities in order 8; frame-load contracts and typed unary
+cleanup remain candidates rather than completed work.
+
 ## Evidence and scope
 
 There are three different performance concerns:

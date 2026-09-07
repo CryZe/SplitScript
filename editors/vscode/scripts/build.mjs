@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 const extension = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repository = resolve(extension, '..', '..');
 const production = process.argv.includes('--production');
+const profile = production ? 'max-opt' : 'release';
 
 run(process.execPath, [resolve(extension, 'scripts', 'clean.mjs')]);
 run(process.execPath, [
@@ -26,7 +27,8 @@ run('cargo', [
     'build',
     '--manifest-path',
     resolve(repository, 'Cargo.toml'),
-    '--release',
+    '--profile',
+    profile,
     '--target',
     'wasm32-unknown-unknown',
     '--package',
@@ -37,7 +39,7 @@ const source = resolve(
     repository,
     'target',
     'wasm32-unknown-unknown',
-    'release',
+    profile,
     'splitscript_vscode_wasm.wasm',
 );
 const destination = resolve(extension, 'dist', 'splitscript_vscode_wasm.wasm');

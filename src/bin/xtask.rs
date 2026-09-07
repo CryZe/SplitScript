@@ -794,13 +794,26 @@ fn check() -> Result<(), String> {
             "--examples",
         ],
     )?;
-    run(&root, "cargo", &["build", "--bin", "splitc"])?;
     run(
         &root,
         "cargo",
         &[
             "build",
-            "--release",
+            "--profile",
+            "max-opt",
+            "--bin",
+            "splitc",
+            "--bin",
+            "splitls",
+        ],
+    )?;
+    run(
+        &root,
+        "cargo",
+        &[
+            "build",
+            "--profile",
+            "max-opt",
             "--target",
             "wasm32-unknown-unknown",
             "--package",
@@ -816,7 +829,7 @@ fn check() -> Result<(), String> {
     run(&extension, npm, &["run", "compile:ts"])?;
     run(&extension, npm, &["run", "bundle:web"])?;
     let embedded_compiler =
-        root.join("target/wasm32-unknown-unknown/release/splitscript_vscode_wasm.wasm");
+        root.join("target/wasm32-unknown-unknown/max-opt/splitscript_vscode_wasm.wasm");
     let packaged_compiler = extension.join("dist/splitscript_vscode_wasm.wasm");
     fs::copy(&embedded_compiler, &packaged_compiler).map_err(|error| {
         format!(
@@ -876,9 +889,9 @@ fn check() -> Result<(), String> {
     fs::create_dir_all(&outputs)
         .map_err(|error| format!("could not create {}: {error}", outputs.display()))?;
     let compiler = root.join(if cfg!(windows) {
-        "target/debug/splitc.exe"
+        "target/max-opt/splitc.exe"
     } else {
-        "target/debug/splitc"
+        "target/max-opt/splitc"
     });
     let artifacts = verification_artifacts(RUNTIME_FIXTURES, COMPILE_FIXTURES)?;
     println!(

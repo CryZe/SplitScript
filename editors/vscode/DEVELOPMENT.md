@@ -15,7 +15,7 @@ npm run test
 npm run compile
 ```
 
-`npm run compile` builds the optimized `wasm32-unknown-unknown` compiler
+`npm run compile` builds the release-profile `wasm32-unknown-unknown` compiler
 adapter, compiles the TypeScript extension and its language/build workers, and
 copies the compiler module into the ignored `dist` package directory. Native
 `splitc` and `splitls` builds remain independent from the repository root.
@@ -33,6 +33,11 @@ npm run package:vsix
 
 The production build runs automatically and writes
 `splitscript-<version>.vsix` in this directory.
+It uses the Rust `max-opt` profile for the embedded compiler: full LTO, one code
+generation unit, aborting panics, and symbol stripping. The artifact is copied
+from `target/wasm32-unknown-unknown/max-opt`. Normal extension development builds
+continue to use `release`. These Rust profiles do not change which SplitScript
+debug/release builds the extension can produce.
 
 After the complete verification job succeeds for a push to `master`, CI runs
 the same production packaging path with the stable asset name

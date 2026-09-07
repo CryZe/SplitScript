@@ -12,6 +12,13 @@ members = [
     "crates/splitscript-vscode-wasm",
 ]
 
+[profile.max-opt]
+inherits = "release"
+codegen-units = 1
+lto = "fat"
+panic = "abort"
+strip = "symbols"
+
 [dependencies]
 splitscript-syntax = { path = "crates/splitscript-syntax" }
 serde = { version = "1.0.229", features = ["derive"] }

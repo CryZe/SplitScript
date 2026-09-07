@@ -190,10 +190,131 @@ struct AsyncTestHost {
     fail_entities_read: bool,
 }
 
+#[test]
+fn async_dispatch_tables_cover_state_boundaries_in_both_profiles() {
+    for suspensions in [0, 1, 2, 63, 64] {
+        let mut source = String::from("state \"game.exe\" {}\nonAttach {\n");
+        for index in 0..suspensions {
+            source.push_str(&format!(
+                "let value{index} = retry process.read<u32>(0x1000)\n"
+            ));
+        }
+        source.push('}');
+        let state_count = 1 + 2 * suspensions;
+        for profile in [
+            splitscript::BuildProfile::Debug,
+            splitscript::BuildProfile::Release,
+        ] {
+            let wasm = splitscript::compile_with_options(
+                &source,
+                splitscript::CompilerOptions {
+                    profile,
+                    ..Default::default()
+                },
+            )
+            .expect("boundary fixture should compile");
+            Validator::new_with_features(WasmFeatures::all())
+                .validate_all(&wasm)
+                .expect("dispatcher branch depths should validate");
+            let mut tables = Vec::new();
+            for payload in Parser::new(0).parse_all(&wasm) {
+                if let Payload::CodeSectionEntry(body) = payload.unwrap() {
+                    for operator in body.get_operators_reader().unwrap() {
+                        if let wasmparser::Operator::BrTable { targets } = operator.unwrap() {
+                            tables.push((
+                                targets.targets().collect::<Result<Vec<_>, _>>().unwrap(),
+                                targets.default(),
+                            ));
+                        }
+                    }
+                }
+            }
+            if (2..=128).contains(&state_count) {
+                assert_eq!(
+                    tables,
+                    vec![((0..state_count).collect::<Vec<_>>(), state_count)],
+                    "{profile:?}: {state_count} states"
+                );
+            } else {
+                assert!(tables.is_empty(), "{profile:?}: {state_count} states");
+            }
+        }
+    }
+}
+
+#[test]
+fn async_dispatch_preserves_retry_nested_calls_and_loop_transfers() {
+    let source = r#"
+        state "game.exe" {}
+        fn countSteps() -> async u32 {
+            let total = 0u32
+            for value in [1u32, 2, 3, 4] {
+                if value == 2 { continue }
+                await process.module("Game.dll")
+                total += value
+                if value == 3 { break }
+            }
+            for value in [5u32, 6] {
+                await process.module("Game.dll")
+                total += value
+            }
+            return total
+        }
+        onAttach {
+            print("begin")
+            let value = retry process.read<u32>(0x1000)
+            print(`value {value}`)
+            let total = await countSteps()
+            print(`total {total}`)
+            print("done")
+        }
+    "#;
+    for profile in [
+        splitscript::BuildProfile::Debug,
+        splitscript::BuildProfile::Release,
+    ] {
+        let (mut store, instance) = execute_with_mock_host_with_profile(source, profile);
+        let update = instance
+            .get_typed_func::<(), ()>(&mut store, "update")
+            .unwrap();
+        for _ in 0..4 {
+            update.call(&mut store, ()).unwrap();
+        }
+        assert_eq!(store.data().messages, ["begin"], "{profile:?}");
+        store
+            .data_mut()
+            .memory_regions
+            .push((0x1000, 77u32.to_le_bytes().to_vec()));
+        for _ in 0..20 {
+            update.call(&mut store, ()).unwrap();
+        }
+        assert_eq!(
+            store.data().messages,
+            ["begin", "value 77", "total 15", "done"],
+            "{profile:?}"
+        );
+        assert_eq!(store.data().module_lookups, 4, "{profile:?}");
+    }
+}
+
 fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasmtime::Instance) {
+    execute_with_mock_host_with_profile(source, splitscript::BuildProfile::Debug)
+}
+
+fn execute_with_mock_host_with_profile(
+    source: &str,
+    profile: splitscript::BuildProfile,
+) -> (wasmtime::Store<AsyncTestHost>, wasmtime::Instance) {
     use wasmtime::{Config, Engine, ExternType, Linker, Module, Store, Val, ValType};
 
-    let wasm = splitscript::compile(source).expect("runtime fixture should compile");
+    let wasm = splitscript::compile_with_options(
+        source,
+        splitscript::CompilerOptions {
+            profile,
+            ..Default::default()
+        },
+    )
+    .expect("runtime fixture should compile");
     let mut config = Config::new();
     config.wasm_gc(true);
     config.wasm_function_references(true);

@@ -824,6 +824,76 @@ compiler-library tests (one manual benchmark ignored), 617 compiler integration
 tests, editor/browser workers, the embedded Wasm compiler, Wasm validation,
 and host-runtime fixtures.
 
+## 2026-09-07 shared async table dispatch
+
+Comparison against `3543444`, using saved release-built compiler executables
+and unchanged fixtures. Both SplitScript profiles now emit `br_table` for async
+bodies with 2–128 states. This changes direct instruction emission, without an
+optimization pass or a separate debug implementation. Single-state bodies keep
+the smaller linear encoding; machines above 128 states keep shallow dispatch
+to bound structured nesting. Compiler RAM was not a target for this batch.
+
+### Generated release modules
+
+| Fixture | Before bytes | After bytes | Saved bytes |
+| --- | ---: | ---: | ---: |
+| Lunistice | 34,500 | 33,439 | 1,061 (3.1%) |
+| managed instances | 17,369 | 16,867 | 502 (2.9%) |
+| managed instances Mono | 26,608 | 25,454 | 1,154 (4.3%) |
+| cancellation | 2,795 | 2,727 | 68 (2.4%) |
+| Minish Cap | 48,773 | 48,773 | 0 |
+| settings | 8,790 | 8,790 | 0 |
+| debug-profile fixture, release output | 1,591 | 1,591 | 0 |
+| set runtime | 3,597 | 3,597 | 0 |
+| map runtime | 5,016 | 5,016 | 0 |
+
+All size reductions are in the code section, including its encoded length.
+The five unchanged modules are byte-identical. Lunistice's code section drops
+from 30,931 to 29,870 bytes; the Mono fixture's drops from 23,324 to 22,170.
+This does not establish a runtime speedup for the generated script.
+
+### Compiler latency
+
+Rust 1.98.1, Windows x86-64, 32 logical CPUs; release-built Rust harness and
+SplitScript release profile. The normal in-process baseline uses 200 samples
+after 20 warmups per fixture, with builds and tests stopped:
+
+| Fixture | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| minimal | 48.21 ms | 49.38 ms | 54.48 ms | 52.91 ms |
+| Lunistice | 57.99 ms | 58.70 ms | 67.82 ms | 61.71 ms |
+| cancellation | 49.94 ms | 49.57 ms | 62.80 ms | 51.10 ms |
+| settings | 50.70 ms | 52.20 ms | 57.47 ms | 62.85 ms |
+
+The affected fixtures move by -0.7% to +1.2% at the median, while unchanged
+controls move by +2.4% to +3.0%. This shows approximate compilation-time parity,
+not a demonstrated compiler speedup or a material dispatcher-related slowdown.
+
+A separate debug-profile CLI check uses 50 samples after 10 warmups per fixture
+and executable. It includes process startup, compiler initialization, and file
+I/O, so it must not be compared directly with the in-process numbers above:
+
+| Fixture | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Lunistice | 138.61 ms | 124.02 ms | 145.34 ms | 128.30 ms |
+| cancellation | 123.83 ms | 112.49 ms | 132.98 ms | 118.20 ms |
+| settings | 126.25 ms | 114.76 ms | 133.59 ms | 117.99 ms |
+
+The unchanged settings control improves similarly, so these CLI numbers do not
+attribute the improvement to dispatch. They show no added debug compilation
+cost in this run. The deterministic output-size reduction is the reason to
+keep this change; compile/editor latency remains the next measurement target.
+
+New regression coverage validates table labels/default branches at small and
+large state counts in both profiles, and executes retry, nested async calls,
+loop continue/break, exhaustion, and completion in both profiles. Existing async
+runtime coverage now exercises table dispatch in the default debug profile too.
+
+The full `cargo xtask check` passed: formatting, Clippy, documentation, 98 syntax
+tests, 420 compiler-library tests (one manual benchmark ignored), 619 compiler
+integration tests, editor/browser workers, the embedded Wasm compiler, generated
+Wasm validation, and host-runtime fixtures.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

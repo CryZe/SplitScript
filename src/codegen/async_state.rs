@@ -431,19 +431,45 @@ fn compile_async_body(
     collect_async_states(entry, &mut states, None);
     debug_assert!(states.iter().all(Option::is_some));
 
+    // A table avoids repeating the frame load and PC comparison for every
+    // state. A single-state table costs more bytes; bound structured nesting for
+    // unusually large machines. Both profiles use the same dispatcher.
+    let table_dispatch = (2..=128).contains(&async_state_count);
     function.instruction(&Instruction::Loop(BlockType::Empty));
-    for (pc, state) in states.into_iter().enumerate() {
-        let state = state.expect("every async state is assigned during lowering");
+    if table_dispatch {
+        // Innermost block is state 0. The outermost block handles an invalid
+        // or completed PC with the same return as the linear dispatcher.
+        for _ in 0..=async_state_count {
+            function.instruction(&Instruction::Block(BlockType::Empty));
+        }
         frame.emit(&mut function);
         function
             .instruction(&Instruction::StructGet {
                 struct_type_index: frame.struct_type,
                 field_index: 0,
             })
-            .instruction(&Instruction::I32Const(pc as i32))
-            .instruction(&Instruction::I32Eq);
-
-        function.instruction(&Instruction::If(BlockType::Empty));
+            .instruction(&Instruction::BrTable(
+                (0..async_state_count).collect::<Vec<_>>().into(),
+                async_state_count,
+            ));
+    }
+    for (pc, state) in states.into_iter().enumerate() {
+        let state = state.expect("every async state is assigned during lowering");
+        let loop_depth = if table_dispatch {
+            function.instruction(&Instruction::End);
+            async_state_count - pc as u32
+        } else {
+            frame.emit(&mut function);
+            function
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: frame.struct_type,
+                    field_index: 0,
+                })
+                .instruction(&Instruction::I32Const(pc as i32))
+                .instruction(&Instruction::I32Eq)
+                .instruction(&Instruction::If(BlockType::Empty));
+            1
+        };
         if let Some(debug) = context.debug {
             match state {
                 AsyncState::Block { resume_source, .. } => {
@@ -464,8 +490,8 @@ fn compile_async_body(
             } => compile_async_flow(
                 &mut function,
                 block,
-                1,
-                loop_targets.map(|targets| targets.control(1)),
+                loop_depth,
+                loop_targets.map(|targets| targets.control(loop_depth)),
                 result_global,
                 cancellation_region,
                 layout,
@@ -503,14 +529,14 @@ fn compile_async_body(
                 compile_async_flow(
                     &mut function,
                     body,
-                    2,
+                    loop_depth + 1,
                     Some(
                         AsyncLoopTargets {
                             break_state: exit_state,
                             continue_state: header_state,
                             break_destination: None,
                         }
-                        .control(2),
+                        .control(loop_depth + 1),
                     ),
                     result_global,
                     cancellation_region,
@@ -520,7 +546,7 @@ fn compile_async_body(
                 function.instruction(&Instruction::Else);
                 set_async_state(&mut function, exit_state, frame);
                 function
-                    .instruction(&Instruction::Br(2))
+                    .instruction(&Instruction::Br(loop_depth + 1))
                     .instruction(&Instruction::End);
             }
             AsyncState::Poll {
@@ -552,15 +578,20 @@ fn compile_async_body(
                     &context,
                 );
                 set_async_state(&mut function, resume_state, frame);
-                function.instruction(&Instruction::Br(1));
+                function.instruction(&Instruction::Br(loop_depth));
             }
         }
         emit_async_action_default(&mut function, bare_return);
         mark_future_complete(&mut function, bare_return);
         function
             .instruction(&Instruction::I32Const(1))
-            .instruction(&Instruction::Return)
-            .instruction(&Instruction::End);
+            .instruction(&Instruction::Return);
+        if !table_dispatch {
+            function.instruction(&Instruction::End);
+        }
+    }
+    if table_dispatch {
+        function.instruction(&Instruction::End);
     }
     function
         .instruction(&Instruction::I32Const(1))

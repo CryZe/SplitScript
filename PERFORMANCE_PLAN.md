@@ -10,6 +10,14 @@ lowest-risk output improvements are compact local declarations, shared ordinary
 function signatures, and operation-level reachability for sets. General
 optimization passes should follow those changes, rather than block them.
 
+Priority clarification (2026-09-07): compiler/editor latency and generated
+release Wasm size are the main goals. Compiler RAM is secondary; defer further
+ownership changes, including shared source documents, unless measurements show
+a worthwhile latency benefit. Prefer shared code generation across debug and
+release when the improvement is a cheap encoding choice. Reserve profile-specific
+optimization for work with a meaningful compilation cost, and preserve debug
+metadata without introducing unnecessary differences in runtime behavior.
+
 The original review and measurements below are retained as the starting point.
 Implementation progress is tracked separately here; investigation artifacts
 are under ignored `target/performance-review`.
@@ -374,6 +382,27 @@ User syntax, source documents, declaration HIR, and resolution tables still
 have additional stage copies. Parsed-library reuse remains the larger fixed-cost
 opportunity; this batch does not introduce incremental inference or skip checks.
 
+## Async dispatcher implementation batch
+
+Replaced repeated frame-PC comparisons with structured `br_table` dispatch for
+async bodies with 2–128 states, in both debug and release. This is direct
+emission without a new optimization pass. Single-state bodies retain the smaller
+linear form; unusually large machines retain shallow dispatch to bound nesting.
+The shared body emitter derives branch depths from the selected layout, including
+retry, suspension, and loop break/continue targets.
+
+Release Lunistice shrinks from 34,500 to 33,439 bytes (1,061 bytes, 3.1%). The
+Mono managed-instance fixture saves 1,154 bytes (4.3%), the other managed-instance
+fixture saves 502 bytes (2.9%), and cancellation saves 68 bytes (2.4%). Five
+other release controls remain byte-identical. These savings are in the code
+section. Compiler latency and validation are recorded in
+[baselines](docs/BASELINES.md); no compiler speedup is assumed from smaller output.
+
+Validation: `cargo xtask check` passed, including all 619 compiler integration
+tests, editor/browser tests, Wasm validation, and runtime fixtures. New coverage
+checks table boundaries and executes retry, nested futures, break/continue, and
+loop exhaustion in both profiles.
+
 ## Evidence and scope
 
 There are three different performance concerns:
@@ -701,15 +730,13 @@ parsed-template reuse independently if semantic reuse needs a larger redesign.
 
 The size evidence directs attention to generated provider preparation and
 asynchronous discovery. [compile_async_body](src/codegen/async_state.rs) emits a
-linear sequence of program-counter comparisons, loading the frame PC for each
-state. Measure state count, dispatch bytes, repeated generated binding logic,
-and polling runtime separately from the useful provider work.
+shared table dispatch for 2–128 states, with the measured savings recorded above.
+Measure repeated generated binding logic and polling runtime separately from
+the useful provider work.
 
-Try a structured `br_table` dispatcher for sufficiently large state machines,
-with small machines retaining the simpler form when smaller. Factor repeated
-binding/discovery sequences into shared ordinary helpers where the encoded
-call/signature/frame cost is lower. These are experiments: neither dispatcher
-changes nor helper extraction is yet proven to shrink the observed modules.
+Factor repeated binding/discovery sequences into shared ordinary helpers where
+the encoded call/signature/frame cost is lower. Helper extraction remains an
+experiment; it is not yet proven to shrink the observed modules.
 Preserve retry ordering, suspension, break/continue, cancellation, attachment
 lifetime, and debug source locations. Use Lunistice, Minish Cap, and the async
 runtime fixtures as acceptance workloads.

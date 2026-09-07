@@ -894,6 +894,21 @@ tests, 420 compiler-library tests (one manual benchmark ignored), 619 compiler
 integration tests, editor/browser workers, the embedded Wasm compiler, generated
 Wasm validation, and host-runtime fixtures.
 
+## 2026-09-07 Binaryen reference study
+
+The [Binaryen review](../BINARYEN_OPTIMIZATION_REVIEW.md) records a separate
+experiment against `72a6a15`, using Binaryen 132 solely as an offline reference.
+It contains the full eight-fixture size matrix, section attribution, isolated
+pass results, runtime checks, and reproduction commands.
+
+Lunistice is 33,439 bytes from SplitScript, 29,418 after Binaryen's instruction
+peephole pass and reader/writer normalization, 27,974 with O4, 26,960 with Oz,
+and 22,678 with the combined O4/size/closed-world/convergence experiment. Minish
+Cap is respectively 48,773, 43,821, 40,010, 39,535, and 28,075 bytes. Custom
+sections remain 160 bytes in all outputs. These are opportunities identified
+for future native compiler work, not size reductions already implemented in
+SplitScript or a new external optimization stage in its build pipeline.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

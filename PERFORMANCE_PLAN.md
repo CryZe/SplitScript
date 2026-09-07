@@ -403,6 +403,34 @@ tests, editor/browser tests, Wasm validation, and runtime fixtures. New coverage
 checks table boundaries and executes retry, nested futures, break/continue, and
 loop exhaustion in both profiles.
 
+## Binaryen reference study and revised next steps
+
+After `72a6a15`, updated the local Binaryen installation to 132 and compared
+eight release modules with rewrite-only, instruction peephole, O4, Oz, and a
+combined closed-world/convergence pipeline. The full investigation and commands
+are in [BINARYEN_OPTIMIZATION_REVIEW.md](BINARYEN_OPTIMIZATION_REVIEW.md).
+Binaryen remains an offline reference, with no compiler or build dependency.
+
+The next output-size work should start with two shared emission fixes:
+
+1. Avoid completion tails after unconditional branches/returns, using explicit
+   fallthrough information in the existing emitter.
+2. Avoid redundant `ref.as_non_null` assertions at known GC consumers, preserving
+   required non-null types and trap ordering across effects.
+
+Binaryen's reader/writer plus its instruction peephole pass reduces Lunistice
+from 33,439 to 29,418 bytes without changing its defined-function count. The
+remaining targets are tighter GC type planning, then bounded release constant
+propagation, branch cleanup/factoring, and size-budgeted inlining. Plain inlining
+in isolation enlarged all three measured large fixtures; it is not the first
+implementation target. Keep compiler/editor latency work, particularly the
+standard-library frontend floor, alongside these output improvements.
+
+Validation: 48 modules validated and 78 runtime scenarios matched their original
+traces. A separate 75-output single-pass sweep was validated for size attribution.
+The study includes caveats about the combined closed-world result, optimization
+cost, type identity, and the Windows Node runtime configuration used for testing.
+
 ## Evidence and scope
 
 There are three different performance concerns:

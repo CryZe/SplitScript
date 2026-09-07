@@ -136,10 +136,110 @@ fn reused_inference_survives_policy_changes_and_invalidates_on_edits() {
 fn strict_check_does_not_replace_an_existing_recovery_snapshot() {
     let mut database =
         CompilerDatabase::new(format!("{SOURCE}fn broken() {{ return missingName }}"));
+    database.lower().unwrap();
+    let before = inference_run_count();
     let recovered = database.recovering_check().unwrap();
     assert!(database.check().is_err());
     assert!(Arc::ptr_eq(
         &recovered,
         &database.recovering_check().unwrap()
     ));
+    assert_eq!(inference_run_count() - before, 1);
+}
+
+#[test]
+fn successful_checks_share_recovery_facts_in_either_query_order() {
+    for source in [
+        SOURCE.to_owned(),
+        format!("{SOURCE}fn warning() {{ return {{ 1; }} }}"),
+        "state \"game.exe\" {} whileAttached { let unread = 1 }".to_owned(),
+    ] {
+        for recovery_first in [false, true] {
+            let mut database = CompilerDatabase::with_source_name("shared.split", &source);
+            let lowered = database.lower().unwrap();
+            let before = inference_run_count();
+            if recovery_first {
+                database.recovering_check().unwrap();
+            }
+            let checked = database.check().unwrap();
+            let recovered = database.recovering_check().unwrap();
+            assert_eq!(inference_run_count() - before, 1);
+            assert!(std::ptr::eq(checked.semantics(), recovered.semantics()));
+            assert!(std::ptr::eq(checked.syntax(), recovered.syntax()));
+            assert!(std::ptr::eq(
+                checked.source_document(),
+                recovered.source_document()
+            ));
+            assert!(std::ptr::eq(checked.hir(), recovered.hir()));
+            let cloned = (*recovered).clone();
+            assert!(std::ptr::eq(cloned.semantics(), checked.semantics()));
+
+            let independent = crate::check_recovering((*lowered).clone());
+            assert_eq!(recovered.diagnostics(), independent.diagnostics());
+            assert_eq!(recovered.effects(), independent.effects());
+            assert_eq!(recovered.source_name(), independent.source_name());
+            assert_eq!(recovered.context(), independent.context());
+            assert_eq!(
+                recovered
+                    .semantics()
+                    .expression_types()
+                    .collect::<BTreeMap<_, _>>(),
+                independent
+                    .semantics()
+                    .expression_types()
+                    .collect::<BTreeMap<_, _>>()
+            );
+        }
+    }
+}
+
+#[test]
+fn shared_successful_recovery_survives_policy_changes_and_source_revisions() {
+    let source = "state \"game.exe\" {} whileAttached { let unread = 1 }";
+    let mut database = CompilerDatabase::new(source);
+    database.lower().unwrap();
+    let before = inference_run_count();
+    let recovered = database.recovering_check().unwrap();
+    let checked = database.check().unwrap();
+    let mut policy = WarningPolicy::default();
+    for level in [WarningLevel::Deny, WarningLevel::Allow] {
+        policy.set(DiagnosticCode::UnusedBinding, level);
+        database.set_warning_policy(policy);
+        assert_eq!(
+            database.diagnostics().is_empty(),
+            level == WarningLevel::Allow
+        );
+        assert!(Arc::ptr_eq(&checked, &database.check().unwrap()));
+        assert!(Arc::ptr_eq(
+            &recovered,
+            &database.recovering_check().unwrap()
+        ));
+        assert_eq!(inference_run_count() - before, 1);
+    }
+
+    database.set_source("state \"game.exe\" {} whileAttached { let broken: bool = 42 }");
+    let failed = database.recovering_check().unwrap();
+    assert!(database.check().is_err());
+    assert_eq!(inference_run_count() - before, 2);
+    assert!(!std::ptr::eq(failed.semantics(), recovered.semantics()));
+    assert_eq!(recovered.source_document().source(), source);
+    assert!(std::ptr::eq(recovered.semantics(), checked.semantics()));
+}
+
+#[test]
+fn recovery_first_validation_failure_runs_inference_once() {
+    let mut database = CompilerDatabase::new(format!(
+        "{SOURCE}fn readValue() -> u32! {{ return process.read<u32>(0) }}\n\
+         onDetach {{ let value = readValue() }}"
+    ));
+    database.lower().unwrap();
+    let before = inference_run_count();
+    let recovered = database.recovering_check().unwrap();
+    assert!(recovered.effects().is_some());
+    assert!(database.check().is_err());
+    assert!(Arc::ptr_eq(
+        &recovered,
+        &database.recovering_check().unwrap()
+    ));
+    assert_eq!(inference_run_count() - before, 1);
 }

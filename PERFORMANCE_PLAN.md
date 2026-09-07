@@ -255,6 +255,43 @@ Recovery-first followed by strict checking can still run inference separately;
 successful strict/recovery products also remain separately owned. Parsed-library
 template reuse and broader immutable-stage sharing remain open.
 
+## Shared checked products and query-order implementation batch
+
+Implemented the next slice of order 7 on 2026-09-07. Successful strict and
+recovering queries now share a checked product, including syntax, declaration
+HIR, semantics, and effects. Recovery-first queries use the strict checker when
+syntax and resolution prerequisites agree, so subsequent strict queries reuse
+the same success or failure. Cloning a recovered result shares immutable data.
+Syntax/resolution failures retain the existing recovery path.
+
+The new query-order benchmark exposed invalid state-field separators in the
+older small/large tooling fixtures. Their commas are now semicolons; previous
+"valid" hover measurements reached checked semantics through parser repair.
+Both sides of this batch's comparison use the corrected fixtures. Historical
+timings remain useful for their original workloads but are not directly
+comparable with these corrected inputs.
+
+Valid strict/recovery pairs improved 32.1–35.7% in median latency. Retained heap
+for both products fell from 5.26 to 4.75 MiB (small) and 17.09 to 14.82 MiB
+(500 helpers). Recovery-first error checks also avoid a second inference pass.
+Recovery alone has a memory tradeoff: successful results now retain the complete
+checked program, increasing retained heap from 2.42 to 4.75 MiB and from 11.05
+to 14.82 MiB respectively. The ordinary successful diagnostics/hover path
+already uses the strict checked product; these query-pair gains are not a claim
+of another equivalent end-to-end LSP improvement.
+
+Seven focused tests cover one inference pass in either order, shared identity,
+agreement with independent recovery, warning policy, and old snapshots after
+edits. All 47 compiler-query integration tests passed. Seven release fixtures
+remain byte-identical. The full `cargo xtask check` passed, including 421 library
+tests (one manual benchmark ignored), 608 compiler integration tests,
+documentation, editor/browser checks, and Wasm/runtime fixtures. Timing details
+are recorded in [baselines](docs/BASELINES.md).
+
+This resolves the preceding batch's outstanding query-order duplication for
+compatible inputs. Parsed-library templates and remaining parse/lower stage
+copies are still open; no incremental inference or release optimizer was added.
+
 ## Evidence and scope
 
 There are three different performance concerns:

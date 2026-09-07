@@ -3,6 +3,7 @@
 //! Run with `cargo run --release --example tooling_baseline -- 500 100`.
 //! Append `--root-effects` to measure repeated root completion in detached contexts.
 //! Append `--recovery` to measure diagnostics followed by hover after invalid edits.
+//! Append `--check-order` to compare strict/recovery query orders and recovery alone.
 
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -82,7 +83,7 @@ fn main() {
     assert!(
         matches!(
             mode.as_deref(),
-            None | Some("--root-effects" | "--recovery")
+            None | Some("--root-effects" | "--recovery" | "--check-order")
         ),
         "unknown benchmark mode"
     );
@@ -133,6 +134,10 @@ fn main() {
         run_recovery(functions, iterations);
         return;
     }
+    if mode.as_deref() == Some("--check-order") {
+        run_check_order(functions, iterations);
+        return;
+    }
 
     for fixture in &fixtures {
         run_fixture(fixture, iterations);
@@ -141,6 +146,56 @@ fn main() {
     println!("retained fixture\tstate\tretained_bytes\tpeak_delta_bytes");
     for fixture in &fixtures {
         report_retained_states(fixture);
+    }
+}
+
+fn run_check_order(functions: usize, iterations: usize) {
+    for (name, source, valid) in [
+        ("check_order_valid", small_source(), true),
+        ("check_order_large_valid", large_source(functions), true),
+        (
+            "check_order_type_error",
+            format!("{}\nfn broken() {{ return missingName }}", small_source()),
+            false,
+        ),
+        (
+            "check_order_validation_error",
+            format!(
+                "{}\nfn readValue() -> u32! {{ return process.read<u32>(0) }}\nonDetach {{ let value = readValue() }}",
+                small_source()
+            ),
+            false,
+        ),
+        (
+            "check_order_syntax_error",
+            format!("{}\nfn broken(", small_source()),
+            false,
+        ),
+    ] {
+        let fixture = Fixture::new(name, source, "current.position", "point.x");
+        for order in [
+            "strict_then_recovery",
+            "recovery_then_strict",
+            "recovery_only",
+        ] {
+            let query = |database: &mut CompilerDatabase, _: &Fixture| {
+                if order == "strict_then_recovery" {
+                    let result = database.check();
+                    assert_eq!(result.is_ok(), valid, "{name}: {:?}", result.err());
+                }
+                black_box(
+                    database
+                        .recovering_check()
+                        .expect("recovery must remain available"),
+                );
+                if order == "recovery_then_strict" {
+                    let result = database.check();
+                    assert_eq!(result.is_ok(), valid, "{name}: {:?}", result.err());
+                }
+            };
+            measure_database_edit(&fixture, order, iterations, query);
+            report_retained_state(&fixture, order, query);
+        }
     }
 }
 
@@ -588,7 +643,7 @@ fn small_source() -> String {
 }
 
 state "small.exe" {
-    position: Position at 0x100,
+    position: Position at 0x100;
 }
 
 whileAttached {
@@ -601,7 +656,7 @@ whileAttached {
 
 fn large_source(functions: usize) -> String {
     let mut source = String::from(
-        "struct Position {\n    x: u32,\n    y: u32,\n}\n\nstate \"large.exe\" {\n    position: Position at 0x100,\n}\n\n",
+        "struct Position {\n    x: u32,\n    y: u32,\n}\n\nstate \"large.exe\" {\n    position: Position at 0x100;\n}\n\n",
     );
     for index in 0..functions {
         source.push_str(&format!(

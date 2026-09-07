@@ -444,6 +444,17 @@ pub struct CheckedProgram {
 /// independent declarations and expressions remain queryable.
 #[derive(Debug, Clone)]
 pub struct RecoveredCheck {
+    data: RecoveryData,
+}
+
+#[derive(Debug, Clone)]
+enum RecoveryData {
+    Checked(std::sync::Arc<CheckedProgram>),
+    Partial(std::sync::Arc<PartialCheck>),
+}
+
+#[derive(Debug)]
+struct PartialCheck {
     context: CompilerContext,
     source_name: String,
     document: syntax::SourceDocument,
@@ -456,42 +467,82 @@ pub struct RecoveredCheck {
 }
 
 impl RecoveredCheck {
+    fn partial(data: PartialCheck) -> Self {
+        Self {
+            data: RecoveryData::Partial(std::sync::Arc::new(data)),
+        }
+    }
+
+    /// Used only when strict and recovery validation prerequisites agree.
+    pub(crate) fn from_checked(checked: std::sync::Arc<CheckedProgram>) -> Self {
+        Self {
+            data: RecoveryData::Checked(checked),
+        }
+    }
+
     pub fn context(&self) -> CompilerContext {
-        self.context.clone()
+        match &self.data {
+            RecoveryData::Checked(checked) => checked.context(),
+            RecoveryData::Partial(partial) => partial.context.clone(),
+        }
     }
 
     pub fn source_document(&self) -> &syntax::SourceDocument {
-        &self.document
+        match &self.data {
+            RecoveryData::Checked(checked) => checked.source_document(),
+            RecoveryData::Partial(partial) => &partial.document,
+        }
     }
 
     pub fn source_name(&self) -> &str {
-        &self.source_name
+        match &self.data {
+            RecoveryData::Checked(checked) => checked.source_name(),
+            RecoveryData::Partial(partial) => &partial.source_name,
+        }
     }
 
     pub fn syntax(&self) -> &ast::Program {
-        &self.syntax
+        match &self.data {
+            RecoveryData::Checked(checked) => checked.syntax(),
+            RecoveryData::Partial(partial) => &partial.syntax,
+        }
     }
 
     pub fn hir(&self) -> &hir::DeclarationIndex {
-        &self.hir
+        match &self.data {
+            RecoveryData::Checked(checked) => checked.typed_hir().declarations(),
+            RecoveryData::Partial(partial) => &partial.hir,
+        }
     }
 
     pub fn semantics(&self) -> &semantic::SemanticModel {
-        &self.semantics
+        match &self.data {
+            RecoveryData::Checked(checked) => checked.semantics(),
+            RecoveryData::Partial(partial) => &partial.semantics,
+        }
     }
 
     pub fn diagnostics(&self) -> &[Diagnostic] {
-        &self.diagnostics
+        match &self.data {
+            RecoveryData::Checked(checked) => checked.diagnostics(),
+            RecoveryData::Partial(partial) => &partial.diagnostics,
+        }
     }
 
     pub fn enum_types(&self) -> &[ast::EnumDecl] {
-        &self.enum_types
+        match &self.data {
+            RecoveryData::Checked(checked) => checked.enum_types(),
+            RecoveryData::Partial(partial) => &partial.enum_types,
+        }
     }
 
     /// Operational effects are available when type recovery completed without
     /// errors, even if a later semantic validation rejected the program.
     pub fn effects(&self) -> Option<&effects::OperationAnalysis> {
-        self.effects.as_ref()
+        match &self.data {
+            RecoveryData::Checked(checked) => Some(&checked.effects),
+            RecoveryData::Partial(partial) => partial.effects.as_ref(),
+        }
     }
 }
 
@@ -749,7 +800,7 @@ fn check_impl(
             let mut diagnostics = syntax_diagnostics.clone();
             diagnostics.extend(resolution_diagnostics);
             diagnostics.extend(inference_diagnostics.iter().cloned());
-            *recovery = Some(RecoveredCheck {
+            *recovery = Some(RecoveredCheck::partial(PartialCheck {
                 context,
                 source_name,
                 document,
@@ -759,7 +810,7 @@ fn check_impl(
                 diagnostics,
                 enum_types: output.enum_types,
                 effects: None,
-            });
+            }));
         }
         let mut diagnostics = inference_diagnostics;
         diagnostics.extend(syntax_diagnostics);
@@ -797,7 +848,7 @@ fn check_impl(
         {
             let mut diagnostics = syntax_diagnostics.clone();
             diagnostics.extend(validation.diagnostics.iter().cloned());
-            *recovery = Some(RecoveredCheck {
+            *recovery = Some(RecoveredCheck::partial(PartialCheck {
                 context,
                 source_name,
                 document,
@@ -807,7 +858,7 @@ fn check_impl(
                 diagnostics,
                 enum_types: output.enum_types,
                 effects: Some(validation.effects),
-            });
+            }));
         }
         let mut diagnostics = syntax_diagnostics;
         diagnostics.extend(validation.diagnostics);
@@ -891,7 +942,7 @@ pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
     if let Some(validation) = &validation {
         diagnostics.extend(validation.diagnostics.iter().cloned());
     }
-    RecoveredCheck {
+    RecoveredCheck::partial(PartialCheck {
         context,
         source_name,
         document,
@@ -901,7 +952,7 @@ pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
         diagnostics,
         enum_types: recovered.output.enum_types,
         effects: validation.map(|validation| validation.effects),
-    }
+    })
 }
 
 /// Lowers a checked program into the inspectable Wasm-oriented control-flow

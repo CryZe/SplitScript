@@ -285,6 +285,18 @@ impl CompilerDatabase {
     }
 
     pub fn recovering_check(&mut self) -> QueryResult<RecoveredCheck> {
+        if self.cache.recovering_checked.is_none()
+            && self
+                .lower()
+                .is_ok_and(|lowered| lowered.resolution_diagnostics().is_empty())
+            && let Ok(checked) = self.check()
+        {
+            // These inputs use the same inference and validation in both
+            // modes. Failures populate recovery in `check`; success supplies
+            // a shared view without copying semantics or rerunning inference.
+            self.cache.recovering_checked =
+                Some(Ok(Arc::new(RecoveredCheck::from_checked(checked))));
+        }
         if self.cache.recovering_checked.is_none() {
             // Editor semantics must start from the recovered syntax tree. Using
             // strict lowering here makes one parser diagnostic discard every

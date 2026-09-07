@@ -516,6 +516,90 @@ The full `cargo xtask check` passed, including 418 library tests (one manual
 benchmark ignored), 608 compiler integration tests, documentation, editor/browser
 checks, and Wasm/runtime fixtures.
 
+## 2026-09-07 shared checked products and query order
+
+The new benchmark caught invalid state-field separators in the shared small
+and large tooling fixtures: commas have been corrected to semicolons. Earlier
+"valid" diagnostics/hover rows reached checked semantics through the editor's
+length-preserving parser repair. Historical measurements remain records of
+those workloads; do not compare their absolute timings directly with runs of
+the corrected fixtures. Both executables below use the corrected sources and
+the same new harness, whose strict checks assert the expected success/failure.
+
+Before: `8c2f6d4`. After: shared successful checked/recovery products and reuse
+in either query order. Rust `1.98.1`, Windows x86-64, 32 logical CPUs, release
+harness, 20 warmups and 30 measured edits per row. Runs were sequential without
+concurrent builds or tests:
+
+```console
+cargo run --release --example tooling_baseline -- 500 30 --check-order
+```
+
+Each row alternates source revisions and requests the indicated database
+queries. These timings include cache invalidation and frontend work; they are
+not cached-query hit timings. The post-type-validation fixture calls a helper
+with latent process effects from `onDetach`.
+
+| Fixture / query order | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| valid / strict → recovery | 70.87 ms | 45.65 ms | 73.93 ms | 47.78 ms |
+| valid / recovery → strict | 67.17 ms | 44.37 ms | 69.06 ms | 46.66 ms |
+| valid / recovery only | 46.15 ms | 43.13 ms | 49.69 ms | 46.75 ms |
+| valid, 500 helpers / strict → recovery | 104.51 ms | 67.25 ms | 122.84 ms | 72.42 ms |
+| valid, 500 helpers / recovery → strict | 100.10 ms | 67.94 ms | 109.94 ms | 71.20 ms |
+| valid, 500 helpers / recovery only | 68.90 ms | 68.66 ms | 80.20 ms | 71.67 ms |
+| type error / strict → recovery | 37.97 ms | 36.13 ms | 38.93 ms | 40.54 ms |
+| type error / recovery → strict | 51.75 ms | 36.39 ms | 52.71 ms | 37.57 ms |
+| type error / recovery only | 37.52 ms | 36.68 ms | 38.55 ms | 38.16 ms |
+| post-type-validation error / strict → recovery | 45.17 ms | 44.20 ms | 46.18 ms | 47.17 ms |
+| post-type-validation error / recovery → strict | 67.18 ms | 43.95 ms | 69.88 ms | 45.36 ms |
+| post-type-validation error / recovery only | 45.26 ms | 43.96 ms | 46.50 ms | 45.47 ms |
+| syntax error / strict → recovery | 42.7 µs | 43.9 µs | 44.1 µs | 53.8 µs |
+| syntax error / recovery → strict | 42.8 µs | 42.6 µs | 43.8 µs | 95.1 µs |
+| syntax error / recovery only | 42.9 µs | 41.7 µs | 43.5 µs | 43.3 µs |
+
+Valid query pairs improve 32.1–35.7% in median latency. Recovery-first type
+and post-type-validation failures improve 29.7% and 34.6%, respectively.
+Strict-first failures already reused inference before this batch. Recovery-only
+and syntax-error controls show no comparable structural speedup; small timing
+differences should not be overinterpreted. Ordinary successful diagnostics/hover
+already uses strict checking, so the paired-query gains do not describe another
+equivalent improvement to that LSP path.
+
+Fresh-database retained heap, excluding initialized process-wide caches:
+
+| Successful fixture / requests | Before | After |
+| --- | ---: | ---: |
+| small / both queries, either order | 5.26 MiB | 4.75 MiB |
+| 500 helpers / both queries, either order | 17.09 MiB | 14.82 MiB |
+| small / recovery only | 2.42 MiB | 4.75 MiB |
+| 500 helpers / recovery only | 11.05 MiB | 14.82 MiB |
+
+Sharing avoids a second recovery semantic model, but recovery alone now retains
+the complete checked product, including compilation syntax and typed HIR. This
+is an explicit retention tradeoff for subsequent strict-query reuse, not a
+universal memory reduction. Fresh-database peak growth for small strict-first
+pairs falls from 9.50 to 6.66 MiB; large strict-first pairs fall from 22.30 to
+16.17 MiB. Error/syntax retained readings are essentially unchanged.
+Recovery-first error queries also reduce peak growth by avoiding another check;
+strict-first and recovery-only error peaks remain essentially unchanged.
+
+All seven focused inference/sharing tests and 47 compiler-query integration
+tests passed. Tests verify pointer sharing and agreement with standalone
+recovery, exactly one inference in either order for compatible inputs,
+warning-policy changes, and snapshot stability after source edits. The same
+seven release fixtures as the previous batch remain byte-identical: Lunistice
+(34,526 bytes), Minish Cap (48,773), desktop settings (8,790), managed instances
+(17,369), Mono managed instances (26,608), debug-profile fixture in release
+(1,591), and set runtime (3,597).
+
+The full `cargo xtask check` passed: formatting, Clippy, documentation, 421
+library tests (one manual benchmark ignored), 608 compiler integration tests,
+editor/browser workers, the embedded Wasm compiler, Wasm validation, and
+host-runtime fixtures. Smoke runs of the existing default and `--recovery`
+tooling modes also passed with the corrected fixtures (five generated helpers,
+20 warmups, one measured sample; used for assertions, not timing conclusions).
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

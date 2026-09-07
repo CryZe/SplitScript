@@ -706,15 +706,18 @@ impl Checker {
                     } else {
                         None
                     };
+                    let shape_constraints = self.layout_match_constraints(value, &arm.pattern);
                     let arm_type = self.with_state_layouts(state_layouts, |checker| {
-                        if let Some(guard) = &arm.guard {
-                            let flow = checker.check_condition(guard);
-                            checker.with_condition_path(flow.when_true.as_ref(), |checker| {
+                        checker.with_layout_constraints(shape_constraints.as_deref(), |checker| {
+                            if let Some(guard) = &arm.guard {
+                                let flow = checker.check_condition(guard);
+                                checker.with_condition_path(flow.when_true.as_ref(), |checker| {
+                                    checker.expr(&arm.value, result_type)
+                                })
+                            } else {
                                 checker.expr(&arm.value, result_type)
-                            })
-                        } else {
-                            checker.expr(&arm.value, result_type)
-                        }
+                            }
+                        })
                     });
                     self.scopes.pop();
                     if expected.is_none()

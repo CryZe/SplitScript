@@ -1,21 +1,25 @@
 // Faithful port of NiohRTANoLoad.asl for versions 1.21.04 through 1.21.06.
 // ASL omits Windows' executable suffix; the current WASM host requires it.
+enum NiohBuild { V12104, V12105, V12106 }
+let build: NiohBuild
+
 state "Nioh.exe" {
-    /// Nioh 1.21.04 memory layout.
-    layout V12104 {
+    if build is NiohBuild.V12104 {
+        /// Whether version 1.21.04 is on the map.
         onMap: u8 at 0x2171030;
+        /// Version 1.21.04 mission timer.
         missionTimer: f32 at 0x20d8588, 0x1e0aac;
-    },
-    /// Nioh 1.21.05 memory layout.
-    layout V12105 {
+    } else if build is NiohBuild.V12105 {
+        /// Whether version 1.21.05 is on the map.
         onMap: u8 at 0x2176f80, 0x90;
+        /// Version 1.21.05 mission timer.
         missionTimer: f32 at 0x20a7418, 0x5d8;
-    },
-    /// Nioh 1.21.06 memory layout.
-    layout V12106 {
+    } else {
+        /// Whether version 1.21.06 is on the map.
         onMap: u8 at 0x2176f80, 0x90;
+        /// Version 1.21.06 mission timer.
         missionTimer: f32 at 0x20a7418, 0x5d8;
-    },
+    }
 }
 
 tickRate {
@@ -26,13 +30,16 @@ onAttach {
     let executable = await process.mainModule()
     if executable.size == 63_766_528 {
         print(`Nioh 1.21.04 detected, module size {executable.size}`)
-        return StateLayout.V12104
+        build = NiohBuild.V12104
+        return
     } else if executable.size == 63_827_968 {
         print(`Nioh 1.21.05 detected, module size {executable.size}`)
-        return StateLayout.V12105
+        build = NiohBuild.V12105
+        return
     } else if executable.size == 63_848_448 {
         print(`Nioh 1.21.06 detected, module size {executable.size}`)
-        return StateLayout.V12106
+        build = NiohBuild.V12106
+        return
     }
 
     print(`unsupported Nioh module size {executable.size}`)

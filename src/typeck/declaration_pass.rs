@@ -302,8 +302,40 @@ fn collect_conditional_state_fields(checker: &mut Checker, program: &Program) {
             }
         }
     }
+    for (name, declarations) in checker.declarations.conditional_state_fields.clone() {
+        if declarations.is_empty()
+            || !checker
+                .layout_predicates_cover_all(declarations.iter().map(|(_, _, predicate)| predicate))
+        {
+            continue;
+        }
+        let (canonical, canonical_ty, _) = declarations[0].clone();
+        let compatible = declarations
+            .iter()
+            .skip(1)
+            .all(|(_, ty, _)| checker.inference.unify(*ty, canonical_ty).is_ok());
+        if !compatible {
+            continue;
+        }
+        checker
+            .declarations
+            .state_fields
+            .insert(name, (canonical, canonical_ty));
+        for (field, _, _) in declarations {
+            checker
+                .declarations
+                .state_storage_fields
+                .insert(field, canonical);
+        }
+    }
+    let storage_fields = state
+        .all_fields()
+        .filter_map(|field| {
+            (checker.declarations.state_storage_fields[&field.id] == field.id).then_some(field.id)
+        })
+        .collect();
     checker.semantics.resolve_state_layout(
-        state.all_fields().map(|field| field.id).collect(),
+        storage_fields,
         checker.declarations.state_storage_fields.clone(),
         HashMap::new(),
     );

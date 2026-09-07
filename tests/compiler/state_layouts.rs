@@ -574,8 +574,7 @@ fn attachment_shape_globals_are_frozen_after_attach() {
     let diagnostics = splitscript::compile(source)
         .expect_err("an attachment schema discriminator must remain frozen");
     assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.message
-            == "attachment-shape global `edition` can only be assigned in `onAttach`"
+        diagnostic.message == "attachment-shape global `edition` can only be assigned in `onAttach`"
     }));
 }
 
@@ -609,6 +608,37 @@ fn state_enum_fields_are_dynamic_schema_dimensions() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("dynamic state predicates should produce valid Wasm GC");
+}
+
+#[test]
+fn exhaustive_shape_branches_share_compatible_state_fields() {
+    let source = r#"
+        enum Build { Steam, GOG }
+        let build: Build
+        state "game.exe" {
+            if build is Build.Steam {
+                value: u32 at 0x100;
+                checkpoint: u8 at 0x110;
+            } else {
+                value: u32 at 0x200;
+                checkpoint: u16 at 0x210;
+            }
+        }
+        onAttach { build = Build.Steam }
+        split {
+            if old.value != current.value { return true }
+            return match build {
+                Build.Steam => old.checkpoint != current.checkpoint,
+                Build.GOG => old.checkpoint != current.checkpoint,
+            }
+        }
+    "#;
+    let wasm = splitscript::compile(source).expect(
+        "exhaustive same-typed fields should share an interface while conflicting types refine",
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("compatible conditional storage should produce valid Wasm GC");
 }
 
 #[test]

@@ -1,17 +1,21 @@
 // Port of the compact Ronin autosplitter. Its two supported executable
 // versions share the loading field, while the bike field genuinely changes
 // signedness between versions.
+enum RoninBuild { V8, V9 }
+let build: RoninBuild
+
 state "Ronin.exe" {
-    /// Version 8 memory layout.
-    layout V8 {
+    if build is RoninBuild.V8 {
+        /// Version 8 loading flag.
         loading: i32 at "Ronin.exe", 0x002f01cc, 0x7dc, 0xc0;
+        /// Version 8 signed bike value.
         bike: i16 at "Ronin.exe", 0x561758, 0x140;
-    },
-    /// Version 9 memory layout.
-    layout V9 {
+    } else {
+        /// Version 9 loading flag.
         loading: i32 at "Ronin.exe", 0x002f7228, 0x5c, 0x418, 0x5c, 0xb4;
+        /// Version 9 unsigned bike value.
         bike: u16 at "Ronin.exe", 0x56a758, 0xe4;
-    },
+    }
 }
 
 let doubleTap: u32 = 0
@@ -19,10 +23,12 @@ let doubleTap: u32 = 0
 onAttach {
     let executable = await process.mainModule()
     if executable.size == 5_705_728 {
-        return StateLayout.V9
+        build = RoninBuild.V9
+        return
     }
     if executable.size == 5_668_864 {
-        return StateLayout.V8
+        build = RoninBuild.V8
+        return
     }
 
     print(`unsupported Ronin module size {executable.size}`)
@@ -45,9 +51,9 @@ split {
         return false
     }
 
-    let acquiredBike = match layout {
-        StateLayout.V8 => old.bike != 21_368 && current.bike == 21_368,
-        StateLayout.V9 => old.bike != 52_688 && current.bike == 52_688,
+    let acquiredBike = match build {
+        RoninBuild.V8 => old.bike != 21_368 && current.bike == 21_368,
+        RoninBuild.V9 => old.bike != 52_688 && current.bike == 52_688,
     }
     if acquiredBike {
         doubleTap = 500

@@ -44,6 +44,15 @@ impl Checker {
         Some(constraints)
     }
 
+    pub(super) fn layout_match_constraints(
+        &self,
+        value: &Expr,
+        pattern: &MatchPattern,
+    ) -> Option<Vec<LayoutConstraint>> {
+        self.layout_is_constraint_atom(value, pattern)
+            .map(|constraint| vec![constraint])
+    }
+
     /// Derives the facts established by the false branch when that complement
     /// is itself one exact layout assignment. At present this is possible for
     /// a single equality over a two-variant enum. Broader predicates would
@@ -203,6 +212,18 @@ impl Checker {
         self.active_layout_assignments()
             .iter()
             .all(|assignment| predicate_matches_assignment(required, assignment))
+    }
+
+    pub(super) fn layout_predicates_cover_all<'a>(
+        &self,
+        predicates: impl IntoIterator<Item = &'a LayoutPredicate>,
+    ) -> bool {
+        let predicates = predicates.into_iter().collect::<Vec<_>>();
+        self.layout_assignments().iter().all(|assignment| {
+            predicates
+                .iter()
+                .any(|predicate| predicate_matches_assignment(predicate, assignment))
+        })
     }
 
     fn collect_layout_constraints(

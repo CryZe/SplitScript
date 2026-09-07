@@ -136,25 +136,38 @@ to inference or code generation.
     misses and ambiguities report the responsible source aliases once and keep
     the attachment inert until the process closes instead of rescanning
     metadata forever.
-- [x] Replace independent state and managed-class layouts with one
-  attachment-wide `layout: Layout` struct composed from explicitly declared,
-  enum-valued dimensions such as edition, storefront, renderer, or build.
-  Matching one dimension refines every state field, managed field, snapshot,
-  and attachment-scoped global conditioned on that value without requiring a
-  cartesian product of public layout variants. Keep ordinary metadata aliases
-  and equivalent class-binding alternatives private: a class must never expose
-  a second public `.layout` selector merely because the same logical schema has
-  multiple metadata spellings.
-  - [x] Add dimension declarations to the state DSL and represent the generated
-    `Layout` struct and read-only `layout` value through ordinary struct/value
-    identities. Require finite enum-valued dimensions initially, preserve their
-    documentation, and integrate formatting, recovery, navigation, completion,
-    hover, semantic highlighting, reference docs, and unused analysis.
+- [ ] Remove `layout` as a user-facing concept and express every observable
+  shape decision with ordinary typed state. Attachment-static decisions such
+  as edition, storefront, renderer, or build are bare enum globals initialized
+  by `onAttach` or, when uniquely proven, by Unity metadata. Decisions that may
+  change while a process remains attached are ordinary enum-valued state
+  fields. The compiler retains one finite internal predicate model for field
+  availability and schema planning; users should not need a parallel `Layout`
+  struct, implicit `layout` value, or generated `StateLayout` enum.
+  - [x] Generalize the predicate representation across legacy layout fields,
+    attachment globals, and dynamic state fields. Use it for path-sensitive
+    member availability, declaration checking, and code generation rather than
+    introducing syntax-specific aliases.
+  - [x] Allow attachment enum globals to guard state and managed-class fields.
+    Freeze a global once it participates in attachment shape, and let uniquely
+    distinguishing Unity metadata initialize an otherwise bare global before
+    `onAttach`. The Lunistice example now uses `edition: Edition` directly.
+  - [x] Allow enum-valued state fields to guard other state fields. Poll the
+    discriminator first, initialize an entering branch transactionally, leave
+    inactive branches unread, and seed newly active fields into `old` so a
+    shape transition cannot manufacture a split from storage defaults.
+  - [ ] Replace every maintained example, test, guide, hover, completion item,
+    and generated-reference entry that still teaches `layout`, `Layout`, or
+    `StateLayout` with ordinary globals/state fields. Remove the old grammar,
+    AST nodes, generated symbols, backend storage, and layout-return contract
+    from `onAttach`; retain at most a focused migration diagnostic.
+  - [ ] Document compiler-initialized attachment globals in hover/reference
+    output and diagnose partial mixed ownership when one shape dimension is
+    assigned by `onAttach` while another is expected from metadata.
   - [x] Allow state and managed-class fields to be conditioned by ordinary,
-    statically decidable predicates over global layout dimensions. Type-check
-    those predicates once, reject runtime-dependent conditions, and use the
-    same predicate representation for member availability, control-flow
-    refinement, binding, diagnostics, and code generation.
+    statically decidable predicates over finite enum dimensions. Type-check
+    those predicates once and use the same predicate representation for member
+    availability, control-flow refinement, binding, diagnostics, and codegen.
   - [x] Support `else if` and `else` chains for conditional state and managed
     fields. Represent every branch as the exact bounded set of layout
     assignments left after preceding branches, so complements across several
@@ -162,11 +175,11 @@ to inference or code generation.
     generated polling code.
   - [x] Make managed schema probes contribute constraints to the global layout
     dimensions. Probe results preserve both offsets and presence. When the
-    complete set of conditional fields gives every bounded layout combination
-    a distinct exact presence pattern, attachment selects the generated
-    `Layout` automatically before user `onAttach` code runs. Otherwise require
-    an explicit `onAttach` return and explain why automatic selection is not
-    decisive. The compiler bounds the product rather than eagerly enumerating
+    complete set of conditional fields gives every bounded shape combination
+    a distinct exact presence pattern, attachment initializes the responsible
+    bare globals automatically before user `onAttach` code runs. Otherwise
+    require direct `onAttach` assignments and explain why automatic selection
+    is not decisive. The compiler bounds the product rather than enumerating
     an unbounded cartesian product, and a failed automatic match rejects that
     process for the remainder of its lifetime.
   - [x] Remove generated `<Class>.Layout` enums, `<Class>.layout` values, and
@@ -181,7 +194,7 @@ to inference or code generation.
     the low-level evidence source for global layout constraints.
   - [x] Replace the temporary inert zero-match behavior with a focused runtime
     attachment report naming every observed conditional managed field and the
-    expected presence pattern of each responsible source `Layout`. Distinct
+    expected presence pattern of each responsible source shape. Distinct
     exact patterns make multiple runtime matches impossible; indistinguishable
     patterns remain a compile-time error.
 

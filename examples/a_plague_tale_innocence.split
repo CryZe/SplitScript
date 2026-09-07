@@ -77,9 +77,11 @@ settings {
     },
 }
 
+enum PlagueTaleBuild { Steam, Epic, Xbox }
+let build: PlagueTaleBuild
+
 state "APlagueTaleInnocence_x64" {
-    /// Steam executable layout.
-    layout Steam {
+    if build is PlagueTaleBuild.Steam {
         /// Whether the audio runtime reports a loading screen.
         loading: bool at "WwiseLibPCx64R.dll", 0x262521;
         /// Player-control state used to detect a new run.
@@ -88,9 +90,7 @@ state "APlagueTaleInnocence_x64" {
         map at "APlagueTaleInnocence_x64", 0x015206E0, 0x88, 0x0, 0xD0, 0x990, 0x260 as utf8(50);
         /// Cutscene state used by the final ending split.
         cutsceneState: i32 at "APlagueTaleInnocence_x64", 0x164BC34;
-    },
-    /// Epic Games Store executable layout.
-    layout Epic {
+    } else if build is PlagueTaleBuild.Epic {
         /// Whether the audio runtime reports a loading screen.
         loading: bool at "WwiseLibPCx64R.dll", 0x262521;
         /// Player-control state used to detect a new run.
@@ -99,9 +99,7 @@ state "APlagueTaleInnocence_x64" {
         map at "APlagueTaleInnocence_x64", 0x016AADC0, 0x10, 0x110, 0xD8, 0x10, 0x30, 0x170, 0x260 as utf8(50);
         /// Cutscene state used by the final ending split.
         cutsceneState: i32 at "APlagueTaleInnocence_x64", 0x164B9F4;
-    },
-    /// Xbox executable layout.
-    layout Xbox {
+    } else {
         /// Whether the audio runtime reports a loading screen.
         loading: bool at "WwiseLibPCx64R.dll", 0x262521;
         /// Player-control state used to detect a new run.
@@ -110,7 +108,7 @@ state "APlagueTaleInnocence_x64" {
         map at "MessageBus.dll", 0x005C0DE0, 0x340, 0x668 as utf8(50);
         /// Xbox has no known cutscene-state address, so its ending trigger is unavailable.
         cutsceneState: i32 = 0;
-    },
+    }
 }
 
 /// Bit set of chapter-entry splits already emitted during the current run.
@@ -228,11 +226,14 @@ onAttach {
     attachedOnce = true
     let executable = await process.mainModule()
     if executable.size == 25_473_024 {
-        return StateLayout.Steam
+        build = PlagueTaleBuild.Steam
+        return
     } else if executable.size == 25_284_608 {
-        return StateLayout.Epic
+        build = PlagueTaleBuild.Epic
+        return
     } else if executable.size == 27_566_080 {
-        return StateLayout.Xbox
+        build = PlagueTaleBuild.Xbox
+        return
     }
 
     print(`unsupported A Plague Tale: Innocence module size {executable.size}`)

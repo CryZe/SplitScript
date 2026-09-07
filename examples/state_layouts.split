@@ -1,35 +1,45 @@
+enum Build {
+    Steam,
+    GOG,
+}
+
+let build: Build
+
 state "LayoutGame.exe" {
-    /// Steam build memory layout.
-    layout Steam {
+    if build is Build.Steam {
+        /// Value stored at the Steam address.
         value: u32 at 0x1000;
+        /// Steam's byte-sized checkpoint.
         checkpoint: u8 at 0x1100;
-    },
-    /// GOG build memory layout.
-    layout GOG {
+    } else {
+        /// Value stored at the GOG address.
         value: u32 at 0x2000;
+        /// GOG's word-sized checkpoint.
         checkpoint: u16 at 0x2100;
-    },
+    }
 }
 
 onAttach {
     let module = await process.mainModule()
     if module.size == 0x1000 {
-        return StateLayout.Steam
+        build = Build.Steam
+        return
     }
     if module.size == 0x2000 {
-        return StateLayout.GOG
+        build = Build.GOG
+        return
     }
     await process.closed()
 }
 
 whileAttached {
-    setVariable("Layout", match layout {
-        StateLayout.Steam => "Steam",
-        StateLayout.GOG => "GOG",
+    setVariable("Layout", match build {
+        Build.Steam => "Steam",
+        Build.GOG => "GOG",
     })
-    setVariable("Checkpoint", match layout {
-        StateLayout.Steam => current.checkpoint as u16,
-        StateLayout.GOG => current.checkpoint,
+    setVariable("Checkpoint", match build {
+        Build.Steam => current.checkpoint as u16,
+        Build.GOG => current.checkpoint,
     })
 }
 

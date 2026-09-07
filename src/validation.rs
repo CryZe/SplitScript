@@ -2255,6 +2255,37 @@ fn validate_unused_declarations(
     fully_observed_types.extend(state_execution_roots.fully_observed_types.iter().copied());
     pending.extend(state_execution_roots.dependencies);
 
+    // Conditional schema predicates are compiler-consumed runtime reads. They
+    // are not ordinary HIR expressions, so seed their globals, discriminator
+    // state fields, and matched variants explicitly into the same reachability
+    // graph used for user-authored reads.
+    let predicates = syntax
+        .state
+        .iter()
+        .flat_map(|state| state.all_fields())
+        .filter_map(|field| semantics.state_field_layout_predicate(field.id))
+        .chain(
+            syntax
+                .managed_class_declarations()
+                .into_iter()
+                .flat_map(|class| class.all_fields())
+                .filter_map(|field| semantics.managed_field_layout_predicate(field.id)),
+        );
+    for predicate in predicates {
+        for constraint in predicate.alternatives.iter().flatten() {
+            observed_enum_variants.insert(constraint.variant);
+            match constraint.dimension {
+                crate::semantic::ResolvedLayoutDimension::Global(value) => {
+                    pending.push_back((DeclarationWorkItem::Global(value), UseProfiles::ALL))
+                }
+                crate::semantic::ResolvedLayoutDimension::StateField(value) => {
+                    observed_state_fields.insert(value);
+                }
+                crate::semantic::ResolvedLayoutDimension::LayoutField(_) => {}
+            }
+        }
+    }
+
     // State storage and settings declarations exist at runtime even when user
     // code never reads their values. Their complete value types therefore
     // seed nominal type reachability. This does not make the internal state

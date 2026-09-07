@@ -264,7 +264,7 @@ const expectedBindingFailure = ambiguousClass
             : missingField
                 ? "no Unity field matches metadata names"
                 : mixedLayout
-                    ? "Could not select an attachment layout"
+                    ? "Could not select the attachment shape"
                 : undefined;
 if (expectedBindingFailure !== undefined) {
     if (variableWrites !== 0) {
@@ -277,11 +277,11 @@ if (expectedBindingFailure !== undefined) {
         for (const expected of [
             "Assembly-CSharp::GameManager.level",
             "Assembly-CSharp::GameManager.scene",
-            "Expected `Layout { edition: Edition.BaseGame }`",
-            "Expected `Layout { edition: Edition.DlcDemo }`",
+            "Expected attachment shape `edition = Edition.BaseGame`",
+            "Expected attachment shape `edition = Edition.DlcDemo`",
         ]) {
             if (!messages.some(message => message.includes(expected))) {
-                throw new Error(`layout report omitted ${JSON.stringify(expected)}: ${JSON.stringify(messages)}`);
+                throw new Error(`shape report omitted ${JSON.stringify(expected)}: ${JSON.stringify(messages)}`);
             }
         }
     }

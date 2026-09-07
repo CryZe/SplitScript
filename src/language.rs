@@ -141,34 +141,41 @@ split {
     }
 }"#;
 
-const MULTI_LAYOUT_STATE_SOURCE: &str = r#"state "game.exe" {
-    layout Steam {
+const MULTI_LAYOUT_STATE_SOURCE: &str = r#"enum Build {
+    Steam,
+    GOG,
+}
+
+let build: Build
+
+state "game.exe" {
+    if build == Build.Steam {
         level: u32 at 0x1000;
         checkpoint: u8 at 0x1100;
-    },
-
-    layout GOG {
+    } else {
         level: u32 at 0x2000;
         checkpoint: u16 at 0x2100;
-    },
+    }
 }
 
 onAttach {
     let module = await process.mainModule()
     if module.size == 10_000 {
-        return StateLayout.Steam
+        build = Build.Steam
+        return
     }
     if module.size == 20_000 {
-        return StateLayout.GOG
+        build = Build.GOG
+        return
     }
     await process.closed()
 }
 
 whileAttached {
     setVariable("Level", current.level)
-    setVariable("Checkpoint", match layout {
-        StateLayout.Steam => current.checkpoint as u16,
-        StateLayout.GOG => current.checkpoint,
+    setVariable("Checkpoint", match build {
+        Build.Steam => current.checkpoint as u16,
+        Build.GOG => current.checkpoint,
     })
 }"#;
 
@@ -176,6 +183,8 @@ const MANAGED_IMAGE_SOURCE: &str = r#"enum Edition {
     BaseGame,
     Demo,
 }
+
+let edition: Edition
 
 image "Assembly-CSharp" {
     class Player {
@@ -186,7 +195,7 @@ image "Assembly-CSharp" {
         static GameManager instance;
         Player player;
 
-        if layout.edition == Edition.BaseGame {
+        if edition == Edition.BaseGame {
             u32 level;
         } else {
             u32 scene;
@@ -195,22 +204,16 @@ image "Assembly-CSharp" {
 }
 
 state Unity ["game.exe"] {
-    layout {
-        edition: Edition,
-    }
     manager: GameManager = GameManager.instance?.snapshot()?
 }
 
 onAttach {
     let managers = await GameManager.instances()
     print(managers.length())
-    return Layout {
-        edition: Edition.BaseGame,
-    }
 }
 
 whileAttached {
-    if layout.edition == Edition.BaseGame {
+    if edition == Edition.BaseGame {
         print(current.manager.level)
     }
     else {
@@ -1398,7 +1401,7 @@ define_language_catalog! {
         "An [`image`] schema names the managed assembly image that owns its classes. The [`Unity`] state provider resolves the reachable image and class metadata once per attachment before state polling begins. Unused schema declarations do not retain generated binding or reading code. Schema declarations describe metadata; they do not read live game memory until a [`static`] or instance field path is evaluated. Runtime image traversal is a private implementation detail of the provider rather than an alternative public workflow.",
         &[Example::checked(
             "Describe a managed assembly image",
-            "image \"Assembly-CSharp\" {\n    class Player {\n        u32 score;\n    }\n\n    class GameManager from [\"Manager\", \"GameManager\"] {\n        static GameManager instance;\n        Player player;\n\n        if layout.edition == Edition.BaseGame {\n            u32 level;\n        } else {\n            u32 scene;\n        }\n    }\n}",
+            "image \"Assembly-CSharp\" {\n    class Player {\n        u32 score;\n    }\n\n    class GameManager from [\"Manager\", \"GameManager\"] {\n        static GameManager instance;\n        Player player;\n\n        if edition == Edition.BaseGame {\n            u32 level;\n        } else {\n            u32 scene;\n        }\n    }\n}",
             MANAGED_IMAGE_SOURCE,
         )]
     ),
@@ -1419,9 +1422,9 @@ define_language_catalog! {
         ManagedClass,
         "class",
         LanguageItemKind::Declaration,
-        "class Name from [\"Alias\", ...] { Type field; static Type field; if layout.dimension == Variant { ... } }",
+        "class Name from [\"Alias\", ...] { Type field; static Type field; if shape == Variant { ... } }",
         "Declares a typed managed class binding.",
-        "The class name `T` denotes an immutable local snapshot, while `T.Ref` denotes a live remote object reference. Fields without [`static`] are read fallibly from a `T.Ref`; static fields are read through the class name. Each live field hop yields [`T!`], so postfix [`?`] can propagate an unsuccessful lookup to the surrounding state field, function, or [`retry`] boundary. Calling `reference.snapshot()` reads every active instance field first and exposes one [`T!`] only when the complete snapshot succeeds; no partially populated object escapes when a read fails. Conditional fields follow the refined attachment [`layout`]. Live scalar paths reread remote memory without allocating a GC object, while snapshots and arrays materialize owned values. `await T.instances()` cooperatively scans readable, writable, non-executable process memory and returns a completed `[T.Ref]` snapshot. A [`UnityGameObject`](type@UnityGameObject) obtained through `unity.scenes` can use `component<T>()` to find the same typed `T.Ref` by runtime class. Both traversal paths are bounded, and generated binders, readers, snapshots, and scans are retained only when used. The optional [`from`] list supplies runtime metadata names. Fields declared directly in the class are always available. Put build-specific fields in an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain over the attachment-wide [`layout`] value. Each later branch describes exactly the layouts left unmatched by earlier branches, and the same branch predicate refines those fields in ordinary code. Mono and IL2CPP metadata traversal remains private to the [`Unity`] provider.",
+        "The class name `T` denotes an immutable local snapshot, while `T.Ref` denotes a live remote object reference. Fields without [`static`] are read fallibly from a `T.Ref`; static fields are read through the class name. Each live field hop yields [`T!`], so postfix [`?`] can propagate an unsuccessful lookup to the surrounding state field, function, or [`retry`] boundary. Calling `reference.snapshot()` reads every active instance field first and exposes one [`T!`] only when the complete snapshot succeeds; no partially populated object escapes when a read fails. Live scalar paths reread remote memory without allocating a GC object, while snapshots and arrays materialize owned values. `await T.instances()` cooperatively scans readable, writable, non-executable process memory and returns a completed `[T.Ref]` snapshot. A [`UnityGameObject`](type@UnityGameObject) obtained through `unity.scenes` can use `component<T>()` to find the same typed `T.Ref` by runtime class. Both traversal paths are bounded, and generated binders, readers, snapshots, and scans are retained only when used. The optional [`from`] list supplies runtime metadata names. Fields declared directly in the class are always available. Put build-specific fields in an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain over an enum global initialized during [`onAttach`]. When the managed metadata uniquely identifies the enum variant, the [`Unity`] provider initializes that global automatically. Each later branch describes exactly the variants left unmatched by earlier branches, and the same predicate refines those fields in ordinary code. Mono and IL2CPP metadata traversal remains private to the [`Unity`] provider.",
         &[
             Example::checked(
                 "Follow a typed managed field path",
@@ -1464,7 +1467,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "class Name from \"MetadataName\" { ... } | Type field from [\"name\", \"fallback\"];",
         "Supplies one or more runtime metadata names for a managed declaration.",
-        "Without [`from`], a managed [`class`] or field uses its SplitScript declaration name for metadata lookup. A single quoted name replaces that default. An array describes equivalent runtime names, which supports renamed classes and fields across builds without changing the stable source-facing name. The binder requires one unambiguous match rather than selecting whichever candidate happens to be discovered first. For an instance field without an explicit [`from`], lookup also accepts the conventional C# automatic-property backing-field spelling. Metadata aliases do not create a public layout dimension; use [`layout`] only when the source-visible shape or behavior actually differs. Editor rename preserves the effective metadata candidates by inserting an explicit [`from`] clause when changing a declaration whose source name was still implicit.",
+        "Without [`from`], a managed [`class`] or field uses its SplitScript declaration name for metadata lookup. A single quoted name replaces that default. An array describes equivalent runtime names, which supports renamed classes and fields across builds without changing the stable source-facing name. The binder requires one unambiguous match rather than selecting whichever candidate happens to be discovered first. For an instance field without an explicit [`from`], lookup also accepts the conventional C# automatic-property backing-field spelling. Metadata aliases do not create a source-visible shape discriminator; use an ordinary enum global when the source-visible shape or behavior actually differs. Editor rename preserves the effective metadata candidates by inserting an explicit [`from`] clause when changing a declaration whose source name was still implicit.",
         &[Example::checked(
             "Try alternate managed field names",
             "u32 score from [\"_score\", \"<Score>k__BackingField\"];",
@@ -1490,7 +1493,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "state \"game.exe\" { ... } | state Provider { ... } | state { provider Name: Provider { ... }, ... }",
         "Declares process attachment and persistent watched state.",
-        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. A named standard-library provider selects a typed memory model. [`Unity`] binds managed [`image`] schemas while [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`], [`GCN`], and [`Wii`] expose emulator-specific read roots and accept original console addresses in state fields. When one autosplitter supports genuinely different runtimes, a `state { provider Name: Provider { ... }, ... }` declaration cooperatively tries the alternatives that accept the attached process and selects the first one that completes. The read-only `provider: StateProvider` value identifies that choice. Fields with compatible declarations in every alternative remain directly available through [`current`] and [`old`]; a direct [`match`] on [`provider`] exposes alternative-only fields and provider roots. Process names shared by alternatives are attached only once. A provider alternative must read directly from an attached process; providers with a prepared schema or attachment context, such as [`Unity`], use the concise single-provider form. For one provider with several build-specific memory shapes, use named [`layout`] blocks. With attachment-wide layout dimensions, conditional state fields may use an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain; later branches cover the exact layout combinations left unmatched by earlier branches. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. A field may use another field from the same active layout by name, including as the base of an [`at`](syntax@at) path. Declaration order is irrelevant: the compiler evaluates dependencies first and rejects cycles. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful independent fields advance; a dependent field is not evaluated when one of its dependencies fails. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
+        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. A named standard-library provider selects a typed memory model. [`Unity`] binds managed [`image`] schemas while [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`], [`GCN`], and [`Wii`] expose emulator-specific read roots and accept original console addresses in state fields. When one autosplitter supports genuinely different runtimes, a `state { provider Name: Provider { ... }, ... }` declaration cooperatively tries the alternatives that accept the attached process and selects the first one that completes. The read-only `provider: StateProvider` value identifies that choice. Fields with compatible declarations in every alternative remain directly available through [`current`] and [`old`]; a direct [`match`] on [`provider`] exposes alternative-only fields and provider roots. Process names shared by alternatives are attached only once. A provider alternative must read directly from an attached process; providers with a prepared schema or attachment context, such as [`Unity`], use the concise single-provider form. Build-specific fields may use an [`if`] / [`else if`](keyword@if) / [`else`](keyword@if) chain over an enum global initialized during [`onAttach`], or over an enum state field when the shape can change while attached. Later branches cover the exact variants left unmatched by earlier branches. Compatible fields declared in every possible branch remain directly available; other fields require the corresponding predicate or [`match`] refinement. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. A field may use another field from the same active branch by name, including as the base of an [`at`](syntax@at) path. Declaration order is irrelevant: the compiler evaluates dependencies first and rejects cycles. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful independent fields advance; a dependent field is not evaluated when one of its dependencies fails. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
         STATE_DECL_EXAMPLES
     ),
     language_item!(
@@ -1523,21 +1526,21 @@ define_language_catalog! {
         )]
     ),
     language_item!(
-        StateLayout,
-        "layout",
+        ConditionalStateFields,
+        "conditional fields",
         LanguageItemKind::Declaration,
-        "state { layout { dimension: Type } ... } | state { layout Name { field at address } }",
-        "Declares attachment-wide build dimensions or a named state memory shape.",
-        "An unnamed `layout { ... }` declares independent attachment-wide dimensions. When conditional managed fields give every possible combination a unique presence pattern, attachment selects the generated `Layout` automatically before user [`onAttach`] code runs. Otherwise [`onAttach`] returns `Layout { ... }` explicitly after checking the remaining build facts. The read-only [`layout`] value is then available to state expressions, managed [`class`] conditions, and lifecycle code. A predicate such as `layout.edition == Edition.BaseGame` refines every state and managed field declared under that same predicate. For a two-variant dimension, the corresponding [`else`] branch refines to the other variant. This keeps build facts in one place even when native state and several managed classes vary independently. A named `layout Name { ... }` instead declares one complete state memory shape. Compatible fields shared by every named shape form the common snapshot interface; other fields become available after a direct [`match`] on the generated `StateLayout` value. [`await`] [`Process.closed`] represents an unsupported build without repeatedly reattaching.",
+        "let shape: Shape; state Provider { if shape == Shape.Variant { ... } else { ... } }",
+        "Declares fields whose availability follows an ordinary enum value.",
+        "A bare enum global assigned on every successful [`onAttach`] path is an attachment-scoped shape discriminator. It is frozen after attachment and can guard conditional fields in both [`state`] and managed [`class`] declarations. The [`Unity`] provider can initialize such a global automatically when the active managed metadata uniquely identifies one variant; otherwise `onAttach` assigns it explicitly. An enum-valued state field can instead describe a shape that changes while attached. The compiler tracks either kind through [`if`] / [`else if`](keyword@if) / [`else`](keyword@if), direct [`match`], and [`is`] conditions. Compatible fields present with the same type in every possible branch form the common snapshot interface. Other fields are available only where their predicate has been proven. Dynamic branch transitions are transactional: newly active fields must all read successfully, and their first accepted values seed [`old`] and [`current`] equally.",
         &[
             Example::checked(
-                "Select and refine a supported build",
-                "layout Steam {\n    level: u32 at 0x1000;\n    checkpoint: u8 at 0x1100;\n}",
+                "Select and refine a supported build shape",
+                "if build == Build.Steam {\n    level: u32 at 0x1000;\n    checkpoint: u8 at 0x1100;\n} else {\n    level: u32 at 0x2000;\n    checkpoint: u16 at 0x2100;\n}",
                 MULTI_LAYOUT_STATE_SOURCE,
             ),
             Example::checked(
-                "Refine managed fields with the shared layout",
-                "if layout.edition == Edition.BaseGame {\n    print(manager.level else 0)\n} else {\n    print(manager.scene else 0)\n}",
+                "Refine managed fields with the shared discriminator",
+                "if edition == Edition.BaseGame {\n    print(manager.level else 0)\n} else {\n    print(manager.scene else 0)\n}",
                 MANAGED_IMAGE_SOURCE,
             ),
         ]
@@ -1548,7 +1551,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "field: T at module-or-field, offset, ... | field: T? at module-or-field, offset, ...",
         "Reads a persistent state field through a pointer path.",
-        "A string selects a module-relative pointer base, an integer selects an absolute base, and a sibling field name uses that field's candidate value as a dynamic base. Each following integer is an address offset. Sibling references are independent of declaration order, must stay within the active named layout, and may also appear in expression-backed fields. The compiler evaluates their dependency graph in order and rejects cycles. If a dependency fails, the dependent read is skipped and retains its previous accepted value. A required `T` field is a [`T!`] boundary: initialization waits for it, while a later failed read retains its last accepted value. An explicitly optional [`T?`] field instead accepts its own read failure as [`None`] and a successful read as [`Some`]`(T)`, so absence is observable in [`current`] and [`old`]. The exact memory representation must be explicit or inferred from an exact use; optional read semantics require the [`T?`] annotation. A memory-readable [`[T; N]`] field reads the complete contiguous array in one operation and is limited to 4,096 elements and 65,536 bytes. For a larger region when only selected values are needed, use an expression-valued state field that constructs a growable [`[T]`] from focused reads instead of declaring one oversized fixed array.",
+        "A string selects a module-relative pointer base, an integer selects an absolute base, and a sibling field name uses that field's candidate value as a dynamic base. Each following integer is an address offset. Sibling references are independent of declaration order, must stay within the same active conditional branch, and may also appear in expression-backed fields. The compiler evaluates their dependency graph in order and rejects cycles. If a dependency fails, the dependent read is skipped and retains its previous accepted value. A required `T` field is a [`T!`] boundary: initialization waits for it, while a later failed read retains its last accepted value. An explicitly optional [`T?`] field instead accepts its own read failure as [`None`] and a successful read as [`Some`]`(T)`, so absence is observable in [`current`] and [`old`]. The exact memory representation must be explicit or inferred from an exact use; optional read semantics require the [`T?`] annotation. A memory-readable [`[T; N]`] field reads the complete contiguous array in one operation and is limited to 4,096 elements and 65,536 bytes. For a larger region when only selected values are needed, use an expression-valued state field that constructs a growable [`[T]`] from focused reads instead of declaring one oversized fixed array.",
         STATE_POINTER_EXAMPLE
     ),
     language_item!(
@@ -1557,7 +1560,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "field at address as utf8(maxBytes)",
         "Decodes a bounded native UTF-8 string state field.",
-        "This is state-layout sugar for a bounded read-and-decode operation, not a string-size type. It follows the complete pointer path, reads at most 4096 bytes once, and stops at the first NUL byte. A required field rejects its candidate when memory cannot be read or the bytes are not valid UTF-8; an explicitly annotated optional [`String`] ([`T?`]) field observes that failure as [`None`]. Without the optional annotation, the field type is inferred as [`String`].",
+        "This is state-field sugar for a bounded read-and-decode operation, not a string-size type. It follows the complete pointer path, reads at most 4096 bytes once, and stops at the first NUL byte. A required field rejects its candidate when memory cannot be read or the bytes are not valid UTF-8; an explicitly annotated optional [`String`] ([`T?`]) field observes that failure as [`None`]. Without the optional annotation, the field type is inferred as [`String`].",
         NATIVE_STRING_DECODER_EXAMPLE
     ),
     language_item!(
@@ -1566,7 +1569,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "field at address as utf16le(maxUtf16Units)",
         "Decodes a bounded native UTF-16LE string state field.",
-        "This state-layout sugar follows the complete pointer path, reads at most 2048 little-endian UTF-16 code units once, and stops at the first NUL code unit. Unpaired surrogate code units become the Unicode replacement character. A required field rejects its candidate when memory cannot be read; an explicitly annotated optional [`String`] ([`T?`]) field observes that failure as [`None`]. Without the optional annotation, the field type is inferred as [`String`].",
+        "This state-field sugar follows the complete pointer path, reads at most 2048 little-endian UTF-16 code units once, and stops at the first NUL code unit. Unpaired surrogate code units become the Unicode replacement character. A required field rejects its candidate when memory cannot be read; an explicitly annotated optional [`String`] ([`T?`]) field observes that failure as [`None`]. Without the optional annotation, the field type is inferred as [`String`].",
         NATIVE_UTF16LE_DECODER_EXAMPLE
     ),
     language_item!(
@@ -2103,7 +2106,7 @@ define_language_catalog! {
         SelectProcess,
         "selectProcess",
         "Chooses among same-name process candidates.",
-        "Runs synchronously for each candidate before provider setup and [`onAttach`]. The candidate is exposed as [`process`](provider@Native). Return `true` to accept it or `false` to try another candidate. This block is an implicit error boundary: postfix [`?`] and [`throw`] reject only the current candidate. Falling through also rejects the candidate. State snapshots, provider roots, [`layout`], and attachment-scoped globals are not initialized yet.",
+        "Runs synchronously for each candidate before provider setup and [`onAttach`]. The candidate is exposed as [`process`](provider@Native). Return `true` to accept it or `false` to try another candidate. This block is an implicit error boundary: postfix [`?`] and [`throw`] reject only the current candidate. Falling through also rejects the candidate. State snapshots, provider roots, and attachment-scoped globals are not initialized yet.",
         "selectProcess {\n    let path = process.path()?\n    return path.endsWith(\"/wanted/game.exe\")\n}",
         related: &[LanguageItemId::ResultType, LanguageItemId::Propagate, LanguageItemId::Throw, LanguageItemId::OnAttach]
     ),
@@ -2112,7 +2115,7 @@ define_language_catalog! {
         OnDetach,
         "onDetach",
         "Handles closure of a successfully initialized process.",
-        "Runs synchronously once when a process whose [`onAttach`] completed closes, after its unusable handle, provider state, selected layout, and pending continuations are cleared. It does not run when attachment initialization was still pending or rejected the process through postfix [`?`] or [`throw`], and it never runs for the initial detached state; use [`setup`] for one-time script initialization. Process and state snapshots are unavailable.",
+        "Runs synchronously once when a process whose [`onAttach`] completed closes, after its unusable handle, provider state, attachment-scoped globals, and pending continuations are cleared. It does not run when attachment initialization was still pending or rejected the process through postfix [`?`] or [`throw`], and it never runs for the initial detached state; use [`setup`] for one-time script initialization. Process and state snapshots are unavailable.",
         "onDetach {\n    timer.pauseGameTime()\n}"
     ),
     action_item!(
@@ -2120,9 +2123,9 @@ define_language_catalog! {
         OnAttach,
         "onAttach",
         "Initializes one attached process.",
-        "This action is implicitly suspending and owns process-lifetime cancellation for [`await`] and [`retry`] continuations. It is also an implicit error boundary: postfix [`?`] or [`throw`] rejects this process, keeps its handle inert until it closes, and never runs [`onDetach`] for the incomplete attachment. When the [`state`] declaration contains named [`layout`] declarations, a successful path returns the generated layout variant that should be polled.",
+        "This action is implicitly suspending and owns process-lifetime cancellation for [`await`] and [`retry`] continuations. It is also an implicit error boundary: postfix [`?`] or [`throw`] rejects this process, keeps its handle inert until it closes, and never runs [`onDetach`] for the incomplete attachment. A bare global assigned on every successful path becomes attachment-scoped and may select conditional [`state`] and managed [`class`] fields. Attachment-scoped globals are frozen after this action completes.",
         "onAttach {\n    let module = await process.module(\"GameAssembly.dll\")\n}",
-        related: &[LanguageItemId::State, LanguageItemId::StateLayout, LanguageItemId::Await, LanguageItemId::Retry, LanguageItemId::Propagate, LanguageItemId::Throw, LanguageItemId::OnStateReady]
+        related: &[LanguageItemId::State, LanguageItemId::ConditionalStateFields, LanguageItemId::Await, LanguageItemId::Retry, LanguageItemId::Propagate, LanguageItemId::Throw, LanguageItemId::OnStateReady]
     ),
     action_item!(
         OnStateReady,
@@ -2137,7 +2140,7 @@ define_language_catalog! {
         OnStart,
         "onStart",
         "Reacts after the timer starts.",
-        "Runs once when consecutive updates observe the timer leave [`TimerState.NotRunning`]. A bare global assigned on every completing path becomes attempt-scoped: it remains live across process detach and is cleared after [`onReset`]. The first update establishes a baseline without firing, so loading during an active attempt does not synthesize initialization. Observation happens after settings refresh but before process attachment and state polling, so this action can run while detached. Process providers, attachment-scoped globals, [`layout`], [`current`], and [`old`] are unavailable. A start requested by this script is observed on the following update rather than invoking this action directly from the [`start`] decision.",
+        "Runs once when consecutive updates observe the timer leave [`TimerState.NotRunning`]. A bare global assigned on every completing path becomes attempt-scoped: it remains live across process detach and is cleared after [`onReset`]. The first update establishes a baseline without firing, so loading during an active attempt does not synthesize initialization. Observation happens after settings refresh but before process attachment and state polling, so this action can run while detached. Process providers, attachment-scoped globals, [`current`], and [`old`] are unavailable. A start requested by this script is observed on the following update rather than invoking this action directly from the [`start`] decision.",
         "let elapsed\n\nonStart {\n    elapsed = 0.0\n}"
     ),
     action_item!(
@@ -2145,7 +2148,7 @@ define_language_catalog! {
         OnReset,
         "onReset",
         "Reacts after the timer resets.",
-        "Runs once when consecutive updates observe the timer enter [`TimerState.NotRunning`]. Attempt-scoped globals remain available during this action and are cleared after it completes. The first update establishes a baseline without firing. Observation happens after settings refresh but before process attachment and state polling, so the action remains available while detached. Process providers, attachment-scoped globals, [`layout`], [`current`], and [`old`] are unavailable. A reset requested by this script is observed on the following update rather than invoking this action directly from the [`reset`] decision.",
+        "Runs once when consecutive updates observe the timer enter [`TimerState.NotRunning`]. Attempt-scoped globals remain available during this action and are cleared after it completes. The first update establishes a baseline without firing. Observation happens after settings refresh but before process attachment and state polling, so the action remains available while detached. Process providers, attachment-scoped globals, [`current`], and [`old`] are unavailable. A reset requested by this script is observed on the following update rather than invoking this action directly from the [`reset`] decision.",
         "onReset {\n    print(\"Attempt reset\")\n}"
     ),
     action_item!(
@@ -2375,56 +2378,56 @@ impl LanguageCatalog {
             },
             ActionKind::OnAttach => ActionReferenceFacts {
                 timing: "Once after acquiring and preparing a process",
-                available_context: "process, prepared provider roots, settings, and globals; layout when already selected",
+                available_context: "process, prepared provider roots, settings, and globals",
                 suspension: "await and retry allowed; ? and throw reject; cancelled on process close",
-                result: "None, Layout, or StateLayout on success; implicit error boundary",
-                fallthrough: "finish attachment when no layout result is required",
+                result: "None on success; implicit error boundary",
+                fallthrough: "finish attachment",
             },
             ActionKind::OnStateReady => ActionReferenceFacts {
                 timing: "Once after the first complete state snapshot",
-                available_context: "process, provider roots, layout, globals, old, and current",
+                available_context: "process, provider roots, globals, old, and current",
                 suspension: "not allowed",
                 result: "None",
                 fallthrough: "complete initialization",
             },
             ActionKind::WhileAttached => ActionReferenceFacts {
                 timing: "Every initialized attached update after state refresh",
-                available_context: "process, provider roots, layout, globals, old, and current",
+                available_context: "process, provider roots, globals, old, and current",
                 suspension: "await and retry allowed; one invocation is polled per update and cancelled on process close",
                 result: "bool",
                 fallthrough: "true; continue to timer decisions after completion; pending skips them",
             },
             ActionKind::Start => ActionReferenceFacts {
                 timing: "After whileAttached when the sampled timer is NotRunning",
-                available_context: "process, provider roots, layout, globals, old, and current",
+                available_context: "process, provider roots, globals, old, and current",
                 suspension: "not allowed",
                 result: "bool",
                 fallthrough: "false; do not start",
             },
             ActionKind::IsLoading => ActionReferenceFacts {
                 timing: "After start handling when the sampled timer is Running or Paused",
-                available_context: "process, provider roots, layout, globals, old, and current",
+                available_context: "process, provider roots, globals, old, and current",
                 suspension: "not allowed",
                 result: "bool?",
                 fallthrough: "None; retain the current loading state",
             },
             ActionKind::GameTime => ActionReferenceFacts {
                 timing: "After isLoading when the sampled timer is Running or Paused",
-                available_context: "process, provider roots, layout, globals, old, and current",
+                available_context: "process, provider roots, globals, old, and current",
                 suspension: "not allowed",
                 result: "Duration?",
                 fallthrough: "None; retain the current game time",
             },
             ActionKind::Reset => ActionReferenceFacts {
                 timing: "After loading and game-time updates when the sampled timer is Running or Paused",
-                available_context: "process, provider roots, layout, globals, old, and current",
+                available_context: "process, provider roots, globals, old, and current",
                 suspension: "not allowed",
                 result: "bool",
                 fallthrough: "false; continue to split",
             },
             ActionKind::Split => ActionReferenceFacts {
                 timing: "After reset declines when the sampled timer is Running or Paused",
-                available_context: "process, provider roots, layout, globals, old, and current",
+                available_context: "process, provider roots, globals, old, and current",
                 suspension: "not allowed",
                 result: "bool",
                 fallthrough: "false; do not split",

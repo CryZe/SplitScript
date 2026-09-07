@@ -948,6 +948,24 @@ fn generalize_component(checker: &mut Checker, functions: &[FunctionId]) {
 }
 
 fn check_action_bodies(checker: &mut Checker, program: &Program) {
+    if let Some((assigned, missing)) = crate::layout_selection::partial_shape_selection(program)
+        && let Some(action) = program
+            .actions
+            .iter()
+            .find(|action| action.kind == ActionKind::OnAttach)
+    {
+        checker.errors.push(
+            Diagnostic::type_error(
+                "`onAttach` cannot mix explicit and provider-inferred attachment shape",
+                action.span,
+            )
+            .with_primary_label(
+                "assign every attachment-shape global here, or let provider metadata initialize all of them",
+            )
+            .with_note(format!("assigned here: {}", assigned.join(", ")))
+            .with_note(format!("still provider-inferred: {}", missing.join(", "))),
+        );
+    }
     let explicit_attachment_layout =
         crate::layout_selection::has_explicit_layout_selection(program);
     let automatic_attachment_layout = !explicit_attachment_layout

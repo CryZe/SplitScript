@@ -51,6 +51,7 @@ pub const fn action_has_attempt_scope(action: ActionKind) -> bool {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScopedGlobalAnalysis {
     lifetimes: HashMap<ValueId, GlobalLifetime>,
+    compiler_initialized: HashSet<ValueId>,
     layouts: Vec<AttachmentLayout>,
     available_in: HashMap<ValueId, HashSet<AttachmentLayout>>,
     function_layouts: HashMap<FunctionId, HashSet<AttachmentLayout>>,
@@ -69,6 +70,10 @@ impl ScopedGlobalAnalysis {
 
     pub fn is_attachment_global(&self, value: ValueId) -> bool {
         self.lifetime(value) == Some(GlobalLifetime::Attachment)
+    }
+
+    pub fn is_compiler_initialized(&self, value: ValueId) -> bool {
+        self.compiler_initialized.contains(&value)
     }
 
     pub fn is_attempt_global(&self, value: ValueId) -> bool {
@@ -175,6 +180,7 @@ pub(crate) fn analyze(
     );
     let mut analysis = ScopedGlobalAnalysis {
         lifetimes: HashMap::new(),
+        compiler_initialized: HashSet::new(),
         layouts,
         available_in: HashMap::new(),
         function_layouts: HashMap::new(),
@@ -207,6 +213,7 @@ pub(crate) fn analyze(
         }
         _ => HashSet::new(),
     };
+    analysis.compiler_initialized = compiler_initialized.clone();
     let mut assigned_by_attach = assignments_in_action(hir, ActionKind::OnAttach, &bare_globals);
     assigned_by_attach.extend(compiler_initialized.iter().copied());
     let assigned_by_start = assignments_in_action(hir, ActionKind::OnStart, &bare_globals);

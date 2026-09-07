@@ -488,17 +488,19 @@ pub(crate) fn has_explicit_layout_selection(program: &Program) -> bool {
     };
     let mut finder = Finder(false);
     finder.visit_block(&action.body);
-    finder.0 || explicitly_assigned_shape_globals(program, action).is_some()
+    let complete_globals = shape_global_assignments(program, action)
+        .is_some_and(|(dimensions, assigned)| !assigned.is_empty() && assigned == dimensions);
+    finder.0 || complete_globals
 }
 
 /// Returns the attachment-shape globals assigned directly by `onAttach`, but
 /// only when that action owns every global dimension. Mixing user selection
 /// with metadata selection would make the managed schema and source value
 /// disagree, so it is intentionally not treated as explicit selection.
-fn explicitly_assigned_shape_globals(
+fn shape_global_assignments(
     program: &Program,
     action: &crate::ast::Action,
-) -> Option<HashSet<String>> {
+) -> Option<(HashSet<String>, HashSet<String>)> {
     struct DimensionCollector<'a> {
         globals: &'a HashSet<&'a str>,
         dimensions: HashSet<String>,
@@ -563,10 +565,32 @@ fn explicitly_assigned_shape_globals(
     if collector.dimensions.is_empty() {
         return None;
     }
-    let mut assignments = AssignmentCollector {
-        dimensions: &collector.dimensions,
-        assigned: HashSet::new(),
+    let assigned = {
+        let mut assignments = AssignmentCollector {
+            dimensions: &collector.dimensions,
+            assigned: HashSet::new(),
+        };
+        assignments.visit_block(&action.body);
+        assignments.assigned
     };
-    assignments.visit_block(&action.body);
-    (assignments.assigned == collector.dimensions).then_some(assignments.assigned)
+    Some((collector.dimensions, assigned))
+}
+
+pub(crate) fn partial_shape_selection(program: &Program) -> Option<(Vec<String>, Vec<String>)> {
+    let action = program
+        .actions
+        .iter()
+        .find(|action| action.kind == ActionKind::OnAttach)?;
+    let (dimensions, assigned) = shape_global_assignments(program, action)?;
+    if assigned.is_empty() || assigned == dimensions {
+        return None;
+    }
+    let mut assigned = assigned.into_iter().collect::<Vec<_>>();
+    let mut missing = dimensions
+        .into_iter()
+        .filter(|dimension| !assigned.contains(dimension))
+        .collect::<Vec<_>>();
+    assigned.sort();
+    missing.sort();
+    Some((assigned, missing))
 }

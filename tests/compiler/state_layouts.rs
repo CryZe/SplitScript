@@ -579,6 +579,35 @@ fn attachment_shape_globals_are_frozen_after_attach() {
 }
 
 #[test]
+fn attachment_shape_selection_has_one_owner() {
+    let source = r#"
+        enum Edition { Base, Demo }
+        enum Storefront { Steam, GOG }
+        let edition: Edition
+        let storefront: Storefront
+        state "game.exe" {
+            if edition is Edition.Base && storefront is Storefront.Steam {
+                value: u8 at 0x100;
+            } else {
+                value: u8 at 0x200;
+            }
+        }
+        onAttach { edition = Edition.Base }
+        split { return current.value != old.value }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("shape selection must not mix user and provider ownership");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message
+            == "`onAttach` cannot mix explicit and provider-inferred attachment shape"
+            && diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("still provider-inferred: storefront"))
+    }));
+}
+
+#[test]
 fn state_enum_fields_are_dynamic_schema_dimensions() {
     let source = r#"
         enum Game { Menu, Playing }
@@ -804,6 +833,8 @@ fn managed_fields_share_the_attachment_layout_refinement_model() {
 
 #[test]
 fn unity_metadata_can_initialize_an_attachment_shape_global() {
+    use splitscript::tooling::database::CompilerDatabase;
+
     let source = r#"
         enum Edition { BaseGame, Demo }
         let edition: Edition
@@ -840,6 +871,15 @@ fn unity_metadata_can_initialize_an_attachment_shape_global() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("automatic global shape selection should produce valid Wasm GC");
+
+    let mut database = CompilerDatabase::new(source);
+    let position = source.find("let edition").unwrap() + "let ".len();
+    let hover = database.hover(position).unwrap().unwrap();
+    assert!(
+        hover
+            .markdown
+            .contains("initialized automatically from the attached provider's schema")
+    );
 }
 
 #[test]

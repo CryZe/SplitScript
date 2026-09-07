@@ -946,7 +946,13 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                     .and_then(|checked| checked.scoped_globals().lifetime(value));
                 let kind = match scoped {
                     Some(crate::GlobalLifetime::Attachment) => {
-                        "Attachment-scoped global variable; initialized by `onAttach` and cleared on detach"
+                        if context.snapshot.checked().is_some_and(|checked| {
+                            checked.scoped_globals().is_compiler_initialized(value)
+                        }) {
+                            "Attachment-scoped global variable; initialized automatically from the attached provider's schema and cleared on detach"
+                        } else {
+                            "Attachment-scoped global variable; initialized by `onAttach` and cleared on detach"
+                        }
                     }
                     Some(crate::GlobalLifetime::Attempt) => {
                         "Attempt-scoped global variable; initialized by `onStart` and cleared after `onReset`"

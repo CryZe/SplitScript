@@ -1,6 +1,9 @@
 use wasmparser::{Validator, WasmFeatures};
 
-use splitscript::tooling::database::CompilerDatabase;
+use splitscript::{
+    compiler::stdlib::{StdlibFieldId, StdlibSymbolId},
+    tooling::database::{CompilerDatabase, DefinitionTarget},
+};
 
 #[test]
 fn maps_support_lookup_mutation_and_entry_iteration() {
@@ -124,10 +127,7 @@ fn map_editor_surface_exposes_only_the_approved_lookup_api() {
 
 #[test]
 fn collection_constructors_complete_in_expression_positions() {
-    for (prefix, expected, hidden) in [
-        ("Se", "Set", "SetIterator"),
-        ("Ma", "Map", "MapEntry"),
-    ] {
+    for (prefix, expected, hidden) in [("Se", "Set", "SetIterator"), ("Ma", "Map", "MapEntry")] {
         let source = format!(
             r#"
                 state "game.exe" {{}}
@@ -204,4 +204,91 @@ fn map_entry_patterns_participate_in_nested_usefulness() {
     "#;
     splitscript::compile(source)
         .expect("generic standard-library structs should support nested patterns");
+}
+
+#[test]
+fn map_entry_pattern_fields_support_hover_and_binding_rename() {
+    let shorthand_source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let map = Map.new<String, u32>()
+            map.insert("foo", 123)
+            for { key, value } in map {
+                print(`key: {key}, value: {value}`)
+            }
+        }
+    "#;
+    let pattern = shorthand_source.find("for { key, value }").unwrap();
+    let key = pattern + "for { ".len();
+    let value = pattern + "for { key, ".len();
+
+    let mut database = CompilerDatabase::new(shorthand_source);
+    assert_eq!(
+        database.definition_at(key).unwrap(),
+        Some(DefinitionTarget::StandardLibrarySymbol(
+            StdlibSymbolId::Field(StdlibFieldId::MapEntryKey),
+        ))
+    );
+    let hover = database
+        .hover(key)
+        .unwrap()
+        .expect("a catalog struct shorthand should expose both identities");
+    assert!(hover.markdown.contains("MapEntry<K, V>.key: K"));
+    assert!(
+        hover
+            .markdown
+            .contains("**Value represented by the shorthand**")
+    );
+    assert!(hover.markdown.contains("key: String"));
+
+    for (offset, new_name, expected) in [
+        (key, "name", "key: name"),
+        (value, "number", "value: number"),
+    ] {
+        let mut database = CompilerDatabase::new(shorthand_source);
+        let plan = database
+            .rename_at(offset, new_name)
+            .expect("renaming a catalog struct shorthand should split field and binding names");
+        assert!(
+            plan.edits
+                .iter()
+                .any(|edit| { edit.span.start == offset && edit.replacement == expected }),
+            "missing `{expected}` shorthand expansion: {plan:#?}"
+        );
+    }
+
+    let explicit_source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let map = Map.new<String, u32>()
+            for { key: name, value: number } in map {
+                print(`{name}: {number}`)
+            }
+        }
+    "#;
+    let pattern = explicit_source
+        .find("for { key: name, value: number }")
+        .unwrap();
+    let key = pattern + "for { ".len();
+    let value = pattern + "for { key: name, ".len();
+    let mut database = CompilerDatabase::new(explicit_source);
+
+    assert_eq!(
+        database.definition_at(key).unwrap(),
+        Some(DefinitionTarget::StandardLibrarySymbol(
+            StdlibSymbolId::Field(StdlibFieldId::MapEntryKey),
+        ))
+    );
+    assert_eq!(
+        database.definition_at(value).unwrap(),
+        Some(DefinitionTarget::StandardLibrarySymbol(
+            StdlibSymbolId::Field(StdlibFieldId::MapEntryValue),
+        ))
+    );
+    let hover = database
+        .hover(key)
+        .unwrap()
+        .expect("an explicit catalog struct field should have hover information");
+    assert!(hover.markdown.contains("MapEntry<K, V>.key: K"));
+    assert!(hover.markdown.contains("Key stored by this entry."));
 }

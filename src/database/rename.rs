@@ -41,8 +41,22 @@ pub enum RenameError {
 struct StructShorthandReference {
     span: Span,
     name: String,
-    field: SourceDefinitionId,
+    field: ResolvedStructFieldId,
     value: SourceDefinitionId,
+}
+
+impl StructShorthandReference {
+    fn source_field(&self) -> Option<SourceDefinitionId> {
+        match self.field {
+            ResolvedStructFieldId::Source(field) => Some(SourceDefinitionId::StructField(field)),
+            ResolvedStructFieldId::Standard(_) => None,
+        }
+    }
+
+    fn field_is_renamed(&self, target_ids: &[SourceDefinitionId]) -> bool {
+        self.source_field()
+            .is_some_and(|field| target_ids.contains(&field))
+    }
 }
 
 impl fmt::Display for RenameError {
@@ -164,14 +178,14 @@ impl CompilerDatabase {
             .map(|span| {
                 let shorthand = shorthand_references.iter().find(|reference| {
                     reference.span == span
-                        && (target_ids.contains(&reference.field)
+                        && (reference.field_is_renamed(&target_ids)
                             || target_ids.contains(&reference.value))
                 });
                 let replacement = shorthand.map_or_else(
                     || new_name.to_owned(),
                     |reference| {
                         expanded_shorthands.push(reference.clone());
-                        if target_ids.contains(&reference.field) {
+                        if reference.field_is_renamed(&target_ids) {
                             format!("{new_name}: {}", reference.name)
                         } else {
                             format!("{}: {new_name}", reference.name)
@@ -222,7 +236,7 @@ impl CompilerDatabase {
         }
         for shorthand in &expanded_shorthands {
             let mapped = remap_span(shorthand.span, &edits);
-            let renamed_field = target_ids.contains(&shorthand.field);
+            let renamed_field = shorthand.field_is_renamed(&target_ids);
             let (field_name, value_name) = if renamed_field {
                 (new_name, shorthand.name.as_str())
             } else {
@@ -236,11 +250,21 @@ impl CompilerDatabase {
                 start: field_span.end + 2,
                 end: field_span.end + 2 + value_name.len(),
             };
-            if !candidate_definitions
-                .reference_at(field_span.start)
-                .is_some_and(|reference| {
-                    reference.span == field_span && reference.target == shorthand.field
-                })
+            let field_still_resolves = match shorthand.field {
+                ResolvedStructFieldId::Source(field) => candidate_definitions
+                    .reference_at(field_span.start)
+                    .is_some_and(|reference| {
+                        reference.span == field_span
+                            && reference.target == SourceDefinitionId::StructField(field)
+                    }),
+                ResolvedStructFieldId::Standard(field) => matches!(
+                    candidate.definition_at_query_offset(field_span.start),
+                    Ok(Some(DefinitionTarget::StandardLibrarySymbol(
+                        crate::stdlib::StdlibSymbolId::Field(candidate_field)
+                    ))) if candidate_field == field
+                ),
+            };
+            if !field_still_resolves
                 || !candidate_definitions
                     .reference_at(value_span.start)
                     .is_some_and(|reference| {
@@ -430,9 +454,6 @@ impl<'ast> Visitor<'ast> for StructShorthandCollector<'_> {
                     if !field.shorthand {
                         continue;
                     }
-                    let ResolvedStructFieldId::Source(struct_field) = resolved_field else {
-                        continue;
-                    };
                     let Some(value) = self
                         .semantics
                         .value(field.value.id)
@@ -443,7 +464,7 @@ impl<'ast> Visitor<'ast> for StructShorthandCollector<'_> {
                     self.references.push(StructShorthandReference {
                         span: field.name_span,
                         name: field.name.clone(),
-                        field: SourceDefinitionId::StructField(*struct_field),
+                        field: *resolved_field,
                         value: SourceDefinitionId::Value(value),
                     });
                 }
@@ -471,13 +492,11 @@ impl StructShorthandCollector<'_> {
                 for (field, resolved_field) in fields.iter().zip(resolved) {
                     if field.shorthand
                         && let MatchPattern::Binding(binding) = &field.pattern.kind
-                        && let crate::semantic::ResolvedStructFieldId::Source(resolved_field) =
-                            resolved_field
                     {
                         self.references.push(StructShorthandReference {
                             span: field.name_span,
                             name: field.name.clone(),
-                            field: SourceDefinitionId::StructField(*resolved_field),
+                            field: *resolved_field,
                             value: SourceDefinitionId::Value(binding.id),
                         });
                     }

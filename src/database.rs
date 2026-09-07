@@ -97,12 +97,19 @@ pub struct DefinitionIndex {
     managed_classes: HashMap<ManagedClassId, SourceDefinition>,
     managed_fields: HashMap<ManagedFieldId, SourceDefinition>,
     syntax_references: Vec<SyntaxReference>,
+    standard_library_references: Vec<StandardLibraryReference>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SyntaxReference {
     pub target: SourceDefinitionId,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StandardLibraryReference {
+    target: StdlibSymbolId,
+    span: Span,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -247,6 +254,11 @@ impl DefinitionIndex {
             .syntax_references
             .sort_by_key(|reference| (reference.span.start, reference.span.end));
         collector.index.syntax_references.dedup();
+        collector
+            .index
+            .standard_library_references
+            .sort_by_key(|reference| (reference.span.start, reference.span.end));
+        collector.index.standard_library_references.dedup();
         collector.index
     }
 
@@ -274,6 +286,16 @@ impl DefinitionIndex {
     pub fn reference_at(&self, offset: usize) -> Option<&SyntaxReference> {
         self.references_at_offset(offset)
             .min_by_key(|reference| navigation_reference_priority(reference.target))
+    }
+
+    fn standard_library_reference_at(&self, offset: usize) -> Option<&StandardLibraryReference> {
+        let end = self
+            .standard_library_references
+            .partition_point(|reference| reference.span.start <= offset);
+        self.standard_library_references[..end]
+            .iter()
+            .rev()
+            .find(|reference| offset < reference.span.end)
     }
 
     /// Returns every source identity represented by the token at `offset`.
@@ -891,6 +913,12 @@ impl DefinitionCollector<'_> {
             .push(SyntaxReference { target, span });
     }
 
+    fn add_standard_library_reference(&mut self, target: StdlibSymbolId, span: Span) {
+        self.index
+            .standard_library_references
+            .push(StandardLibraryReference { target, span });
+    }
+
     fn add_type_after_colon(&mut self, ty: SyntaxTypeRef, span: Span) {
         let Some((target, name)) = named_type(self.syntax, ty) else {
             return;
@@ -988,11 +1016,16 @@ impl DefinitionCollector<'_> {
                     .struct_pattern_fields(pattern_id)
                     .unwrap_or_default();
                 for (field, resolved) in fields.iter().zip(resolved) {
-                    if let ResolvedStructFieldId::Source(resolved) = resolved {
-                        self.add_reference(
+                    match resolved {
+                        ResolvedStructFieldId::Source(resolved) => self.add_reference(
                             SourceDefinitionId::StructField(*resolved),
                             field.name_span,
-                        );
+                        ),
+                        ResolvedStructFieldId::Standard(resolved) => self
+                            .add_standard_library_reference(
+                                StdlibSymbolId::Field(*resolved),
+                                field.name_span,
+                            ),
                     }
                     self.add_pattern_references(
                         &field.pattern.kind,
@@ -1421,11 +1454,16 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                     .struct_literal_fields(expression.id)
                     .unwrap_or_default();
                 for (literal_field, field) in fields.iter().zip(resolved) {
-                    if let crate::semantic::ResolvedStructFieldId::Source(field) = field {
-                        self.add_reference(
+                    match field {
+                        ResolvedStructFieldId::Source(field) => self.add_reference(
                             SourceDefinitionId::StructField(*field),
                             literal_field.name_span,
-                        );
+                        ),
+                        ResolvedStructFieldId::Standard(field) => self
+                            .add_standard_library_reference(
+                                StdlibSymbolId::Field(*field),
+                                literal_field.name_span,
+                            ),
                     }
                 }
             }

@@ -613,6 +613,11 @@ impl CompilerDatabase {
         offset: usize,
     ) -> SemanticQueryResult<Option<DefinitionTarget>> {
         let definitions = self.definition_index()?;
+        if let Some(reference) = definitions.standard_library_reference_at(offset) {
+            return Ok(Some(DefinitionTarget::StandardLibrarySymbol(
+                reference.target,
+            )));
+        }
         if let Some(reference) = definitions.reference_at(offset) {
             return Ok(definitions
                 .get(reference.target)

@@ -230,27 +230,18 @@ pub(crate) fn hover(
         DefinitionTarget::Source(SourceDefinition {
             id: SourceDefinitionId::StructField(_),
             ..
-        })
+        }) | DefinitionTarget::StandardLibrarySymbol(StdlibSymbolId::Field(_))
     ) {
         let definitions = database.definition_index()?;
-        let references = definitions.references_at_offset(offset).collect::<Vec<_>>();
-        let field_span = references.iter().find_map(|reference| {
-            matches!(reference.target, SourceDefinitionId::StructField(_)).then_some(reference.span)
-        });
-        field_span.and_then(|field_span| {
-            references
-                .iter()
-                .find(|reference| {
-                    reference.span == field_span
-                        && matches!(reference.target, SourceDefinitionId::Value(_))
-                })
-                .and_then(|reference| definitions.get(reference.target))
-                .cloned()
-        })
+        definitions
+            .references_at_offset(offset)
+            .find(|reference| matches!(reference.target, SourceDefinitionId::Value(_)))
+            .and_then(|reference| definitions.get(reference.target))
+            .cloned()
     } else {
         None
     };
-    let (markdown, documentation_uri) = match target {
+    let (mut markdown, documentation_uri) = match target {
         DefinitionTarget::StandardLibrary(item) => {
             let type_arguments = database
                 .analysis_at(offset)?
@@ -391,18 +382,19 @@ pub(crate) fn hover(
             let Some(context) = semantic_context(database) else {
                 return Ok(None);
             };
-            let Some(mut markdown) = render_source_hover(&definition, &context) else {
+            let Some(markdown) = render_source_hover(&definition, &context) else {
                 return Ok(None);
             };
-            if let Some(value) = shorthand_value.as_ref()
-                && let Some(value_markdown) = render_source_hover(value, &context)
-            {
-                markdown.push_str("\n\n**Value represented by the shorthand**\n\n");
-                markdown.push_str(&value_markdown);
-            }
             (markdown, None)
         }
     };
+    if let Some(value) = shorthand_value.as_ref()
+        && let Some(context) = semantic_context(database)
+        && let Some(value_markdown) = render_source_hover(value, &context)
+    {
+        markdown.push_str("\n\n**Value represented by the shorthand**\n\n");
+        markdown.push_str(&value_markdown);
+    }
     Ok(Some(HoverInfo {
         span: token.span,
         markdown,

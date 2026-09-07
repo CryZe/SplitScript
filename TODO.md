@@ -68,7 +68,9 @@ running timer decisions against stale snapshots. Continue with the remaining
 P0 porting gaps below. Do not begin managed
 collection support itself until ASR has a tested
 representation, and bring every language, standard-library, provider, or
-host-surface decision below back to the user.
+host-surface decision below back to the user. The next product decisions are,
+in order, runtime-dependent state-field activation and a typed associative map;
+neither should be skipped merely because it needs design approval.
 
 ## Unity schema foundation and deferred follow-ups
 
@@ -343,6 +345,19 @@ explicit compile error. The external exercise directory is disposable evidence,
 not a durable roadmap dependency; retain actionable conclusions and minimized
 in-tree regression cases instead of paths or assumptions tied to one generated
 corpus.
+
+The 2026-09-04 WIP pass produced 33 compiler-clean ports or partial ports, but
+was less disciplined about behavioral equivalence and repeated one class of
+literal-precondition observation roughly forty times. Treat its compile-only
+ports as hypotheses, not validation. Its deep attempts nevertheless add strong
+independent evidence for runtime-dependent state polling and an associative
+map, and reinforce the existing timer, writable-file, dynamic-settings, module
+enumeration, managed-collection, and process-write host gaps. Rechecking the
+current compiler also confirms that a 166 KiB unmodified legacy ASL still takes
+more than 60 seconds without producing diagnostics. Conversely, `Module.md5`,
+named layouts, finite scans, growable arrays and sets, `Instant`, and static
+settings families already cover several reported omissions; those findings are
+documentation or migration-search work, not reasons to add duplicate APIs.
 
 ### Turn every reported blocker into an actionable product outcome
 
@@ -693,6 +708,32 @@ concepts rather than maintaining a parallel inventory.
 
 ### Polling, mutable watcher patterns, and settings
 
+- [ ] Design runtime-dependent state-field activation using the MCC
+  `gameIndicator` watcher groups as the first acceptance case and Outer Wilds,
+  Rain World, and Bloodstained as cross-checks. An inactive game's required
+  pointer must not block initial attachment, and inactive fields must not be
+  read merely to retain the previous value. Compare a discriminator-dependent
+  enum snapshot, explicitly conditional fields/groups, and ordinary on-demand
+  reads before choosing syntax. The design must define initialization order,
+  dependencies on already-read discriminator fields, `old` / `current`
+  availability, inactive-value semantics, failure retention, layout
+  interaction, and whether a discriminator change can alter the visible
+  snapshot shape. Reuse the existing state dependency graph and transactional
+  lowering rather than adding a mutable `MemoryWatcherList` compatibility
+  object. Bring this language and state-model decision back for approval before
+  implementation.
+- [ ] Design and implement one typed associative `Map<K, V>` now that the MGS
+  signature/checker dispatch, MGS2 room callbacks, Halo objective guards,
+  Bully route tables, and Uncharted Waters route data demonstrate genuine
+  runtime key-to-value lookup. The proposal must compare an equality-backed
+  insertion-order map with a hashed representation before committing to a
+  user-facing `Hashable` capability, and define stable GC identity, replacement
+  versus insertion, `get`/absence and indexing semantics, removal, iteration
+  order, mutation-during-iteration behavior, inference, structural
+  Debug/Display, and reachability-driven code generation. Use `Map`, not a C#
+  `Dictionary` alias; add focused `Dictionary` / `IDictionary` / `HashMap`
+  migration guidance once the canonical API is approved. Keep heterogeneous
+  `ExpandoObject` data and runtime settings registration as separate designs.
 - [ ] Design the canonical representation for runtime-varying watched value
   types using the FNaF Security Breach interactible rules as the acceptance
   case. Compare a source-authored enum/tag plus typed optional payloads with a
@@ -796,6 +837,22 @@ concepts rather than maintaining a parallel inventory.
 
 ### Engine and emulator providers
 
+- [ ] Unify readable address spaces through one source-defined capability
+  hierarchy instead of copying helpers onto `Process`, every emulator root,
+  modules, and future memory views. Start from the common primitive needed by
+  `read<T>` and determine which higher-level operations—bounded UTF-8/UTF-16
+  decoding, fixed byte reads, and pointer following—can be authored once in
+  the standard library. Keep host-process-only behavior such as module
+  discovery, mapped-range enumeration, and process-wide scanning off emulator
+  values; likewise, do not assume every guest address space has native pointer
+  width or module semantics. Use MGS's PS1 strings and Code: Veronica X's PS2
+  product code as acceptance cases, integrate with the existing capability and
+  associated-type architecture, and generate only reachable helpers. First
+  determine whether current provider translation plus the existing read ABI is
+  sufficient; if a new runtime primitive is required and ASR has no tested
+  contract, retain the task as ASR-gated. Bring the capability names,
+  membership, failure semantics, bounds, encoding policy, and source syntax
+  back for approval before implementation.
 - [ ] Decide the source-defined provider refresh lifecycle before claiming
   parity for emulator cores that unload without their host process exiting.
   `state PS2` validates RetroArch's core mapping on every read and fails safely
@@ -823,12 +880,6 @@ concepts rather than maintaining a parallel inventory.
   PS2 address conversion still documents and enforces
   `0x00100000..=0x01FFFFFF`. Wait for ASR to establish and test the broader
   domain before changing SplitScript.
-- [ ] Design decoded guest-string reads once the PS2 domain decision is known.
-  The Code: Veronica X product code demonstrates a bounded UTF-8/ASCII field in
-  guest memory, while emulator providers currently expose only typed reads and
-  reject native-state `as utf8(...)` sugar. Prefer one provider-independent
-  bounded decoding facility with explicit encoding and failure semantics over a
-  PS2-only spelling, and bring the source API back for approval.
 - [ ] Assess an Unreal provider only after representative `GWorld`, object, and
   name traversal ports establish the required surface.
 ## P1 — expand migration guidance and automated fixes
@@ -836,8 +887,15 @@ concepts rather than maintaining a parallel inventory.
 - [ ] Expand the structured foreign-spelling entries beyond the existing
   declarations, option value, strings, durations, and numeric types. Add new
   entries only for corpus-proven, unambiguous spellings that are not already
-  handled by the type-aware callable suggestion machinery. Keep canonical
-  syntax unique; do not add compatibility aliases.
+  handled by the type-aware callable suggestion machinery. The current proven
+  holes are `HashSet` -> `Set`, tuple collections -> a named struct in `[T]`,
+  `Environment.TickCount` / elapsed `Stopwatch` use -> `Instant`, and duplicate
+  native ASL state blocks -> one process-candidate array with named layouts.
+  Searches for `Dictionary`, `File.GetLastWriteTime`, and JSON should identify
+  their explicit pending designs rather than returning a misleading nearby
+  symbol; `Thread.Sleep` should explain cooperative state-machine timing and
+  why blocking is unavailable. Keep canonical syntax unique and do not add
+  compatibility aliases.
 - [ ] Include the canonical compiler identity already exposed by the compiler
   service and generated-module metadata in machine-readable port reports so
   future evidence remains reproducible.
@@ -856,6 +914,16 @@ concepts rather than maintaining a parallel inventory.
   parse, diagnostics, semantic tokens, hover, and completion on one database
   before and after, rather than hiding the issue behind additional `Clone`
   implementations.
+- [ ] Bound recovery and diagnostic construction on large foreign inputs. A
+  release build at revision `57f2564` processed a 165,809-byte legacy ASL file
+  for more than 60 seconds without producing its first diagnostic, so recent
+  sharing work has not eliminated this failure mode. Profile lexing, parser
+  recovery, migration recognition, type checking, and diagnostic rendering
+  separately; remove superlinear retry and cascading-error paths rather than
+  adding a spinner or a special bounded mode. Add a compact or generated
+  in-tree stress fixture with budgets for time to first useful diagnostic and
+  total work, cap redundant cascades, and keep the test independent of the
+  disposable external corpus.
 
 ## P1 — source-level debugging after the debugger boundary is chosen
 
@@ -1204,6 +1272,19 @@ remaining work is product hardening and distribution.
   and release behavior before exposing mutations. Prefer handle-free whole-file
   operations unless a real port proves streaming is necessary, and bring this
   standard-library and sandbox decision back for approval.
+- [ ] Design read-only file change metadata for Outer Wilds-style save polling.
+  Decide whether the smallest stable API is an opaque change token or explicit
+  size and modification time, and specify missing-file behavior, timestamp
+  precision, fallibility, suspension, and the guarantees available through the
+  host's WASI view. Do not introduce a general `DateTime` model merely to copy
+  `File.GetLastWriteTime`; bring the standard-library shape back for approval
+  and test it against real replacement, truncation, and same-size updates.
+- [ ] Design JSON support after the typed `Map` representation is settled, using
+  the Outer Wilds save file as the acceptance case. Cover UTF-8 objects, arrays,
+  strings, numbers, booleans, and null; typed inspection, useful parse errors,
+  numeric fidelity, duplicate object keys, ordering, depth and size limits, and
+  release-size cost. Keep JSON parsing separate from file polling and runtime
+  settings, and bring the value/API shape back for approval before implementation.
 - [ ] Complete structured future composition with explicit cancellation
   semantics. `future.race([async T])` and
   `future.timeout(async T, Duration) -> async T!` are implemented with lazy
@@ -1250,14 +1331,6 @@ remaining work is product hardening and distribution.
   immutable String operations beyond the corpus-proven P0 slice, additional
   numeric operations, and typed time operations proven useful by maintained
   ports.
-- [ ] Add an associative map only after a maintained port demonstrates a
-  runtime key-to-value lookup that cannot be folded into `settings`, a struct,
-  a finite `match`, or parallel typed arrays. If that evidence arrives, design
-  one typed `Map<K, V>` around the source-defined equality/hash capability
-  hierarchy, stable GC identity, mutation-during-iteration rules, indexing
-  absence semantics, documentation, and inference. Do not add C#
-  `Dictionary<K, V>` as a compatibility alias; the A Plague Tale chapter table
-  is compile-time settings data and is not evidence for a runtime map.
 - [ ] Add general floating-point power only when a maintained port needs a
   negative or non-integral exponent. Port and attribute a vetted implementation
   such as Rust compiler-builtins' MIT-licensed libm `pow`/`powf`, including its
@@ -1273,6 +1346,12 @@ remaining work is product hardening and distribution.
 
 ## P2 — documentation and editor evolution
 
+- [ ] Make exact documentation queries for concrete generic members resolve to
+  their canonical operation instead of only returning a ranked type list. For
+  example, `splitc docs SetIterator.next` should show the specialized signature,
+  explain `IteratorStep`, and include the relevant example. Drive array, set,
+  range, future map/filter, and `Map` iterator pages through the same catalog
+  operation so this improves lookup without duplicating documentation.
 - [ ] Improve navigation for very long terminal guide results without changing
   their content model. Put stable exact subsection identities near the top of
   monolithic guides and make focused `splitc docs` queries obvious before a
@@ -1307,6 +1386,18 @@ remaining work is product hardening and distribution.
 
 ## P2 — architecture, verification, and release scaling
 
+- [ ] Add one catalog-owned constant-precondition analysis rather than a family
+  of one-off lints. When compile-time evaluation proves that a literal call or
+  operation must fail, trap, or never complete, diagnose it using the same
+  constraint metadata that documents the API; do not repeat the porting
+  report's roughly forty separate variants. Cover empty or undersized scan
+  patterns, decoder and collection bounds, invalid rates and radices, empty
+  delimiters, literal parsing, division by zero, provider address domains,
+  empty reduction identities, and literal file paths as those contracts are
+  represented. Decide warning versus error based on whether the failure can be
+  intentionally handled through `T!`, provide focused fixes, and ignore values
+  that are not statically known. Keep cross-platform executable spelling and
+  host path normalization out of this value analysis.
 - [ ] Decompose broad backend and type-checking coordinators by semantic
   ownership under existing behavior tests. Extract structural expression,
   call dispatch, numeric, string/collection, process/memory, and suspension
@@ -1370,6 +1461,11 @@ remaining work is product hardening and distribution.
   `state GCN` / `state Genesis` provider model, but must still be brought to the
   user before implementation. A manual RetroArch memory root remains an interim
   port, not the canonical endpoint.
+- [ ] After ASR has a tested Sega CD / Mega-CD provider, add one typed provider
+  aligned with its emulator discovery, RAM mapping, address-domain, and byte-
+  order semantics. Do not infer those contracts independently from the SEGA
+  Master Splitter or expose a raw process-memory workaround as the canonical
+  API; bring the provider surface back for approval once the runtime exists.
 - [ ] Revisit native-state suggestions for typed emulator providers only if
   future porting evidence shows this remains a recurring source of incorrect
   scripts after the current provider documentation and search work. This is
@@ -1462,19 +1558,24 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Coordinate the read-only timer metadata/time surface, imperative
-   timer-control boundary, writable persistent file API, and safe module
-   enumeration with their host-runtime contracts before designing source APIs.
-   Abe's Oddysee, Ato, Spider-Man, and the SEGA Master Splitter remain the
-   acceptance evidence. Deterministic executable identity is already
-   available through bounded exact-file `Module.md5()` without weakening
-   source hashes to version metadata.
-2. Decide fixed-array equality/patterns and runtime-varying watched types using
-   the Code: Veronica X and FNaF ports. Prefer reusable static typing and
-   ordinary aggregate architecture over compatibility-shaped intrinsics.
-3. Resume measured editor/compiler performance, release hardening, hosted IDE,
-   and debugging work after the porting correctness and design sequence above.
-4. Keep the PS2 low-memory domain, its dependent decoded guest strings,
-   `unity.time`, SNES, and managed collections gated on tested ASR evidence.
-   Keep writes/injection, physical `None` specialization, and other broad host
-   powers deferred until their explicit dependencies and policies are ready.
+1. Design runtime-dependent state-field activation from MCC, then the typed
+   associative `Map` proven by MGS, MGS2, Halo, Bully, and Uncharted Waters.
+   Bring both language and standard-library decisions back for approval, then
+   implement them on the existing state graph and capability foundations.
+2. Bound recovery on large foreign inputs and close the exact migration-search
+   holes exposed by the latest porting pass. A compiler-clean port is not a
+   success when inactive state fields prevent attachment or existing canonical
+   APIs remain undiscoverable.
+3. Coordinate the read-only timer metadata/time surface, imperative timer
+   control, writable files, read-only file metadata, JSON, and safe module
+   enumeration with their host-runtime contracts. Abe's Oddysee, Outer Wilds,
+   Ato, Spider-Man, and the SEGA Master Splitter are the acceptance evidence;
+   deterministic executable identity already exists through `Module.md5()`.
+4. Resolve the FNaF runtime-varying watched-value design, then resume measured
+   compiler/editor performance, release hardening, hosted IDE, and debugging
+   work after the correctness and product-design sequence above.
+5. Keep only the portions of shared readable-memory helpers that need a new
+   host primitive, the PS2 low-memory domain, `unity.time`, Sega CD, SNES, and
+   managed collections gated on tested ASR evidence. Keep writes/injection,
+   physical `None` specialization, and other broad host powers deferred until
+   their explicit dependencies and policies are ready.

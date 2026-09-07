@@ -1,7 +1,8 @@
 # ASL porting campaign audits
 
-This audit classifies the candidates described by the external
-`PORTING_FEEDBACK.md`. They were produced with compiler revision
+This audit classifies the candidates described by the earlier external report,
+now archived as `old/PORTING_FEEDBACK.md` in the porting workspace. They were
+produced with compiler revision
 `69f2bd9d3eb4`. The audit was performed against revision `b82638c`, the source
 ASL corpus, the current compiler, and maintained in-tree ports and host
 fixtures. The campaign was not rerun: its reports are evidence about the

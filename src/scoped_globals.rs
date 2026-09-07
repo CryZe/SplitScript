@@ -185,7 +185,30 @@ pub(crate) fn analyze(
         return (analysis, Vec::new());
     }
 
-    let assigned_by_attach = assignments_in_action(hir, ActionKind::OnAttach, &bare_globals);
+    let automatic_shape = if crate::layout_selection::has_explicit_layout_selection(syntax) {
+        crate::layout_selection::AutomaticLayoutSelection::NotDeclared
+    } else {
+        crate::layout_selection::automatic_layout_selection(syntax, semantics)
+    };
+    let compiler_initialized = match automatic_shape {
+        crate::layout_selection::AutomaticLayoutSelection::Available(plan)
+            if plan.evidence_fields.is_empty()
+                || semantics.state_provider()
+                    == Some(crate::stdlib::StdlibStateProviderId::Unity) =>
+        {
+            plan.dimensions
+                .into_iter()
+                .filter_map(|dimension| match dimension.dimension {
+                    crate::semantic::ResolvedLayoutDimension::Global(value) => Some(value),
+                    crate::semantic::ResolvedLayoutDimension::LayoutField(_) => None,
+                    crate::semantic::ResolvedLayoutDimension::StateField(_) => None,
+                })
+                .collect::<HashSet<_>>()
+        }
+        _ => HashSet::new(),
+    };
+    let mut assigned_by_attach = assignments_in_action(hir, ActionKind::OnAttach, &bare_globals);
+    assigned_by_attach.extend(compiler_initialized.iter().copied());
     let assigned_by_start = assignments_in_action(hir, ActionKind::OnStart, &bare_globals);
     let declarations = syntax
         .globals
@@ -289,7 +312,8 @@ pub(crate) fn analyze(
             requirements: &requirements,
             uninitialized_reads: RefCell::new(HashSet::new()),
         };
-        let mut flow = initializer.eval_block(on_attach, vec![EvalPath::new(HashSet::new())]);
+        let mut flow =
+            initializer.eval_block(on_attach, vec![EvalPath::new(compiler_initialized.clone())]);
         if analysis.layouts == [AttachmentLayout::Single] {
             // Explicit empty returns and ordinary fallthrough both complete a
             // single-layout attachment successfully.
@@ -338,6 +362,14 @@ pub(crate) fn analyze(
                     .is_some_and(|layouts| !layouts.is_empty())
             },
         ));
+    } else if !compiler_initialized.is_empty() {
+        for value in compiler_initialized {
+            analysis
+                .available_in
+                .entry(value)
+                .or_default()
+                .insert(AttachmentLayout::Single);
+        }
     }
 
     if let Some(on_start) = hir.action_body(ActionKind::OnStart)

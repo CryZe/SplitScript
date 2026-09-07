@@ -1,17 +1,14 @@
 //! Attachment-wide layout selection derived from runtime schema evidence.
 //!
-//! The public model is always the source-defined `Layout` structure. Managed
-//! metadata contributes only presence observations for conditional fields;
+//! Managed metadata contributes presence observations for conditional fields;
 //! this module turns those observations into a bounded, backend-independent
 //! decision plan shared by semantic validation and Wasm emission.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{
-        ActionKind, EnumId, EnumVariantId, Expr, ExprKind, ManagedFieldId, Program, StructFieldId,
-    },
-    semantic::SemanticModel,
+    ast::{ActionKind, EnumId, EnumVariantId, Expr, ExprKind, ManagedFieldId, Program},
+    semantic::{ResolvedLayoutDimension, SemanticModel},
     types::TypeKind,
     visit::{self, Visitor},
 };
@@ -61,7 +58,7 @@ pub(crate) struct LayoutSelectionPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LayoutSelectionDimension {
-    pub field: StructFieldId,
+    pub dimension: ResolvedLayoutDimension,
     pub enumeration: EnumId,
     pub variants: Vec<EnumVariantId>,
 }
@@ -142,17 +139,6 @@ impl LayoutSelectionPlan {
                     .iter()
                     .zip(&candidate.variants)
                     .map(|(dimension, variant)| {
-                        let field = program.structs[program
-                            .state
-                            .as_ref()
-                            .and_then(|state| state.layout.as_ref())
-                            .expect("layout selection plans have a layout struct")
-                            .structure
-                            .index()]
-                        .fields
-                        .iter()
-                        .find(|field| field.id == dimension.field)
-                        .expect("layout dimensions use fields from the layout struct");
                         let enumeration = program
                             .enum_declaration(dimension.enumeration)
                             .expect("layout dimensions use source enums");
@@ -161,12 +147,24 @@ impl LayoutSelectionPlan {
                             .iter()
                             .find(|declaration| declaration.id == *variant)
                             .expect("layout candidates use declared variants");
-                        format!("{}: {}.{}", field.name, enumeration.name, variant.name)
+                        format!(
+                            "{}: {}.{}",
+                            layout_dimension_name(program, dimension.dimension),
+                            enumeration.name,
+                            variant.name
+                        )
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
+                let label = if self.dimensions.iter().all(|dimension| {
+                    matches!(dimension.dimension, ResolvedLayoutDimension::LayoutField(_))
+                }) {
+                    format!("Expected `Layout {{ {layout} }}`")
+                } else {
+                    format!("Expected attachment shape `{layout}`")
+                };
                 LayoutSelectionCandidateReport {
-                    label: format!("Expected `Layout {{ {layout} }}`"),
+                    label,
                     present_fields: candidate.present_fields.clone(),
                 }
             })
@@ -222,8 +220,34 @@ fn managed_field_label(program: &Program, target: ManagedFieldId) -> String {
     unreachable!("layout evidence belongs to a managed source field")
 }
 
+fn layout_dimension_name(program: &Program, dimension: ResolvedLayoutDimension) -> &str {
+    match dimension {
+        ResolvedLayoutDimension::LayoutField(target) => program
+            .structs
+            .iter()
+            .flat_map(|structure| &structure.fields)
+            .find(|field| field.id == target)
+            .map(|field| field.name.as_str())
+            .expect("layout dimensions refer to declared fields"),
+        ResolvedLayoutDimension::Global(target) => program
+            .globals
+            .iter()
+            .filter_map(|global| global.binding.simple_binding())
+            .find(|binding| binding.id == target)
+            .map(|binding| binding.name.as_str())
+            .expect("layout dimensions refer to declared globals"),
+        ResolvedLayoutDimension::StateField(target) => program
+            .state
+            .iter()
+            .flat_map(|state| state.all_fields())
+            .find(|field| field.id == target)
+            .map(|field| field.name.as_str())
+            .expect("layout dimensions refer to declared state fields"),
+    }
+}
+
 struct ManagedEvidenceGroup {
-    alternatives: Vec<Vec<(StructFieldId, EnumVariantId)>>,
+    alternatives: Vec<Vec<(ResolvedLayoutDimension, EnumVariantId)>>,
     fields: Vec<ManagedFieldId>,
 }
 
@@ -233,8 +257,14 @@ pub(crate) fn automatic_layout_selection(
 ) -> AutomaticLayoutSelection {
     automatic_layout_selection_with(
         program,
-        |field| {
-            let ty = semantics.struct_field_type(field)?;
+        |dimension| {
+            let ty = match dimension {
+                ResolvedLayoutDimension::LayoutField(field) => {
+                    semantics.struct_field_type(field)?
+                }
+                ResolvedLayoutDimension::Global(value) => semantics.value_type(value)?,
+                ResolvedLayoutDimension::StateField(value) => semantics.value_type(value)?,
+            };
             let TypeKind::Enum(enumeration) = semantics.types().kind(ty) else {
                 return None;
             };
@@ -262,21 +292,50 @@ pub(crate) fn automatic_layout_selection(
 
 pub(crate) fn automatic_layout_selection_with(
     program: &Program,
-    enum_for_dimension: impl Fn(StructFieldId) -> Option<EnumId>,
-    predicates_for_field: impl Fn(ManagedFieldId) -> Vec<Vec<(StructFieldId, EnumVariantId)>>,
+    enum_for_dimension: impl Fn(ResolvedLayoutDimension) -> Option<EnumId>,
+    predicates_for_field: impl Fn(ManagedFieldId) -> Vec<Vec<(ResolvedLayoutDimension, EnumVariantId)>>,
 ) -> AutomaticLayoutSelection {
-    let Some(layout) = program
+    let mut source_dimensions = Vec::new();
+    if let Some(layout) = program
         .state
         .as_ref()
         .and_then(|state| state.layout.as_ref())
-    else {
+    {
+        source_dimensions.extend(
+            program.structs[layout.structure.index()]
+                .fields
+                .iter()
+                .map(|field| ResolvedLayoutDimension::LayoutField(field.id)),
+        );
+    }
+    for field in program
+        .managed_class_declarations()
+        .into_iter()
+        .flat_map(|class| class.all_fields())
+    {
+        for alternative in predicates_for_field(field.id) {
+            for (dimension, _) in alternative {
+                if matches!(dimension, ResolvedLayoutDimension::StateField(_)) {
+                    continue;
+                }
+                if !source_dimensions.contains(&dimension) {
+                    source_dimensions.push(dimension);
+                }
+            }
+        }
+    }
+    if source_dimensions.is_empty() {
         return AutomaticLayoutSelection::NotDeclared;
-    };
-    let structure = &program.structs[layout.structure.index()];
-    let mut dimensions = Vec::with_capacity(structure.fields.len());
+    }
+    source_dimensions.sort_by_key(|dimension| match dimension {
+        ResolvedLayoutDimension::LayoutField(field) => (0, field.index()),
+        ResolvedLayoutDimension::Global(value) => (1, value.index()),
+        ResolvedLayoutDimension::StateField(value) => (2, value.index()),
+    });
+    let mut dimensions = Vec::with_capacity(source_dimensions.len());
     let mut combination_count = 1usize;
-    for field in &structure.fields {
-        let Some(enumeration) = enum_for_dimension(field.id) else {
+    for dimension in source_dimensions {
+        let Some(enumeration) = enum_for_dimension(dimension) else {
             return AutomaticLayoutSelection::RequiresExplicit(
                 ExplicitSelectionReason::IndistinguishableEvidence,
             );
@@ -304,7 +363,7 @@ pub(crate) fn automatic_layout_selection_with(
             }
         };
         dimensions.push(LayoutSelectionDimension {
-            field: field.id,
+            dimension,
             enumeration,
             variants: declaration
                 .variants
@@ -384,7 +443,7 @@ fn enumerate_candidates(
     let assignment = dimensions
         .iter()
         .zip(variants.iter().copied())
-        .map(|(dimension, variant)| (dimension.field, variant))
+        .map(|(dimension, variant)| (dimension.dimension, variant))
         .collect::<HashMap<_, _>>();
     let mut present_fields = groups
         .iter()
@@ -407,7 +466,7 @@ fn enumerate_candidates(
 
 /// Whether user `onAttach` code explicitly owns layout selection. Returns
 /// inside closures belong to those closures and do not count.
-pub(crate) fn has_explicit_layout_return(program: &Program) -> bool {
+pub(crate) fn has_explicit_layout_selection(program: &Program) -> bool {
     struct Finder(bool);
 
     impl<'ast> Visitor<'ast> for Finder {
@@ -429,5 +488,85 @@ pub(crate) fn has_explicit_layout_return(program: &Program) -> bool {
     };
     let mut finder = Finder(false);
     finder.visit_block(&action.body);
-    finder.0
+    finder.0 || explicitly_assigned_shape_globals(program, action).is_some()
+}
+
+/// Returns the attachment-shape globals assigned directly by `onAttach`, but
+/// only when that action owns every global dimension. Mixing user selection
+/// with metadata selection would make the managed schema and source value
+/// disagree, so it is intentionally not treated as explicit selection.
+fn explicitly_assigned_shape_globals(
+    program: &Program,
+    action: &crate::ast::Action,
+) -> Option<HashSet<String>> {
+    struct DimensionCollector<'a> {
+        globals: &'a HashSet<&'a str>,
+        dimensions: HashSet<String>,
+    }
+    impl<'ast> Visitor<'ast> for DimensionCollector<'_> {
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if let ExprKind::Path(path) = &expression.kind
+                && let [name] = path.as_slice()
+                && self.globals.contains(name.as_str())
+            {
+                self.dimensions.insert(name.clone());
+            }
+            visit::walk_expr(self, expression);
+        }
+    }
+    struct AssignmentCollector<'a> {
+        dimensions: &'a HashSet<String>,
+        assigned: HashSet<String>,
+    }
+    impl<'ast> Visitor<'ast> for AssignmentCollector<'_> {
+        fn visit_stmt(&mut self, statement: &'ast crate::ast::Stmt) {
+            if let crate::ast::Stmt::Assign { name, op: None, .. } = statement
+                && self.dimensions.contains(name)
+            {
+                self.assigned.insert(name.clone());
+            }
+            visit::walk_stmt(self, statement);
+        }
+
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if !matches!(expression.kind, ExprKind::Closure { .. }) {
+                visit::walk_expr(self, expression);
+            }
+        }
+    }
+
+    let globals = program
+        .globals
+        .iter()
+        .filter_map(|global| global.binding.simple_binding())
+        .map(|binding| binding.name.as_str())
+        .collect::<HashSet<_>>();
+    let mut collector = DimensionCollector {
+        globals: &globals,
+        dimensions: HashSet::new(),
+    };
+    for condition in program
+        .state
+        .iter()
+        .flat_map(|state| &state.conditional_fields)
+        .filter_map(|group| group.condition.as_ref())
+        .chain(
+            program
+                .managed_class_declarations()
+                .into_iter()
+                .flat_map(|class| &class.conditional_fields)
+                .filter_map(|group| group.condition.as_ref()),
+        )
+    {
+        collector.visit_expr(condition);
+    }
+    if collector.dimensions.is_empty() {
+        return None;
+    }
+    let mut assignments = AssignmentCollector {
+        dimensions: &collector.dimensions,
+        assigned: HashSet::new(),
+    };
+    assignments.visit_block(&action.body);
+    (assignments.assigned == collector.dimensions).then_some(assignments.assigned)
 }

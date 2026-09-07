@@ -14,10 +14,23 @@ use crate::{
     inference::Type,
 };
 
-/// One fact established about the attachment-wide `layout` value.
+/// The source value that selects one finite declaration shape.
+///
+/// `LayoutField` is retained while the old source syntax is migrated. Ordinary
+/// attachment-scoped globals are the canonical source representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum LayoutDimension {
+    LayoutField(StructFieldId),
+    Global(ValueId),
+    /// A dynamically polled state field. These dimensions may guard other
+    /// state fields, but never managed metadata declarations.
+    StateField(ValueId),
+}
+
+/// One fact established about a finite declaration-shape discriminator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct LayoutConstraint {
-    pub(super) dimension: StructFieldId,
+    pub(super) dimension: LayoutDimension,
     pub(super) variant: EnumVariantId,
 }
 

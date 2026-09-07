@@ -79,6 +79,8 @@ pub(super) fn compile(
                 lowering.runtime_globals.selected_layout,
                 lowering.semantics,
                 lowering.gc,
+                lowering.globals,
+                super::update::PredicateState::Unavailable,
             );
             function.instruction(&Instruction::If(BlockType::Result(
                 lowering.gc.val_type(Type::Result(field_result)),

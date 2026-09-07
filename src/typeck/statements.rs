@@ -174,6 +174,19 @@ impl Checker {
                     Some(binding) => {
                         if let Some(target) = binding.id {
                             self.semantics.resolve_assignment(*id, target);
+                            if self.is_attachment_shape_global(target)
+                                && !matches!(
+                                    self.callable,
+                                    CallableContext::Action(ActionKind::OnAttach)
+                                )
+                            {
+                                self.error(
+                                    format!(
+                                        "attachment-shape global `{name}` can only be assigned in `onAttach`"
+                                    ),
+                                    *span,
+                                );
+                            }
                         }
                         if let Some(op) = op {
                             if let Some(right_type) = self.expr(value, None)

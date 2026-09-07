@@ -23,40 +23,73 @@ pub(super) fn check(checker: &mut Checker, program: &Program) {
     check_global_initializers(checker, program);
     check_state_provider_configuration(checker, program);
     check_layout_conditions(checker, program);
+    super::declaration_pass::collect_conditional_fields(checker, program);
     check_function_bodies(checker, program);
     check_state_expressions(checker, program);
     check_action_bodies(checker, program);
 }
 
 fn check_layout_conditions(checker: &mut Checker, program: &Program) {
-    checker.scopes.clear();
     let expected = checker.core_type(CoreTypeId::Bool);
-    for condition in program
-        .state
-        .iter()
-        .flat_map(|state| &state.conditional_fields)
-        .filter_map(|group| group.condition.as_ref())
-        .chain(
-            program
-                .managed_class_declarations()
-                .into_iter()
-                .flat_map(|class| &class.conditional_fields)
-                .filter_map(|group| group.condition.as_ref()),
-        )
-    {
-        let mut conditional_bindings = ConditionalLayoutBindingCollector::default();
-        conditional_bindings.visit_expr(condition);
-        for (name, span) in conditional_bindings.bindings {
-            checker.error(
-                format!(
-                    "layout predicates cannot introduce conditional binding `{}`",
-                    name
-                ),
-                span,
+    checker.scopes.clear();
+    checker.scopes.push(HashMap::new());
+    if let Some(state) = &program.state {
+        for field in &state.fields {
+            let Some(ty) = checker
+                .declarations
+                .state_fields_by_id
+                .get(&field.id)
+                .copied()
+            else {
+                continue;
+            };
+            checker.scopes.last_mut().unwrap().insert(
+                field.name.clone(),
+                Binding {
+                    id: Some(field.id),
+                    ty,
+                    mutable: false,
+                    debug_only: false,
+                    declaration_span: Some(field.span),
+                },
             );
         }
-        checker.expr(condition, Some(expected));
+        for condition in state
+            .conditional_fields
+            .iter()
+            .filter_map(|group| group.condition.as_ref())
+        {
+            check_layout_condition(checker, condition, expected);
+        }
     }
+    checker.scopes.clear();
+    for condition in program
+        .managed_class_declarations()
+        .into_iter()
+        .flat_map(|class| &class.conditional_fields)
+        .filter_map(|group| group.condition.as_ref())
+    {
+        check_layout_condition(checker, condition, expected);
+    }
+}
+
+fn check_layout_condition(
+    checker: &mut Checker,
+    condition: &crate::ast::Expr,
+    expected: crate::inference::Type,
+) {
+    let mut conditional_bindings = ConditionalLayoutBindingCollector::default();
+    conditional_bindings.visit_expr(condition);
+    for (name, span) in conditional_bindings.bindings {
+        checker.error(
+            format!(
+                "layout predicates cannot introduce conditional binding `{}`",
+                name
+            ),
+            span,
+        );
+    }
+    checker.expr(condition, Some(expected));
 }
 
 #[derive(Default)]
@@ -915,7 +948,8 @@ fn generalize_component(checker: &mut Checker, functions: &[FunctionId]) {
 }
 
 fn check_action_bodies(checker: &mut Checker, program: &Program) {
-    let explicit_attachment_layout = crate::layout_selection::has_explicit_layout_return(program);
+    let explicit_attachment_layout =
+        crate::layout_selection::has_explicit_layout_selection(program);
     let automatic_attachment_layout = !explicit_attachment_layout
         && matches!(
             automatic_layout_selection(checker, program),
@@ -1024,8 +1058,33 @@ fn automatic_layout_selection(
             if let crate::types::TypeKind::Enum(enumeration) =
                 checker.inference.type_store().kind(ty)
             {
-                enum_by_dimension.insert(field.id, *enumeration);
+                enum_by_dimension.insert(
+                    crate::semantic::ResolvedLayoutDimension::LayoutField(field.id),
+                    *enumeration,
+                );
             }
+        }
+    }
+    for dimension in checker.layout_dimensions.clone() {
+        let crate::typeck::declarations::LayoutDimension::Global(value) = dimension else {
+            continue;
+        };
+        let Some(ty) = checker
+            .declarations
+            .globals
+            .values()
+            .find_map(|binding| (binding.id == Some(value)).then_some(binding.ty))
+        else {
+            continue;
+        };
+        let Type::Known(ty) = checker.shallow_type(ty) else {
+            continue;
+        };
+        if let crate::types::TypeKind::Enum(enumeration) = checker.inference.type_store().kind(ty) {
+            enum_by_dimension.insert(
+                crate::semantic::ResolvedLayoutDimension::Global(value),
+                *enumeration,
+            );
         }
     }
     let selection = crate::layout_selection::automatic_layout_selection_with(
@@ -1043,7 +1102,26 @@ fn automatic_layout_selection(
                         .map(|alternative| {
                             alternative
                                 .iter()
-                                .map(|constraint| (constraint.dimension, constraint.variant))
+                                .map(|constraint| {
+                                    let dimension = match constraint.dimension {
+                                        crate::typeck::declarations::LayoutDimension::LayoutField(
+                                            field,
+                                        ) => crate::semantic::ResolvedLayoutDimension::LayoutField(
+                                            field,
+                                        ),
+                                        crate::typeck::declarations::LayoutDimension::Global(
+                                            value,
+                                        ) => crate::semantic::ResolvedLayoutDimension::Global(
+                                            value,
+                                        ),
+                                        crate::typeck::declarations::LayoutDimension::StateField(
+                                            value,
+                                        ) => crate::semantic::ResolvedLayoutDimension::StateField(
+                                            value,
+                                        ),
+                                    };
+                                    (dimension, constraint.variant)
+                                })
                                 .collect()
                         })
                         .collect()

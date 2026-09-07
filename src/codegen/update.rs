@@ -89,6 +89,13 @@ pub(super) struct StatePollFunctions<'a> {
 }
 
 #[derive(Clone, Copy)]
+pub(super) enum PredicateState {
+    Unavailable,
+    Local(u32),
+    Global(u32),
+}
+
+#[derive(Clone, Copy)]
 struct StateFieldPoll {
     field: ValueId,
     read_function: u32,
@@ -97,6 +104,7 @@ struct StateFieldPoll {
 }
 
 struct SnapshotPollContext<'a> {
+    program: &'a Program,
     candidate_state: u32,
     poll_result_locals: HashMap<ValueId, u32>,
     pointer_prefix_locals: &'a PrefixLocals,
@@ -454,6 +462,7 @@ pub(super) fn compile_update(
     locals.extend(prefix_local_declarations);
     let mut function = Function::new(locals);
     let snapshot_poll = SnapshotPollContext {
+        program,
         candidate_state,
         poll_result_locals,
         pointer_prefix_locals: &pointer_prefix_locals,
@@ -805,12 +814,8 @@ pub(super) fn compile_update(
             .instruction(&Instruction::If(BlockType::Empty));
         emit_automatic_layout_selection(&mut function, program, plan, lowering);
         function
-            .instruction(&Instruction::GlobalGet(
-                globals
-                    .selected_layout
-                    .expect("automatic layout selection has global storage"),
-            ))
-            .instruction(&Instruction::RefIsNull)
+            .instruction(&Instruction::GlobalGet(globals.attach_ready))
+            .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty));
         emit_automatic_layout_failure_report(&mut function, strings, program, plan, lowering);
         function
@@ -920,6 +925,8 @@ pub(super) fn compile_update(
                     lowering.runtime_globals.selected_layout,
                     lowering.semantics,
                     lowering.gc,
+                    lowering.globals,
+                    PredicateState::Local(candidate_state),
                 );
                 function.instruction(&Instruction::If(BlockType::Empty));
             }
@@ -932,7 +939,7 @@ pub(super) fn compile_update(
                     poll_result_local: first_poll_result + read_index as u32,
                 },
                 &mut prefix_emission,
-                predicate.is_some(),
+                predicate,
                 &snapshot_poll,
             );
             if predicate.is_some() {
@@ -971,13 +978,14 @@ pub(super) fn compile_update(
                         poll_result_local: first_poll_result + read_index as u32,
                     },
                     &mut prefix_emission,
-                    false,
+                    None,
                     &snapshot_poll,
                 );
             }
             function.instruction(&Instruction::End);
         }
     }
+    emit_dynamic_shape_transition_seeding(&mut function, program, candidate_state, lowering);
     if let Some(active) = lowering.managed_state_reads.active() {
         function
             .instruction(&Instruction::I32Const(0))
@@ -1358,6 +1366,8 @@ pub(super) fn emit_layout_predicate(
     selected_layout: Option<u32>,
     semantics: &SemanticModel,
     gc: &GcLayout,
+    globals: &HashMap<ValueId, u32>,
+    state: PredicateState,
 ) {
     for (alternative_index, alternative) in predicate.alternatives.iter().enumerate() {
         emit_layout_constraints(
@@ -1367,6 +1377,8 @@ pub(super) fn emit_layout_predicate(
             selected_layout,
             semantics,
             gc,
+            globals,
+            state,
         );
         if alternative_index != 0 {
             function.instruction(&Instruction::I32Or);
@@ -1384,32 +1396,30 @@ fn emit_layout_constraints(
     selected_layout: Option<u32>,
     semantics: &SemanticModel,
     gc: &GcLayout,
+    globals: &HashMap<ValueId, u32>,
+    state_snapshot: PredicateState,
 ) {
+    if constraints.is_empty() {
+        function.instruction(&Instruction::I32Const(1));
+        return;
+    }
     let state = program
         .state
         .as_ref()
         .expect("state polling has a state declaration");
-    let layout = state
-        .layout
-        .as_ref()
-        .expect("conditional fields require attachment layout dimensions");
-    let structure = program
-        .structs
-        .get(layout.structure.index())
-        .expect("attachment Layout is an ordinary struct");
-    let selected = selected_layout.expect("conditional fields have selected-layout storage");
     for (index, constraint) in constraints.iter().enumerate() {
-        let field_index = structure
-            .fields
-            .iter()
-            .position(|field| field.id == constraint.dimension)
-            .expect("layout constraints refer to Layout fields") as u32;
-        let field_type = semantic_type(
-            semantics
-                .struct_field_type(constraint.dimension)
-                .expect("layout dimensions have checked enum types"),
-            semantics,
-        );
+        let field_type = match constraint.dimension {
+            crate::semantic::ResolvedLayoutDimension::LayoutField(field) => semantic_type(
+                semantics
+                    .struct_field_type(field)
+                    .expect("layout dimensions have checked enum types"),
+                semantics,
+            ),
+            crate::semantic::ResolvedLayoutDimension::Global(value) => value_type(value, semantics),
+            crate::semantic::ResolvedLayoutDimension::StateField(value) => {
+                value_type(value, semantics)
+            }
+        };
         let Type::Enum(enumeration) = field_type else {
             unreachable!("validated layout dimensions are source enums")
         };
@@ -1424,15 +1434,54 @@ fn emit_layout_constraints(
             .expect("layout constraints refer to variants of their dimension")
             as i32;
 
-        function
-            .instruction(&Instruction::GlobalGet(selected))
-            .instruction(&Instruction::RefAsNonNull);
-        emit_typed_struct_get(
-            function,
-            gc.index(Type::Struct(layout.structure)),
-            field_index,
-            field_type,
-        );
+        match constraint.dimension {
+            crate::semantic::ResolvedLayoutDimension::LayoutField(field) => {
+                let layout = state
+                    .layout
+                    .as_ref()
+                    .expect("legacy layout constraints require attachment layout storage");
+                let structure = program
+                    .structs
+                    .get(layout.structure.index())
+                    .expect("attachment Layout is an ordinary struct");
+                let field_index = structure
+                    .fields
+                    .iter()
+                    .position(|candidate| candidate.id == field)
+                    .expect("layout constraints refer to Layout fields")
+                    as u32;
+                let selected = selected_layout
+                    .expect("legacy layout constraints have selected-layout storage");
+                function
+                    .instruction(&Instruction::GlobalGet(selected))
+                    .instruction(&Instruction::RefAsNonNull);
+                emit_typed_struct_get(
+                    function,
+                    gc.index(Type::Struct(layout.structure)),
+                    field_index,
+                    field_type,
+                );
+            }
+            crate::semantic::ResolvedLayoutDimension::Global(value) => {
+                function.instruction(&Instruction::GlobalGet(globals[&value]));
+            }
+            crate::semantic::ResolvedLayoutDimension::StateField(value) => {
+                match state_snapshot {
+                    PredicateState::Local(snapshot) => {
+                        function.instruction(&Instruction::LocalGet(snapshot));
+                    }
+                    PredicateState::Global(snapshot) => {
+                        function.instruction(&Instruction::GlobalGet(snapshot));
+                    }
+                    PredicateState::Unavailable => unreachable!(
+                        "dynamic state predicates are only emitted with a state snapshot"
+                    ),
+                }
+                function.instruction(&Instruction::RefAsNonNull);
+                let (field_index, _) = state_storage_index(value, semantics);
+                emit_typed_struct_get(function, STATE_TYPE, field_index, field_type);
+            }
+        }
         function
             .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
@@ -1474,6 +1523,8 @@ fn emit_managed_field_presence_validation(
                 lowering.runtime_globals.selected_layout,
                 lowering.semantics,
                 lowering.gc,
+                lowering.globals,
+                PredicateState::Unavailable,
             );
             function.instruction(&Instruction::If(BlockType::Empty));
             for field in &group.fields {
@@ -1529,15 +1580,10 @@ fn emit_automatic_layout_selection(
             .expect("managed layout evidence has generated bindings");
         (global, structure)
     });
-    let layout = program
+    let legacy_layout = program
         .state
         .as_ref()
-        .and_then(|state| state.layout.as_ref())
-        .expect("automatic selection has attachment layout dimensions");
-    let selected = lowering
-        .runtime_globals
-        .selected_layout
-        .expect("automatic selection has layout storage");
+        .and_then(|state| state.layout.as_ref());
 
     for candidate in &plan.candidates {
         if let Some((bindings_global, bindings_struct)) = bindings {
@@ -1586,12 +1632,27 @@ fn emit_automatic_layout_selection(
             function.instruction(&Instruction::StructNew(
                 lowering.gc.index(Type::Enum(enumeration.id)),
             ));
+            if let crate::semantic::ResolvedLayoutDimension::Global(value) = dimension.dimension {
+                function.instruction(&Instruction::GlobalSet(lowering.globals[&value]));
+            }
+        }
+        if let Some(layout) = legacy_layout {
+            function
+                .instruction(&Instruction::StructNew(
+                    lowering.gc.index(Type::Struct(layout.structure)),
+                ))
+                .instruction(&Instruction::GlobalSet(
+                    lowering
+                        .runtime_globals
+                        .selected_layout
+                        .expect("legacy automatic selection has layout storage"),
+                ));
         }
         function
-            .instruction(&Instruction::StructNew(
-                lowering.gc.index(Type::Struct(layout.structure)),
+            .instruction(&Instruction::I32Const(ATTACH_LAYOUT_SELECTED))
+            .instruction(&Instruction::GlobalSet(
+                lowering.runtime_globals.attach_ready,
             ))
-            .instruction(&Instruction::GlobalSet(selected))
             .instruction(&Instruction::End);
     }
 }
@@ -1626,6 +1687,89 @@ fn emit_provider_selection(
             lowering.gc.index(Type::Enum(enumeration.id)),
         ))
         .instruction(&Instruction::GlobalSet(selected));
+}
+
+fn predicate_uses_state(predicate: &crate::semantic::ResolvedLayoutPredicate) -> bool {
+    predicate.alternatives.iter().flatten().any(|constraint| {
+        matches!(
+            constraint.dimension,
+            crate::semantic::ResolvedLayoutDimension::StateField(_)
+        )
+    })
+}
+
+/// A newly activated conditional group has no meaningful previous value.
+/// Once all of its fields have been read transactionally, seed those slots in
+/// the accepted snapshot so the first visible `(old, current)` pair does not
+/// manufacture a transition from backend defaults.
+fn emit_dynamic_shape_transition_seeding(
+    function: &mut Function,
+    program: &Program,
+    candidate_state: u32,
+    lowering: &UpdateContext<'_>,
+) {
+    let Some(state) = &program.state else {
+        return;
+    };
+    let fields = state
+        .conditional_fields
+        .iter()
+        .flat_map(|group| &group.fields)
+        .filter_map(|field| {
+            let predicate = lowering.semantics.state_field_layout_predicate(field.id)?;
+            predicate_uses_state(predicate).then_some((field, predicate))
+        })
+        .collect::<Vec<_>>();
+    if fields.is_empty() {
+        return;
+    }
+
+    function
+        .instruction(&Instruction::GlobalGet(
+            lowering.runtime_globals.state_ready,
+        ))
+        .instruction(&Instruction::If(BlockType::Empty));
+    for (field, predicate) in fields {
+        emit_layout_predicate(
+            function,
+            program,
+            predicate,
+            lowering.runtime_globals.selected_layout,
+            lowering.semantics,
+            lowering.gc,
+            lowering.globals,
+            PredicateState::Local(candidate_state),
+        );
+        emit_layout_predicate(
+            function,
+            program,
+            predicate,
+            lowering.runtime_globals.selected_layout,
+            lowering.semantics,
+            lowering.gc,
+            lowering.globals,
+            PredicateState::Global(lowering.runtime_globals.current),
+        );
+        function
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::I32And)
+            .instruction(&Instruction::If(BlockType::Empty));
+        let field_type = value_type(field.id, lowering.semantics);
+        let (field_index, _) = state_storage_index(field.id, lowering.semantics);
+        function
+            .instruction(&Instruction::GlobalGet(lowering.runtime_globals.current))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::LocalGet(candidate_state))
+            .instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(function, STATE_TYPE, field_index, field_type);
+        function
+            .instruction(&Instruction::StructSet {
+                struct_type_index: STATE_TYPE,
+                field_index,
+            })
+            .instruction(&Instruction::End);
+    }
+    function.instruction(&Instruction::End);
 }
 
 /// Stable topological order for the physical fields active in one state
@@ -1680,7 +1824,7 @@ fn emit_state_field_poll(
     function: &mut Function,
     poll: StateFieldPoll,
     prefix_emission: &mut PrefixEmissionState,
-    conditional: bool,
+    predicate: Option<&crate::semantic::ResolvedLayoutPredicate>,
     context: &SnapshotPollContext<'_>,
 ) {
     let StateFieldPoll {
@@ -1708,7 +1852,7 @@ fn emit_state_field_poll(
             prefix,
             &context.pointer_emission,
             prefix_emission,
-            conditional,
+            predicate.is_some(),
         );
     }
     let dependencies = semantics.state_dependencies(field);
@@ -1812,8 +1956,23 @@ fn emit_state_field_poll(
         .instruction(&Instruction::GlobalGet(
             lowering.runtime_globals.state_ready,
         ))
-        .instruction(&Instruction::I32Eqz)
-        .instruction(&Instruction::If(BlockType::Empty));
+        .instruction(&Instruction::I32Eqz);
+    if let Some(predicate) = predicate.filter(|predicate| predicate_uses_state(predicate)) {
+        emit_layout_predicate(
+            function,
+            context.program,
+            predicate,
+            lowering.runtime_globals.selected_layout,
+            lowering.semantics,
+            lowering.gc,
+            lowering.globals,
+            PredicateState::Global(lowering.runtime_globals.current),
+        );
+        function
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::I32Or);
+    }
+    function.instruction(&Instruction::If(BlockType::Empty));
     if let Some(active) = lowering.managed_state_reads.active() {
         function
             .instruction(&Instruction::I32Const(0))

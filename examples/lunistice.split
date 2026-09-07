@@ -6,6 +6,9 @@ enum Edition {
     DlcDemo,
 }
 
+/// Attachment-static edition inferred from the managed metadata shape.
+let edition: Edition
+
 struct LevelTimeParts {
     minutes: f32,
     seconds: f32,
@@ -24,7 +27,7 @@ image "Assembly-CSharp" {
         /// Deaths accumulated in this run.
         u32 deaths from "_deaths";
 
-        if layout.edition == Edition.BaseGame {
+        if edition == Edition.BaseGame {
             /// The original game's numeric level index.
             i32 level from "currentLevel";
         } else {
@@ -48,10 +51,6 @@ image "Assembly-CSharp" {
 }
 
 state Unity.il2cpp(2020) ["Lunistice.exe", "Lunistice-Demo.exe"] {
-    layout {
-        edition: Edition,
-    }
-
     gameManager: GameManager = GameManager.instance?.snapshot()?;
     timer: Timer = Timer.instance?.snapshot()?;
 }
@@ -108,19 +107,19 @@ whileAttached {
     setVariable("Points", current.gameManager.points)
     setVariable("Resets", current.gameManager.deaths)
     setVariable("Level Time", current.timer.levelTimeParts)
-    if layout.edition == Edition.BaseGame {
+    if edition == Edition.BaseGame {
         setVariable("Level", levelText(current.gameManager.level))
     } else {
         setVariable("Scene", current.gameManager.scene)
     }
     setVariable(
         "Character",
-        characterName(current.timer.character, layout.edition == Edition.DlcDemo),
+        characterName(current.timer.character, edition == Edition.DlcDemo),
     )
 }
 
 start {
-    let isFirstLevel = if layout.edition == Edition.BaseGame {
+    let isFirstLevel = if edition == Edition.BaseGame {
         current.gameManager.level == 0
     } else {
         current.gameManager.scene == "Shrine01"
@@ -138,7 +137,7 @@ reset {
 
 split {
     let enteredResults = old.gameManager.gameState != 6 && current.gameManager.gameState == 6
-    let creditsTransition = layout.edition == Edition.BaseGame
+    let creditsTransition = edition == Edition.BaseGame
         && old.gameManager.level >= 13
         && current.gameManager.level == 2
 

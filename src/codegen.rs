@@ -441,7 +441,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     );
     let async_frames = AsyncFrameLayouts::plan(program, wasm_ir, semantics, &reachability);
     let managed = crate::managed::ManagedBindingPlan::build(program, semantics);
-    let explicit_layout_selection = crate::layout_selection::has_explicit_layout_return(program);
+    let explicit_layout_selection = crate::layout_selection::has_explicit_layout_selection(program);
     let automatic_layout = if explicit_layout_selection {
         None
     } else {

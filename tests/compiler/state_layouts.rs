@@ -526,6 +526,92 @@ fn conditional_state_fields_refine_multiple_attachment_dimensions() {
 }
 
 #[test]
+fn attachment_globals_are_conditional_schema_dimensions() {
+    let source = r#"
+        enum Edition { BaseGame, Demo }
+        let edition: Edition
+
+        state "game.exe" {
+            common: u8 at 0x100;
+            if edition is Edition.BaseGame {
+                level: u8 at 0x180;
+            } else {
+                scene: u16 at 0x200;
+            }
+        }
+
+        onAttach {
+            edition = Edition.BaseGame
+        }
+
+        split {
+            if edition is Edition.BaseGame {
+                return current.level != old.level
+            } else {
+                return current.scene != old.scene
+            }
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("an attachment enum global should select conditional state fields");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("global schema predicates should produce valid Wasm GC");
+}
+
+#[test]
+fn attachment_shape_globals_are_frozen_after_attach() {
+    let source = r#"
+        enum Edition { BaseGame, Demo }
+        let edition: Edition
+        state "game.exe" {
+            if edition is Edition.BaseGame { level: u8 at 0x100; }
+            else { scene: u8 at 0x200; }
+        }
+        onAttach { edition = Edition.BaseGame }
+        whileAttached { edition = Edition.Demo }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("an attachment schema discriminator must remain frozen");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message
+            == "attachment-shape global `edition` can only be assigned in `onAttach`"
+    }));
+}
+
+#[test]
+fn state_enum_fields_are_dynamic_schema_dimensions() {
+    let source = r#"
+        enum Game { Menu, Playing }
+
+        state "game.exe" {
+            game: Game = if process.read<u8>(0x100)? == 0 {
+                Game.Menu
+            } else {
+                Game.Playing
+            };
+            if game is Game.Menu {
+                selection: u8 at 0x200;
+            } else {
+                level: u16 at 0x300;
+            }
+        }
+
+        split {
+            if current.game is Game.Playing {
+                return current.level != old.level
+            }
+            return false
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("a state enum should select dynamically conditional state fields");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("dynamic state predicates should produce valid Wasm GC");
+}
+
+#[test]
 fn conditional_state_field_chains_preserve_exact_remaining_layouts() {
     let source = r#"
         enum Edition { Base, Demo }
@@ -684,6 +770,46 @@ fn managed_fields_share_the_attachment_layout_refinement_model() {
         }),
         "{diagnostics:#?}"
     );
+}
+
+#[test]
+fn unity_metadata_can_initialize_an_attachment_shape_global() {
+    let source = r#"
+        enum Edition { BaseGame, Demo }
+        let edition: Edition
+
+        image "Assembly-CSharp" {
+            class GameManager {
+                static GameManager instance;
+                if edition is Edition.BaseGame {
+                    u32 level;
+                } else {
+                    u32 scene;
+                }
+            }
+        }
+
+        state Unity ["game.exe"] {
+            if edition is Edition.BaseGame {
+                level: u32 = GameManager.instance?.level?;
+            } else {
+                scene: u32 = GameManager.instance?.scene?;
+            }
+        }
+
+        split {
+            if edition is Edition.BaseGame {
+                return current.level != old.level
+            } else {
+                return current.scene != old.scene
+            }
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("unique Unity metadata should initialize the shape global automatically");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("automatic global shape selection should produce valid Wasm GC");
 }
 
 #[test]

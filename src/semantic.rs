@@ -363,10 +363,18 @@ pub enum DynamicCallCallee {
     Value(ValueId),
 }
 
-/// One statically proven fact about the attachment-wide `layout` value.
+/// The checked source value that selects one finite declaration shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResolvedLayoutDimension {
+    LayoutField(StructFieldId),
+    Global(ValueId),
+    StateField(ValueId),
+}
+
+/// One statically proven fact about a finite declaration-shape discriminator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ResolvedLayoutConstraint {
-    pub dimension: StructFieldId,
+    pub dimension: ResolvedLayoutDimension,
     pub variant: EnumVariantId,
 }
 

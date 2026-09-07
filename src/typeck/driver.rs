@@ -209,6 +209,7 @@ fn initialize_checker(
         layout_available_in_on_attach: false,
         active_state_layouts: None,
         active_state_field: None,
+        layout_dimensions: Vec::new(),
         active_layouts: None,
         scopes: Vec::new(),
         condition_flows: std::collections::HashMap::new(),

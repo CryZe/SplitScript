@@ -24,6 +24,17 @@ pub(super) fn collect(checker: &mut Checker, program: &Program) {
     collect_function_signatures(checker, program);
 }
 
+/// Collects declarations whose shape depends on checked source expressions.
+///
+/// This deliberately runs after global initializers have established their
+/// bindings and types. Conditional schema declarations can therefore use an
+/// ordinary enum global as their discriminator without introducing a second,
+/// layout-specific name-resolution path.
+pub(super) fn collect_conditional_fields(checker: &mut Checker, program: &Program) {
+    collect_conditional_state_fields(checker, program);
+    collect_conditional_managed_fields(checker, program);
+}
+
 fn collect_state_fields(checker: &mut Checker, program: &Program) {
     let Some(state) = program.state.as_ref() else {
         return;
@@ -54,47 +65,6 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
                     format!("duplicate state field `{}`", field.name),
                     field.span,
                 );
-            }
-        }
-        let predicates = checker.layout_branch_predicates(&state.conditional_fields);
-        for (group, predicate) in state.conditional_fields.iter().zip(predicates) {
-            let mut names = state
-                .fields
-                .iter()
-                .map(|field| field.name.clone())
-                .collect::<HashSet<_>>();
-            for field in &group.fields {
-                let ty = collect_state_field_type(checker, field, provider);
-                checker.semantics.resolve_value_type(field.id, ty);
-                checker.declarations.state_fields_by_id.insert(field.id, ty);
-                checker
-                    .declarations
-                    .state_field_spans
-                    .insert(field.id, field.span);
-                checker
-                    .declarations
-                    .state_storage_fields
-                    .insert(field.id, field.id);
-                checker
-                    .declarations
-                    .conditional_state_fields
-                    .entry(field.name.clone())
-                    .or_default()
-                    .push((field.id, ty, predicate.clone()));
-                checker
-                    .declarations
-                    .conditional_state_field_predicates
-                    .insert(field.id, predicate.clone());
-                checker.semantics.resolve_conditional_state_field(
-                    field.id,
-                    resolved_layout_predicate(&predicate),
-                );
-                if !names.insert(field.name.clone()) {
-                    checker.error(
-                        format!("duplicate conditional state field `{}`", field.name),
-                        field.span,
-                    );
-                }
             }
         }
     } else {
@@ -230,9 +200,13 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
         );
     }
 
-    let storage_fields = if !state.has_named_variants() {
-        state.all_fields().map(|field| field.id).collect()
-    } else {
+    if !state.has_named_variants() {
+        // Conditional fields are collected after globals have been checked;
+        // that later phase finalizes the physical snapshot layout as well.
+        return;
+    }
+
+    let storage_fields = {
         let mut fields = state
             .canonical_fields()
             .iter()
@@ -261,6 +235,77 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
         storage_fields,
         checker.declarations.state_storage_fields.clone(),
         layout_fields,
+    );
+}
+
+fn collect_conditional_state_fields(checker: &mut Checker, program: &Program) {
+    let Some(state) = program.state.as_ref() else {
+        return;
+    };
+    if state.has_named_variants() {
+        return;
+    }
+    let provider = checker
+        .provider_value
+        .map(|(provider, _)| checker.standard_library.state_provider(provider));
+    let predicates = checker.layout_branch_predicates(&state.conditional_fields);
+    for (group, predicate) in state.conditional_fields.iter().zip(predicates) {
+        let mut names = state
+            .fields
+            .iter()
+            .map(|field| field.name.clone())
+            .collect::<HashSet<_>>();
+        for field in &group.fields {
+            let ty = collect_state_field_type(checker, field, provider);
+            checker.semantics.resolve_value_type(field.id, ty);
+            checker.declarations.state_fields_by_id.insert(field.id, ty);
+            checker
+                .declarations
+                .state_field_spans
+                .insert(field.id, field.span);
+            checker
+                .declarations
+                .state_storage_fields
+                .insert(field.id, field.id);
+            checker
+                .declarations
+                .conditional_state_fields
+                .entry(field.name.clone())
+                .or_default()
+                .push((field.id, ty, predicate.clone()));
+            checker
+                .declarations
+                .conditional_state_field_predicates
+                .insert(field.id, predicate.clone());
+            for dependency in predicate
+                .alternatives
+                .iter()
+                .flatten()
+                .filter_map(|constraint| match constraint.dimension {
+                    super::declarations::LayoutDimension::StateField(value) => Some(value),
+                    super::declarations::LayoutDimension::LayoutField(_)
+                    | super::declarations::LayoutDimension::Global(_) => None,
+                })
+            {
+                checker
+                    .semantics
+                    .resolve_state_dependency(field.id, dependency);
+            }
+            checker
+                .semantics
+                .resolve_conditional_state_field(field.id, resolved_layout_predicate(&predicate));
+            if !names.insert(field.name.clone()) {
+                checker.error(
+                    format!("duplicate conditional state field `{}`", field.name),
+                    field.span,
+                );
+            }
+        }
+    }
+    checker.semantics.resolve_state_layout(
+        state.all_fields().map(|field| field.id).collect(),
+        checker.declarations.state_storage_fields.clone(),
+        HashMap::new(),
     );
 }
 
@@ -621,28 +666,6 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
                 &mut common_metadata_names,
             );
         }
-        let predicates = checker.layout_branch_predicates(&class.conditional_fields);
-        for (group, predicate) in class.conditional_fields.iter().zip(predicates) {
-            let mut fields = common_fields.clone();
-            let mut metadata_names = common_metadata_names.clone();
-            for field in &group.fields {
-                collect_managed_field(
-                    checker,
-                    class.name.as_str(),
-                    field,
-                    &mut fields,
-                    &mut metadata_names,
-                );
-                checker
-                    .declarations
-                    .conditional_managed_fields
-                    .insert(field.id, predicate.clone());
-                checker.semantics.resolve_conditional_managed_field(
-                    field.id,
-                    resolved_layout_predicate(&predicate),
-                );
-            }
-        }
     }
 
     let mut enum_names = HashSet::new();
@@ -689,6 +712,59 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
     }
 }
 
+fn collect_conditional_managed_fields(checker: &mut Checker, program: &Program) {
+    for class in program.managed_class_declarations() {
+        let common_fields: HashSet<String> = class
+            .fields
+            .iter()
+            .map(|field| field.name.clone())
+            .collect();
+        let common_metadata_names: HashMap<String, (String, Span)> = class
+            .fields
+            .iter()
+            .flat_map(|field| {
+                field
+                    .binding_name_candidates()
+                    .into_iter()
+                    .map(|(name, span, _)| (name, (field.name.clone(), span)))
+            })
+            .collect();
+        let predicates = checker.layout_branch_predicates(&class.conditional_fields);
+        for (group, predicate) in class.conditional_fields.iter().zip(predicates) {
+            if predicate.alternatives.iter().flatten().any(|constraint| {
+                matches!(
+                    constraint.dimension,
+                    super::declarations::LayoutDimension::StateField(_)
+                )
+            }) {
+                checker.error(
+                    "managed field conditions cannot depend on dynamically polled state fields",
+                    group.keyword_span,
+                );
+            }
+            let mut fields = common_fields.clone();
+            let mut metadata_names = common_metadata_names.clone();
+            for field in &group.fields {
+                collect_managed_field(
+                    checker,
+                    class.name.as_str(),
+                    field,
+                    &mut fields,
+                    &mut metadata_names,
+                );
+                checker
+                    .declarations
+                    .conditional_managed_fields
+                    .insert(field.id, predicate.clone());
+                checker.semantics.resolve_conditional_managed_field(
+                    field.id,
+                    resolved_layout_predicate(&predicate),
+                );
+            }
+        }
+    }
+}
+
 fn resolved_layout_predicate(
     predicate: &super::declarations::LayoutPredicate,
 ) -> crate::semantic::ResolvedLayoutPredicate {
@@ -700,7 +776,17 @@ fn resolved_layout_predicate(
                 alternative
                     .iter()
                     .map(|constraint| crate::semantic::ResolvedLayoutConstraint {
-                        dimension: constraint.dimension,
+                        dimension: match constraint.dimension {
+                            super::declarations::LayoutDimension::LayoutField(field) => {
+                                crate::semantic::ResolvedLayoutDimension::LayoutField(field)
+                            }
+                            super::declarations::LayoutDimension::Global(value) => {
+                                crate::semantic::ResolvedLayoutDimension::Global(value)
+                            }
+                            super::declarations::LayoutDimension::StateField(value) => {
+                                crate::semantic::ResolvedLayoutDimension::StateField(value)
+                            }
+                        },
                         variant: constraint.variant,
                     })
                     .collect()

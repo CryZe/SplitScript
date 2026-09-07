@@ -15,10 +15,15 @@ use crate::{
 
 use super::{
     Checker,
-    declarations::{LayoutConstraint, LayoutPredicate},
+    declarations::{LayoutConstraint, LayoutDimension, LayoutPredicate},
 };
 
 impl Checker {
+    pub(super) fn is_attachment_shape_global(&self, value: crate::ast::ValueId) -> bool {
+        self.layout_dimensions
+            .contains(&LayoutDimension::Global(value))
+    }
+
     /// Extracts a conjunction of enum-variant facts from an arbitrary
     /// condition. Returning `None` merely means that the expression does not
     /// refine layout-dependent declarations.
@@ -34,7 +39,7 @@ impl Checker {
                 return None;
             }
         }
-        constraints.sort_by_key(|constraint| constraint.dimension.index());
+        constraints.sort_by_key(|constraint| layout_dimension_sort_key(constraint.dimension));
         constraints.dedup();
         Some(constraints)
     }
@@ -52,18 +57,7 @@ impl Checker {
         let [constraint] = constraints.as_slice() else {
             return None;
         };
-        let layout = self
-            .declarations
-            .structs
-            .iter()
-            .find(|structure| structure.name == "Layout")?;
-        let field = layout
-            .fields
-            .iter()
-            .find(|field| field.id == constraint.dimension)?;
-        let ResolvedTypeRef::Enum(enum_id) = self.resolutions.type_ref(field.ty)? else {
-            return None;
-        };
+        let enum_id = self.layout_dimension_enum(constraint.dimension)?;
         let enumeration = self
             .declarations
             .enums
@@ -108,6 +102,9 @@ impl Checker {
         &mut self,
         groups: &[ConditionalFieldsDecl<Field>],
     ) -> Vec<LayoutPredicate> {
+        for condition in groups.iter().filter_map(|group| group.condition.as_ref()) {
+            self.collect_declared_layout_dimensions(condition);
+        }
         let universe = self.layout_assignments();
         if universe.is_empty() && !groups.is_empty() {
             self.errors.push(
@@ -193,7 +190,7 @@ impl Checker {
             self.active_layouts = Some(LayoutPredicate {
                 alternatives: active
                     .into_iter()
-                    .filter(|assignment| predicate.alternatives.contains(assignment))
+                    .filter(|assignment| predicate_matches_assignment(predicate, assignment))
                     .collect(),
             });
         }
@@ -205,7 +202,7 @@ impl Checker {
     pub(super) fn layout_predicate_satisfied(&self, required: &LayoutPredicate) -> bool {
         self.active_layout_assignments()
             .iter()
-            .all(|assignment| required.alternatives.contains(assignment))
+            .all(|assignment| predicate_matches_assignment(required, assignment))
     }
 
     fn collect_layout_constraints(
@@ -292,29 +289,11 @@ impl Checker {
 
     fn layout_constraint_atom(&self, dimension: &Expr, variant: &Expr) -> Option<LayoutConstraint> {
         let dimension_path = expression_path(dimension)?;
-        let [root, dimension_name] = dimension_path.as_slice() else {
-            return None;
-        };
-        if *root != "layout" {
-            return None;
-        }
         let variant_path = expression_path(variant)?;
         let [enum_name, variant_name] = variant_path.as_slice() else {
             return None;
         };
-
-        let layout = self
-            .declarations
-            .structs
-            .iter()
-            .find(|structure| structure.name == "Layout")?;
-        let field = layout
-            .fields
-            .iter()
-            .find(|field| field.name == *dimension_name)?;
-        let ResolvedTypeRef::Enum(enum_id) = self.resolutions.type_ref(field.ty)? else {
-            return None;
-        };
+        let (dimension, enum_id) = self.resolve_layout_dimension(&dimension_path)?;
         let enumeration = self
             .declarations
             .enums
@@ -325,7 +304,7 @@ impl Checker {
             .iter()
             .find(|variant| variant.name == *variant_name)?;
         Some(LayoutConstraint {
-            dimension: field.id,
+            dimension,
             variant: variant.id,
         })
     }
@@ -344,24 +323,7 @@ impl Checker {
             return None;
         };
         let dimension_path = expression_path(dimension)?;
-        let [root, dimension_name] = dimension_path.as_slice() else {
-            return None;
-        };
-        if *root != "layout" {
-            return None;
-        }
-        let layout = self
-            .declarations
-            .structs
-            .iter()
-            .find(|structure| structure.name == "Layout")?;
-        let field = layout
-            .fields
-            .iter()
-            .find(|field| field.name == *dimension_name)?;
-        let ResolvedTypeRef::Enum(enum_id) = self.resolutions.type_ref(field.ty)? else {
-            return None;
-        };
+        let (dimension, enum_id) = self.resolve_layout_dimension(&dimension_path)?;
         let enumeration_decl = self
             .declarations
             .enums
@@ -372,22 +334,114 @@ impl Checker {
             .iter()
             .find(|candidate| candidate.name == *variant)?;
         Some(LayoutConstraint {
-            dimension: field.id,
+            dimension,
             variant: variant.id,
         })
     }
 
+    fn resolve_layout_dimension(
+        &self,
+        path: &[&str],
+    ) -> Option<(LayoutDimension, crate::ast::EnumId)> {
+        match path {
+            ["layout", dimension_name] => {
+                let layout = self
+                    .declarations
+                    .structs
+                    .iter()
+                    .find(|structure| structure.name == "Layout")?;
+                let field = layout
+                    .fields
+                    .iter()
+                    .find(|field| field.name == *dimension_name)?;
+                let ResolvedTypeRef::Enum(enum_id) = self.resolutions.type_ref(field.ty)? else {
+                    return None;
+                };
+                Some((LayoutDimension::LayoutField(field.id), enum_id))
+            }
+            [name] => {
+                if let Some(binding) = self.declarations.globals.get(*name) {
+                    let value = binding.id?;
+                    let ResolvedTypeRef::Enum(enum_id) =
+                        binding.ty.to_ref(self.inference.type_store())
+                    else {
+                        return None;
+                    };
+                    return Some((LayoutDimension::Global(value), enum_id));
+                }
+                let (value, ty) = self.declarations.state_fields.get(*name).copied()?;
+                let ResolvedTypeRef::Enum(enum_id) = ty.to_ref(self.inference.type_store()) else {
+                    return None;
+                };
+                Some((LayoutDimension::StateField(value), enum_id))
+            }
+            ["current", name] => {
+                let (value, ty) = self.declarations.state_fields.get(*name).copied()?;
+                let ResolvedTypeRef::Enum(enum_id) = ty.to_ref(self.inference.type_store()) else {
+                    return None;
+                };
+                Some((LayoutDimension::StateField(value), enum_id))
+            }
+            _ => None,
+        }
+    }
+
+    fn layout_dimension_enum(&self, dimension: LayoutDimension) -> Option<crate::ast::EnumId> {
+        match dimension {
+            LayoutDimension::LayoutField(field_id) => {
+                let layout = self
+                    .declarations
+                    .structs
+                    .iter()
+                    .find(|structure| structure.name == "Layout")?;
+                let field = layout.fields.iter().find(|field| field.id == field_id)?;
+                let ResolvedTypeRef::Enum(enum_id) = self.resolutions.type_ref(field.ty)? else {
+                    return None;
+                };
+                Some(enum_id)
+            }
+            LayoutDimension::Global(value) => {
+                let ty = self
+                    .declarations
+                    .globals
+                    .values()
+                    .find_map(|binding| (binding.id == Some(value)).then_some(binding.ty))?;
+                let ResolvedTypeRef::Enum(enum_id) = ty.to_ref(self.inference.type_store()) else {
+                    return None;
+                };
+                Some(enum_id)
+            }
+            LayoutDimension::StateField(value) => {
+                let ty = self.declarations.state_fields_by_id.get(&value).copied()?;
+                let ResolvedTypeRef::Enum(enum_id) = ty.to_ref(self.inference.type_store()) else {
+                    return None;
+                };
+                Some(enum_id)
+            }
+        }
+    }
+
+    fn collect_declared_layout_dimensions(&mut self, expression: &Expr) {
+        let mut paths = Vec::new();
+        collect_expression_paths(expression, &mut paths);
+        for path in paths {
+            let Some((dimension, _)) = self.resolve_layout_dimension(&path) else {
+                continue;
+            };
+            if !self.layout_dimensions.contains(&dimension) {
+                self.layout_dimensions.push(dimension);
+            }
+        }
+    }
+
     fn layout_assignments(&self) -> Vec<Vec<LayoutConstraint>> {
-        let Some(layout) = self
+        let layout = self
             .declarations
             .structs
             .iter()
-            .find(|structure| structure.name == "Layout")
-        else {
-            return vec![Vec::new()];
-        };
+            .find(|structure| structure.name == "Layout");
         let mut assignments = vec![Vec::new()];
-        for field in &layout.fields {
+        for field in layout.into_iter().flat_map(|layout| &layout.fields) {
             let Some(ResolvedTypeRef::Enum(enum_id)) = self.resolutions.type_ref(field.ty) else {
                 return Vec::new();
             };
@@ -414,7 +468,45 @@ impl Checker {
                     enumeration.variants.iter().map(move |variant| {
                         let mut assignment = assignment.clone();
                         assignment.push(LayoutConstraint {
-                            dimension: field.id,
+                            dimension: LayoutDimension::LayoutField(field.id),
+                            variant: variant.id,
+                        });
+                        assignment
+                    })
+                })
+                .collect();
+        }
+        for dimension in &self.layout_dimensions {
+            if matches!(dimension, LayoutDimension::LayoutField(_)) {
+                continue;
+            }
+            let Some(enum_id) = self.layout_dimension_enum(*dimension) else {
+                return Vec::new();
+            };
+            let Some(enumeration) = self
+                .declarations
+                .enums
+                .iter()
+                .find(|enumeration| enumeration.id == enum_id)
+            else {
+                return Vec::new();
+            };
+            if assignments
+                .len()
+                .checked_mul(enumeration.variants.len())
+                .is_none_or(|count| {
+                    count > crate::layout_selection::MAX_ENUMERATED_LAYOUT_COMBINATIONS
+                })
+            {
+                return Vec::new();
+            }
+            assignments = assignments
+                .into_iter()
+                .flat_map(|assignment| {
+                    enumeration.variants.iter().map(move |variant| {
+                        let mut assignment = assignment.clone();
+                        assignment.push(LayoutConstraint {
+                            dimension: *dimension,
                             variant: variant.id,
                         });
                         assignment
@@ -488,8 +580,43 @@ fn canonical_constraints(candidates: Vec<LayoutConstraint>) -> Vec<LayoutConstra
             variant.map(|variant| LayoutConstraint { dimension, variant })
         })
         .collect::<Vec<_>>();
-    constraints.sort_by_key(|constraint| constraint.dimension.index());
+    constraints.sort_by_key(|constraint| layout_dimension_sort_key(constraint.dimension));
     constraints
+}
+
+fn layout_dimension_sort_key(dimension: LayoutDimension) -> (u8, usize) {
+    match dimension {
+        LayoutDimension::LayoutField(field) => (0, field.index()),
+        LayoutDimension::Global(value) => (1, value.index()),
+        LayoutDimension::StateField(value) => (2, value.index()),
+    }
+}
+
+fn predicate_matches_assignment(
+    predicate: &LayoutPredicate,
+    assignment: &[LayoutConstraint],
+) -> bool {
+    predicate.alternatives.iter().any(|alternative| {
+        alternative
+            .iter()
+            .all(|constraint| assignment.contains(constraint))
+    })
+}
+
+fn collect_expression_paths<'a>(expression: &'a Expr, output: &mut Vec<Vec<&'a str>>) {
+    match &expression.kind {
+        ExprKind::Unary { expr, .. } => collect_expression_paths(expr, output),
+        ExprKind::Binary { left, right, .. } => {
+            collect_expression_paths(left, output);
+            collect_expression_paths(right, output);
+        }
+        ExprKind::Is { value, .. } => collect_expression_paths(value, output),
+        _ => {
+            if let Some(path) = expression_path(expression) {
+                output.push(path);
+            }
+        }
+    }
 }
 
 fn assignment_satisfies_constraints(

@@ -434,12 +434,13 @@ impl Parser<'_> {
             };
             let start = self.previous().span;
             let expression_start = self.cursor.position();
+            let expression_depth = self.cursor.delimiter_depth();
             let parsed = if self.expression_is_missing_before_statement() {
                 Err(self.error("expected an expression"))
             } else {
                 self.expression(12)
             };
-            let value = self.recover_root_expression(parsed, expression_start);
+            let value = self.recover_root_expression(parsed, expression_start, expression_depth);
             let span = start.join(value.span);
             let destination = self.new_value_id();
             return Ok(self.new_expr(
@@ -555,7 +556,7 @@ impl Parser<'_> {
         }
         if self.eat(&TokenKind::LParen).is_some() {
             let start = self.previous().span;
-            let target_depth = self.delimiter_depth_before(self.cursor.position());
+            let target_depth = self.cursor.delimiter_depth();
             let mut expr =
                 self.with_struct_literals(true, |parser| parser.required_expression(0))?;
             let end = if let Some(end) = self.eat(&TokenKind::RParen) {
@@ -1056,12 +1057,13 @@ impl Parser<'_> {
 
     pub(super) fn root_expression(&mut self) -> Expr {
         let expression_start = self.cursor.position();
+        let expression_depth = self.cursor.delimiter_depth();
         let parsed = if self.expression_is_missing_before_statement() {
             Err(self.error("expected an expression"))
         } else {
             self.expression(0)
         };
-        self.recover_root_expression(parsed, expression_start)
+        self.recover_root_expression(parsed, expression_start, expression_depth)
     }
 
     pub(super) fn root_expression_before_block(&mut self) -> Expr {
@@ -1072,6 +1074,7 @@ impl Parser<'_> {
         &mut self,
         parsed: Result<Expr, Diagnostic>,
         expression_start: usize,
+        expression_depth: DelimiterDepth,
     ) -> Expr {
         match parsed {
             Ok(expression) => expression,
@@ -1079,7 +1082,7 @@ impl Parser<'_> {
                 let error_span = error.span;
                 self.record_recovery_diagnostic(error);
                 let skipped_start = self.cursor.tokens()[expression_start].span.start;
-                self.synchronize_root_expression(expression_start);
+                self.synchronize_root_expression(expression_start, expression_depth);
                 let skipped_end = self.current().span.start.max(skipped_start);
                 self.record_error_region(skipped_start, skipped_end);
                 let span = if skipped_end == skipped_start {
@@ -1098,10 +1101,13 @@ impl Parser<'_> {
         }
     }
 
-    pub(super) fn synchronize_root_expression(&mut self, expression_start: usize) {
-        let target_depth = self.delimiter_depth_before(expression_start);
-        let mut depth = self.delimiter_depth_before(self.cursor.position());
+    pub(super) fn synchronize_root_expression(
+        &mut self,
+        expression_start: usize,
+        target_depth: DelimiterDepth,
+    ) {
         loop {
+            let depth = self.cursor.delimiter_depth();
             let at_same_brace_depth = depth.braces == target_depth.braces;
             if self.at(&TokenKind::Eof)
                 || (self.at(&TokenKind::Semicolon) && at_same_brace_depth)
@@ -1122,8 +1128,7 @@ impl Parser<'_> {
             {
                 return;
             }
-            let kind = self.bump().kind.clone();
-            depth.update(&kind);
+            self.bump();
         }
     }
 
@@ -1176,8 +1181,8 @@ impl Parser<'_> {
         closing: &TokenKind,
         target_depth: DelimiterDepth,
     ) {
-        let mut depth = self.delimiter_depth_before(self.cursor.position());
         loop {
+            let depth = self.cursor.delimiter_depth();
             if self.at(&TokenKind::Eof)
                 || (self.at(closing) && depth == target_depth)
                 || self.at(&TokenKind::TemplateExprEnd)
@@ -1190,8 +1195,7 @@ impl Parser<'_> {
             {
                 return;
             }
-            let kind = self.bump().kind.clone();
-            depth.update(&kind);
+            self.bump();
         }
     }
 
@@ -1621,7 +1625,7 @@ impl Parser<'_> {
     }
 
     fn match_arm_body_end(&self, parsed_end: usize) -> (usize, usize) {
-        let target = self.delimiter_depth_before(self.cursor.position());
+        let target = self.cursor.delimiter_depth();
         let mut depth = target;
         let mut diagnostic_end = parsed_end;
         for token in &self.cursor.tokens()[self.cursor.position()..] {
@@ -1651,10 +1655,10 @@ impl Parser<'_> {
         missing_closing_message: &'static str,
         allow_trailing_comma: bool,
     ) -> (Vec<Expr>, Span) {
-        let target_depth = self.delimiter_depth_before(self.cursor.position());
+        let target_depth = self.cursor.delimiter_depth();
         let mut expressions = Vec::new();
         loop {
-            let depth = self.delimiter_depth_before(self.cursor.position());
+            let depth = self.cursor.delimiter_depth();
             if self.at(&closing) && depth == target_depth {
                 return (expressions, self.bump().span);
             }
@@ -1675,7 +1679,7 @@ impl Parser<'_> {
                 if self.eat(&TokenKind::Comma).is_some() {
                     if !allow_trailing_comma
                         && self.at(&closing)
-                        && self.delimiter_depth_before(self.cursor.position()) == target_depth
+                        && self.cursor.delimiter_depth() == target_depth
                     {
                         self.record_missing(Diagnostic::new(
                             "expected an expression after `,`",
@@ -1684,9 +1688,7 @@ impl Parser<'_> {
                     }
                     continue;
                 }
-                if self.at(&closing)
-                    && self.delimiter_depth_before(self.cursor.position()) == target_depth
-                {
+                if self.at(&closing) && self.cursor.delimiter_depth() == target_depth {
                     continue;
                 }
                 self.record_missing(Diagnostic::new(
@@ -1725,19 +1727,17 @@ impl Parser<'_> {
         target_depth: DelimiterDepth,
         closing: &TokenKind,
     ) {
-        let mut depth = self.delimiter_depth_before(self.cursor.position());
         loop {
+            let depth = self.cursor.delimiter_depth();
             if self.at(&TokenKind::Eof)
                 || (self.at(closing) && depth == target_depth)
                 || self.is_expression_list_boundary(closing, depth, target_depth)
             {
                 return;
             }
-            let kind = self.bump().kind.clone();
-            if kind == TokenKind::Comma && depth == target_depth {
+            if self.bump().kind == TokenKind::Comma && depth == target_depth {
                 return;
             }
-            depth.update(&kind);
         }
     }
 
@@ -1760,18 +1760,6 @@ impl Parser<'_> {
             TokenKind::RBrace => depth.braces <= target.braces,
             _ => false,
         }
-    }
-
-    pub(super) fn delimiter_depth_before(&self, position: usize) -> DelimiterDepth {
-        let mut depth = DelimiterDepth {
-            parentheses: 0,
-            brackets: 0,
-            braces: 0,
-        };
-        for token in &self.cursor.tokens()[..position] {
-            depth.update(&token.kind);
-        }
-        depth
     }
 
     pub(super) fn if_expression(&mut self, start: Span) -> Result<Expr, Diagnostic> {

@@ -552,6 +552,38 @@ Continue profiling the remaining frontend floor before implementing parsed
 library templates. Prefix-scan removal reduces avoidable parsing work but does
 not avoid reparsing augmented source, and does not complete order 8.
 
+## Expression delimiter-scan removal
+
+The follow-up to `21da5b6` found a second prefix scan in ordinary parenthesized
+expressions, calls, and array argument lists. Expression lists repeatedly
+reconstructed all three delimiter counts, even on valid input. The cursor now
+maintains parentheses, brackets, and braces together; expressions retain a
+depth snapshot for root recovery. The parser no longer has either prefix-scan
+helper or separate advancing recovery counters. Forward lookahead still uses
+a copied depth without consuming tokens. Both script profiles share this code.
+
+The call-heavy 4,000-function parser benchmark falls from 1.38 seconds to
+10.2 ms in Rust release and 1.75 seconds to 9.9 ms in `max-opt`. Full compilation
+improves by roughly 44–53% across the four fixtures and two run orders.
+The frontend baseline (parse, augmentation, resolution, and disposal) falls
+from 22–32 ms to 2.2–2.7 ms. All nine release outputs remain byte-identical;
+40 malformed-source diagnostic comparisons also match exactly. Measurements
+are recorded in [baselines](docs/BASELINES.md).
+
+The actual `max-opt` LSP improves edit-to-diagnostics medians from
+41.2/46.7/71.5 to 21.6/22.3/45.4 ms (small/Lunistice/generated large).
+The embedded compiler improves from 43.2/51.7 to 20.3/24.1 ms
+(minimal/Lunistice). Reverse-order runs confirm both results. These are warm
+workloads, with startup excluded. Full `cargo xtask check` passed, including
+editor/browser workers, Wasm validation, and all 95 runtime scenarios.
+
+Reprioritize order 8 accordingly: a complex parsed-template cache can now save
+only a fraction of a roughly 2–3 ms frontend budget in these fixtures. Profile
+checking, specialization, and emission before introducing syntax-ID remapping
+or larger caches. Reuse of checked library facts remains a candidate, subject
+to the existing semantic requirements; the old parsing-floor measurements no
+longer justify implementing parsed-library templates first.
+
 ## Evidence and scope
 
 There are three different performance concerns:
@@ -833,6 +865,12 @@ allocation measurements show the ownership change is worthwhile. Use the
 existing query/recovery tests and explicitly cover warning-policy changes.
 
 ## 8. Reuse standard-library templates across compilations
+
+**Reprioritized after delimiter-scan removal:** the current frontend baseline is
+2.2–2.7 ms. Defer the parsed-template prototype below until fresh profiling
+justifies its complexity. First identify the dominant work after lowering;
+the design and correctness constraints here remain applicable if reuse is
+still the best measured option.
 
 The initial working-tree change cached rendered source and name indexes. The
 token-reuse batch above also caches lexed library tokens, but still does **not**

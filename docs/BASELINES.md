@@ -1289,6 +1289,106 @@ Evidence is retained under ignored `target/performance-review/brace-*`,
 reuse and remaining frontend work still need separate profiling; this change
 does not eliminate augmented parsing or claim script-size savings.
 
+## 2026-09-08 expression delimiter-depth tracking
+
+Source baseline: `21da5b6`, with brace-depth tracking already retained. Calls,
+array lists, parenthesized expressions, and expression recovery still scanned
+the entire consumed token prefix for parentheses/bracket/brace counts. The
+cursor now maintains all three counts, and root recovery saves the starting
+depth before parsing an expression. No delimiter-prefix scan remains, and
+recovery shares the cursor's counters. Crossed delimiters retain independent
+counts with saturating closers, preserving malformed-source behavior.
+
+The syntax benchmark now accepts `--calls` for functions containing
+`consume([1, 2], pair(3, 4))`:
+
+```console
+cargo run -p splitscript-syntax --release --example parser_scaling -- 10 --calls
+cargo run -p splitscript-syntax --profile max-opt --example parser_scaling -- 10 --calls
+```
+
+Windows x86-64, Rust 1.98.1. These runs have 10 warmups and 10 measured samples;
+lexing/token cloning are outside the timer, parsing and disposal are inside.
+Medians:
+
+| Functions | Source bytes | Rust release before → after | Rust max-opt before → after |
+| --- | ---: | ---: | ---: |
+| 100 | 5,310 | 1.136 → 0.276 ms | 1.387 → 0.264 ms |
+| 500 | 26,910 | 22.721 → 1.310 ms | 28.933 → 1.305 ms |
+| 1,000 | 53,910 | 85.821 → 2.497 ms | 113.743 → 2.357 ms |
+| 2,000 | 108,910 | 344.398 → 5.070 ms | 443.385 → 5.116 ms |
+| 4,000 | 218,910 | 1,377.603 → 10.197 ms | 1,745.079 → 9.888 ms |
+
+Fresh native compiler benchmarks use 20 warmups and 50 measured samples per
+fixture, with no concurrent builds/tests from this task. All scripts use the
+SplitScript release profile; columns distinguish the Rust executable profiles.
+
+| Fixture | Rust release before → after | Release reverse-order repeat | Rust max-opt before → after | Max-opt reverse-order repeat |
+| --- | ---: | ---: | ---: | ---: |
+| minimal | 49.46 → 26.42 ms | 49.33 → 26.11 ms | 44.69 → 24.78 ms | 44.63 → 24.96 ms |
+| Lunistice | 57.24 → 29.54 ms | 57.53 → 28.58 ms | 51.67 → 27.39 ms | 50.79 → 27.75 ms |
+| cancellation | 48.52 → 24.81 ms | 48.98 → 24.30 ms | 43.35 → 22.81 ms | 43.78 → 22.99 ms |
+| settings | 51.16 → 25.66 ms | 51.77 → 24.28 ms | 46.76 → 23.37 ms | 45.66 → 23.54 ms |
+
+Frontend-only medians from `compiler_baseline -- 50 --frontend`, including
+disposal and excluding checking/emission:
+
+| Fixture | Rust release before → after | Rust max-opt before → after |
+| --- | ---: | ---: |
+| minimal | 25.77 → 2.21 ms | 21.97 → 2.23 ms |
+| Lunistice | 31.86 → 2.68 ms | 26.96 → 2.60 ms |
+| cancellation | 26.56 → 2.26 ms | 22.35 → 2.19 ms |
+| settings | 27.92 → 2.22 ms | 23.56 → 2.19 ms |
+
+The actual `max-opt` language server was measured over stdio, alternating
+trailing-newline edits and awaiting versioned diagnostics. These use 20 warmups
+and 50 samples, the ordinary allocator, and the same sources as the previous
+distribution benchmark. Initial process/document startup is excluded. Saved
+pre-change distribution binaries have the compiler logic of `21da5b6`.
+
+| Fixture | Edit → diagnostics median before → after | p95 before → after | Reverse-order median before → after |
+| --- | ---: | ---: | ---: |
+| small | 41.17 → 21.65 ms | 42.84 → 22.72 ms | 41.31 → 21.86 ms |
+| Lunistice | 46.71 → 22.29 ms | 49.19 → 23.82 ms | 47.37 → 22.77 ms |
+| generated large | 71.54 → 45.44 ms | 76.83 → 50.21 ms | 70.94 → 45.57 ms |
+
+The embedded compiler's service ABI uses Node 24.14.0 with
+`--single-threaded --no-wasm-async-compilation`, 20 warmups and 50 samples:
+
+| Fixture | Median before → after | p95 before → after | Reverse-order median before → after |
+| --- | ---: | ---: | ---: |
+| minimal | 43.19 → 20.26 ms | 45.25 → 21.38 ms | 43.15 → 20.24 ms |
+| Lunistice | 51.65 → 24.10 ms | 54.84 → 24.74 ms | 51.24 → 23.72 ms |
+
+Module instantiation remains roughly 14 ms and is outside these compilation
+timings; this does not measure browser startup. The embedded compiler changes
+from 6,342,419 to 6,338,996 bytes. Native `max-opt` CLI size changes from
+6,299,136 to 6,296,576 bytes, and LSP from 4,320,768 to 4,318,720 bytes.
+These small compiler-artifact reductions are separate from script Wasm size.
+
+This changes the priority of parsed-library caching: the whole frontend now
+costs about 2–3 ms in these fixtures. Profile the remaining checking/emission
+work before adding template cloning and syntax-ID remapping to save a fraction
+of that budget. This change retains full augmented parsing and validation.
+
+All nine release script fixtures are byte-identical, including metadata.
+Lunistice remains 30,565 bytes and Minish Cap 45,113 bytes. Debug executable
+sections and line tables match on all nine fixtures; only the already-recorded
+DWARF variable-order variation appears, in two `.debug_info` sections this run.
+Forty before/after malformed-source comparisons preserve complete diagnostics
+and source locations across globals, state fields, functions, and actions.
+
+Validation: full `cargo xtask check` passed, including 102 syntax tests,
+420 library tests, 621 compiler integrations, editor/browser workers, Wasm
+validation, and all 95 runtime scenarios from 67 unique artifacts. The updated
+syntax benchmark also passes targeted Clippy. New tests cover independent
+delimiter counts, crossed/stray closers, string contents, contextual generic
+token merging, snapshots, and cloned cursors; existing recovery tests pass.
+
+Raw logs and saved binaries are under ignored `target/performance-review`,
+using `delimiter-*`, `compiler-delimiter-*`, `parser-delimiter-*`, and
+`splitc-delimiter-*`, `splitls-delimiter-*`, and `embedded-delimiter-*` names.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

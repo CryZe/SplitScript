@@ -1,27 +1,44 @@
 //! Manual parser scaling baseline: `cargo run -p splitscript-syntax --release
 //! --example parser_scaling -- 50` (also supports `--profile max-opt`).
 //! Token cloning and lexing are outside the timer; syntax/token disposal is inside.
+//! Append `--calls` to exercise nested calls and array argument lists.
 
 use std::{fmt::Write, hint::black_box, time::Instant};
 
 use splitscript_syntax::{SyntaxMode, lex, parser};
 
 fn main() {
-    let iterations = std::env::args()
-        .nth(1)
+    let mut arguments = std::env::args().skip(1);
+    let iterations = arguments
+        .next()
         .map(|value| value.parse::<usize>().expect("positive iteration count"))
         .unwrap_or(50);
     assert!(iterations > 0);
+    let calls = match arguments.next().as_deref() {
+        None => false,
+        Some("--calls") => true,
+        Some(other) => panic!("unknown benchmark option: {other}"),
+    };
+    assert!(arguments.next().is_none(), "too many benchmark arguments");
+    println!("fixture={}", if calls { "calls" } else { "blocks" });
     println!("warmup_iterations=10 measured_iterations={iterations}");
     println!("functions\tsource_bytes\ttokens\tmedian_us\tp95_us");
     for functions in [100, 500, 1_000, 2_000, 4_000] {
         let mut source = String::from("state \"game.exe\" {}\n");
         for index in 0..functions {
-            writeln!(
-                source,
-                "fn helper{index}() {{ if true {{ return 1 }} return 0 }}"
-            )
-            .unwrap();
+            if calls {
+                writeln!(
+                    source,
+                    "fn helper{index}() {{ return consume([1, 2], pair(3, 4)) }}"
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    source,
+                    "fn helper{index}() {{ if true {{ return 1 }} return 0 }}"
+                )
+                .unwrap();
+            }
         }
         let tokens = lex(&source, SyntaxMode::Program).expect("valid fixture tokens");
         let mut samples = Vec::with_capacity(iterations);

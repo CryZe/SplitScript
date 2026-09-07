@@ -27,6 +27,7 @@ use crate::{
         TypeApplicationId, TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId,
         VariableDecl,
     },
+    cursor::DelimiterDepth,
     diagnostic::{Diagnostic, DiagnosticFix, FixApplicability, TextEdit},
     migration::{ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
     source::{RecoveryNode, RecoveryNodeKind},
@@ -162,27 +163,6 @@ struct Parser<'a> {
     struct_literals_allowed: bool,
     diagnostics: Vec<Diagnostic>,
     recovery_nodes: Vec<RecoveryNode>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct DelimiterDepth {
-    parentheses: u32,
-    brackets: u32,
-    braces: u32,
-}
-
-impl DelimiterDepth {
-    fn update(&mut self, kind: &TokenKind) {
-        match kind {
-            TokenKind::LParen => self.parentheses += 1,
-            TokenKind::RParen => self.parentheses = self.parentheses.saturating_sub(1),
-            TokenKind::LBracket => self.brackets += 1,
-            TokenKind::RBracket => self.brackets = self.brackets.saturating_sub(1),
-            TokenKind::LBrace => self.braces += 1,
-            TokenKind::RBrace => self.braces = self.braces.saturating_sub(1),
-            _ => {}
-        }
-    }
 }
 
 impl Parser<'_> {

@@ -1,5 +1,29 @@
 use crate::{Token, TokenKind};
 
+/// Independent delimiter counts, including for malformed/crossed delimiters.
+/// Template interpolation markers are distinct tokens and do not change these
+/// counts; their recovery remains the template parser's responsibility.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DelimiterDepth {
+    pub(crate) parentheses: u32,
+    pub(crate) brackets: u32,
+    pub(crate) braces: u32,
+}
+
+impl DelimiterDepth {
+    pub(crate) fn update(&mut self, kind: &TokenKind) {
+        match kind {
+            TokenKind::LParen => self.parentheses += 1,
+            TokenKind::RParen => self.parentheses = self.parentheses.saturating_sub(1),
+            TokenKind::LBracket => self.brackets += 1,
+            TokenKind::RBracket => self.brackets = self.brackets.saturating_sub(1),
+            TokenKind::LBrace => self.braces += 1,
+            TokenKind::RBrace => self.braces = self.braces.saturating_sub(1),
+            _ => {}
+        }
+    }
+}
+
 /// Shared navigation over one token stream.
 ///
 /// The cursor never advances past EOF, and lookahead saturates at the final
@@ -9,7 +33,7 @@ use crate::{Token, TokenKind};
 pub struct TokenCursor {
     tokens: Vec<Token>,
     position: usize,
-    brace_depth: u32,
+    delimiter_depth: DelimiterDepth,
     /// Only contextual token splitting needs a token outside `tokens`.
     /// Ordinary advancement borrows the preceding slot without cloning text.
     split_previous: Option<Token>,
@@ -24,7 +48,7 @@ impl TokenCursor {
         Self {
             tokens,
             position: 0,
-            brace_depth: 0,
+            delimiter_depth: DelimiterDepth::default(),
             split_previous: None,
         }
     }
@@ -36,7 +60,13 @@ impl TokenCursor {
     /// Unmatched opening braces before the current token. Stray closing braces
     /// saturate at zero so recovery can resume at the next top-level declaration.
     pub fn brace_depth(&self) -> u32 {
-        self.brace_depth
+        self.delimiter_depth.braces
+    }
+
+    /// Counts before the current token. A copy can retain an expression's
+    /// starting context for recovery without rescanning consumed tokens.
+    pub(crate) fn delimiter_depth(&self) -> DelimiterDepth {
+        self.delimiter_depth
     }
 
     pub fn tokens(&self) -> &[Token] {
@@ -62,12 +92,10 @@ impl TokenCursor {
 
     pub fn bump(&mut self) -> &Token {
         let index = self.position;
-        match self.tokens[index].kind {
-            TokenKind::Eof => return &self.tokens[index],
-            TokenKind::LBrace => self.brace_depth += 1,
-            TokenKind::RBrace => self.brace_depth = self.brace_depth.saturating_sub(1),
-            _ => {}
+        if matches!(self.tokens[index].kind, TokenKind::Eof) {
+            return &self.tokens[index];
         }
+        self.delimiter_depth.update(&self.tokens[index].kind);
         self.position += 1;
         self.split_previous = None;
         &self.tokens[index]
@@ -240,6 +268,53 @@ mod tests {
         assert_eq!(cursor.current().kind, TokenKind::Eof);
         cursor.bump();
         assert_eq!(cursor.brace_depth(), 1);
+    }
+
+    #[test]
+    fn delimiter_counts_preserve_crossed_delimiters_and_ignore_string_contents() {
+        let mut cursor =
+            TokenCursor::new(lex(r#")] } ([{ ")]}" )]}"#, SyntaxMode::Program).unwrap());
+        for expected in [
+            (0, 0, 0),
+            (0, 0, 0),
+            (0, 0, 0),
+            (0, 0, 0),
+            (1, 0, 0),
+            (1, 1, 0),
+            (1, 1, 1),
+            (1, 1, 1),
+            (0, 1, 1),
+            (0, 0, 1),
+            (0, 0, 0),
+        ] {
+            let depth = cursor.delimiter_depth();
+            assert_eq!((depth.parentheses, depth.brackets, depth.braces), expected);
+            cursor.bump();
+        }
+        assert_eq!(cursor.current().kind, TokenKind::Eof);
+        assert_eq!(cursor.delimiter_depth(), DelimiterDepth::default());
+    }
+
+    #[test]
+    fn delimiter_snapshots_survive_generic_token_merging_and_advancement() {
+        let mut cursor = TokenCursor::new(lex("[(>==)]", SyntaxMode::Program).unwrap());
+        cursor.bump();
+        cursor.bump();
+        let start_depth = cursor.delimiter_depth();
+        assert_eq!(start_depth.parentheses, 1);
+        assert_eq!(start_depth.brackets, 1);
+        let mut cloned = cursor.clone();
+        cloned.eat_leading_gt().unwrap();
+        assert_eq!(cloned.current().kind, TokenKind::EqEq);
+        assert_eq!(cloned.delimiter_depth(), start_depth);
+        cloned.bump();
+        cloned.bump();
+        cloned.bump();
+        assert_eq!(cloned.delimiter_depth(), DelimiterDepth::default());
+        assert_eq!(cursor.delimiter_depth(), start_depth);
+        assert_eq!(cursor.current().kind, TokenKind::Ge);
+        assert_eq!(start_depth.parentheses, 1);
+        assert_eq!(start_depth.brackets, 1);
     }
 
     #[test]

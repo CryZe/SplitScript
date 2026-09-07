@@ -785,6 +785,220 @@ fn append_attachment_shapes(
     }
 }
 
+fn append_shape_availability(
+    description: &mut String,
+    predicate: &crate::semantic::ResolvedShapePredicate,
+    context: &SemanticContext,
+) {
+    let alternatives = simplified_shape_alternatives(predicate, context.syntax());
+    let alternatives = alternatives
+        .iter()
+        .map(|alternative| {
+            alternative
+                .iter()
+                .map(|constraint| render_shape_constraint(*constraint, context))
+                .collect::<Option<Vec<_>>>()
+                .map(|constraints| constraints.join(" && "))
+        })
+        .collect::<Option<Vec<_>>>();
+    let Some(alternatives) = alternatives else {
+        return;
+    };
+    if alternatives.is_empty() || alternatives.iter().any(String::is_empty) {
+        return;
+    }
+    description.push_str("\n\n**Available when:** ");
+    description.push_str(
+        &alternatives
+            .iter()
+            .map(|alternative| format!("`{alternative}`"))
+            .collect::<Vec<_>>()
+            .join(" or "),
+    );
+    description.push('.');
+}
+
+fn state_field_shape_availability(
+    field: crate::ast::ValueId,
+    context: &SemanticContext,
+) -> Option<crate::semantic::ResolvedShapePredicate> {
+    let semantics = context.semantics();
+    let storage = semantics.state_storage_field(field)?;
+    let mut alternatives = Vec::new();
+    let mut found = false;
+    for candidate in context
+        .syntax()
+        .state
+        .as_ref()?
+        .all_fields()
+        .filter(|candidate| semantics.state_storage_field(candidate.id) == Some(storage))
+    {
+        found = true;
+        let Some(predicate) = semantics.state_field_shape_predicate(candidate.id) else {
+            return None;
+        };
+        alternatives.extend(predicate.alternatives.iter().cloned());
+    }
+    found.then_some(crate::semantic::ResolvedShapePredicate { alternatives })
+}
+
+/// Removes dimensions that do not affect a declaration's availability from
+/// its finite truth table. The checked predicate deliberately retains complete
+/// assignments for schema planning; hover should instead show the smallest
+/// condition a user needs to establish.
+fn simplified_shape_alternatives(
+    predicate: &crate::semantic::ResolvedShapePredicate,
+    syntax: &crate::ast::Program,
+) -> Vec<Vec<crate::semantic::ResolvedShapeConstraint>> {
+    let mut alternatives = Vec::new();
+    for alternative in &predicate.alternatives {
+        if !alternatives.contains(alternative) {
+            alternatives.push(alternative.clone());
+        }
+    }
+
+    loop {
+        let before_subsumption = alternatives.len();
+        let snapshot = alternatives.clone();
+        alternatives.retain(|candidate| {
+            !snapshot.iter().any(|other| {
+                other.len() < candidate.len()
+                    && other
+                        .iter()
+                        .all(|constraint| candidate.contains(constraint))
+            })
+        });
+
+        let mut dimensions = Vec::new();
+        for constraint in alternatives.iter().flatten() {
+            if !dimensions.contains(&constraint.dimension) {
+                dimensions.push(constraint.dimension);
+            }
+        }
+
+        let mut collapsed = false;
+        'dimensions: for dimension in dimensions {
+            let Some(variants) = shape_dimension_variants(dimension, &alternatives, syntax) else {
+                continue;
+            };
+            let mut bases = Vec::new();
+            for alternative in &alternatives {
+                if !alternative
+                    .iter()
+                    .any(|constraint| constraint.dimension == dimension)
+                {
+                    continue;
+                }
+                let base = alternative
+                    .iter()
+                    .filter(|constraint| constraint.dimension != dimension)
+                    .copied()
+                    .collect::<Vec<_>>();
+                if !bases.contains(&base) {
+                    bases.push(base);
+                }
+            }
+            for base in bases {
+                let covers_every_variant = variants.iter().all(|variant| {
+                    alternatives.iter().any(|alternative| {
+                        alternative.iter().any(|constraint| {
+                            constraint.dimension == dimension && constraint.variant == *variant
+                        }) && alternative
+                            .iter()
+                            .filter(|constraint| constraint.dimension != dimension)
+                            .copied()
+                            .eq(base.iter().copied())
+                    })
+                });
+                if !covers_every_variant {
+                    continue;
+                }
+                alternatives.retain(|alternative| {
+                    !(alternative
+                        .iter()
+                        .any(|constraint| constraint.dimension == dimension)
+                        && alternative
+                            .iter()
+                            .filter(|constraint| constraint.dimension != dimension)
+                            .copied()
+                            .eq(base.iter().copied()))
+                });
+                alternatives.push(base);
+                collapsed = true;
+                break 'dimensions;
+            }
+        }
+
+        if !collapsed && alternatives.len() == before_subsumption {
+            break;
+        }
+    }
+    alternatives
+}
+
+fn shape_dimension_variants(
+    dimension: crate::semantic::ResolvedShapeDimension,
+    alternatives: &[Vec<crate::semantic::ResolvedShapeConstraint>],
+    syntax: &crate::ast::Program,
+) -> Option<Vec<crate::ast::EnumVariantId>> {
+    let variant = alternatives
+        .iter()
+        .flatten()
+        .find(|constraint| constraint.dimension == dimension)?
+        .variant;
+    let enumeration = syntax.enum_declarations().find(|enumeration| {
+        enumeration
+            .variants
+            .iter()
+            .any(|candidate| candidate.id == variant)
+    })?;
+    Some(
+        enumeration
+            .variants
+            .iter()
+            .map(|variant| variant.id)
+            .collect(),
+    )
+}
+
+fn render_shape_constraint(
+    constraint: crate::semantic::ResolvedShapeConstraint,
+    context: &SemanticContext,
+) -> Option<String> {
+    let syntax = context.syntax();
+    let dimension = match constraint.dimension {
+        crate::semantic::ResolvedShapeDimension::Global(value) => syntax
+            .globals
+            .iter()
+            .filter_map(|global| global.binding.simple_binding())
+            .find(|binding| binding.id == value)?
+            .name
+            .clone(),
+        crate::semantic::ResolvedShapeDimension::StateField(value) => {
+            let field = syntax
+                .state
+                .as_ref()?
+                .all_fields()
+                .find(|field| field.id == value)?;
+            format!("current.{}", field.name)
+        }
+    };
+    let enumeration = syntax.enum_declarations().find(|enumeration| {
+        enumeration
+            .variants
+            .iter()
+            .any(|variant| variant.id == constraint.variant)
+    })?;
+    let variant = enumeration
+        .variants
+        .iter()
+        .find(|variant| variant.id == constraint.variant)?;
+    Some(format!(
+        "{dimension} is {}.{}",
+        enumeration.name, variant.name
+    ))
+}
+
 fn struct_field_memory_layout(
     structure: &crate::ast::StructDecl,
     field: crate::ast::StructFieldId,
@@ -963,13 +1177,14 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 .as_ref()
                 .and_then(|state| state.all_fields().find(|field| field.id == value))
             {
-                (
-                    format!("current.{}: {ty}", definition.name),
-                    documented_description(
-                        "Transactional state field",
-                        field.documentation.as_deref(),
-                    ),
-                )
+                let mut description = documented_description(
+                    "Transactional state field",
+                    field.documentation.as_deref(),
+                );
+                if let Some(predicate) = state_field_shape_availability(field.id, context) {
+                    append_shape_availability(&mut description, &predicate, context);
+                }
+                (format!("current.{}: {ty}", definition.name), description)
             } else if let Some(setting) = syntax.settings.iter().find(|setting| setting.id == value)
             {
                 let mut description = format!("Setting: {}", setting.description);
@@ -1206,25 +1421,31 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                     class.documentation.as_deref(),
                 ),
             )),
-            ManagedSourceDeclaration::Field(field) => Some(source_markdown(
-                &format!(
-                    "{}{} {}",
-                    if field.is_static { "static " } else { "" },
-                    semantics
-                        .managed_field_type(field.id)
-                        .map(|ty| render_type(ty, context))
-                        .unwrap_or_else(|| "<unknown>".to_owned()),
-                    field.name
-                ),
-                &documented_description(
+            ManagedSourceDeclaration::Field(field) => {
+                let mut description = documented_description(
                     if field.is_static {
                         "Static managed field"
                     } else {
                         "Managed instance field"
                     },
                     field.documentation.as_deref(),
-                ),
-            )),
+                );
+                if let Some(predicate) = semantics.managed_field_shape_predicate(field.id) {
+                    append_shape_availability(&mut description, predicate, context);
+                }
+                Some(source_markdown(
+                    &format!(
+                        "{}{} {}",
+                        if field.is_static { "static " } else { "" },
+                        semantics
+                            .managed_field_type(field.id)
+                            .map(|ty| render_type(ty, context))
+                            .unwrap_or_else(|| "<unknown>".to_owned()),
+                        field.name
+                    ),
+                    &description,
+                ))
+            }
         },
     }
 }
@@ -2671,6 +2892,98 @@ whileAttached {
                 "missing `{description}` in {}",
                 hover.markdown
             );
+        }
+    }
+
+    #[test]
+    fn conditional_field_hover_shows_exact_shape_availability() {
+        let source = r#"
+enum Edition { Base, Demo }
+enum Phase { Menu, Playing, Credits }
+let edition: Edition
+
+image "Assembly-CSharp" {
+    class GameManager {
+        static GameManager instance;
+        if edition is Edition.Base {
+            u32 level;
+        } else {
+            u32 scene;
+        }
+    }
+}
+
+state Unity ["game.exe"] {
+    phase: Phase = Phase.Playing;
+    if phase is Phase.Playing {
+        playingScore: u32 at 0x100;
+    } else {
+        menuValue: u32 at 0x104;
+    }
+    if phase is Phase.Playing {
+        shared: u32 at 0x108;
+    } else {
+        shared: u32 at 0x10c;
+    }
+}
+
+onAttach { edition = Edition.Base }
+
+whileAttached {
+    let manager = GameManager.instance else return
+    if edition is Edition.Base {
+        print(manager.level else 0)
+    }
+    if current.phase is Phase.Playing {
+        print(current.playingScore)
+    }
+    print(current.shared)
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+
+        for (needle, expected) in [
+            ("level;", "**Available when:** `edition is Edition.Base`."),
+            ("scene;", "**Available when:** `edition is Edition.Demo`."),
+            (
+                "playingScore:",
+                "**Available when:** `current.phase is Phase.Playing`.",
+            ),
+        ] {
+            let hover = database
+                .hover(source.find(needle).unwrap() + 1)
+                .unwrap()
+                .unwrap_or_else(|| panic!("hover for {needle}"));
+            assert!(hover.markdown.contains(expected), "{}", hover.markdown);
+        }
+
+        let fallback = database
+            .hover(source.find("menuValue:").unwrap() + 1)
+            .unwrap()
+            .expect("fallback state-field hover");
+        assert!(fallback.markdown.contains("`current.phase is Phase.Menu`"));
+        assert!(
+            fallback
+                .markdown
+                .contains("`current.phase is Phase.Credits`")
+        );
+        assert!(fallback.markdown.contains(" or "));
+
+        let common = database
+            .hover(source.rfind("current.shared").unwrap() + "current.".len())
+            .unwrap()
+            .expect("common state-field hover");
+        assert!(!common.markdown.contains("Available when"));
+
+        for (needle, expected) in [
+            ("manager.level", "`edition is Edition.Base`"),
+            ("current.playingScore", "`current.phase is Phase.Playing`"),
+        ] {
+            let hover = database
+                .hover(source.rfind(needle).unwrap() + needle.rfind('.').unwrap() + 1)
+                .unwrap()
+                .unwrap_or_else(|| panic!("usage hover for {needle}"));
+            assert!(hover.markdown.contains(expected), "{}", hover.markdown);
         }
     }
 

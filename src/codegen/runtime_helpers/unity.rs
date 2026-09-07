@@ -67,7 +67,6 @@ pub(super) fn compile_c_string_eq(abi: &Abi, gc: &GcLayout, c_string: ScratchReg
         .instruction(&Instruction::LocalGet(len))
         .instruction(&Instruction::I32Add)
         .instruction(&Instruction::LocalGet(expected))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::I32GtU)
         .instruction(&Instruction::If(BlockType::Empty))
@@ -152,7 +151,6 @@ pub(super) fn compile_backing_field_eq(
     let index = 4;
     function
         .instruction(&Instruction::LocalGet(expected))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalTee(expected_len))
         .instruction(&Instruction::I32Const(237))
@@ -253,7 +251,6 @@ pub(super) fn compile_unity_get_image(
     function
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(module))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityModule),
             field_index: gc.standard_field_index(StdlibFieldId::UnityModuleAssemblies),
@@ -326,7 +323,6 @@ pub(super) fn compile_unity_get_image(
         .instruction(&Instruction::LocalGet(expected_name))
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::LocalGet(expected_name))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::Call(c_string_eq))
         .instruction(&Instruction::I32Const(1))
@@ -398,7 +394,6 @@ pub(super) fn compile_unity_get_class(
         .instruction(&Instruction::Loop(BlockType::Empty))
         .instruction(&Instruction::LocalGet(scan_index))
         .instruction(&Instruction::LocalGet(expected_name))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::I32GeU)
         .instruction(&Instruction::BrIf(1))
@@ -428,7 +423,6 @@ pub(super) fn compile_unity_get_class(
     function
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(image_value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityImage),
             field_index: gc.standard_field_index(StdlibFieldId::UnityImageAddress),
@@ -463,7 +457,6 @@ pub(super) fn compile_unity_get_class(
     function
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(image_value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityImage),
             field_index: gc.standard_field_index(StdlibFieldId::UnityImageAddress),
@@ -507,12 +500,10 @@ pub(super) fn compile_unity_get_class(
         .instruction(&Instruction::LocalSet(metadata_handle))
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(image_value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityImage),
             field_index: gc.standard_field_index(StdlibFieldId::UnityImageModule),
         })
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityModule),
             field_index: gc.standard_field_index(StdlibFieldId::UnityModuleTypeInfoTable),
@@ -584,7 +575,6 @@ pub(super) fn compile_unity_get_class(
         .instruction(&Instruction::LocalGet(expected_name))
         .instruction(&Instruction::LocalGet(dot_plus_one))
         .instruction(&Instruction::LocalGet(expected_name))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalGet(dot_plus_one))
         .instruction(&Instruction::I32Sub)
@@ -659,7 +649,6 @@ pub(super) fn compile_unity_get_class(
         .instruction(&Instruction::I32Const(LOOKUP_FOUND))
         .instruction(&Instruction::LocalGet(selected))
         .instruction(&Instruction::LocalGet(image_value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityImage),
             field_index: gc.standard_field_index(StdlibFieldId::UnityImageModule),
@@ -707,19 +696,16 @@ pub(super) fn compile_unity_get_field_offset(
     let comparison = 13;
     function
         .instruction(&Instruction::LocalGet(class_value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityClass),
             field_index: gc.standard_field_index(StdlibFieldId::UnityClassAddress),
         })
         .instruction(&Instruction::LocalSet(current))
         .instruction(&Instruction::LocalGet(class_value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityClass),
             field_index: gc.standard_field_index(StdlibFieldId::UnityClassModule),
         })
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityModule),
             field_index: gc.standard_field_index(StdlibFieldId::UnityModuleVersion),
@@ -889,7 +875,6 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::LocalGet(expected_name))
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::LocalGet(expected_name))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::Call(c_string_eq))
         .instruction(&Instruction::LocalTee(comparison))
@@ -1025,7 +1010,6 @@ pub(super) fn compile_unity_get_field_any(
     let names_backing = 8;
     function
         .instruction(&Instruction::LocalGet(names))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: names_array,
             field_index: super::super::array_value::BACKING_FIELD,
@@ -1035,7 +1019,6 @@ pub(super) fn compile_unity_get_field_any(
         .instruction(&Instruction::Loop(BlockType::Empty))
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::LocalGet(names))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: names_array,
             field_index: super::super::array_value::LENGTH_FIELD,
@@ -1174,7 +1157,6 @@ pub(super) fn compile_unity_get_class_any(
     let selected = 7;
     function
         .instruction(&Instruction::LocalGet(names))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: names_array,
             field_index: super::super::array_value::BACKING_FIELD,
@@ -1184,7 +1166,6 @@ pub(super) fn compile_unity_get_class_any(
         .instruction(&Instruction::Loop(BlockType::Empty))
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::LocalGet(names))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: names_array,
             field_index: super::super::array_value::LENGTH_FIELD,
@@ -1223,7 +1204,6 @@ pub(super) fn compile_unity_get_class_any(
         .instruction(&Instruction::I32Const(LOOKUP_FOUND))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::LocalGet(image))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityImage),
             field_index: gc.standard_field_index(StdlibFieldId::UnityImageModule),
@@ -1244,13 +1224,11 @@ pub(super) fn compile_unity_get_class_any(
         .instruction(&Instruction::LocalSet(selected))
         .instruction(&Instruction::Else)
         .instruction(&Instruction::LocalGet(selected))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityClass),
             field_index: gc.standard_field_index(StdlibFieldId::UnityClassAddress),
         })
         .instruction(&Instruction::LocalGet(class))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityClass),
             field_index: gc.standard_field_index(StdlibFieldId::UnityClassAddress),
@@ -1260,7 +1238,6 @@ pub(super) fn compile_unity_get_class_any(
         .instruction(&Instruction::I32Const(LOOKUP_FOUND))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::LocalGet(image))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityImage),
             field_index: gc.standard_field_index(StdlibFieldId::UnityImageModule),
@@ -1323,12 +1300,10 @@ pub(super) fn compile_unity_get_static_instance(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(class_value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityClass),
             field_index: gc.standard_field_index(StdlibFieldId::UnityClassModule),
         })
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityModule),
             field_index: gc.standard_field_index(StdlibFieldId::UnityModuleVersion),
@@ -1337,7 +1312,6 @@ pub(super) fn compile_unity_get_static_instance(
         .instruction(&Instruction::LocalSet(static_table))
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(class_value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityClass),
             field_index: gc.standard_field_index(StdlibFieldId::UnityClassAddress),
@@ -1368,7 +1342,6 @@ pub(super) fn compile_unity_get_static_instance(
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(static_table))
         .instruction(&Instruction::LocalGet(field))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.standard_index(StdlibTypeId::UnityField),
             field_index: gc.standard_field_index(StdlibFieldId::UnityFieldOffset),

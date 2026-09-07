@@ -54,14 +54,12 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GCNEmulatorBase),
         })
         .instruction(&Instruction::LocalSet(base))
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GCNEmulatorBackend),
@@ -72,7 +70,6 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::I32Eq)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc
@@ -82,7 +79,6 @@ pub(super) fn compile_translate_address(
     emit_process_read(&mut function, abi, abi_read, base, 1);
     function
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GCNEmulatorBase),

@@ -62,7 +62,6 @@ pub(super) fn compile_read_memory(abi: &Abi, gc: &GcLayout) -> Function {
     function
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc
@@ -70,14 +69,12 @@ pub(super) fn compile_read_memory(abi: &Abi, gc: &GcLayout) -> Function {
         })
         .instruction(&Instruction::LocalSet(backend))
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GenesisEmulatorBase),
         })
         .instruction(&Instruction::LocalSet(base))
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGetU {
             struct_type_index: emulator_type,
             field_index: gc
@@ -94,7 +91,6 @@ pub(super) fn compile_read_memory(abi: &Abi, gc: &GcLayout) -> Function {
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc

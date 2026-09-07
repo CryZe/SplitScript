@@ -1,3 +1,8 @@
+//! Emit unary GC reads (`struct.get*` and `array.len`) without a preceding
+//! null assertion: the read itself traps on null. Keep assertions needed by
+//! non-null result types or before evaluating further operands of writes and
+//! indexed reads, where deferring a trap could change observable effects.
+
 use wasm_encoder::{
     AbstractHeapType, ConstExpr, Function, HeapType, Instruction, MemArg, RefType, ValType,
 };

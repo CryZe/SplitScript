@@ -35,7 +35,6 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::End)
         // Ensure the selected backend is initialized.
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GBAEmulatorBackend),
@@ -63,14 +62,12 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::I32LeU)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GBAEmulatorEwram),
         })
         .instruction(&Instruction::LocalSet(base))
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GBAEmulatorAux1),
@@ -95,14 +92,12 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::I32LeU)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GBAEmulatorIwram),
         })
         .instruction(&Instruction::LocalSet(base))
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GBAEmulatorAux2),
@@ -142,7 +137,6 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::I32Eq)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GBAEmulatorAux1),

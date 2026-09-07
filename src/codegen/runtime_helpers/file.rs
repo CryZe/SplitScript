@@ -52,7 +52,6 @@ pub(super) fn compile_open_read_only(
     emit_ensure_linear_capacity_for_open(&mut function, staging_end, required_pages);
     function
         .instruction(&Instruction::LocalGet(path))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalTee(path_length))
         .instruction(&Instruction::I32Const(MAX_PATH_BYTES))
@@ -677,7 +676,6 @@ pub(super) fn compile_utf8_string_from_storage(gc: &GcLayout) -> Function {
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(backing))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalGet(length))
         .instruction(&Instruction::I32Eq)

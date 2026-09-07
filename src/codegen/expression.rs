@@ -2429,12 +2429,10 @@ pub(super) fn compile_for_init(
             }
             ForCollection::Set { set, .. } => {
                 compile_value_get(function, iterable_value, context);
-                function
-                    .instruction(&Instruction::RefAsNonNull)
-                    .instruction(&Instruction::StructGet {
-                        struct_type_index: context.gc.index(Type::Set(set)),
-                        field_index: super::set_functions::VERSION_FIELD,
-                    });
+                function.instruction(&Instruction::StructGet {
+                    struct_type_index: context.gc.index(Type::Set(set)),
+                    field_index: super::set_functions::VERSION_FIELD,
+                });
             }
             ForCollection::Range { range, .. } => {
                 let kind = context
@@ -2539,12 +2537,10 @@ pub(super) fn compile_for_has_next(
             super::array_value::emit_version(function, context.gc, array);
         }
         ForCollection::Set { set, .. } => {
-            function
-                .instruction(&Instruction::RefAsNonNull)
-                .instruction(&Instruction::StructGet {
-                    struct_type_index: context.gc.index(Type::Set(set)),
-                    field_index: super::set_functions::VERSION_FIELD,
-                });
+            function.instruction(&Instruction::StructGet {
+                struct_type_index: context.gc.index(Type::Set(set)),
+                field_index: super::set_functions::VERSION_FIELD,
+            });
         }
         ForCollection::Range { .. } | ForCollection::DirectRange { .. } => unreachable!(),
         ForCollection::Iterator { .. } => unreachable!(),
@@ -3876,7 +3872,6 @@ fn compile_expr_unconverted(
             function.instruction(&Instruction::LocalSet(closure_local));
             function
                 .instruction(&Instruction::LocalGet(closure_local))
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: context.gc.index(Type::Callable(callable)),
                     field_index: 1,
@@ -3886,7 +3881,6 @@ fn compile_expr_unconverted(
             }
             function
                 .instruction(&Instruction::LocalGet(closure_local))
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: context.gc.index(Type::Callable(callable)),
                     field_index: 0,
@@ -4236,9 +4230,7 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::StringLength => {
                 compile_receiver(function, target, context);
-                function
-                    .instruction(&Instruction::RefAsNonNull)
-                    .instruction(&Instruction::ArrayLen);
+                function.instruction(&Instruction::ArrayLen);
             }
             IntrinsicId::StringContains
             | IntrinsicId::StringStartsWith
@@ -4837,7 +4829,6 @@ fn compile_expr_unconverted(
                 function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
                 compile_receiver(function, target, context);
                 function
-                    .instruction(&Instruction::RefAsNonNull)
                     .instruction(&Instruction::StructGet {
                         struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
                         field_index: context.gc.standard_field_index(StdlibFieldId::ModuleName),
@@ -5213,7 +5204,6 @@ fn emit_iterator_constructor(
                 .instruction(&Instruction::LocalGet(source))
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::LocalGet(source))
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: context.gc.index(Type::Set(set)),
                     field_index: super::set_functions::VERSION_FIELD,
@@ -5368,19 +5358,16 @@ fn emit_set_iterator_next(
     let cursor_index = context.gc.index(Type::Application(cursor_type));
 
     emit_cursor_field(function, cursor, cursor_index, 0, Type::Set(set));
-    function
-        .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::StructGet {
-            struct_type_index: context.gc.index(Type::Set(set)),
-            field_index: super::set_functions::VERSION_FIELD,
-        });
+    function.instruction(&Instruction::StructGet {
+        struct_type_index: context.gc.index(Type::Set(set)),
+        field_index: super::set_functions::VERSION_FIELD,
+    });
     emit_cursor_field(function, cursor, cursor_index, 2, Type::U32);
     emit_iterator_mutation_check(function);
 
     emit_cursor_field(function, cursor, cursor_index, 1, Type::U32);
     emit_cursor_field(function, cursor, cursor_index, 0, Type::Set(set));
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: context.gc.index(Type::Set(set)),
             field_index: super::set_functions::LENGTH_FIELD,
@@ -5392,7 +5379,6 @@ fn emit_set_iterator_next(
 
     emit_cursor_field(function, cursor, cursor_index, 0, Type::Set(set));
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: context.gc.index(Type::Set(set)),
             field_index: super::set_functions::BACKING_FIELD,
@@ -5726,7 +5712,6 @@ fn emit_process_memory_ranges(
     for mask in [2, 4, 8] {
         function
             .instruction(&Instruction::LocalGet(output))
-            .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
                 struct_type_index: wrapper_type,
                 field_index: super::array_value::LENGTH_FIELD,

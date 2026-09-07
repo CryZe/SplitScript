@@ -194,11 +194,9 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_eq(gc: &GcLayout) -> F
 
     function
         .instruction(&Instruction::LocalGet(left))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalTee(len))
         .instruction(&Instruction::LocalGet(right))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::I32Ne)
         .instruction(&Instruction::If(BlockType::Empty))

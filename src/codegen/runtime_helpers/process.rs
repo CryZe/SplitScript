@@ -393,14 +393,12 @@ pub(super) fn compile_follow_address(
         .instruction(&Instruction::LocalGet(base))
         .instruction(&Instruction::LocalSet(current))
         .instruction(&Instruction::LocalGet(offsets))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: offsets_array,
             field_index: super::super::array_value::LENGTH_FIELD,
         })
         .instruction(&Instruction::LocalSet(len))
         .instruction(&Instruction::LocalGet(offsets))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: offsets_array,
             field_index: super::super::array_value::BACKING_FIELD,
@@ -1239,7 +1237,6 @@ pub(super) fn compile_loaded_module(
 
     function
         .instruction(&Instruction::LocalGet(name))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(name_length));
     function
@@ -1335,7 +1332,6 @@ pub(super) fn compile_module_path(
 
     function
         .instruction(&Instruction::LocalGet(name))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(name_length))
         .instruction(&Instruction::I32Const(host_strings))

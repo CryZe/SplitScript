@@ -71,7 +71,6 @@ pub(super) fn emit_new_fixed(
 /// Replaces a source array on the operand stack with its non-null raw backing.
 pub(super) fn emit_backing(function: &mut Function, gc: &GcLayout, array: ArrayTypeId) {
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.index(Type::Array(array)),
             field_index: BACKING_FIELD,
@@ -81,22 +80,18 @@ pub(super) fn emit_backing(function: &mut Function, gc: &GcLayout, array: ArrayT
 
 /// Replaces a source array on the operand stack with its logical length.
 pub(super) fn emit_length(function: &mut Function, gc: &GcLayout, array: ArrayTypeId) {
-    function
-        .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::StructGet {
-            struct_type_index: gc.index(Type::Array(array)),
-            field_index: LENGTH_FIELD,
-        });
+    function.instruction(&Instruction::StructGet {
+        struct_type_index: gc.index(Type::Array(array)),
+        field_index: LENGTH_FIELD,
+    });
 }
 
 /// Replaces a source array on the operand stack with its structural version.
 pub(super) fn emit_version(function: &mut Function, gc: &GcLayout, array: ArrayTypeId) {
-    function
-        .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::StructGet {
-            struct_type_index: gc.index(Type::Array(array)),
-            field_index: VERSION_FIELD,
-        });
+    function.instruction(&Instruction::StructGet {
+        struct_type_index: gc.index(Type::Array(array)),
+        field_index: VERSION_FIELD,
+    });
 }
 
 /// Increments the structural version of the source array in local zero.
@@ -106,7 +101,6 @@ pub(super) fn emit_increment_version(function: &mut Function, gc: &GcLayout, arr
         .instruction(&Instruction::LocalGet(0))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: array_type,
             field_index: VERSION_FIELD,

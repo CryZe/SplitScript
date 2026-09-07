@@ -997,6 +997,70 @@ integration tests, editor/browser workers, the embedded Wasm compiler, generated
 Wasm validation, and host-runtime fixtures. Repeated Lunistice and Minish Cap
 release builds are byte-identical.
 
+## 2026-09-07 unary GC read emission
+
+Comparison against `d332a14`, removing explicit null assertions immediately
+before unary GC reads at 157 emission sites. The read itself traps on null,
+so removing this adjacent instruction preserves trap ordering and receiver
+evaluation. Checks before other operands of indexed reads/writes, and checks
+required by non-null type contracts, remain. This is shared debug/release
+emission with fewer encoder calls, not an added optimization pass.
+
+### Release output attribution
+
+| Fixture | Before | After | Saved |
+| --- | ---: | ---: | ---: |
+| Lunistice | 30,784 | 30,565 | 219 |
+| Minish Cap | 45,434 | 45,113 | 321 |
+| managed instances | 15,536 | 15,413 | 123 |
+| managed instances Mono | 22,870 | 22,770 | 100 |
+| cancellation | 2,706 | 2,700 | 6 |
+| settings | 8,790 | 8,771 | 19 |
+| debug-profile fixture, release output | 1,591 | 1,589 | 2 |
+| set runtime | 3,597 | 3,568 | 29 |
+| map runtime | 5,016 | 4,975 | 41 |
+
+All savings are in the code section; section framing does not change in these
+fixtures. Lunistice, Minish Cap, and Mono code sections are now 26,996, 39,202,
+and 19,486 bytes. The minimal fixture remains 1,006 bytes.
+
+### Compiler latency
+
+Same Windows/Rust environment as the preceding batch, release-built Rust
+harness and SplitScript release profile. Saved before executable followed by
+the new executable, 100 measured samples after 20 warmups per fixture, with no
+concurrent build or test run.
+
+| Fixture | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| minimal | 51.94 ms | 51.18 ms | 54.09 ms | 55.88 ms |
+| Lunistice | 62.63 ms | 57.94 ms | 71.22 ms | 64.82 ms |
+| cancellation | 53.64 ms | 48.62 ms | 59.48 ms | 55.30 ms |
+| settings | 57.39 ms | 54.37 ms | 61.44 ms | 59.46 ms |
+
+This sample shows no latency regression. Recent sequential measurements on
+this machine have substantial drift, and the change removes very little work
+relative to total compilation. These numbers do not establish a repeatable
+compiler speedup; the deterministic size reduction is the established benefit.
+
+### Validation
+
+All nine new release modules validate with `wasm-tools --features all`.
+Complete before/after WAT listings match after deleting only the old
+`ref.as_non_null` lines immediately followed by `struct.get*` or `array.len`.
+The removal counts exactly match the size savings above. This checks that
+receiver evaluation, calls, stores, indexed reads, and all other instructions
+remain unchanged, including checks which guard later operand effects.
+
+Thirteen release runtime traces match: five Lunistice scenarios, both Minish
+Cap backends, settings, cancellation, both managed runtimes, sets, and maps.
+Artifacts and timing logs are in `target/performance-review/unary-gc-*`.
+
+Full `cargo xtask check` passed: formatting, Clippy, documentation, 98 syntax
+tests, 420 compiler-library tests (one manual benchmark ignored), 621 compiler
+integration tests, editor/browser workers, the embedded Wasm compiler, generated
+Wasm validation, and host-runtime fixtures.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

@@ -21,7 +21,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_print_string(
 
     function
         .instruction(&Instruction::LocalGet(string))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(len))
         .instruction(&Instruction::LocalGet(len))
@@ -88,11 +87,9 @@ pub(in crate::codegen::runtime_helpers) fn compile_timer_set_variable(
     let required_pages = 5;
     function
         .instruction(&Instruction::LocalGet(key))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(key_len))
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(value_len))
         .instruction(&Instruction::I32Const(host_strings))
@@ -447,7 +444,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_quote_debug_string(gc: &GcLay
 
     function
         .instruction(&Instruction::LocalGet(input))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(length))
         .instruction(&Instruction::I32Const(2))
@@ -706,11 +702,9 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_match(gc: &GcLayout) -
 
     function
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(value_len))
         .instruction(&Instruction::LocalGet(needle))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(needle_len))
         .instruction(&Instruction::LocalGet(mode))
@@ -865,7 +859,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_ascii_case(gc: &GcLayo
         .instruction(&Instruction::I32Add)
         .instruction(&Instruction::LocalSet(first))
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(len))
         // First find whether any transformation is needed. Returning the
@@ -966,11 +959,9 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_find(gc: &GcLayout) ->
 
     function
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(value_len))
         .instruction(&Instruction::LocalGet(needle))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(needle_len))
         .instruction(&Instruction::LocalGet(needle_len))
@@ -1070,11 +1061,9 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_rfind(gc: &GcLayout) -
 
     function
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(value_len))
         .instruction(&Instruction::LocalGet(needle))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(needle_len))
         .instruction(&Instruction::LocalGet(needle_len))
@@ -1171,11 +1160,9 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_replace_all(
 
     function
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(value_len))
         .instruction(&Instruction::LocalGet(search))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalTee(search_len))
         .instruction(&Instruction::I32Eqz)
@@ -1185,7 +1172,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_replace_all(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(replacement))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(replacement_len))
         .instruction(&Instruction::Block(BlockType::Empty))
@@ -1362,11 +1348,9 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_split(
 
     function
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(value_len))
         .instruction(&Instruction::LocalGet(delimiter))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalTee(delimiter_len))
         .instruction(&Instruction::I32Eqz)
@@ -1524,7 +1508,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_parse_integer(gc: &GcL
 
     function
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalTee(len))
         .instruction(&Instruction::I32Eqz)
@@ -1668,7 +1651,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_inspect(gc: &GcLayout)
 
     function
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalTee(value_len))
         .instruction(&Instruction::LocalGet(index))
@@ -1921,7 +1903,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_slice(gc: &GcLayout) -
 
     function
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(value_len))
         // Reject reversed and out-of-range bounds.
@@ -2027,7 +2008,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_trim_ascii_whitespace(
 
     function
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalTee(len))
         .instruction(&Instruction::LocalSet(end))
@@ -2121,7 +2101,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_is_blank(
 
     function
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(value_len))
         .instruction(&Instruction::Block(BlockType::Empty))
@@ -2244,7 +2223,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_pad(gc: &GcLayout) -> 
 
     function
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(value_len))
         // Count UTF-8 leading bytes, which are exactly the Unicode scalars.
@@ -2472,14 +2450,12 @@ pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
     let strings_backing = 10;
     function
         .instruction(&Instruction::LocalGet(strings))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: strings_array,
             field_index: super::super::array_value::LENGTH_FIELD,
         })
         .instruction(&Instruction::LocalSet(string_count))
         .instruction(&Instruction::LocalGet(strings))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: strings_array,
             field_index: super::super::array_value::BACKING_FIELD,
@@ -2491,7 +2467,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::Else)
         .instruction(&Instruction::LocalGet(separator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalSet(separator_len))
@@ -2511,7 +2486,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
         gc,
     );
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalGet(total_len))
         .instruction(&Instruction::I32Add)
@@ -2590,7 +2564,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
         .instruction(&Instruction::Loop(BlockType::Empty))
         .instruction(&Instruction::LocalGet(byte_index))
         .instruction(&Instruction::LocalGet(current))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::I32GeU)
         .instruction(&Instruction::BrIf(1))
@@ -2707,7 +2680,6 @@ pub(in crate::codegen::runtime_helpers) fn compile_indent_display(gc: &GcLayout)
 
     function
         .instruction(&Instruction::LocalGet(input))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalSet(length))
         .instruction(&Instruction::Block(BlockType::Empty))

@@ -117,7 +117,6 @@ fn compile_length(set: &ResolvedSetType, gc: &GcLayout) -> Function {
     let mut function = Function::new([]);
     function
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.index(Type::Set(set.id)),
             field_index: LENGTH_FIELD,
@@ -196,7 +195,6 @@ fn compile_insert(set: &ResolvedSetType, contains: u32, gc: &GcLayout) -> Functi
     load_set_state(&mut function, set, backing, length, gc);
     function
         .instruction(&Instruction::LocalGet(backing))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalTee(capacity))
         .instruction(&Instruction::LocalGet(length))
@@ -254,7 +252,6 @@ fn compile_insert(set: &ResolvedSetType, contains: u32, gc: &GcLayout) -> Functi
         .instruction(&Instruction::LocalGet(0))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.index(Type::Set(set.id)),
             field_index: VERSION_FIELD,
@@ -352,7 +349,6 @@ fn compile_remove(
         .instruction(&Instruction::LocalGet(0))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.index(Type::Set(set.id)),
             field_index: VERSION_FIELD,
@@ -401,7 +397,6 @@ fn compile_clear(set: &ResolvedSetType, gc: &GcLayout) -> Function {
         .instruction(&Instruction::LocalGet(0))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.index(Type::Set(set.id)),
             field_index: VERSION_FIELD,
@@ -426,14 +421,12 @@ fn load_set_state(
     let set_type = gc.index(Type::Set(set.id));
     function
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: set_type,
             field_index: BACKING_FIELD,
         })
         .instruction(&Instruction::LocalSet(backing))
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: set_type,
             field_index: LENGTH_FIELD,

@@ -83,21 +83,18 @@ fn compile_push(
 
     function
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: array_type,
             field_index: array_value::BACKING_FIELD,
         })
         .instruction(&Instruction::LocalSet(backing))
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: array_type,
             field_index: array_value::LENGTH_FIELD,
         })
         .instruction(&Instruction::LocalSet(length))
         .instruction(&Instruction::LocalGet(backing))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalTee(capacity))
         .instruction(&Instruction::LocalGet(length))
@@ -173,14 +170,12 @@ fn compile_remove_at(
     let length = 3;
     function
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: array_type,
             field_index: array_value::BACKING_FIELD,
         })
         .instruction(&Instruction::LocalSet(backing))
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: array_type,
             field_index: array_value::LENGTH_FIELD,
@@ -258,14 +253,12 @@ fn compile_clear(
     let length = 2;
     function
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: array_type,
             field_index: array_value::BACKING_FIELD,
         })
         .instruction(&Instruction::LocalSet(backing))
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: array_type,
             field_index: array_value::LENGTH_FIELD,

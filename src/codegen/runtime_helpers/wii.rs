@@ -31,7 +31,6 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::WiiEmulatorBackend),
@@ -42,7 +41,6 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::I32Eq)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc
@@ -78,7 +76,6 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::WiiEmulatorMem1),
@@ -109,7 +106,6 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(emulator))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
             field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::WiiEmulatorMem2),

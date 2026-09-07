@@ -311,7 +311,6 @@ fn compile_set(
         |function| {
             function
                 .instruction(&Instruction::LocalGet(0))
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: inputs.gc.index(Type::Set(set)),
                     field_index: super::set_functions::LENGTH_FIELD,
@@ -320,7 +319,6 @@ fn compile_set(
         |function| {
             function
                 .instruction(&Instruction::LocalGet(0))
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: inputs.gc.index(Type::Set(set)),
                     field_index: super::set_functions::BACKING_FIELD,

@@ -462,6 +462,33 @@ Thirteen additional before/after release scenarios matched their original traces
 New regressions cover nested return/fallthrough behavior in both profiles, dead
 dispatcher tails, and non-null poll-frame signatures and loads.
 
+## Unary GC read cleanup implementation batch
+
+After `d332a14`, removed 157 direct-emission assertions immediately before
+`struct.get`, packed `struct.get_u`, and `array.len` across expression, async,
+collection, provider, and runtime-helper emission. These unary instructions
+already accept nullable receivers and trap on null; no operand evaluation can
+intervene between the removed assertion and the read. The codegen module now
+documents that contract. Both profiles share the change, with no extra pass.
+
+Checks needed by non-null argument/result types and checks before later write
+or index operands remain. Assertions hidden inside reusable reference-load
+helpers also remain; changing those requires reviewing all consumer contracts.
+
+Release output shrinks by 219 bytes for Lunistice (30,784 → 30,565), 321 bytes
+for Minish Cap (45,434 → 45,113), and 2–123 bytes for each of the other seven
+measured fixtures. All savings are in the code section. Comparing complete
+release instruction listings confirms that only adjacent unary null assertions
+were removed: receivers, subsequent operands, calls, and branches are unchanged.
+All nine modules validate and all thirteen release runtime traces match.
+See [baselines](docs/BASELINES.md) for sizes, timing limits, and full validation.
+The full `cargo xtask check` passed, including all 621 compiler integration tests,
+editor/browser workers, embedded Wasm compiler, and host-runtime fixtures.
+
+Next opportunities remain consumer contracts in shared load helpers, ordinary
+function terminal fallbacks, and measured GC type planning. Compiler latency
+work should continue to target repeated checking/augmentation rather than RAM.
+
 ## Evidence and scope
 
 There are three different performance concerns:

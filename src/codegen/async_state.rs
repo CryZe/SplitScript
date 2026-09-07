@@ -1105,7 +1105,6 @@ fn emit_cooperative_module_scan_any(
 
     compile_receiver(function, target, context);
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
             field_index: context.gc.standard_field_index(StdlibFieldId::ModuleSize),
@@ -1138,7 +1137,6 @@ fn emit_cooperative_module_scan_any(
     function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
     compile_receiver(function, target, context);
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
             field_index: context
@@ -1340,7 +1338,6 @@ fn emit_process_find_memory_range(
         .instruction(&Instruction::LocalGet(flags));
     compile_expr(function, args[1], context);
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: context.gc.standard_index(StdlibTypeId::MemoryRangeAccess),
             field_index: 0,
@@ -1351,7 +1348,6 @@ fn emit_process_find_memory_range(
         .instruction(&Instruction::Else);
     compile_expr(function, args[1], context);
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: context.gc.standard_index(StdlibTypeId::MemoryRangeAccess),
             field_index: 0,
@@ -2173,7 +2169,6 @@ fn compile_suspension_poll(
         Some(IntrinsicId::ModuleScanRelative32Target) => {
             compile_receiver(function, target, context);
             function
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
                     field_index: context
@@ -2183,7 +2178,6 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::LocalSet(scratch[1]));
             compile_receiver(function, target, context);
             function
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
                     field_index: context.gc.standard_field_index(StdlibFieldId::ModuleSize),
@@ -2475,14 +2469,12 @@ fn compile_suspension_poll(
         Some(IntrinsicId::UnityClassStaticTable) => {
             compile_receiver(function, target, context);
             function
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: context.gc.standard_index(StdlibTypeId::UnityClass),
                     field_index: context
                         .gc
                         .standard_field_index(StdlibFieldId::UnityClassModule),
                 })
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: context.gc.standard_index(StdlibTypeId::UnityModule),
                     field_index: context
@@ -2493,14 +2485,12 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::LocalSet(module_address_local))
                 .instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
-            function
-                .instruction(&Instruction::RefAsNonNull)
-                .instruction(&Instruction::StructGet {
-                    struct_type_index: context.gc.standard_index(StdlibTypeId::UnityClass),
-                    field_index: context
-                        .gc
-                        .standard_field_index(StdlibFieldId::UnityClassAddress),
-                });
+            function.instruction(&Instruction::StructGet {
+                struct_type_index: context.gc.standard_index(StdlibTypeId::UnityClass),
+                field_index: context
+                    .gc
+                    .standard_field_index(StdlibFieldId::UnityClassAddress),
+            });
             unity_layout::emit_versioned_offset(
                 function,
                 module_address_local,
@@ -2539,7 +2529,6 @@ fn compile_suspension_poll(
         Some(IntrinsicId::ModuleScan) => {
             compile_receiver(function, target, context);
             function
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
                     field_index: context
@@ -2549,7 +2538,6 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::LocalSet(scratch[1]));
             compile_receiver(function, target, context);
             function
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
                     field_index: context.gc.standard_field_index(StdlibFieldId::ModuleSize),
@@ -2591,7 +2579,6 @@ fn compile_suspension_poll(
             function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
             function
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
                     field_index: context.gc.standard_field_index(StdlibFieldId::ModuleName),
@@ -2807,7 +2794,6 @@ fn emit_future_timeout_poll(
 
     compile_expr(function, duration, context);
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: context.gc.standard_index(StdlibTypeId::Duration),
             field_index: context
@@ -2817,7 +2803,6 @@ fn emit_future_timeout_poll(
         .instruction(&Instruction::LocalSet(*duration_seconds));
     compile_expr(function, duration, context);
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: context.gc.standard_index(StdlibTypeId::Duration),
             field_index: context
@@ -3149,7 +3134,6 @@ fn emit_future_poll_status(
     // copied into the caller's destination.
     emit_future(function);
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: erased_frame,
             field_index: FUTURE_POLL_EPOCH_FIELD,
@@ -3161,7 +3145,6 @@ fn emit_future_poll_status(
         .instruction(&Instruction::If(BlockType::Empty));
     emit_future(function);
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: erased_frame,
             field_index: FUTURE_STATE_FIELD,
@@ -3188,7 +3171,6 @@ fn emit_future_poll_status(
     for (frame_type, tag, poll, completion) in candidates {
         emit_future(function);
         function
-            .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
                 struct_type_index: erased_frame,
                 field_index: FUTURE_TAG_FIELD,

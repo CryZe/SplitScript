@@ -140,7 +140,6 @@ fn emit_setting_key_match(function: &mut Function, key: u32, string_type: u32, e
     let bytes = expected.as_bytes();
     function
         .instruction(&Instruction::LocalGet(key))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::I32Const(bytes.len() as i32))
         .instruction(&Instruction::I32Eq)

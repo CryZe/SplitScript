@@ -315,7 +315,6 @@ fn emit_selected_process_attachment(
             .instruction(&Instruction::LocalSet(locals.result))
             // Both an uncaught error and `false` reject only this candidate.
             .instruction(&Instruction::LocalGet(locals.result))
-            .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
                 struct_type_index: result_struct,
                 field_index: 1,
@@ -670,7 +669,6 @@ pub(super) fn compile_update(
                     .instruction(&Instruction::Call(attachment.poll))
                     .instruction(&Instruction::If(BlockType::Empty))
                     .instruction(&Instruction::GlobalGet(attachment.frame_global))
-                    .instruction(&Instruction::RefAsNonNull)
                     .instruction(&Instruction::StructGet {
                         struct_type_index: attachment.frame_type,
                         field_index: attachment.completion_field,
@@ -751,7 +749,6 @@ pub(super) fn compile_update(
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End)
             .instruction(&Instruction::GlobalGet(frame_global))
-            .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
                 struct_type_index: frame_type,
                 field_index: completion_field,
@@ -786,7 +783,6 @@ pub(super) fn compile_update(
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End)
             .instruction(&Instruction::GlobalGet(preparation.frame_global))
-            .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
                 struct_type_index: preparation.frame_type,
                 field_index: preparation.completion_field,
@@ -959,7 +955,6 @@ pub(super) fn compile_update(
             let mut prefix_emission = PrefixEmissionState::default();
             function
                 .instruction(&Instruction::GlobalGet(selected))
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: lowering.gc.index(Type::Enum(enumeration.id)),
                     field_index: 0,
@@ -1120,7 +1115,6 @@ pub(super) fn compile_update(
                 .instruction(&Instruction::If(BlockType::Empty))
                 .instruction(&Instruction::Else)
                 .instruction(&Instruction::LocalGet(duration_local))
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: lowering.gc.standard_index(StdlibTypeId::Duration),
                     field_index: lowering
@@ -1128,7 +1122,6 @@ pub(super) fn compile_update(
                         .standard_field_index(StdlibFieldId::DurationSeconds),
                 })
                 .instruction(&Instruction::LocalGet(duration_local))
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: lowering.gc.standard_index(StdlibTypeId::Duration),
                     field_index: lowering
@@ -1444,7 +1437,6 @@ fn emit_shape_constraints(
             }
         }
         function
-            .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
                 struct_type_index: gc.index(field_type),
                 field_index: 0,
@@ -1821,7 +1813,6 @@ fn emit_state_field_poll(
                 .instruction(&Instruction::LocalGet(
                     context.poll_result_locals[dependency],
                 ))
-                .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
                     struct_type_index: lowering.gc.index(Type::Result(dependency_result)),
                     field_index: 1,
@@ -1858,7 +1849,6 @@ fn emit_state_field_poll(
     if let Some(transform) = transform_function {
         function
             .instruction(&Instruction::LocalGet(poll_result_local))
-            .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
                 struct_type_index: lowering.gc.index(Type::Result(result_type)),
                 field_index: 1,
@@ -1888,7 +1878,6 @@ fn emit_state_field_poll(
     // successful sibling fields continue building the candidate snapshot.
     function
         .instruction(&Instruction::LocalGet(poll_result_local))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: lowering.gc.index(Type::Result(result_type)),
             field_index: 1,

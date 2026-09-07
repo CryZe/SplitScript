@@ -85,7 +85,6 @@ pub(super) fn compile_string_parse_float(
 
     function
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::LocalTee(len))
         .instruction(&Instruction::I32Eqz)

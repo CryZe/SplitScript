@@ -339,6 +339,41 @@ for existing arrays/applications and application-layout arguments. Their scaling
 on large generic/map workloads remains an investigation target; no isolated
 regression or optimization claim is established for those searches yet.
 
+## Shared augmented syntax implementation batch
+
+Implemented another slice of order 7 after `88378b2`. Lowered and checked
+programs now share the immutable compilation syntax, including injected
+standard-library bodies. Cloning a lowered program for a database check no
+longer duplicates that tree. This is sharing within one source revision, not
+a parsed-library cache across unrelated compilations: every revision still
+parses, resolves, and validates its own library bodies and identities.
+
+Lowering also waits until augmentation is complete before cloning user syntax
+for the no-augmentation fallback. The usual augmented path no longer creates
+and immediately discards that copy. Recovery without strict syntax still
+retains its existing separate user tree and never promotes it to strict codegen.
+
+Tests cover shared identity across strict/recovery query orders, cloned lowered
+programs with and without injected library bodies, source-revision isolation,
+and unchanged code generation from old snapshots after an edit. Measurements
+and full validation results are recorded in [baselines](docs/BASELINES.md).
+
+Retained heap for successful strict/recovery query pairs drops by 1.09 MiB
+(21.9%) on a small document and 1.77 MiB (11.7%) with 500 helpers. Failed checks
+mainly benefit in peak heap. Initial timing runs had substantial drift; a
+closer repeated comparison is approximately at parity. No large latency
+speedup is claimed for this ownership change.
+
+Validation: nine focused checking tests, all 47 compiler-query integration
+tests, and the full `cargo xtask check` passed. The full run includes 420
+compiler-library tests (one manual benchmark ignored), 617 compiler integration
+tests, documentation, editor/browser workers, and Wasm/runtime checks. Nine
+release fixture modules remain byte-identical.
+
+User syntax, source documents, declaration HIR, and resolution tables still
+have additional stage copies. Parsed-library reuse remains the larger fixed-cost
+opportunity; this batch does not introduce incremental inference or skip checks.
+
 ## Evidence and scope
 
 There are three different performance concerns:

@@ -350,7 +350,7 @@ pub struct LoweredProgram {
     syntax: ast::Program,
     /// User syntax plus compiler-owned standard-library bodies. Kept private
     /// so editor and public compiler queries never expose injected symbols.
-    compilation_syntax: ast::Program,
+    compilation_syntax: std::sync::Arc<ast::Program>,
     hir: hir::DeclarationIndex,
     resolutions: resolution::ProgramResolutions,
     /// Parser diagnostics retained only by editor-oriented recovered lowering.
@@ -421,7 +421,7 @@ pub struct CheckedProgram {
     source_name: String,
     document: syntax::SourceDocument,
     syntax: ast::Program,
-    compilation_syntax: ast::Program,
+    compilation_syntax: std::sync::Arc<ast::Program>,
     hir: hir::TypedProgram,
     diagnostics: Vec<Diagnostic>,
     semantics: semantic::SemanticModel,
@@ -714,17 +714,19 @@ pub fn lower(parsed: ParsedProgram) -> LoweredProgram {
 pub(crate) fn lower_for_tooling(parsed: ParsedProgram) -> Result<LoweredProgram, Vec<Diagnostic>> {
     let syntax = parsed.syntax;
     let syntax_diagnostics = parsed.syntax_diagnostics;
-    let mut compilation_syntax = syntax.clone();
     let mut resolution_diagnostics = parsed.resolution_diagnostics;
-    if parsed.context.include_standard_library_bodies
-        && let Some(augmented) = stdlib::augment_program_with_library_bodies(
+    let augmented = if parsed.context.include_standard_library_bodies {
+        stdlib::augment_program_with_library_bodies(
             parsed.document.source(),
             &syntax,
             &parsed.context.standard_library(),
         )?
-    {
-        compilation_syntax = augmented;
-    }
+    } else {
+        None
+    };
+    // Lowering and checking only read this tree. Database stage transitions
+    // can share all injected library bodies instead of deep-cloning them.
+    let compilation_syntax = std::sync::Arc::new(augmented.unwrap_or_else(|| syntax.clone()));
     let mut resolutions = resolution::ProgramResolutions::default();
     resolution_diagnostics.extend(resolution::resolve_program(
         &compilation_syntax,

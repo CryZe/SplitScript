@@ -738,6 +738,92 @@ compiler, Wasm validation, and host-runtime fixtures including maps and
 the migrated conditional-state examples. Both benchmark modes completed with
 their fixture assertions enabled.
 
+## 2026-09-07 shared augmented syntax
+
+Before: `88378b2`. After: reference-counted immutable compilation syntax shared
+by lowered/checked products, plus lazy cloning of user syntax when augmentation
+is absent. Ordinary database checks no longer deep-copy the augmented program.
+Library parsing, resolution, inference, and validation still run for each
+revision; no syntax identities are reused across independently lowered sources.
+The public one-shot compilation path also uses the database for analysis, so
+it reaches this ownership boundary.
+
+Rust `1.98.1`, Windows x86-64, 32 logical CPUs, release harness/profile, with
+20 warmups per row. Tooling uses 500 generated helpers and 30 measured edits;
+the initial compiler runs use 200 samples. Runs are sequential without
+concurrent builds/tests. Saved before executables are retained under ignored
+`target/performance-review`, along with all raw logs.
+
+Fresh-database heap measurements exclude initialized process-wide caches:
+
+| Fixture / requests | Before retained bytes | After retained bytes | Before peak growth | After peak growth |
+| --- | ---: | ---: | ---: | ---: |
+| small valid / strict + recovery, either order | 5,229,648 | 4,086,275 | 7,106,727 | 5,964,306 |
+| 500 helpers, valid / strict + recovery, either order | 15,826,141 | 13,974,189 | 17,112,874 | 15,261,874 |
+| small valid / diagnostics + hover | 5,231,862 | 4,088,489 | 7,106,727 | 5,964,306 |
+| small type error / diagnostics + hover | 2,608,467 | 2,608,491 | 4,368,982 | 3,225,672 |
+| 500 helpers, type error / diagnostics + hover | 11,585,771 | 11,585,795 | 14,329,869 | 12,477,980 |
+
+Successful retained heap drops by 1,143,373 bytes (1.09 MiB, 21.9%) for the
+small fixture and 1,851,952 bytes (1.77 MiB, 11.7%) with 500 helpers. Recovery-only
+success has the same retained bytes as the successful query pairs because that
+query already retains the complete checked product. Failed checks already
+discarded the temporary syntax copy, so sharing reduces their peak rather than
+retained heap. Their 24-byte retained increase comes from the ownership-layout
+change. Syntax-error recovery likewise has a 24-byte retained increase, with
+approximately 2.2 KiB less peak growth.
+
+The nine release fixture modules are byte-identical before/after, including
+compiler metadata: Minish Cap (48,773 bytes), desktop settings (8,790), managed
+instances (17,369), Mono managed instances (26,608), the debug-profile fixture
+in release (1,591), set runtime (3,597), cancellation (2,795), Lunistice (34,500),
+and map runtime (5,016).
+
+Timing was unstable during the initial runs. For example, the unchanged before
+executable measured 83.44 ms for the small database check and 136.95 ms with
+500 helpers, then 48.86 and 70.57 ms on a later run. Initial 200-sample compiler
+medians were 87.10/103.90/90.06/97.80 ms before and 49.19/58.45/48.90/51.24 ms
+after (minimal/Lunistice/cancellation/settings). The apparent large improvement
+cannot be attributed to this change: the saved before executable recovered on
+repetition too. Do not compare these initial timings with earlier sessions or
+claim their ratios as speedups.
+
+A closer sequential repeat uses the same 30-edit stage harness, 20 warmups:
+
+| Fixture / cumulative database query | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| small / parse | 8.9 µs | 9.1 µs | 9.4 µs | 9.4 µs |
+| small / lower | 24.72 ms | 26.07 ms | 26.49 ms | 27.21 ms |
+| small / check | 48.86 ms | 49.45 ms | 51.54 ms | 50.55 ms |
+| 500 helpers / parse | 2.22 ms | 2.29 ms | 3.48 ms | 3.29 ms |
+| 500 helpers / lower | 39.66 ms | 37.92 ms | 55.42 ms | 40.34 ms |
+| 500 helpers / check | 70.57 ms | 69.42 ms | 74.48 ms | 72.98 ms |
+
+The additional compiler repeat uses 50 samples after 20 warmups, as a drift
+check rather than a replacement for the initial 200-sample run:
+
+| Fixture | Before median | After median | Before p95 | After p95 |
+| --- | ---: | ---: | ---: | ---: |
+| minimal | 51.48 ms | 48.80 ms | 89.21 ms | 50.70 ms |
+| Lunistice | 57.36 ms | 57.10 ms | 59.27 ms | 60.90 ms |
+| cancellation | 48.54 ms | 48.19 ms | 53.30 ms | 49.96 ms |
+| settings | 50.60 ms | 51.05 ms | 52.56 ms | 54.74 ms |
+
+These repeats show approximate latency parity with mixed small changes. The
+established improvement is retained/peak heap and elimination of deep copies,
+not a reliable percentage reduction in total compiler or LSP latency.
+
+Nine focused checking tests and all 47 compiler-query integration tests passed.
+New assertions verify shared augmented syntax in both query orders, independent
+revision ownership, and unchanged release code generation from an old checked
+snapshot after an edit. Signature-only documentation contexts still fail strict
+body validation when required library bodies are absent.
+
+The full `cargo xtask check` passed: formatting, Clippy, documentation, 420
+compiler-library tests (one manual benchmark ignored), 617 compiler integration
+tests, editor/browser workers, the embedded Wasm compiler, Wasm validation,
+and host-runtime fixtures.
+
 ## 2026-07-28 historical baseline
 
 - Rust: `rustc 1.97.0 (2d8144b78 2026-07-07)`, LLVM 22.1.6

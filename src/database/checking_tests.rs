@@ -164,6 +164,10 @@ fn successful_checks_share_recovery_facts_in_either_query_order() {
             let checked = database.check().unwrap();
             let recovered = database.recovering_check().unwrap();
             assert_eq!(inference_run_count() - before, 1);
+            assert!(Arc::ptr_eq(
+                &lowered.compilation_syntax,
+                &checked.compilation_syntax
+            ));
             assert!(std::ptr::eq(checked.semantics(), recovered.semantics()));
             assert!(std::ptr::eq(checked.syntax(), recovered.syntax()));
             assert!(std::ptr::eq(
@@ -242,4 +246,71 @@ fn recovery_first_validation_failure_runs_inference_once() {
         &database.recovering_check().unwrap()
     ));
     assert_eq!(inference_run_count() - before, 1);
+}
+
+#[test]
+fn cloned_lowered_programs_share_augmented_syntax_with_and_without_library_bodies() {
+    for include_bodies in [false, true] {
+        let context = if include_bodies {
+            crate::CompilerContext::default()
+        } else {
+            crate::CompilerContext::default().without_standard_library_bodies()
+        };
+        let lowered = crate::lower(crate::parse_with_context(context, SOURCE).unwrap());
+        assert_eq!(
+            lowered.compilation_syntax.functions.len() > lowered.syntax().functions.len(),
+            include_bodies
+        );
+        let cloned = lowered.clone();
+        assert!(Arc::ptr_eq(
+            &lowered.compilation_syntax,
+            &cloned.compilation_syntax
+        ));
+        let recovered = crate::check_recovering(cloned.clone());
+        if include_bodies {
+            let checked = crate::check(cloned).unwrap();
+            assert!(Arc::ptr_eq(
+                &lowered.compilation_syntax,
+                &checked.compilation_syntax
+            ));
+            assert_eq!(checked.diagnostics(), recovered.diagnostics());
+            assert_eq!(checked.source_document().source(), SOURCE);
+        } else {
+            // Signature-only documentation contexts omit required bodies and
+            // must still fail strict body validation rather than becoming
+            // compilable merely because the syntax storage is shared.
+            let errors = crate::check(cloned).unwrap_err();
+            assert_eq!(errors.as_slice(), recovered.diagnostics());
+        }
+    }
+}
+
+#[test]
+fn augmented_syntax_is_revision_scoped_and_old_checked_programs_remain_compilable() {
+    let mut database = CompilerDatabase::new(SOURCE);
+    let original = database.check().unwrap();
+    let options = crate::CompilerOptions {
+        profile: crate::BuildProfile::Release,
+        ..Default::default()
+    };
+    let original_wasm = crate::codegen_with_options(&original, options);
+    // Keep the earlier program alive while another revision gets new spans
+    // and library identities. Neither checking nor code generation may mutate
+    // the shared tree belonging to the old revision.
+    database.set_source(format!("// Another revision 🦊\n{SOURCE}"));
+    let edited = database.check().unwrap();
+    assert!(!Arc::ptr_eq(
+        &original.compilation_syntax,
+        &edited.compilation_syntax
+    ));
+    assert!(Arc::ptr_eq(
+        &edited.compilation_syntax,
+        &database.lower().unwrap().compilation_syntax
+    ));
+    assert_eq!(original.source_document().source(), SOURCE);
+    assert_eq!(
+        crate::codegen_with_options(&original, options),
+        original_wasm
+    );
+    assert_eq!(crate::codegen_with_options(&edited, options), original_wasm);
 }

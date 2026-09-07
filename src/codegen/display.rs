@@ -66,19 +66,20 @@ pub(super) fn compile(inputs: &DisplayInputs<'_>) -> Vec<Function> {
                 } => compile_iterator_step(*layout, arguments[0], inputs),
                 TypeKind::Application {
                     layout,
-                    constructor: StdlibTypeConstructorId::MapEntry,
-                    arguments,
-                } => compile_catalog_struct(
-                    *layout,
-                    StdlibTypeConstructorId::MapEntry,
-                    arguments,
-                    inputs,
-                ),
-                TypeKind::Application {
-                    layout,
                     constructor: StdlibTypeConstructorId::Map,
                     arguments,
                 } => compile_map(*layout, arguments, inputs),
+                TypeKind::Application {
+                    layout,
+                    constructor,
+                    arguments,
+                } if inputs.gc.standard_library.type_constructor_has_capability(
+                    *constructor,
+                    crate::stdlib::StdlibCapabilityId::Debug,
+                ) =>
+                {
+                    compile_catalog_struct(*layout, *constructor, arguments, inputs)
+                }
                 kind => unreachable!("derived Debug implementation for {kind:?}"),
             }
         })
@@ -115,13 +116,30 @@ fn compile_catalog_struct(
         .gc
         .standard_library
         .fields_of_constructor(constructor)
+        .enumerate()
+        .filter(|(_, field)| field.visibility == crate::stdlib::FieldVisibility::Public)
         .collect::<Vec<_>>();
+    let has_hidden_fields = inputs
+        .gc
+        .standard_library
+        .fields_of_constructor(constructor)
+        .count()
+        != fields.len();
+    if fields.is_empty() && has_hidden_fields {
+        emit_string_literal(
+            &mut function,
+            &format!("{} {{ .. }}", declaration.name),
+            inputs.gc,
+        );
+        finish_recursion_guard(&mut function, inputs);
+        return function;
+    }
     emit_string_literal(
         &mut function,
         &format!("{} {{\n", declaration.name),
         inputs.gc,
     );
-    for (field_index, field) in fields.iter().enumerate() {
+    for (field_index, field) in &fields {
         emit_string_literal(&mut function, &format!("    {}: ", field.name), inputs.gc);
         let field_type_id = inputs
             .semantics
@@ -134,7 +152,7 @@ fn compile_catalog_struct(
         emit_typed_struct_get(
             &mut function,
             inputs.gc.index(Type::Application(application)),
-            field_index as u32,
+            *field_index as u32,
             field_type,
         );
         emit_value(&mut function, field_type_id, field_type, inputs);
@@ -143,8 +161,15 @@ fn compile_catalog_struct(
         ));
         emit_string_literal(&mut function, ",\n", inputs.gc);
     }
+    if has_hidden_fields {
+        emit_string_literal(&mut function, "    ..\n", inputs.gc);
+    }
     emit_string_literal(&mut function, "}", inputs.gc);
-    join_pieces(&mut function, 2 + fields.len() as u32 * 3, inputs);
+    join_pieces(
+        &mut function,
+        2 + fields.len() as u32 * 3 + u32::from(has_hidden_fields),
+        inputs,
+    );
     finish_recursion_guard(&mut function, inputs);
     function
 }

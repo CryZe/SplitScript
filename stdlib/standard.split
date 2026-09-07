@@ -2591,7 +2591,9 @@ capability Equatable<T> {
 /// [`String`] and [`char`] values are quoted and escaped. Source structs and
 /// enums derive a multiline representation recursively when every contained
 /// value implements [`Debug`]. Standard-library containers opt into the same
-/// conditional derivation for their element or payload types.
+/// conditional derivation for their public contents. Iterator cursors also
+/// implement [`Debug`], but remain opaque so their private traversal state and
+/// stored closures are not exposed.
 ///
 /// Every [`Debug`] value also implements [`Display`]. A custom
 /// [`Display.toString`] remains the user-facing representation, while
@@ -2859,7 +2861,7 @@ typeConstructor IteratorStep<T> {
 /// let iterator: MapIterator<ArrayIterator<u32>, u32, String> =
 ///     [1, 2].iterator().map(value => `{value}`)
 /// ```
-@capabilities(Iterator, Iterable)
+@capabilities(Debug, Iterator, Iterable)
 typeConstructor MapIterator<I: Iterator, S, U> {
     /// Values produced by this adapter.
     type Item = U;
@@ -2923,7 +2925,7 @@ typeConstructor MapIterator<I: Iterator, S, U> {
 /// let iterator: FilterIterator<ArrayIterator<u32>, u32> =
 ///     [1, 2, 3].iterator().filter(value => value > 1)
 /// ```
-@capabilities(Iterator, Iterable)
+@capabilities(Debug, Iterator, Iterable)
 typeConstructor FilterIterator<I: Iterator, S> {
     /// Values produced by this adapter.
     type Item = S;
@@ -2990,7 +2992,7 @@ typeConstructor FilterIterator<I: Iterator, S> {
 ///
 /// fn inspect(iterator: ArrayIterator<u32>) {}
 /// ```
-@capabilities(Iterator, Iterable)
+@capabilities(Debug, Iterator, Iterable)
 typeConstructor ArrayIterator<T> {
     /// The array element yielded by this cursor.
     type Item = T;
@@ -3049,7 +3051,7 @@ typeConstructor ArrayIterator<T> {
 ///
 /// fn inspect(iterator: SetIterator<String>) {}
 /// ```
-@capabilities(Iterator, Iterable)
+@capabilities(Debug, Iterator, Iterable)
 typeConstructor SetIterator<T: Equatable> {
     /// The set element yielded by this cursor.
     type Item = T;
@@ -3110,7 +3112,7 @@ typeConstructor SetIterator<T: Equatable> {
 ///
 /// fn inspect(iterator: ExclusiveRangeIterator<u16>) {}
 /// ```
-@capabilities(Iterator, Iterable)
+@capabilities(Debug, Iterator, Iterable)
 typeConstructor ExclusiveRangeIterator<T: Integer> {
     /// The integer yielded by this cursor.
     type Item = T;
@@ -3167,7 +3169,7 @@ typeConstructor ExclusiveRangeIterator<T: Integer> {
 ///
 /// fn inspect(iterator: InclusiveRangeIterator<u16>) {}
 /// ```
-@capabilities(Iterator, Iterable)
+@capabilities(Debug, Iterator, Iterable)
 typeConstructor InclusiveRangeIterator<T: Integer> {
     /// The integer yielded by this cursor.
     type Item = T;

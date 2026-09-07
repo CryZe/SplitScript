@@ -25,6 +25,7 @@ impl BackendDependencies {
         semantics: &SemanticModel,
         wasm_ir: &wasm_ir::Program,
         reachability: &super::reachability::Reachability,
+        capabilities: &crate::capabilities::CapabilityAnalysis,
         automatic_shape: Option<&crate::shape_selection::ShapeSelectionPlan>,
     ) -> Self {
         let mut dependencies = Self::default();
@@ -186,9 +187,9 @@ impl BackendDependencies {
                     };
                     dependencies.require_display_helpers(
                         specialize(*receiver_type),
-                        program,
                         semantics,
                         reachability,
+                        capabilities,
                     );
                 }
                 wasm_ir::ExpressionKind::Call {
@@ -222,9 +223,9 @@ impl BackendDependencies {
                             .ty;
                         dependencies.require_display_helpers(
                             specialize(ty),
-                            program,
                             semantics,
                             reachability,
+                            capabilities,
                         );
                     }
                 }
@@ -239,9 +240,9 @@ impl BackendDependencies {
                     }) {
                         dependencies.require_display_helpers(
                             specialize(source),
-                            program,
                             semantics,
                             reachability,
+                            capabilities,
                         );
                     }
                 }
@@ -256,7 +257,12 @@ impl BackendDependencies {
                         .expect("cast operand belongs to Wasm IR")
                         .ty;
                     let source = specialize(source);
-                    dependencies.require_display_helpers(source, program, semantics, reachability);
+                    dependencies.require_display_helpers(
+                        source,
+                        semantics,
+                        reachability,
+                        capabilities,
+                    );
                 }
                 _ => {}
             }
@@ -273,7 +279,7 @@ impl BackendDependencies {
             dependencies.require(RuntimeHelperId::WrapDebugVariant);
             dependencies.require(RuntimeHelperId::QuoteDebugString);
             for ty in reachability.derived_debugs() {
-                dependencies.require_display_helpers(ty, program, semantics, reachability);
+                dependencies.require_display_helpers(ty, semantics, reachability, capabilities);
             }
         }
 
@@ -408,9 +414,9 @@ impl BackendDependencies {
     fn require_display_helpers(
         &mut self,
         ty: TypeId,
-        program: &Program,
         semantics: &SemanticModel,
         reachability: &super::reachability::Reachability,
+        capabilities: &crate::capabilities::CapabilityAnalysis,
     ) {
         let mut pending = vec![ty];
         let mut visited = BTreeSet::new();
@@ -440,49 +446,7 @@ impl BackendDependencies {
                     | CoreTypeId::U64
                     | CoreTypeId::Address,
                 ) => self.require(RuntimeHelperId::FormatI64),
-                TypeKind::Struct(structure) => {
-                    let declaration = &program.structs[structure.index()];
-                    pending.extend(
-                        declaration
-                            .fields
-                            .iter()
-                            .filter_map(|field| semantics.struct_field_type(field.id)),
-                    );
-                }
-                TypeKind::Enum(enumeration) => {
-                    let declaration = program
-                        .enum_declaration(*enumeration)
-                        .expect("reachable source enums retain their declaration");
-                    pending.extend(
-                        declaration
-                            .variants
-                            .iter()
-                            .filter_map(|variant| semantics.enum_variant_payload(variant.id)),
-                    );
-                }
-                TypeKind::Array { element, .. }
-                | TypeKind::Option { value: element, .. }
-                | TypeKind::Result { value: element, .. }
-                | TypeKind::Set { element, .. }
-                | TypeKind::Range { bound: element, .. } => pending.push(*element),
-                TypeKind::Application { arguments, .. } => {
-                    pending.extend(arguments.iter().copied())
-                }
-                TypeKind::Callable {
-                    parameters, result, ..
-                } => {
-                    pending.extend(parameters.iter().copied());
-                    pending.push(*result);
-                }
-                TypeKind::Async { value, .. } => pending.push(*value),
-                TypeKind::Error
-                | TypeKind::Builtin(_)
-                | TypeKind::Standard(_)
-                | TypeKind::StateSnapshot
-                | TypeKind::SettingsView
-                | TypeKind::ManagedClass(_)
-                | TypeKind::ManagedReference(_)
-                | TypeKind::GenericParameter { .. } => {}
+                _ => pending.extend(capabilities.debug_dependency_types(ty, semantics)),
             }
         }
     }

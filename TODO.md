@@ -1252,6 +1252,21 @@ remaining work is product hardening and distribution.
   renaming both together may retain shorthand. Cover parsing, formatting,
   inference, hover, navigation, references, highlighting, and extraction.
 
+- [ ] Make `Debug` a total, lazily materialized capability for every well-typed
+  runtime value. Source structs and enums should keep their useful structural
+  derivation; closures and other representation-only values should receive a
+  stable opaque representation automatically. Standard-library types should
+  default to opaque `Debug` without one declaration per type, and explicitly
+  opt into structural formatting of public contents or a custom formatter when
+  that is useful. Never expose private cursor state, collection storage, or
+  captured closure environments. Preserve `Display`'s existing fallback to
+  `Debug`, make nested containers work without conditional capability holes,
+  keep hover and capability inference truthful, and materialize no formatter
+  unless reachable. Implement this as one capability/catalog policy rather
+  than a growing list of type-specific backend cases. This is high-priority P1
+  cleanup after the current generic-specialization correctness fix; explicit
+  opaque iterator declarations are an acceptable temporary bridge.
+
 - [ ] Design exact host-driven `onSplit` delivery. It must fire even when no
   game process or emulator is attached and distinguish an ordinary split from
   skips, undos, and multiple timer operations between updates. Specify the

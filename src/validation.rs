@@ -63,7 +63,13 @@ pub(crate) fn validate(
         hir,
         semantics,
     ));
-    diagnostics.extend(validate_function_instances(syntax, hir, semantics));
+    diagnostics.extend(validate_function_instances(
+        syntax,
+        hir,
+        semantics,
+        &standard_library,
+        &capabilities,
+    ));
     diagnostics.extend(validate_future_storage(syntax, semantics, enum_types));
     diagnostics.extend(validate_must_use(&standard_library, hir, semantics));
     let unused_declarations = validate_unused_declarations(syntax, hir, semantics, &capabilities);
@@ -3028,6 +3034,8 @@ fn validate_function_instances(
     syntax: &Program,
     hir: &TypedProgram,
     semantics: &SemanticModel,
+    standard_library: &StandardLibrary,
+    capabilities: &CapabilityAnalysis,
 ) -> Vec<Diagnostic> {
     use std::collections::{BTreeSet, HashMap};
 
@@ -3090,6 +3098,7 @@ fn validate_function_instances(
         .collect::<Vec<_>>();
     let mut visited = BTreeSet::new();
     let mut generic_instances = 0usize;
+    let mut diagnostics = Vec::new();
     while let Some((instance, depth, span)) = pending.pop() {
         if !visited.insert(instance.clone()) {
             continue;
@@ -3111,6 +3120,35 @@ fn validate_function_instances(
                 span,
             )];
         }
+        for (parameter, argument) in semantics
+            .function_type_parameters(instance.function)
+            .iter()
+            .zip(&instance.type_arguments)
+        {
+            for constraint in semantics.generic_parameter_constraints(*parameter) {
+                if let Err(error) = capabilities.require(*argument, *constraint, semantics) {
+                    let function_name = syntax
+                        .functions
+                        .iter()
+                        .find(|function| function.id == instance.function)
+                        .map_or("function", |function| function.name.as_str());
+                    let capability = standard_library.capability(*constraint);
+                    diagnostics.push(capability_diagnostic(
+                        format!(
+                            "`{function_name}` requires capability `{}` for this specialization: {error}",
+                            capability.name
+                        ),
+                        span,
+                        *argument,
+                        *constraint,
+                        syntax,
+                        semantics,
+                        standard_library,
+                        capabilities,
+                    ));
+                }
+            }
+        }
         for (call, call_span) in calls.get(&Some(instance.function)).into_iter().flatten() {
             if let Some(called) = to_instance(call) {
                 let called = semantics.specialize_function_instance(&instance, &called);
@@ -3119,5 +3157,5 @@ fn validate_function_instances(
             }
         }
     }
-    Vec::new()
+    diagnostics
 }

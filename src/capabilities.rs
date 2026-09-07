@@ -501,11 +501,31 @@ impl CapabilityAnalysis {
                 constructor,
                 arguments,
                 ..
+            } if *constructor == StdlibTypeConstructorId::Map => arguments.clone(),
+            TypeKind::Application {
+                constructor,
+                arguments,
+                ..
             } if self
                 .standard_library
                 .type_constructor_has_capability(*constructor, StdlibCapabilityId::Debug) =>
             {
-                arguments.clone()
+                let variables = self
+                    .standard_library
+                    .type_constructor(*constructor)
+                    .parameters
+                    .iter()
+                    .zip(arguments)
+                    .map(|(parameter, argument)| (parameter.name, *argument))
+                    .collect::<HashMap<_, _>>();
+                self.standard_library
+                    .public_constructor_fields(*constructor)
+                    .map(|field| {
+                        semantics
+                            .instantiated_catalog_type(field.ty, &variables)
+                            .expect("checked catalog struct fields have concrete semantic types")
+                    })
+                    .collect()
             }
             _ => Vec::new(),
         }

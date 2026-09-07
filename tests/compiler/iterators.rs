@@ -407,3 +407,90 @@ fn inferred_iterable_helpers_accept_iterator_cursors_as_identity_iterables() {
         .validate_all(&splitscript::codegen(&checked))
         .expect("identity-iterable cursor specializations should produce valid Wasm GC");
 }
+
+#[test]
+fn inferred_identity_iterators_compose_map_and_filter_with_reference_items() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn inspect(values) {
+            print(values)
+            for value in values
+                .iterator()
+                .map(x => `inspect: {x}`)
+                .filter(s => !s.contains("b"))
+            {
+                print(value)
+            }
+        }
+
+        setup {
+            inspect(["1", "2"].iterator())
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("an inferred identity iterator should compose map and filter");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("reference-valued identity iterator adapters should produce valid Wasm GC");
+}
+
+#[test]
+fn inferred_function_capabilities_are_checked_for_each_concrete_specialization() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn inspect(values) {
+                print(values)
+            }
+
+            setup {
+                let closure: (u32) -> u32 = x => x
+                inspect([closure])
+            }
+        "#,
+    )
+    .expect_err("a concrete specialization must satisfy inferred capabilities before codegen");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("`inspect` requires capability `Display`")
+                && diagnostic.message.contains("this specialization")
+        }),
+        "unexpected diagnostics: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn every_iterator_kind_has_an_opaque_debug_fallback() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn inspect(values) {
+            print(values)
+        }
+
+        setup {
+            let set = Set.new<String>()
+            set.insert("set")
+
+            let map = Map.new<String, u32>()
+            map.insert("map", 1)
+
+            inspect(["array"].iterator())
+            inspect(set.iterator())
+            inspect(map.iterator())
+            inspect((0..<1).iterator())
+            inspect((0..=1).iterator())
+            inspect(["map adapter"].iterator().map(value => value))
+            inspect(["filter adapter"].iterator().filter(value => true))
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("every standard iterator should inherit Display from opaque Debug");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("all opaque iterator Debug implementations should produce valid Wasm GC");
+}

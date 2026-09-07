@@ -450,8 +450,14 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
                 || semantics.state_provider() == Some(crate::stdlib::StdlibStateProviderId::Unity)
         })
     };
-    let dependencies =
-        BackendDependencies::analyze(program, semantics, wasm_ir, &reachability, automatic_shape);
+    let dependencies = BackendDependencies::analyze(
+        program,
+        semantics,
+        wasm_ir,
+        &reachability,
+        capabilities,
+        automatic_shape,
+    );
     reachability.require_runtime_helper_types(&dependencies, array_types, semantics);
     let failure_payloads = FailurePayloadDemand::analyze(semantics, wasm_ir, &reachability);
     let static_data = StaticData::collect(

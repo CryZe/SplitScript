@@ -2258,6 +2258,47 @@ fn structural_debug_formats_nested_containers_and_text_unambiguously() {
 }
 
 #[test]
+fn iterator_debug_is_uniformly_opaque() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let set = Set.new<String>()
+            set.insert("set")
+            let map = Map.new<String, u32>()
+            map.insert("map", 1)
+
+            print(["array"].iterator())
+            print(set.iterator())
+            print(map.iterator())
+            print((0..<1).iterator())
+            print((0..=1).iterator())
+            print(["mapped"].iterator().map(value => value))
+            print(["filtered"].iterator().filter(value => true))
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(
+        store.data().messages,
+        [
+            "ArrayIterator { .. }",
+            "SetIterator { .. }",
+            "ArrayIterator { .. }",
+            "ExclusiveRangeIterator { .. }",
+            "InclusiveRangeIterator { .. }",
+            "MapIterator { .. }",
+            "FilterIterator { .. }",
+        ]
+    );
+}
+
+#[test]
 fn structural_debug_bounds_recursive_container_graphs() {
     let source = r#"
         struct Node {

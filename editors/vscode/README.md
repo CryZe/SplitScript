@@ -15,9 +15,9 @@ separate native executable.
    compiler-checked guide introduces process attachment, a typed setting, one
    memory field, `old` / `current` snapshots, and the first timer decision.
 4. On desktop, use **SplitScript: Debug Active Script** to compile and run the
-   script inside VS Code. The Run and Debug sidebar shows the simulated timer,
-   runtime statistics, user settings, the raw settings map, timer variables,
-   and controls; runtime output is sent to the
+   script inside VS Code. The dedicated **SplitScript Debugger** sidebar shows
+   the simulated timer, runtime statistics, user settings, the raw settings map,
+   timer variables, and controls; runtime output is sent to the
    **SplitScript Runtime** Output channel and Debug Console.
 5. Use **SplitScript: Start Debug Watch** when you only want to continuously
    rebuild a `.wasm` file without launching it.
@@ -49,8 +49,9 @@ Use the host's normal local-Wasm workflow to load the generated file.
 | **SplitScript: Restart Language Server** | Replaces the language-service worker without reloading the editor window. |
 
 Documentation and build commands are available from the Command Palette. The
-documentation and build/watch actions also appear in the `.split` editor title;
-symbol documentation and build/watch actions are in the editor context menu.
+documentation and release-build actions also appear in the `.split` editor
+title; symbol documentation and build/watch actions are in the editor context
+menu.
 
 ## Language support
 

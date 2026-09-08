@@ -53,11 +53,11 @@ export class SplitScriptDebuggerController implements
             this.output,
             vscode.debug.registerDebugConfigurationProvider(DEBUG_TYPE, this),
             vscode.debug.registerDebugAdapterDescriptorFactory(DEBUG_TYPE, this),
-            vscode.window.registerTreeDataProvider('splitscript.debug.runtime', this.runtimeView),
-            vscode.window.registerTreeDataProvider('splitscript.debug.settings', this.settingsView),
-            vscode.window.registerTreeDataProvider('splitscript.debug.settingsMap', this.settingsMapView),
-            vscode.window.registerTreeDataProvider('splitscript.debug.variables', this.variablesView),
-            vscode.window.registerTreeDataProvider('splitscript.debug.processes', this.processesView),
+            vscode.window.registerTreeDataProvider('splitscript.debugger.runtime', this.runtimeView),
+            vscode.window.registerTreeDataProvider('splitscript.debugger.settings', this.settingsView),
+            vscode.window.registerTreeDataProvider('splitscript.debugger.settingsMap', this.settingsMapView),
+            vscode.window.registerTreeDataProvider('splitscript.debugger.variables', this.variablesView),
+            vscode.window.registerTreeDataProvider('splitscript.debugger.processes', this.processesView),
             vscode.commands.registerCommand('splitscript.debug.start', async () => this.start()),
             vscode.commands.registerCommand('splitscript.debug.restart', async () => {
                 await this.activeAdapter?.restart();

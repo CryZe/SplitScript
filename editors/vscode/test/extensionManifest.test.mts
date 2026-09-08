@@ -29,8 +29,11 @@ interface ExtensionManifest {
                 };
             };
         }>;
+        viewsContainers: {
+            activitybar: Array<{ id: string; title: string; icon: string }>;
+        };
         views: {
-            debug: Array<{ id: string; name: string }>;
+            'splitscript-debugger': Array<{ id: string; name: string }>;
         };
         viewsWelcome: Array<{ view: string; when?: string }>;
         menus: {
@@ -75,22 +78,31 @@ test('desktop debugger contribution launches SplitScript files', () => {
 });
 
 test('runtime view has launch welcome content and active-session actions', () => {
+    const [container] = manifest.contributes.viewsContainers.activitybar;
+    assert.match(container.id, /^[A-Za-z0-9_-]+$/);
+    assert.deepEqual(manifest.contributes.viewsContainers.activitybar, [
+        {
+            id: 'splitscript-debugger',
+            title: 'SplitScript Debugger',
+            icon: 'media/splitscript-debugger.svg',
+        },
+    ]);
     assert.deepEqual(
-        manifest.contributes.views.debug.map(view => view.id),
+        manifest.contributes.views['splitscript-debugger'].map(view => view.id),
         [
-            'splitscript.debug.runtime',
-            'splitscript.debug.settings',
-            'splitscript.debug.settingsMap',
-            'splitscript.debug.variables',
-            'splitscript.debug.processes',
+            'splitscript.debugger.runtime',
+            'splitscript.debugger.settings',
+            'splitscript.debugger.settingsMap',
+            'splitscript.debugger.variables',
+            'splitscript.debugger.processes',
         ],
     );
     assert(manifest.contributes.viewsWelcome.some(
-        welcome => welcome.view === 'splitscript.debug.runtime'
+        welcome => welcome.view === 'splitscript.debugger.runtime'
             && welcome.when === '!splitscript.debug.active',
     ));
     const actions = manifest.contributes.menus['view/title']
-        .filter(item => item.when?.includes('view == splitscript.debug.runtime'))
+        .filter(item => item.when?.includes('view == splitscript.debugger.runtime'))
         .map(item => item.command);
     assert.deepEqual(actions, [
         'splitscript.debug.timerStart',
@@ -101,7 +113,7 @@ test('runtime view has launch welcome content and active-session actions', () =>
     ]);
     assert(manifest.contributes.menus['view/title'].some(
         item => item.command === 'splitscript.debug.clearSettings'
-            && item.when?.includes('view == splitscript.debug.settingsMap'),
+            && item.when?.includes('view == splitscript.debugger.settingsMap'),
     ));
 });
 
@@ -125,6 +137,13 @@ test('the direct documentation command is available in SplitScript editor titles
         when: 'resourceLangId == splitscript',
         group: 'navigation@3',
     });
+});
+
+test('debug watch does not add a second play action to SplitScript editor titles', () => {
+    const editorTitleCommands = manifest.contributes.menus['editor/title']
+        .map(item => item.command);
+    assert(!editorTitleCommands.includes('splitscript.startDebugWatch'));
+    assert(!editorTitleCommands.includes('splitscript.stopDebugWatch'));
 });
 
 test('language-server documentation links trust only the documentation command', () => {

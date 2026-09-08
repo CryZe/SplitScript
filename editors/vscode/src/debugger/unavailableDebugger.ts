@@ -19,11 +19,11 @@ export function registerUnavailableDebugger(context: vscode.ExtensionContext): v
     context.subscriptions.push(
         vscode.debug.registerDebugConfigurationProvider('splitscript', provider),
         ...[
-            'splitscript.debug.runtime',
-            'splitscript.debug.settings',
-            'splitscript.debug.settingsMap',
-            'splitscript.debug.variables',
-            'splitscript.debug.processes',
+            'splitscript.debugger.runtime',
+            'splitscript.debugger.settings',
+            'splitscript.debugger.settingsMap',
+            'splitscript.debugger.variables',
+            'splitscript.debugger.processes',
         ].map(view => vscode.window.registerTreeDataProvider(view, emptyTree)),
         ...[
             'splitscript.debug.start',

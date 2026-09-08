@@ -37,6 +37,7 @@
   },
   "files": [
     "dist/**",
+    "media/**",
     "styles/**",
     "syntaxes/**",
     "language-configuration.json",
@@ -297,34 +298,43 @@
         ]
       }
     ],
-    "views": {
-      "debug": [
+    "viewsContainers": {
+      "activitybar": [
         {
-          "id": "splitscript.debug.runtime",
+          "id": "splitscript-debugger",
+          "title": "SplitScript Debugger",
+          "icon": "media/splitscript-debugger.svg"
+        }
+      ]
+    },
+    "views": {
+      "splitscript-debugger": [
+        {
+          "id": "splitscript.debugger.runtime",
           "name": "SplitScript Runtime",
           "icon": "$(pulse)",
           "contextualTitle": "SplitScript Runtime"
         },
         {
-          "id": "splitscript.debug.settings",
+          "id": "splitscript.debugger.settings",
           "name": "SplitScript Settings",
           "icon": "$(settings-gear)",
           "contextualTitle": "SplitScript Settings"
         },
         {
-          "id": "splitscript.debug.settingsMap",
+          "id": "splitscript.debugger.settingsMap",
           "name": "SplitScript Settings Map",
           "icon": "$(json)",
           "contextualTitle": "SplitScript Settings Map"
         },
         {
-          "id": "splitscript.debug.variables",
+          "id": "splitscript.debugger.variables",
           "name": "SplitScript Variables",
           "icon": "$(symbol-variable)",
           "contextualTitle": "SplitScript Variables"
         },
         {
-          "id": "splitscript.debug.processes",
+          "id": "splitscript.debugger.processes",
           "name": "SplitScript Processes",
           "icon": "$(server-process)",
           "contextualTitle": "SplitScript Processes"
@@ -333,27 +343,27 @@
     },
     "viewsWelcome": [
       {
-        "view": "splitscript.debug.runtime",
+        "view": "splitscript.debugger.runtime",
         "contents": "No SplitScript debugger is running.\n[Debug Active SplitScript](command:splitscript.debug.start)",
         "when": "!splitscript.debug.active"
       },
       {
-        "view": "splitscript.debug.settings",
+        "view": "splitscript.debugger.settings",
         "contents": "Settings appear after a SplitScript debugger starts.",
         "when": "!splitscript.debug.active"
       },
       {
-        "view": "splitscript.debug.settingsMap",
+        "view": "splitscript.debugger.settingsMap",
         "contents": "The runtime settings map appears after a SplitScript debugger starts.",
         "when": "!splitscript.debug.active"
       },
       {
-        "view": "splitscript.debug.variables",
+        "view": "splitscript.debugger.variables",
         "contents": "Timer variables appear after a SplitScript debugger starts.",
         "when": "!splitscript.debug.active"
       },
       {
-        "view": "splitscript.debug.processes",
+        "view": "splitscript.debugger.processes",
         "contents": "Attached processes appear after a SplitScript debugger starts.",
         "when": "!splitscript.debug.active"
       }
@@ -369,16 +379,6 @@
           "command": "splitscript.buildRelease",
           "when": "resourceLangId == splitscript",
           "group": "navigation@1"
-        },
-        {
-          "command": "splitscript.startDebugWatch",
-          "when": "resourceLangId == splitscript && !splitScript.watchActive",
-          "group": "navigation@2"
-        },
-        {
-          "command": "splitscript.stopDebugWatch",
-          "when": "resourceLangId == splitscript && splitScript.watchActive",
-          "group": "navigation@2"
         }
       ],
       "editor/context": [
@@ -413,32 +413,32 @@
       "view/title": [
         {
           "command": "splitscript.debug.timerStart",
-          "when": "view == splitscript.debug.runtime && splitscript.debug.active",
+          "when": "view == splitscript.debugger.runtime && splitscript.debug.active",
           "group": "navigation@1"
         },
         {
           "command": "splitscript.debug.timerReset",
-          "when": "view == splitscript.debug.runtime && splitscript.debug.active",
+          "when": "view == splitscript.debugger.runtime && splitscript.debug.active",
           "group": "navigation@2"
         },
         {
           "command": "splitscript.debug.restart",
-          "when": "view == splitscript.debug.runtime && splitscript.debug.active",
+          "when": "view == splitscript.debugger.runtime && splitscript.debug.active",
           "group": "navigation@3"
         },
         {
           "command": "splitscript.debug.stop",
-          "when": "view == splitscript.debug.runtime && splitscript.debug.active",
+          "when": "view == splitscript.debugger.runtime && splitscript.debug.active",
           "group": "navigation@4"
         },
         {
           "command": "splitscript.debug.showLogs",
-          "when": "view == splitscript.debug.runtime",
+          "when": "view == splitscript.debugger.runtime",
           "group": "navigation@5"
         },
         {
           "command": "splitscript.debug.clearSettings",
-          "when": "view == splitscript.debug.settingsMap && splitscript.debug.active",
+          "when": "view == splitscript.debugger.settingsMap && splitscript.debug.active",
           "group": "navigation@1"
         }
       ]

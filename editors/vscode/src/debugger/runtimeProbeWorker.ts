@@ -1,5 +1,7 @@
 import { parentPort } from 'node:worker_threads';
 
+import { neutralImport } from './asr/neutralImports';
+
 interface ProbeRequest {
     wasm: ArrayBuffer;
     runUpdate: boolean;
@@ -79,41 +81,7 @@ function stubImports(entries: WebAssembly.ModuleImportDescriptor[]): WebAssembly
             throw new Error(`unsupported probe import ${entry.module}.${entry.name} (${entry.kind})`);
         }
         const namespace = imports[entry.module] ??= {};
-        namespace[entry.name] = BIGINT_RESULTS.has(`${entry.module}.${entry.name}`)
-            ? () => 0n
-            : () => 0;
+        namespace[entry.name] = neutralImport(`${entry.module}.${entry.name}`);
     }
     return imports;
 }
-
-// JavaScript must return BigInt for a WebAssembly i64 result. The production
-// host will define exact signatures; this probe only needs type-correct neutral
-// values to validate V8 compilation, instantiation, initialization, and update.
-const BIGINT_RESULTS = new Set([
-    'env.process_attach',
-    'env.process_attach_by_pid',
-    'env.process_get_memory_range_address',
-    'env.process_get_memory_range_count',
-    'env.process_get_memory_range_flags',
-    'env.process_get_memory_range_size',
-    'env.process_get_module_address',
-    'env.process_get_module_size',
-    'env.setting_value_copy',
-    'env.setting_value_get_i64',
-    'env.setting_value_get_list',
-    'env.setting_value_get_map',
-    'env.setting_value_new_bool',
-    'env.setting_value_new_f64',
-    'env.setting_value_new_i64',
-    'env.setting_value_new_list',
-    'env.setting_value_new_map',
-    'env.setting_value_new_string',
-    'env.settings_list_copy',
-    'env.settings_list_get',
-    'env.settings_list_new',
-    'env.settings_map_copy',
-    'env.settings_map_get',
-    'env.settings_map_get_value_by_index',
-    'env.settings_map_load',
-    'env.settings_map_new',
-]);

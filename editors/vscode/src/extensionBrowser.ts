@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { CompilerTaskController } from './compilerTasks';
 import { EmbeddedCompilerBrowserWorkerClient } from './embeddedCompilerBrowserWorkerClient';
+import { registerUnavailableDebugger } from './debugger/unavailableDebugger';
 import { ExtensionRuntime } from './extensionRuntime';
 import { BrowserLanguageClientController } from './languageClientBrowser';
 
@@ -25,6 +26,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         new BrowserLanguageClientController(context),
     );
     await runtime.activate(context);
+    registerUnavailableDebugger(context);
 }
 
 export async function deactivate(): Promise<void> {

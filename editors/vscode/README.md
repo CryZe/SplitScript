@@ -14,9 +14,13 @@ separate native executable.
 3. Run **SplitScript: Open Documentation** and open **Getting started**. That
    compiler-checked guide introduces process attachment, a typed setting, one
    memory field, `old` / `current` snapshots, and the first timer decision.
-4. Use **SplitScript: Start Debug Watch** while editing. The first build happens
-   immediately and later saves rebuild the script.
-5. Use **SplitScript: Build Release** when the module is ready to distribute.
+4. On desktop, use **SplitScript: Debug Active Script** to compile and run the
+   script inside VS Code. The Run and Debug sidebar shows the simulated timer,
+   runtime statistics, and controls; runtime output is sent to the
+   **SplitScript Runtime** Output channel and Debug Console.
+5. Use **SplitScript: Start Debug Watch** when you only want to continuously
+   rebuild a `.wasm` file without launching it.
+6. Use **SplitScript: Build Release** when the module is ready to distribute.
 
 Both build commands create a `.wasm` file beside the source file. For example,
 `game.split` produces `game.wasm`. A failed or superseded build leaves the last
@@ -35,6 +39,10 @@ Use the host's normal local-Wasm workflow to load the generated file.
 | **SplitScript: Search Documentation** | Searches symbols, concepts, signatures, summaries, and migration terms. |
 | **SplitScript: Start Debug Watch** | Saves and builds the active script with the debug profile, then rebuilds it after later saves. |
 | **SplitScript: Stop Debug Watch** | Stops the watcher shown in the status bar. |
+| **SplitScript: Debug Active Script** | Starts a VS Code debug session that compiles and runs the active script in an isolated Node WebAssembly worker. |
+| **SplitScript Debugger: Restart** | Recompiles and replaces the running WebAssembly instance. |
+| **SplitScript Debugger: Start/Reset Timer** | Controls the debugger's simulated timer. |
+| **SplitScript Debugger: Show Logs** | Opens the runtime Output channel. |
 | **SplitScript: Build Release** | Saves and performs one optimized build of the active script. |
 | **SplitScript: Restart Language Server** | Replaces the language-service worker without reloading the editor window. |
 
@@ -68,11 +76,20 @@ virtual workspaces.
 
 - VS Code 1.125 or newer is required.
 - The extension supports desktop and browser extension hosts.
+- Running an autosplitter is currently a desktop-only capability and requires a
+  trusted local workspace. Browser, virtual, and untrusted workspaces retain
+  the compiler and language tooling.
+- The first debugger runtime milestone implements the timer and runtime ASR
+  imports. Process, settings, and WASI imports currently use neutral stubs and
+  are reported in the runtime log when encountered.
+- Source breakpoints and stepping are not implemented yet. Debug builds already
+  carry source and variable metadata; pausing V8 execution requires the planned
+  debugger-instrumented compiler mode.
 - Building requires a saved `.split` resource and write access beside it.
 - Generated modules require an autosplitting host with WebAssembly GC enabled.
   Older host engines that disable WebAssembly GC cannot instantiate them.
-- The extension compiles and documents the autosplitter; it does not configure a
-  timer, install a host component, or select the resulting `.wasm` file.
+- The debugger uses a simulated timer and does not control a running LiveSplit
+  instance.
 - This early package is distributed as a VSIX rather than through the Visual
   Studio Marketplace.
 

@@ -200,6 +200,15 @@ Code extension development host.
 
 ### 1. Runtime skeleton and DAP lifecycle
 
+Status: completed on 2026-09-08. The desktop extension now contributes an
+inline debug adapter, compiles `.split` programs in memory (or launches `.wasm`
+programs directly), runs them in a dedicated Node worker, and supports restart,
+termination, save-triggered hot reload, runtime logs, timer controls, and a
+Runtime tree view. The worker implements the runtime and simulated timer imports;
+process, settings, and WASI imports remain neutral stubs for milestones 2 and 3.
+The browser extension exposes the debugger as unavailable instead of registering
+commands that cannot work there.
+
 - Add debugger contributions, launch configuration provider, and inline DAP
   adapter.
 - Refactor the embedded compiler ownership so a debug session can receive

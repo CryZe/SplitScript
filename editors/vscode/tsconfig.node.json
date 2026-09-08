@@ -4,6 +4,7 @@
     "src/extension.ts",
     "src/embeddedCompilerNodeWorker.ts",
     "src/embeddedLanguageServerNodeWorker.ts",
+    "src/debugger/runtimeWorker.ts",
     "src/debugger/runtimeProbeWorker.ts"
   ]
 }

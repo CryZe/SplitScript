@@ -7,6 +7,10 @@
   },
   "include": [
     "src/embeddedCompiler.ts",
+    "src/debugger/asr/memory.ts",
+    "src/debugger/asr/neutralImports.ts",
+    "src/debugger/asr/timer.ts",
+    "src/debugger/runtimeProtocol.ts",
     "src/savedScript.ts",
     "src/taskState.ts",
     "test/**/*.ts",

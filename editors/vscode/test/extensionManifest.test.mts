@@ -16,11 +16,27 @@ interface MenuContribution {
 }
 
 interface ExtensionManifest {
+    categories: string[];
     contributes: {
         commands: CommandContribution[];
+        debuggers: Array<{
+            type: string;
+            languages: string[];
+            configurationAttributes: {
+                launch: {
+                    required: string[];
+                    properties: Record<string, unknown>;
+                };
+            };
+        }>;
+        views: {
+            debug: Array<{ id: string; name: string }>;
+        };
+        viewsWelcome: Array<{ view: string; when?: string }>;
         menus: {
             'editor/title': MenuContribution[];
             'editor/context': MenuContribution[];
+            'view/title': MenuContribution[];
         };
         configurationDefaults: {
             '[splitscript]': Record<string, unknown>;
@@ -44,6 +60,38 @@ test('documentation has direct, contextual, and searchable commands', () => {
     assert(commands.has('splitscript.openDocumentation'));
     assert(commands.has('splitscript.openSymbolDocumentation'));
     assert(commands.has('splitscript.searchDocumentation'));
+});
+
+test('desktop debugger contribution launches SplitScript files', () => {
+    assert(manifest.categories.includes('Debuggers'));
+    const debuggerContribution = manifest.contributes.debuggers.find(
+        contribution => contribution.type === 'splitscript',
+    );
+    assert(debuggerContribution !== undefined);
+    assert.deepEqual(debuggerContribution.languages, ['splitscript']);
+    assert.deepEqual(debuggerContribution.configurationAttributes.launch.required, ['program']);
+    assert('hotReload' in debuggerContribution.configurationAttributes.launch.properties);
+});
+
+test('runtime view has launch welcome content and active-session actions', () => {
+    assert.deepEqual(
+        manifest.contributes.views.debug.map(view => view.id),
+        ['splitscript.debug.runtime'],
+    );
+    assert(manifest.contributes.viewsWelcome.some(
+        welcome => welcome.view === 'splitscript.debug.runtime'
+            && welcome.when === '!splitscript.debug.active',
+    ));
+    const actions = manifest.contributes.menus['view/title']
+        .filter(item => item.when?.includes('view == splitscript.debug.runtime'))
+        .map(item => item.command);
+    assert.deepEqual(actions, [
+        'splitscript.debug.timerStart',
+        'splitscript.debug.timerReset',
+        'splitscript.debug.restart',
+        'splitscript.debug.stop',
+        'splitscript.debug.showLogs',
+    ]);
 });
 
 test('symbol documentation is available from the SplitScript editor context', () => {

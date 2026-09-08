@@ -14,6 +14,7 @@
   },
   "categories": [
     "Programming Languages",
+    "Debuggers",
     "Formatters",
     "Linters"
   ],
@@ -193,6 +194,108 @@
         "title": "SplitScript: Stop Debug Watch",
         "shortTitle": "Stop Debug Watch",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "splitscript.debug.start",
+        "title": "SplitScript: Debug Active Script",
+        "shortTitle": "Debug Script",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "splitscript.debug.restart",
+        "title": "SplitScript Debugger: Restart",
+        "shortTitle": "Restart",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "splitscript.debug.stop",
+        "title": "SplitScript Debugger: Stop",
+        "shortTitle": "Stop",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "splitscript.debug.timerStart",
+        "title": "SplitScript Debugger: Start Timer",
+        "shortTitle": "Start Timer",
+        "icon": "$(play)"
+      },
+      {
+        "command": "splitscript.debug.timerReset",
+        "title": "SplitScript Debugger: Reset Timer",
+        "shortTitle": "Reset Timer",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "splitscript.debug.showLogs",
+        "title": "SplitScript Debugger: Show Logs",
+        "shortTitle": "Show Logs",
+        "icon": "$(output)"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "splitscript",
+        "label": "SplitScript",
+        "languages": [
+          "splitscript"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Absolute path or URI of the .split or ASR .wasm file to run."
+              },
+              "hotReload": {
+                "type": "boolean",
+                "default": true,
+                "description": "Recompile and restart a .split runtime when the source is saved."
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "splitscript",
+            "request": "launch",
+            "name": "Debug SplitScript",
+            "program": "${file}",
+            "hotReload": true
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "SplitScript: Debug active script",
+            "description": "Compile and run a SplitScript autosplitter in the VS Code debugger.",
+            "body": {
+              "type": "splitscript",
+              "request": "launch",
+              "name": "Debug SplitScript",
+              "program": "${file}",
+              "hotReload": true
+            }
+          }
+        ]
+      }
+    ],
+    "views": {
+      "debug": [
+        {
+          "id": "splitscript.debug.runtime",
+          "name": "SplitScript Runtime",
+          "icon": "$(pulse)",
+          "contextualTitle": "SplitScript Runtime"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "splitscript.debug.runtime",
+        "contents": "No SplitScript debugger is running.\n[Debug Active SplitScript](command:splitscript.debug.start)",
+        "when": "!splitscript.debug.active"
       }
     ],
     "menus": {
@@ -238,6 +341,40 @@
           "command": "splitscript.stopDebugWatch",
           "when": "resourceLangId == splitscript && splitScript.watchActive",
           "group": "navigation@2"
+        }
+      ],
+      "editor/title/run": [
+        {
+          "command": "splitscript.debug.start",
+          "when": "resourceLangId == splitscript && !splitscript.debug.active",
+          "group": "run@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "splitscript.debug.timerStart",
+          "when": "view == splitscript.debug.runtime && splitscript.debug.active",
+          "group": "navigation@1"
+        },
+        {
+          "command": "splitscript.debug.timerReset",
+          "when": "view == splitscript.debug.runtime && splitscript.debug.active",
+          "group": "navigation@2"
+        },
+        {
+          "command": "splitscript.debug.restart",
+          "when": "view == splitscript.debug.runtime && splitscript.debug.active",
+          "group": "navigation@3"
+        },
+        {
+          "command": "splitscript.debug.stop",
+          "when": "view == splitscript.debug.runtime && splitscript.debug.active",
+          "group": "navigation@4"
+        },
+        {
+          "command": "splitscript.debug.showLogs",
+          "when": "view == splitscript.debug.runtime",
+          "group": "navigation@5"
         }
       ]
     },
@@ -299,6 +436,7 @@
     "check": "tsc --noEmit -p ./",
     "test": "tsc --noEmit -p tsconfig.test.json && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/*.test.mts",
     "probe:runtime": "node scripts/probe-runtime.mjs",
+    "probe:debug-runtime": "node scripts/probe-debug-runtime.mjs",
     "probe:native": "node scripts/probe-native.mjs",
     "probe:package": "node scripts/probe-package.mjs"
   },

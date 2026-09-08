@@ -71,12 +71,18 @@ test('desktop debugger contribution launches SplitScript files', () => {
     assert.deepEqual(debuggerContribution.languages, ['splitscript']);
     assert.deepEqual(debuggerContribution.configurationAttributes.launch.required, ['program']);
     assert('hotReload' in debuggerContribution.configurationAttributes.launch.properties);
+    assert('scriptPath' in debuggerContribution.configurationAttributes.launch.properties);
 });
 
 test('runtime view has launch welcome content and active-session actions', () => {
     assert.deepEqual(
         manifest.contributes.views.debug.map(view => view.id),
-        ['splitscript.debug.runtime'],
+        [
+            'splitscript.debug.runtime',
+            'splitscript.debug.settings',
+            'splitscript.debug.settingsMap',
+            'splitscript.debug.variables',
+        ],
     );
     assert(manifest.contributes.viewsWelcome.some(
         welcome => welcome.view === 'splitscript.debug.runtime'
@@ -92,6 +98,10 @@ test('runtime view has launch welcome content and active-session actions', () =>
         'splitscript.debug.stop',
         'splitscript.debug.showLogs',
     ]);
+    assert(manifest.contributes.menus['view/title'].some(
+        item => item.command === 'splitscript.debug.clearSettings'
+            && item.when?.includes('view == splitscript.debug.settingsMap'),
+    ));
 });
 
 test('symbol documentation is available from the SplitScript editor context', () => {

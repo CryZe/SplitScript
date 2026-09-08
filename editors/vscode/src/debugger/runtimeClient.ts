@@ -5,6 +5,7 @@ import type {
     RuntimeRequest,
     RuntimeResponse,
     RuntimeSnapshot,
+    SettingMapSnapshot,
 } from './runtimeProtocol';
 
 export interface RuntimeClientCallbacks {
@@ -16,13 +17,14 @@ export interface RuntimeClientCallbacks {
 export class RuntimeClient {
     private worker: Worker | undefined;
     private intentionalTermination = false;
+    private settings: SettingMapSnapshot | undefined;
 
     public constructor(
         private readonly workerPath: string,
         private readonly callbacks: RuntimeClientCallbacks,
     ) {}
 
-    public async launch(wasm: Uint8Array, program: string): Promise<void> {
+    public async launch(wasm: Uint8Array, program: string, scriptPath?: string): Promise<void> {
         await this.terminate();
         const worker = new Worker(this.workerPath);
         this.worker = worker;
@@ -67,6 +69,8 @@ export class RuntimeClient {
             type: 'launch',
             wasm: owned.buffer,
             program,
+            scriptPath,
+            settings: this.settings,
         }, [owned.buffer]);
         await ready;
     }
@@ -76,6 +80,14 @@ export class RuntimeClient {
             return;
         }
         this.post({ type: 'timerCommand', command });
+    }
+
+    public setSetting(key: string, value: boolean | string): void {
+        if (this.worker !== undefined) this.post({ type: 'setSetting', key, value });
+    }
+
+    public clearSettings(): void {
+        if (this.worker !== undefined) this.post({ type: 'clearSettings' });
     }
 
     public async terminate(): Promise<void> {
@@ -102,6 +114,7 @@ export class RuntimeClient {
 
     private handleMessage(message: RuntimeResponse): void {
         if (message.type === 'snapshot') {
+            this.settings = message.snapshot.settings.map;
             this.callbacks.snapshot(message.snapshot);
         } else if (message.type === 'log') {
             this.callbacks.log(message);

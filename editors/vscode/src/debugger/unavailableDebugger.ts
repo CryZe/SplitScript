@@ -18,7 +18,12 @@ export function registerUnavailableDebugger(context: vscode.ExtensionContext): v
     };
     context.subscriptions.push(
         vscode.debug.registerDebugConfigurationProvider('splitscript', provider),
-        vscode.window.registerTreeDataProvider('splitscript.debug.runtime', emptyTree),
+        ...[
+            'splitscript.debug.runtime',
+            'splitscript.debug.settings',
+            'splitscript.debug.settingsMap',
+            'splitscript.debug.variables',
+        ].map(view => vscode.window.registerTreeDataProvider(view, emptyTree)),
         ...[
             'splitscript.debug.start',
             'splitscript.debug.restart',
@@ -26,6 +31,8 @@ export function registerUnavailableDebugger(context: vscode.ExtensionContext): v
             'splitscript.debug.timerStart',
             'splitscript.debug.timerReset',
             'splitscript.debug.showLogs',
+            'splitscript.debug.editSetting',
+            'splitscript.debug.clearSettings',
         ].map(command => vscode.commands.registerCommand(command, unavailable)),
     );
 }

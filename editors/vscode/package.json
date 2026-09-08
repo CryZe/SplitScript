@@ -230,6 +230,18 @@
         "title": "SplitScript Debugger: Show Logs",
         "shortTitle": "Show Logs",
         "icon": "$(output)"
+      },
+      {
+        "command": "splitscript.debug.editSetting",
+        "title": "SplitScript Debugger: Edit Setting",
+        "shortTitle": "Edit Setting",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "splitscript.debug.clearSettings",
+        "title": "SplitScript Debugger: Clear Settings Map",
+        "shortTitle": "Clear",
+        "icon": "$(clear-all)"
       }
     ],
     "debuggers": [
@@ -253,6 +265,10 @@
                 "type": "boolean",
                 "default": true,
                 "description": "Recompile and restart a .split runtime when the source is saved."
+              },
+              "scriptPath": {
+                "type": "string",
+                "description": "Optional native path exposed to WASI as the SCRIPT_PATH environment variable."
               }
             }
           }
@@ -288,6 +304,24 @@
           "name": "SplitScript Runtime",
           "icon": "$(pulse)",
           "contextualTitle": "SplitScript Runtime"
+        },
+        {
+          "id": "splitscript.debug.settings",
+          "name": "SplitScript Settings",
+          "icon": "$(settings-gear)",
+          "contextualTitle": "SplitScript Settings"
+        },
+        {
+          "id": "splitscript.debug.settingsMap",
+          "name": "SplitScript Settings Map",
+          "icon": "$(json)",
+          "contextualTitle": "SplitScript Settings Map"
+        },
+        {
+          "id": "splitscript.debug.variables",
+          "name": "SplitScript Variables",
+          "icon": "$(symbol-variable)",
+          "contextualTitle": "SplitScript Variables"
         }
       ]
     },
@@ -295,6 +329,21 @@
       {
         "view": "splitscript.debug.runtime",
         "contents": "No SplitScript debugger is running.\n[Debug Active SplitScript](command:splitscript.debug.start)",
+        "when": "!splitscript.debug.active"
+      },
+      {
+        "view": "splitscript.debug.settings",
+        "contents": "Settings appear after a SplitScript debugger starts.",
+        "when": "!splitscript.debug.active"
+      },
+      {
+        "view": "splitscript.debug.settingsMap",
+        "contents": "The runtime settings map appears after a SplitScript debugger starts.",
+        "when": "!splitscript.debug.active"
+      },
+      {
+        "view": "splitscript.debug.variables",
+        "contents": "Timer variables appear after a SplitScript debugger starts.",
         "when": "!splitscript.debug.active"
       }
     ],
@@ -375,6 +424,11 @@
           "command": "splitscript.debug.showLogs",
           "when": "view == splitscript.debug.runtime",
           "group": "navigation@5"
+        },
+        {
+          "command": "splitscript.debug.clearSettings",
+          "when": "view == splitscript.debug.settingsMap && splitscript.debug.active",
+          "group": "navigation@1"
         }
       ]
     },

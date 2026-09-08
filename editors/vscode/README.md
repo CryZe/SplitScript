@@ -16,7 +16,8 @@ separate native executable.
    memory field, `old` / `current` snapshots, and the first timer decision.
 4. On desktop, use **SplitScript: Debug Active Script** to compile and run the
    script inside VS Code. The Run and Debug sidebar shows the simulated timer,
-   runtime statistics, and controls; runtime output is sent to the
+   runtime statistics, user settings, the raw settings map, timer variables,
+   and controls; runtime output is sent to the
    **SplitScript Runtime** Output channel and Debug Console.
 5. Use **SplitScript: Start Debug Watch** when you only want to continuously
    rebuild a `.wasm` file without launching it.
@@ -42,6 +43,7 @@ Use the host's normal local-Wasm workflow to load the generated file.
 | **SplitScript: Debug Active Script** | Starts a VS Code debug session that compiles and runs the active script in an isolated Node WebAssembly worker. |
 | **SplitScript Debugger: Restart** | Recompiles and replaces the running WebAssembly instance. |
 | **SplitScript Debugger: Start/Reset Timer** | Controls the debugger's simulated timer. |
+| **SplitScript Debugger: Clear Settings Map** | Removes all values currently overridden in the runtime settings map. |
 | **SplitScript Debugger: Show Logs** | Opens the runtime Output channel. |
 | **SplitScript: Build Release** | Saves and performs one optimized build of the active script. |
 | **SplitScript: Restart Language Server** | Replaces the language-service worker without reloading the editor window. |
@@ -79,9 +81,13 @@ virtual workspaces.
 - Running an autosplitter is currently a desktop-only capability and requires a
   trusted local workspace. Browser, virtual, and untrusted workspaces retain
   the compiler and language tooling.
-- The first debugger runtime milestone implements the timer and runtime ASR
-  imports. Process, settings, and WASI imports currently use neutral stubs and
-  are reported in the runtime log when encountered.
+- The debugger implements the timer, runtime, user-settings, settings
+  map/list/value, and SplitScript WASI imports. The WASI filesystem is exposed
+  read-only below `/mnt`; an optional `scriptPath` launch property supplies the
+  portable `SCRIPT_PATH` environment variable. Unsupported general-purpose
+  WASI calls are reported in the runtime log.
+- Process imports currently use neutral stubs and are reported in the runtime
+  log until the native process bridge is connected in the next milestone.
 - Source breakpoints and stepping are not implemented yet. Debug builds already
   carry source and variable metadata; pausing V8 execution requires the planned
   debugger-instrumented compiler mode.

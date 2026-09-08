@@ -1,8 +1,32 @@
 state "splitscript-process-fixture.exe" {}
 
+enum ProbeMode {
+    Fast,
+    Accurate,
+}
+
+settings {
+    "Probe" {
+        "Enabled" => enabled: true,
+        "Label" => label: "initial",
+        "Mode" => mode: choice {
+            "Fast" => ProbeMode.Fast default,
+            "Accurate" => ProbeMode.Accurate,
+        },
+        "Input" => input: file {
+            "Text" => "*.txt",
+            mime => "text/plain",
+        },
+    },
+}
+
 setup {
     print("SplitScript runtime worker ready")
     setTickRate(30)
+    setVariable("Probe Enabled", `{settings.enabled}`)
+    setVariable("Probe Label", settings.label)
+    setVariable("Probe Mode", `{settings.mode}`)
+    setVariable("Probe Input", settings.input)
 }
 
 onAttach {

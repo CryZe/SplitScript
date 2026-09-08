@@ -36,6 +36,7 @@ export class RuntimeViewProvider implements vscode.TreeDataProvider<vscode.TreeI
             item('Average Tick', `${formatNumber(snapshot.averageTickMilliseconds)} ms`),
             item('Slowest Tick', `${formatNumber(snapshot.slowestTickMilliseconds)} ms`),
             item('Wasm Memory', formatBytes(snapshot.memoryBytes), 'database'),
+            item('ASR Handles', String(snapshot.settings.handleCount), 'references'),
         ];
     }
 

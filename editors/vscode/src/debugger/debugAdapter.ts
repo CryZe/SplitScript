@@ -79,6 +79,14 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
         this.runtime.timerCommand(command);
     }
 
+    public setSetting(key: string, value: boolean | string): void {
+        this.runtime.setSetting(key, value);
+    }
+
+    public clearSettings(): void {
+        this.runtime.clearSettings();
+    }
+
     public async stop(): Promise<void> {
         await this.runtime.stop();
         this.sendTerminated();

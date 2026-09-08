@@ -4,6 +4,12 @@ import type { EmbeddedCompilerClient, EmbeddedCompilerFactory } from '../compile
 import { SplitScriptDebugAdapter, type DebugAdapterHost } from './debugAdapter';
 import type { RuntimeLogMessage, RuntimeSnapshot } from './runtimeProtocol';
 import { RuntimeViewProvider } from './runtimeView';
+import {
+    SettingsMapViewProvider,
+    SettingsViewProvider,
+    VariablesViewProvider,
+} from './settingsViews';
+import { nativePathToWasi } from './asr/wasi';
 
 const DEBUG_TYPE = 'splitscript';
 const ACTIVE_CONTEXT = 'splitscript.debug.active';
@@ -15,6 +21,9 @@ export class SplitScriptDebuggerController implements
     vscode.Disposable
 {
     private readonly runtimeView = new RuntimeViewProvider();
+    private readonly settingsView = new SettingsViewProvider();
+    private readonly settingsMapView = new SettingsMapViewProvider();
+    private readonly variablesView = new VariablesViewProvider();
     private readonly output = vscode.window.createOutputChannel('SplitScript Runtime');
     private readonly adapters = new Set<SplitScriptDebugAdapter>();
     private compilerModule: Uint8Array | undefined;
@@ -35,10 +44,16 @@ export class SplitScriptDebuggerController implements
         this.context.subscriptions.push(
             this,
             this.runtimeView,
+            this.settingsView,
+            this.settingsMapView,
+            this.variablesView,
             this.output,
             vscode.debug.registerDebugConfigurationProvider(DEBUG_TYPE, this),
             vscode.debug.registerDebugAdapterDescriptorFactory(DEBUG_TYPE, this),
             vscode.window.registerTreeDataProvider('splitscript.debug.runtime', this.runtimeView),
+            vscode.window.registerTreeDataProvider('splitscript.debug.settings', this.settingsView),
+            vscode.window.registerTreeDataProvider('splitscript.debug.settingsMap', this.settingsMapView),
+            vscode.window.registerTreeDataProvider('splitscript.debug.variables', this.variablesView),
             vscode.commands.registerCommand('splitscript.debug.start', async () => this.start()),
             vscode.commands.registerCommand('splitscript.debug.restart', async () => {
                 await this.activeAdapter?.restart();
@@ -53,6 +68,12 @@ export class SplitScriptDebuggerController implements
                 this.activeAdapter?.timerCommand('reset');
             }),
             vscode.commands.registerCommand('splitscript.debug.showLogs', () => this.output.show(true)),
+            vscode.commands.registerCommand('splitscript.debug.editSetting', async (key: string) => {
+                await this.editSetting(key);
+            }),
+            vscode.commands.registerCommand('splitscript.debug.clearSettings', () => {
+                this.activeAdapter?.clearSettings();
+            }),
         );
     }
 
@@ -109,6 +130,9 @@ export class SplitScriptDebuggerController implements
     ): void {
         if (this.activeAdapter === adapter) {
             this.runtimeView.update(snapshot);
+            this.settingsView.update(snapshot);
+            this.settingsMapView.update(snapshot);
+            this.variablesView.update(snapshot);
         }
     }
 
@@ -129,6 +153,9 @@ export class SplitScriptDebuggerController implements
         if (this.activeAdapter === adapter) {
             this.activeAdapter = undefined;
             this.runtimeView.update(undefined);
+            this.settingsView.update(undefined);
+            this.settingsMapView.update(undefined);
+            this.variablesView.update(undefined);
             void this.setActive(false);
         }
     }
@@ -157,7 +184,64 @@ export class SplitScriptDebuggerController implements
         });
     }
 
+    private async editSetting(key: string): Promise<void> {
+        const adapter = this.activeAdapter;
+        const widget = this.settingsView.widget(key);
+        if (adapter === undefined || widget === undefined || widget.type === 'title') return;
+        const current = this.settingsView.value(key);
+        if (widget.type === 'bool') {
+            adapter.setSetting(key, !current);
+            return;
+        }
+        if (widget.type === 'choice') {
+            const selected = await vscode.window.showQuickPick(
+                widget.options.map(option => ({
+                    label: option.description,
+                    description: option.key,
+                    key: option.key,
+                    picked: option.key === current,
+                })),
+                { title: widget.description, placeHolder: widget.tooltip },
+            );
+            if (selected !== undefined) adapter.setSetting(key, selected.key);
+            return;
+        }
+        if (widget.type === 'textInput') {
+            const selected = await vscode.window.showInputBox({
+                title: widget.description,
+                prompt: widget.tooltip,
+                value: typeof current === 'string' ? current : widget.defaultValue,
+            });
+            if (selected !== undefined) adapter.setSetting(key, selected);
+            return;
+        }
+        const selected = await vscode.window.showOpenDialog({
+            title: widget.description,
+            canSelectFiles: true,
+            canSelectFolders: false,
+            canSelectMany: false,
+            filters: fileFilters(widget.filters),
+        });
+        if (selected?.[0] !== undefined) {
+            adapter.setSetting(key, nativePathToWasi(selected[0].fsPath));
+        }
+    }
+
     private setActive(active: boolean): Thenable<unknown> {
         return vscode.commands.executeCommand('setContext', ACTIVE_CONTEXT, active);
     }
+}
+
+function fileFilters(
+    filters: Extract<import('./runtimeProtocol').SettingWidgetSnapshot, { type: 'fileSelect' }>['filters'],
+): Record<string, string[]> | undefined {
+    const result: Record<string, string[]> = {};
+    for (const filter of filters) {
+        if (filter.type !== 'name') continue;
+        const extensions = filter.pattern.split(/\s+/)
+            .map(pattern => /^\*\.([^*?\[\]{}]+)$/.exec(pattern)?.[1])
+            .filter((extension): extension is string => extension !== undefined);
+        if (extensions.length > 0) result[filter.description ?? 'Files'] = extensions;
+    }
+    return Object.keys(result).length === 0 ? undefined : result;
 }

@@ -13,6 +13,7 @@ export interface SplitScriptLaunchConfiguration extends vscode.DebugConfiguratio
     request: 'launch';
     program: string;
     hotReload?: boolean;
+    scriptPath?: string;
 }
 
 export interface DebugRuntimeSessionCallbacks {
@@ -26,6 +27,7 @@ export class DebugRuntimeSession implements vscode.Disposable {
     private compiler: EmbeddedCompilerClient | undefined;
     private programUri: vscode.Uri | undefined;
     private hotReload = true;
+    private scriptPath: string | undefined;
     private reloadChain = Promise.resolve();
     private readonly saveSubscription: vscode.Disposable;
     private stopped = false;
@@ -63,10 +65,11 @@ export class DebugRuntimeSession implements vscode.Disposable {
             throw new Error('SplitScript debugging currently requires a local file.');
         }
         this.hotReload = configuration.hotReload !== false;
+        this.scriptPath = configuration.scriptPath;
         this.compiler = await this.createCompiler();
         const artifact = await this.buildArtifact(uri);
         this.programUri = uri;
-        await this.runtime.launch(artifact, uri.fsPath);
+        await this.runtime.launch(artifact, uri.fsPath, this.scriptPath);
     }
 
     public reload(): Promise<void> {
@@ -78,7 +81,7 @@ export class DebugRuntimeSession implements vscode.Disposable {
             this.callbacks.log(runtimeLog('debug', `Rebuilding ${uri.fsPath}`));
             const artifact = await this.buildArtifact(uri);
             this.callbacks.snapshot(undefined);
-            await this.runtime.launch(artifact, uri.fsPath);
+            await this.runtime.launch(artifact, uri.fsPath, this.scriptPath);
             this.callbacks.log(runtimeLog('info', `Reloaded ${uri.fsPath}`));
         });
         this.reloadChain = operation.catch(() => {});
@@ -87,6 +90,14 @@ export class DebugRuntimeSession implements vscode.Disposable {
 
     public timerCommand(command: 'start' | 'reset'): void {
         this.runtime.timerCommand(command);
+    }
+
+    public setSetting(key: string, value: boolean | string): void {
+        this.runtime.setSetting(key, value);
+    }
+
+    public clearSettings(): void {
+        this.runtime.clearSettings();
     }
 
     public async stop(): Promise<void> {

@@ -205,7 +205,7 @@ inline debug adapter, compiles `.split` programs in memory (or launches `.wasm`
 programs directly), runs them in a dedicated Node worker, and supports restart,
 termination, save-triggered hot reload, runtime logs, timer controls, and a
 Runtime tree view. The worker implements the runtime and simulated timer imports;
-process, settings, and WASI imports remain neutral stubs for milestones 2 and 3.
+at that milestone, process, settings, and WASI imports remained neutral stubs.
 The browser extension exposes the debugger as unavailable instead of registering
 commands that cannot work there.
 
@@ -222,6 +222,16 @@ Exit criterion: F5 launches a simple SplitScript autosplitter, timer actions and
 logs appear in VS Code, saves hot reload it, and Stop always returns control.
 
 ### 2. Complete ASR compatibility
+
+Status: completed on 2026-09-08. The worker now implements the ASR settings
+map/list/value handle APIs, bool/title/choice/text/file widgets and tooltips,
+settings preservation across runtime replacement, and a read-only WASI Preview
+1 host for SplitScript clocks and file operations. An optional `scriptPath`
+launch property is exposed as `SCRIPT_PATH`. The Run and Debug sidebar now has
+interactive Settings, recursive Settings Map, and timer Variables views. Unit
+tests cover the handle and filesystem contracts; generated SplitScript probes
+and the reference debugger's settings-heavy Wasm modules validate the actual
+import signatures and runtime behavior.
 
 - Implement settings handles/maps/lists/values and all user-setting widgets.
 - Add Settings, Settings Map, and Variables views.

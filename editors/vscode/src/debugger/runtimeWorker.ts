@@ -2,12 +2,15 @@ import { parentPort } from 'node:worker_threads';
 
 import { GuestMemory } from './asr/memory';
 import { neutralImport } from './asr/neutralImports';
+import { SettingsHost } from './asr/settings';
 import { DebuggerTimer } from './asr/timer';
+import { WasiHost } from './asr/wasi';
 import type {
     RuntimeLogMessage,
     RuntimeRequest,
     RuntimeResponse,
     RuntimeSnapshot,
+    SettingMapSnapshot,
 } from './runtimeProtocol';
 
 const port = parentPort;
@@ -23,16 +26,22 @@ workerPort.on('message', (message: RuntimeRequest) => {
             fail(new Error('this runtime worker has already launched a module'));
             return;
         }
-        host = new RuntimeHost(message.program);
+        host = new RuntimeHost(message.program, message.scriptPath, message.settings);
         void host.launch(message.wasm).catch(fail);
     } else if (message.type === 'timerCommand') {
         host?.timerCommand(message.command);
+    } else if (message.type === 'setSetting') {
+        host?.setSetting(message.key, message.value);
+    } else if (message.type === 'clearSettings') {
+        host?.clearSettings();
     }
 });
 
 class RuntimeHost {
     private readonly memory = new GuestMemory();
     private readonly timer: DebuggerTimer;
+    private readonly settings: SettingsHost;
+    private readonly wasi: WasiHost;
     private status: RuntimeSnapshot['status'] = 'starting';
     private tickRateHz = 120;
     private tickCount = 0;
@@ -43,11 +52,17 @@ class RuntimeHost {
     private update: (() => void) | undefined;
     private tickTimer: NodeJS.Timeout | undefined;
 
-    public constructor(private readonly program: string) {
+    public constructor(
+        private readonly program: string,
+        scriptPath: string | undefined,
+        initialSettings: SettingMapSnapshot | undefined,
+    ) {
         this.timer = new DebuggerTimer(
             () => this.emitSnapshot(true),
             message => this.emitLog(message),
         );
+        this.settings = new SettingsHost(this.memory, initialSettings);
+        this.wasi = new WasiHost(this.memory, scriptPath, message => this.emitLog(message));
     }
 
     public async launch(bytes: ArrayBuffer): Promise<void> {
@@ -76,7 +91,7 @@ class RuntimeHost {
             this.emitLog({
                 source: 'runtime',
                 level: 'warning',
-                message: `Using neutral Milestone 1 stubs for: ${unsupportedImports.join(', ')}`,
+                message: `Using unavailable-host stubs for: ${unsupportedImports.join(', ')}`,
             });
         }
         this.emitLog({
@@ -96,6 +111,16 @@ class RuntimeHost {
         }
     }
 
+    public setSetting(key: string, value: boolean | string): void {
+        this.settings.set(key, value);
+        this.emitSnapshot(true);
+    }
+
+    public clearSettings(): void {
+        this.settings.clear();
+        this.emitSnapshot(true);
+    }
+
     private scheduleTick(delay: number): void {
         this.tickTimer = setTimeout(() => this.tick(), delay);
     }
@@ -113,6 +138,7 @@ class RuntimeHost {
             update();
         } catch (error) {
             this.status = 'trapped';
+            this.wasi.dispose();
             this.emitSnapshot(true);
             fail(error);
             return;
@@ -123,7 +149,7 @@ class RuntimeHost {
             ? duration
             : this.averageTickMilliseconds * 0.999 + duration * 0.001;
         this.slowestTickMilliseconds = Math.max(this.slowestTickMilliseconds, duration);
-        this.emitSnapshot(false);
+        this.emitSnapshot(this.settings.consumeChanged());
         this.scheduleTick(1_000 / this.tickRateHz);
     }
 
@@ -132,13 +158,18 @@ class RuntimeHost {
         unsupported: string[],
     ): WebAssembly.Imports {
         const available = this.availableEnvImports();
+        const wasi = this.wasi.imports();
         const imports: Record<string, Record<string, WebAssembly.ImportValue>> = {};
         for (const entry of entries) {
             if (entry.kind !== 'function') {
                 throw new Error(`unsupported import ${entry.module}.${entry.name} (${entry.kind})`);
             }
             const namespace = imports[entry.module] ??= {};
-            const exact = entry.module === 'env' ? available[entry.name] : undefined;
+            const exact = entry.module === 'env'
+                ? available[entry.name]
+                : entry.module === 'wasi_snapshot_preview1'
+                    ? wasi[entry.name]
+                    : undefined;
             if (exact !== undefined) {
                 namespace[entry.name] = exact;
             } else {
@@ -152,6 +183,7 @@ class RuntimeHost {
 
     private availableEnvImports(): Record<string, WebAssembly.ImportValue> {
         return {
+            ...this.settings.imports(),
             timer_get_state: () => this.timer.stateNumber(),
             timer_current_split_index: () => this.timer.currentSplitIndex(),
             timer_segment_splitted: (index: bigint) => this.timer.segmentSplitted(index),
@@ -219,6 +251,7 @@ class RuntimeHost {
                 slowestTickMilliseconds: this.slowestTickMilliseconds,
                 memoryBytes: this.memory.byteLength(),
                 timer: this.timer.snapshot(),
+                settings: this.settings.snapshot(),
             },
         } satisfies RuntimeResponse);
     }

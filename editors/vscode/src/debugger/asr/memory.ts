@@ -15,6 +15,14 @@ export class GuestMemory {
         return this.decoder.decode(this.slice(pointer, length));
     }
 
+    public readBytes(pointer: number, length: number): Uint8Array {
+        return this.slice(pointer, length);
+    }
+
+    public writeBytes(pointer: number, bytes: Uint8Array): void {
+        this.slice(pointer, bytes.length).set(bytes);
+    }
+
     public writeHostString(pointer: number, lengthPointer: number, value: string): number {
         const bytes = this.encoder.encode(value);
         const length = this.readU32(lengthPointer);
@@ -26,14 +34,33 @@ export class GuestMemory {
         return 1;
     }
 
-    private readU32(pointer: number): number {
+    public readU32(pointer: number): number {
         const bytes = this.slice(pointer, 4);
         return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true);
     }
 
-    private writeU32(pointer: number, value: number): void {
+    public writeU8(pointer: number, value: number): void {
+        this.slice(pointer, 1)[0] = value;
+    }
+
+    public writeU32(pointer: number, value: number): void {
         const bytes = this.slice(pointer, 4);
         new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setUint32(0, value, true);
+    }
+
+    public writeU64(pointer: number, value: bigint): void {
+        const bytes = this.slice(pointer, 8);
+        new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setBigUint64(0, value, true);
+    }
+
+    public writeI64(pointer: number, value: bigint): void {
+        const bytes = this.slice(pointer, 8);
+        new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setBigInt64(0, value, true);
+    }
+
+    public writeF64(pointer: number, value: number): void {
+        const bytes = this.slice(pointer, 8);
+        new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setFloat64(0, value, true);
     }
 
     private slice(pointer: number, length: number): Uint8Array {

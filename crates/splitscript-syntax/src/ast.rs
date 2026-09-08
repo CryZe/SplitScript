@@ -826,7 +826,19 @@ pub struct EnumDecl {
     pub name: String,
     pub documentation: Option<String>,
     pub name_span: Span,
+    /// Fixed-width integer encoding used when reading this enum from process
+    /// memory. Ordinary enums leave this absent and retain no external byte
+    /// representation.
+    pub representation: Option<TypeRef>,
+    pub representation_span: Option<Span>,
     pub variants: Vec<EnumVariant>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EnumDiscriminant {
+    pub magnitude: u64,
+    pub negative: bool,
     pub span: Span,
 }
 
@@ -837,6 +849,10 @@ pub struct EnumVariant {
     pub name_span: Span,
     pub documentation: Option<String>,
     pub payload: Option<TypeRef>,
+    /// Explicit process-memory discriminant. When the enum has an integer
+    /// representation and this is absent, numbering continues from zero or
+    /// the preceding discriminant.
+    pub discriminant: Option<EnumDiscriminant>,
     pub span: Span,
 }
 

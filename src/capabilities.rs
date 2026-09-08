@@ -114,7 +114,7 @@ impl CapabilityAnalysis {
                 semantics,
                 standard_library.clone(),
             ),
-            memory: MemoryLayouts::build_with_library(structs, semantics, standard_library),
+            memory: MemoryLayouts::build_with_library(structs, enums, semantics, standard_library),
             source_methods,
             structural,
             structural_requirements,

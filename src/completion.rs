@@ -3774,6 +3774,25 @@ enum Mode {
     }
 
     #[test]
+    fn enum_representation_completion_only_offers_fixed_width_integers() {
+        let source = "enum GameState:  { Mission }\nstate \"game.exe\" {}";
+        let mut database = CompilerDatabase::new(source);
+        let candidates = labels(&mut database, "GameState: ");
+        for integer in ["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64"] {
+            assert!(
+                candidates.contains(&integer.to_owned()),
+                "missing {integer}: {candidates:#?}"
+            );
+        }
+        for invalid in ["bool", "f32", "address", "String", "GameState"] {
+            assert!(
+                !candidates.contains(&invalid.to_owned()),
+                "unexpected {invalid}: {candidates:#?}"
+            );
+        }
+    }
+
+    #[test]
     fn value_colons_are_not_mistaken_for_type_annotations() {
         let source = r#"
 struct Position {

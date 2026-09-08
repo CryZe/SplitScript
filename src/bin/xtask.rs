@@ -606,6 +606,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/process_readable_enums.split",
+        output: "process_readable_enums.wasm",
+        profile: "release",
+        harness: "tests/process_readable_enums_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/process_scan_memory.split",
         output: "process_scan_memory.wasm",
         profile: "release",

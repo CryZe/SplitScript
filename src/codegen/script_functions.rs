@@ -315,6 +315,16 @@ pub(super) fn compile_read(
         .expect("checked undecoded pointer fields are MemoryReadable")
         .size();
     emit_process_read(&mut function, &process_read, field_size);
+    emit_memory_validation_failure(
+        &mut function,
+        memory_type_id,
+        result_type,
+        field_type,
+        optional,
+        "process read failed",
+        MemoryByteOrder::Little,
+        lowering,
+    );
     emit_memory_value(
         &mut function,
         memory_type_id,
@@ -516,6 +526,16 @@ fn compile_provider_direct_read(
         provider,
         lowering,
     );
+    emit_memory_validation_failure(
+        &mut function,
+        memory_type_id,
+        result_type,
+        field_type,
+        optional,
+        contract.read_failure,
+        contract.byte_order.into(),
+        lowering,
+    );
     emit_memory_value(
         &mut function,
         memory_type_id,
@@ -656,6 +676,45 @@ fn emit_pointer_read_failure(
             failure_payloads,
         );
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_memory_validation_failure(
+    function: &mut Function,
+    memory_type: crate::types::TypeId,
+    result_type: ResultTypeId,
+    field_type: Type,
+    optional: Option<crate::ast::OptionTypeId>,
+    message: &str,
+    byte_order: MemoryByteOrder,
+    lowering: &EmissionContext<'_>,
+) {
+    if !emit_memory_value_is_valid(
+        function,
+        memory_type,
+        lowering.abi_read,
+        0,
+        lowering.memory,
+        lowering.semantics,
+        byte_order,
+    ) {
+        return;
+    }
+    function
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_pointer_read_failure(
+        function,
+        result_type,
+        field_type,
+        optional,
+        message,
+        lowering.gc,
+        lowering.failure_payloads,
+    );
+    function
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
 }
 
 fn emit_pointer_read_success(
@@ -1499,8 +1558,8 @@ use super::{
     async_frame::AsyncFrameLayout,
     context::EmissionContext,
     data_plan::StringPool,
-    emit_default, emit_memory_load, emit_memory_value, emit_result_error, emit_result_success,
-    emit_struct_get, emit_typed_struct_get,
+    emit_default, emit_memory_load, emit_memory_value, emit_memory_value_is_valid,
+    emit_result_error, emit_result_success, emit_struct_get, emit_typed_struct_get,
     expression::{
         BareReturn, ClosureEnvironment, ExprContext, LocalStorage, MatchLayout, compile_block,
         compile_resolved_path, emit_path_fields,

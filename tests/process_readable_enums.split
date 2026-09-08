@@ -1,0 +1,34 @@
+enum GameState: i32 {
+    Mission = 0,
+    TitleScreen,
+    Menu,
+    Cutscene,
+    Death,
+    Respawn,
+    Results,
+    Load,
+}
+
+struct Snapshot {
+    state: GameState,
+    history: [GameState; 2],
+}
+
+state "game.exe" {}
+
+whileAttached {
+    let direct = process.read<GameState>(0x100) else GameState.Load
+    let nested = process.read<Snapshot>(0x200) else Snapshot {
+        state: GameState.Load,
+        history: [GameState.Load, GameState.Load],
+    }
+    let invalid = process.read<GameState>(0x300) else GameState.Mission
+    let invalidNested = process.read<Snapshot>(0x400) else Snapshot {
+        state: GameState.TitleScreen,
+        history: [GameState.TitleScreen, GameState.TitleScreen],
+    }
+    setVariable("Direct", direct)
+    setVariable("Nested", nested)
+    setVariable("Invalid", invalid)
+    setVariable("Invalid Nested", invalidNested)
+}

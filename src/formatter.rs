@@ -2319,6 +2319,21 @@ fn multiline() {
     }
 
     #[test]
+    fn formats_process_readable_enum_representations_and_discriminants() {
+        let source = "enum GameState:i32{Mission=0,TitleScreen,Results=6,}\nstate \"game.exe\"{}";
+        let expected = r#"enum GameState: i32 {
+    Mission = 0,
+    TitleScreen,
+    Results = 6,
+}
+state "game.exe" {}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn keeps_literal_spellings_templates_signatures_and_type_postfixes() {
         let source = r#"state "game.exe"{bytes:[u8;6] at 0x100}
 fn probe(value:[u8]!)->String{let missing:[u8]?=None;let outcome:i32! = Err("missing");let fixed:[u8;3]=[1,2,3];let sigValue=sig"48 8B ??";let version=v"1.2.3.4";return `{value.length()}:{fixed.length()}:{missing==None}:{sigValue as String}`}

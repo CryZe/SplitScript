@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{
-        ActionKind, ArrayTypeId, AssignmentId, EnumVariantId, ExprId, FunctionId, ManagedClassId,
-        ManagedFieldId, OptionTypeId, PatternId, ResultTypeId, SettingChoiceOptionId,
-        StructFieldId, StructId, TypeApplicationId, ValueId,
+        ActionKind, ArrayTypeId, AssignmentId, EnumId, EnumVariantId, ExprId, FunctionId,
+        ManagedClassId, ManagedFieldId, OptionTypeId, PatternId, ResultTypeId,
+        SettingChoiceOptionId, StructFieldId, StructId, TypeApplicationId, ValueId,
     },
     inference::Type,
     stdlib::{
@@ -411,6 +411,7 @@ pub struct SemanticModel {
     managed_field_types: HashMap<ManagedFieldId, TypeId>,
     standard_field_types: HashMap<StdlibFieldId, TypeId>,
     enum_variant_payloads: HashMap<EnumVariantId, Option<TypeId>>,
+    enum_representations: HashMap<EnumId, TypeId>,
     array_element_types: HashMap<ArrayTypeId, TypeId>,
     state_storage_fields: Vec<ValueId>,
     state_storage_field_by_declaration: HashMap<ValueId, ValueId>,
@@ -1452,6 +1453,10 @@ impl SemanticModel {
             .map(|(field, ty)| (*field, *ty))
     }
 
+    pub fn enum_representation(&self, enumeration: EnumId) -> Option<TypeId> {
+        self.enum_representations.get(&enumeration).copied()
+    }
+
     pub fn managed_field_type(&self, field: ManagedFieldId) -> Option<TypeId> {
         self.managed_field_types.get(&field).copied()
     }
@@ -1786,6 +1791,7 @@ pub(crate) struct SemanticBuilder {
     managed_field_types: HashMap<ManagedFieldId, Type>,
     standard_field_types: HashMap<StdlibFieldId, Type>,
     enum_variant_payloads: HashMap<EnumVariantId, Option<Type>>,
+    enum_representations: HashMap<EnumId, Type>,
     array_element_types: HashMap<ArrayTypeId, Type>,
     state_storage_fields: Vec<ValueId>,
     state_storage_field_by_declaration: HashMap<ValueId, ValueId>,
@@ -2043,6 +2049,11 @@ impl SemanticBuilder {
         debug_assert!(previous.is_none(), "enum variant IDs must be unique");
     }
 
+    pub(crate) fn resolve_enum_representation(&mut self, enumeration: EnumId, ty: Type) {
+        let previous = self.enum_representations.insert(enumeration, ty);
+        debug_assert!(previous.is_none(), "enum IDs must be unique");
+    }
+
     pub(crate) fn resolve_array_element_type(&mut self, array: ArrayTypeId, element: Type) {
         let previous = self.array_element_types.insert(array, element);
         debug_assert!(previous.is_none(), "array type IDs must be unique");
@@ -2242,6 +2253,7 @@ impl SemanticBuilder {
             managed_field_types,
             standard_field_types,
             enum_variant_payloads,
+            enum_representations,
             array_element_types,
             state_storage_fields,
             state_storage_field_by_declaration,
@@ -2468,6 +2480,10 @@ impl SemanticBuilder {
                 )
             })
             .collect();
+        let enum_representations = enum_representations
+            .into_iter()
+            .map(|(enumeration, ty)| (enumeration, types.intern_inferred(resolve(ty), constructed)))
+            .collect();
         let array_element_types = array_element_types
             .into_iter()
             .map(|(array, element)| (array, types.intern_inferred(resolve(element), constructed)))
@@ -2556,6 +2572,7 @@ impl SemanticBuilder {
             managed_field_types,
             standard_field_types,
             enum_variant_payloads,
+            enum_representations,
             array_element_types,
             state_storage_fields,
             state_storage_field_by_declaration,

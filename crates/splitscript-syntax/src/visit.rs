@@ -251,6 +251,9 @@ pub fn walk_struct<'ast, V: Visitor<'ast>>(visitor: &mut V, structure: &'ast Str
 }
 
 pub fn walk_enum<'ast, V: Visitor<'ast>>(visitor: &mut V, enumeration: &'ast EnumDecl) {
+    if let Some(representation) = &enumeration.representation {
+        visitor.visit_type_ref(representation);
+    }
     for variant in &enumeration.variants {
         if let Some(payload) = &variant.payload {
             visitor.visit_type_ref(payload);

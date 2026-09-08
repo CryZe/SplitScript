@@ -27,8 +27,8 @@ use super::{
     context::AttachContext,
     data_plan::StringPool,
     emit_array_get, emit_default, emit_frame_typed_struct_get, emit_memory_value,
-    emit_monotonic_nanoseconds, emit_result_error, emit_result_success, emit_string_literal,
-    emit_typed_struct_get,
+    emit_memory_value_is_valid, emit_monotonic_nanoseconds, emit_result_error, emit_result_success,
+    emit_string_literal, emit_typed_struct_get,
     expression::{
         BareReturn, ExprContext, IntrinsicCapture, LocalStorage, LoopControl, MatchLayout,
         compile_assignment, compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
@@ -2069,6 +2069,22 @@ fn compile_suspension_poll(
                     .instruction(&Instruction::I32Const(context.abi_read.start()))
                     .instruction(&Instruction::I64Load(memarg()))
                     .instruction(&Instruction::I64Eqz)
+                    .instruction(&Instruction::If(BlockType::Empty))
+                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::Return)
+                    .instruction(&Instruction::End);
+            }
+            if emit_memory_value_is_valid(
+                function,
+                read_type_id,
+                context.abi_read,
+                0,
+                context.memory,
+                context.semantics,
+                MemoryByteOrder::Little,
+            ) {
+                function
+                    .instruction(&Instruction::I32Eqz)
                     .instruction(&Instruction::If(BlockType::Empty))
                     .instruction(&Instruction::I32Const(0))
                     .instruction(&Instruction::Return)

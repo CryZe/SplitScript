@@ -1253,6 +1253,9 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
         ) {
             self.insert_definition(definition);
         }
+        if let Some(representation) = enumeration.representation {
+            self.add_type_after_colon(representation, enumeration.span);
+        }
         for variant in &enumeration.variants {
             if let Some(definition) = self.definition(
                 SourceDefinitionId::EnumVariant(variant.id),

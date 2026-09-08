@@ -2173,6 +2173,97 @@ fn explicit_generic_calls_accept_named_and_constructed_types() {
 }
 
 #[test]
+fn integer_represented_enums_are_memory_readable_recursively() {
+    let source = r#"
+        enum GameState: i32 {
+            Mission = 0,
+            TitleScreen,
+            Menu,
+            Results = 6,
+        }
+
+        enum SignedState: i8 {
+            Negative = -1,
+            Zero,
+        }
+
+        enum WideState: u64 {
+            Maximum = 18446744073709551615,
+        }
+
+        struct Snapshot {
+            current: GameState,
+            history: [GameState; 2],
+        }
+
+        state "game.exe" {
+            snapshot: Snapshot at 0x100;
+            signed: SignedState at 0x200;
+            wide: WideState at 0x208;
+        }
+
+        split {
+            return old.snapshot.current != GameState.Results
+                && current.snapshot.current == GameState.Results
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("integer-represented enums should derive recursive MemoryReadable layouts");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("represented enum reads should produce valid Wasm GC");
+}
+
+#[test]
+fn process_readable_enum_declarations_are_validated_eagerly() {
+    for (declaration, expected) in [
+        (
+            "enum Bad: bool { Value = 0 }",
+            "an enum process-memory representation must be one of",
+        ),
+        (
+            "enum Bad: u8 { Value(String) = 0 }",
+            "process-readable enum variant `Bad.Value` cannot carry a payload",
+        ),
+        (
+            "enum Bad: u8 { First = 1, Second = 1 }",
+            "both use discriminant `1`",
+        ),
+        ("enum Bad: i8 { TooLarge = 128 }", "does not fit in `i8`"),
+        ("enum Bad: u8 {}", "an enum needs at least one variant"),
+        (
+            "enum Bad { Value = 0 }",
+            "an explicit discriminant requires an integer representation on the enum",
+        ),
+    ] {
+        let source = format!("{declaration}\nstate \"game.exe\" {{}}");
+        let diagnostics = splitscript::compile(&source)
+            .expect_err("invalid process-readable enum declarations must fail even when unused");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "{declaration}: {diagnostics:#?}"
+        );
+    }
+
+    let diagnostics = splitscript::compile(
+        r#"
+            enum Ordinary { Value }
+            state "game.exe" {}
+            whileAttached { let value = process.read<Ordinary>(0) }
+        "#,
+    )
+    .expect_err("an ordinary enum has no process-memory representation");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("MemoryReadable")
+            || diagnostic
+                .message
+                .contains("no declared process-memory representation")
+    }));
+}
+
+#[test]
 fn known_alternate_modules_and_runtime_pointer_bounds_need_no_enumeration_or_index_array() {
     let source = r#"
         state "Hades.exe" {}

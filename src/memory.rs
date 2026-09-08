@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{StructDecl, StructFieldId, StructId},
+    ast::{EnumDecl, EnumId, EnumVariantId, StructDecl, StructFieldId, StructId},
     semantic::SemanticModel,
     stdlib::{RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibFieldId},
     types::{BuiltinType, TypeId, TypeKind},
@@ -50,8 +50,26 @@ pub struct FixedArrayMemoryLayout {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EnumVariantMemoryLayout {
+    pub variant: EnumVariantId,
+    /// Mathematical value after range checking. Code generation converts it
+    /// to the underlying integer's raw bits only at the load boundary.
+    pub value: i128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumMemoryLayout {
+    pub ty: TypeId,
+    pub representation: BuiltinType,
+    pub size: u32,
+    pub alignment: u32,
+    pub variants: Vec<EnumVariantMemoryLayout>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryTypeLayout<'a> {
     Scalar { size: u32, alignment: u32 },
+    Enum(&'a EnumMemoryLayout),
     Struct(&'a StructMemoryLayout),
     FixedArray(&'a FixedArrayMemoryLayout),
 }
@@ -60,6 +78,7 @@ impl MemoryTypeLayout<'_> {
     pub fn size(self) -> u32 {
         match self {
             Self::Scalar { size, .. } => size,
+            Self::Enum(layout) => layout.size,
             Self::Struct(layout) => layout.size,
             Self::FixedArray(layout) => layout.size,
         }
@@ -68,6 +87,7 @@ impl MemoryTypeLayout<'_> {
     pub fn alignment(self) -> u32 {
         match self {
             Self::Scalar { alignment, .. } => alignment,
+            Self::Enum(layout) => layout.alignment,
             Self::Struct(layout) => layout.alignment,
             Self::FixedArray(layout) => layout.alignment,
         }
@@ -78,31 +98,44 @@ impl MemoryTypeLayout<'_> {
 pub struct MemoryLayouts {
     standard_library: StandardLibrary,
     structs: HashMap<TypeId, Result<StructMemoryLayout, String>>,
+    enums: HashMap<TypeId, Result<EnumMemoryLayout, String>>,
     arrays: HashMap<TypeId, Result<FixedArrayMemoryLayout, String>>,
     source_structs: HashMap<StructId, TypeId>,
+    source_enums: HashMap<EnumId, TypeId>,
 }
 
 impl MemoryLayouts {
-    pub fn build(structs: &[StructDecl], semantics: &SemanticModel) -> Self {
-        Self::build_with_library(structs, semantics, StandardLibrary::new())
+    pub fn build(structs: &[StructDecl], enums: &[EnumDecl], semantics: &SemanticModel) -> Self {
+        Self::build_with_library(structs, enums, semantics, StandardLibrary::new())
     }
 
     pub fn build_with_library(
         structs: &[StructDecl],
+        enums: &[EnumDecl],
         semantics: &SemanticModel,
         standard_library: StandardLibrary,
     ) -> Self {
         let mut layouts = Self {
             standard_library,
             structs: HashMap::new(),
+            enums: HashMap::new(),
             arrays: HashMap::new(),
             source_structs: HashMap::new(),
+            source_enums: HashMap::new(),
         };
+        for enumeration in enums {
+            let ty = semantics.types().id_for_enum(enumeration.id);
+            layouts.source_enums.insert(enumeration.id, ty);
+            if enumeration.representation.is_some() {
+                let result = layouts.build_enum(ty, enumeration, semantics);
+                layouts.enums.insert(ty, result);
+            }
+        }
         for structure in structs {
             let ty = semantics.types().id_for_struct(structure.id);
             layouts.source_structs.insert(structure.id, ty);
             let mut visiting = HashSet::new();
-            let _ = layouts.build_struct(ty, structs, semantics, &mut visiting);
+            let _ = layouts.build_struct(ty, structs, enums, semantics, &mut visiting);
         }
         let library = layouts.standard_library.clone();
         for standard in library.all_types().iter().filter(|standard| {
@@ -116,6 +149,7 @@ impl MemoryLayouts {
             let _ = layouts.build_struct(
                 semantics.types().id_for_standard(standard.id),
                 structs,
+                enums,
                 semantics,
                 &mut visiting,
             );
@@ -136,7 +170,7 @@ impl MemoryLayouts {
             .collect::<Vec<_>>();
         for ty in fixed_arrays {
             let mut visiting = HashSet::new();
-            let _ = layouts.build_array(ty, structs, semantics, &mut visiting);
+            let _ = layouts.build_array(ty, structs, enums, semantics, &mut visiting);
         }
         layouts
     }
@@ -156,6 +190,13 @@ impl MemoryLayouts {
                 .expect("every declared struct has a memory-layout result")
                 .as_ref()
                 .map(MemoryTypeLayout::Struct)
+                .map_err(Clone::clone),
+            TypeKind::Enum(_) => self
+                .enums
+                .get(&ty)
+                .ok_or_else(|| "enum has no declared process-memory representation".to_owned())?
+                .as_ref()
+                .map(MemoryTypeLayout::Enum)
                 .map_err(Clone::clone),
             TypeKind::Standard(standard) => {
                 let library = &self.standard_library;
@@ -215,6 +256,18 @@ impl MemoryLayouts {
             .map_err(String::as_str)
     }
 
+    pub fn enumeration(&self, enumeration: EnumId) -> Result<&EnumMemoryLayout, &str> {
+        let ty = self
+            .source_enums
+            .get(&enumeration)
+            .ok_or("enum has no process-memory representation")?;
+        self.enums
+            .get(ty)
+            .ok_or("enum has no process-memory representation")?
+            .as_ref()
+            .map_err(String::as_str)
+    }
+
     /// Largest fixed-layout value represented by this analysis. Backend
     /// scratch planning uses this conservative bound so every generated
     /// `process.read<T>` destination is sized before body emission.
@@ -234,10 +287,97 @@ impl MemoryLayouts {
             .max(8)
     }
 
+    fn build_enum(
+        &self,
+        ty: TypeId,
+        enumeration: &EnumDecl,
+        semantics: &SemanticModel,
+    ) -> Result<EnumMemoryLayout, String> {
+        let representation = semantics
+            .enum_representation(enumeration.id)
+            .ok_or_else(|| {
+                format!(
+                    "enum `{}` has no declared process-memory representation",
+                    enumeration.name
+                )
+            })?;
+        let TypeKind::Builtin(representation) = semantics.types().kind(representation) else {
+            return Err(format!(
+                "enum `{}` does not use a fixed-width integer representation",
+                enumeration.name
+            ));
+        };
+        let Some((minimum, maximum, size, alignment)) = integer_representation(*representation)
+        else {
+            return Err(format!(
+                "enum `{}` does not use a fixed-width integer representation",
+                enumeration.name
+            ));
+        };
+        if enumeration.variants.is_empty() {
+            return Err(format!(
+                "process-readable enum `{}` must declare at least one variant",
+                enumeration.name
+            ));
+        }
+
+        let mut next = Some(0_i128);
+        let mut seen = HashMap::<i128, &str>::new();
+        let mut variants = Vec::with_capacity(enumeration.variants.len());
+        for variant in &enumeration.variants {
+            if variant.payload.is_some() {
+                return Err(format!(
+                    "process-readable enum variant `{}.{}` cannot carry a payload",
+                    enumeration.name, variant.name
+                ));
+            }
+            let value = if let Some(discriminant) = variant.discriminant {
+                let magnitude = i128::from(discriminant.magnitude);
+                if discriminant.negative {
+                    -magnitude
+                } else {
+                    magnitude
+                }
+            } else {
+                next.ok_or_else(|| {
+                    format!(
+                        "implicit discriminant for `{}.{}` overflows `{}`",
+                        enumeration.name, variant.name, representation
+                    )
+                })?
+            };
+            if value < minimum || value > maximum {
+                return Err(format!(
+                    "discriminant `{value}` for `{}.{}` does not fit in `{}`",
+                    enumeration.name, variant.name, representation
+                ));
+            }
+            if let Some(previous) = seen.insert(value, &variant.name) {
+                return Err(format!(
+                    "enum `{}.{}` and `{}.{}` both use discriminant `{value}`",
+                    enumeration.name, previous, enumeration.name, variant.name
+                ));
+            }
+            variants.push(EnumVariantMemoryLayout {
+                variant: variant.id,
+                value,
+            });
+            next = value.checked_add(1).filter(|next| *next <= maximum);
+        }
+        Ok(EnumMemoryLayout {
+            ty,
+            representation: *representation,
+            size,
+            alignment,
+            variants,
+        })
+    }
+
     fn build_array(
         &mut self,
         ty: TypeId,
         structs: &[StructDecl],
+        enums: &[EnumDecl],
         semantics: &SemanticModel,
         visiting: &mut HashSet<TypeId>,
     ) -> Result<FixedArrayMemoryLayout, String> {
@@ -267,7 +407,7 @@ impl MemoryLayouts {
                 ));
             }
             let (element_size, alignment) =
-                self.fixed_layout(*element, structs, semantics, visiting)?;
+                self.fixed_layout(*element, structs, enums, semantics, visiting)?;
             let stride = align_up(element_size, alignment);
             let size = stride
                 .checked_mul(*length)
@@ -295,6 +435,7 @@ impl MemoryLayouts {
         &mut self,
         ty: TypeId,
         structs: &[StructDecl],
+        enums: &[EnumDecl],
         semantics: &SemanticModel,
         visiting: &mut HashSet<TypeId>,
     ) -> Result<StructMemoryLayout, String> {
@@ -367,7 +508,7 @@ impl MemoryLayouts {
             let mut fields = Vec::with_capacity(declared_fields.len());
             for (field, field_name, field_ty) in declared_fields {
                 let (field_size, field_alignment) = self
-                    .fixed_layout(field_ty, structs, semantics, visiting)
+                    .fixed_layout(field_ty, structs, enums, semantics, visiting)
                     .map_err(|error| {
                         format!("struct `{name}.{field_name}` is not MemoryReadable: {error}")
                     })?;
@@ -398,6 +539,7 @@ impl MemoryLayouts {
         &mut self,
         ty: TypeId,
         structs: &[StructDecl],
+        enums: &[EnumDecl],
         semantics: &SemanticModel,
         visiting: &mut HashSet<TypeId>,
     ) -> Result<(u32, u32), String> {
@@ -405,8 +547,24 @@ impl MemoryLayouts {
             TypeKind::Builtin(builtin) => scalar_layout(&self.standard_library, *builtin)
                 .ok_or_else(|| format!("`{builtin}` has no fixed process-memory layout")),
             TypeKind::Struct(_) => self
-                .build_struct(ty, structs, semantics, visiting)
+                .build_struct(ty, structs, enums, semantics, visiting)
                 .map(|layout| (layout.size, layout.alignment)),
+            TypeKind::Enum(enumeration) => {
+                if !self.enums.contains_key(&ty) {
+                    let declaration = enums
+                        .iter()
+                        .find(|declaration| declaration.id == *enumeration)
+                        .ok_or_else(|| "enum declaration is unavailable".to_owned())?;
+                    let result = self.build_enum(ty, declaration, semantics);
+                    self.enums.insert(ty, result);
+                }
+                self.enums
+                    .get(&ty)
+                    .expect("enum layout was just inserted")
+                    .as_ref()
+                    .map(|layout| (layout.size, layout.alignment))
+                    .map_err(Clone::clone)
+            }
             TypeKind::Standard(standard) => {
                 let library = &self.standard_library;
                 let declaration = library.type_decl(*standard);
@@ -425,7 +583,7 @@ impl MemoryLayouts {
                             format!("`{}` has no fixed process-memory layout", declaration.name)
                         }),
                     RuntimeRepresentation::GcStruct { .. } => self
-                        .build_struct(ty, structs, semantics, visiting)
+                        .build_struct(ty, structs, enums, semantics, visiting)
                         .map(|layout| (layout.size, layout.alignment)),
                     RuntimeRepresentation::GcArray { .. } | RuntimeRepresentation::Enum { .. } => {
                         Err(format!(
@@ -438,7 +596,7 @@ impl MemoryLayouts {
             TypeKind::Array {
                 length: Some(_), ..
             } => self
-                .build_array(ty, structs, semantics, visiting)
+                .build_array(ty, structs, enums, semantics, visiting)
                 .map(|layout| (layout.size, layout.alignment)),
             TypeKind::Array { length: None, .. } => Err(
                 "an unsized `[T]` array has no fixed process-memory layout; use `[T; N]`"
@@ -454,6 +612,21 @@ fn scalar_layout(library: &StandardLibrary, ty: BuiltinType) -> Option<(u32, u32
         .core_type(ty)
         .memory_layout
         .map(|layout| (layout.size, layout.alignment))
+}
+
+fn integer_representation(ty: BuiltinType) -> Option<(i128, i128, u32, u32)> {
+    let (minimum, maximum, size) = match ty {
+        BuiltinType::I8 => (i128::from(i8::MIN), i128::from(i8::MAX), 1),
+        BuiltinType::U8 => (0, i128::from(u8::MAX), 1),
+        BuiltinType::I16 => (i128::from(i16::MIN), i128::from(i16::MAX), 2),
+        BuiltinType::U16 => (0, i128::from(u16::MAX), 2),
+        BuiltinType::I32 => (i128::from(i32::MIN), i128::from(i32::MAX), 4),
+        BuiltinType::U32 => (0, i128::from(u32::MAX), 4),
+        BuiltinType::I64 => (i128::from(i64::MIN), i128::from(i64::MAX), 8),
+        BuiltinType::U64 => (0, i128::from(u64::MAX), 8),
+        _ => return None,
+    };
+    Some((minimum, maximum, size, size))
 }
 
 fn align_up(value: u32, alignment: u32) -> u32 {

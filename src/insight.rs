@@ -1359,8 +1359,25 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 semantics.types().id_for_enum(enumeration.id),
                 context,
             );
+            let representation = semantics
+                .enum_representation(enumeration.id)
+                .map(|ty| render_type(ty, context));
+            if let Some(checked) = context.snapshot.checked()
+                && let Ok(layout) = checked.memory_layouts().enumeration(enumeration.id)
+            {
+                description.push_str(&format!(
+                    "\n\n**Process-memory representation:** `{}` ({} byte{}). Unknown discriminants make the enclosing memory read fail.",
+                    representation.as_deref().unwrap_or("<unknown>"),
+                    layout.size,
+                    if layout.size == 1 { "" } else { "s" },
+                ));
+            }
             Some(source_markdown(
-                &format!("enum {}", enumeration.name),
+                &format!(
+                    "enum {}{}",
+                    enumeration.name,
+                    representation.map_or_else(String::new, |ty| format!(": {ty}"))
+                ),
                 &description,
             ))
         }
@@ -1374,19 +1391,39 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             let payload = semantics
                 .enum_variant_payload(variant)
                 .map(|ty| format!("({})", render_type(ty, context)));
-            let variant_documentation = enumeration
+            let variant_declaration = enumeration
                 .variants
                 .iter()
-                .find(|candidate| candidate.id == variant)
-                .and_then(|variant| variant.documentation.as_deref());
+                .find(|candidate| candidate.id == variant)?;
+            let mut description = documented_description(
+                "Enum variant",
+                variant_declaration.documentation.as_deref(),
+            );
+            let discriminant = context
+                .snapshot
+                .checked()
+                .and_then(|checked| checked.memory_layouts().enumeration(enumeration.id).ok())
+                .and_then(|layout| {
+                    layout
+                        .variants
+                        .iter()
+                        .find(|candidate| candidate.variant == variant)
+                })
+                .map(|layout| layout.value);
+            if let Some(discriminant) = discriminant {
+                description.push_str(&format!(
+                    "\n\n**Process-memory discriminant:** `{discriminant}`."
+                ));
+            }
             Some(source_markdown(
                 &format!(
-                    "{}.{}{}",
+                    "{}.{}{}{}",
                     enumeration.name,
                     definition.name,
-                    payload.as_deref().unwrap_or_default()
+                    payload.as_deref().unwrap_or_default(),
+                    discriminant.map_or_else(String::new, |value| format!(" = {value}")),
                 ),
-                &documented_description("Enum variant", variant_documentation),
+                &description,
             ))
         }
         id @ (SourceDefinitionId::ManagedImage(_)

@@ -773,8 +773,8 @@ focused_example!(
 );
 focused_example!(
     ENUM_EXAMPLE,
-    "Describe distinct states",
-    "enum Mode {\n    Menu,\n    Playing,\n}",
+    "Describe process-readable game states",
+    "enum GameState: i32 {\n    Mission = 0,\n    TitleScreen = 1,\n    Menu = 2,\n}",
     DECLARATIONS_SOURCE
 );
 const STATE_DECL_EXAMPLES: &[Example] = &[
@@ -1387,9 +1387,9 @@ define_language_catalog! {
         Enum,
         "enum",
         LanguageItemKind::Declaration,
-        "enum Name { Variant, Payload(Type) }",
+        "enum Name[: Integer] { Variant[(Type)] [= value] }",
         "Declares a nominal sum type.",
-        "Enums support optional variant payloads, exhaustive match expressions, and structural equality when their payloads support it.",
+        "Enums support optional variant payloads, exhaustive match expressions, and structural equality when their payloads support it. Writing a fixed-width integer representation after the name, such as `enum GameState: i32`, instead declares the enum's process-memory encoding and derives [`MemoryReadable`]. Process-readable variants cannot carry payloads. Their discriminants start at zero, increase by one when omitted, and may be written explicitly with `= value`; duplicates and values outside the representation are compile errors. Reading an unknown raw discriminant fails the enclosing memory read instead of constructing an invalid enum value. The same validation applies recursively inside readable [`struct`]s and fixed arrays and respects the state provider's byte order.",
         ENUM_EXAMPLE
     ),
     language_item!(

@@ -669,6 +669,37 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
                 enumeration.span,
             );
         }
+        if let Some(representation) = enumeration.representation {
+            let representation = checker.syntax_type(representation);
+            checker
+                .semantics
+                .resolve_enum_representation(enumeration.id, representation);
+            let valid = representation
+                .try_to_ref(checker.inference.type_store())
+                .is_some_and(|representation| {
+                    matches!(
+                        representation,
+                        crate::types::ResolvedTypeRef::Core(
+                            crate::types::BuiltinType::I8
+                                | crate::types::BuiltinType::U8
+                                | crate::types::BuiltinType::I16
+                                | crate::types::BuiltinType::U16
+                                | crate::types::BuiltinType::I32
+                                | crate::types::BuiltinType::U32
+                                | crate::types::BuiltinType::I64
+                                | crate::types::BuiltinType::U64
+                        )
+                    )
+                });
+            if !valid {
+                checker.error(
+                    "an enum process-memory representation must be one of `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, or `u64`",
+                    enumeration
+                        .representation_span
+                        .unwrap_or(enumeration.name_span),
+                );
+            }
+        }
         let mut variants = HashSet::new();
         for variant in &enumeration.variants {
             let payload = variant.payload.map(|ty| checker.syntax_type(ty));
@@ -682,6 +713,24 @@ fn collect_named_type_members(checker: &mut Checker, program: &Program) {
                         variant.name, enumeration.name
                     ),
                     variant.span,
+                );
+            }
+            if enumeration.representation.is_some() && payload.is_some() {
+                checker.error(
+                    format!(
+                        "process-readable enum variant `{}.{}` cannot carry a payload",
+                        enumeration.name, variant.name
+                    ),
+                    variant.span,
+                );
+            }
+            if let Some(discriminant) = variant
+                .discriminant
+                .filter(|_| enumeration.representation.is_none())
+            {
+                checker.error(
+                    "an explicit discriminant requires an integer representation on the enum",
+                    discriminant.span,
                 );
             }
             if let Some(standard) = payload.and_then(|ty| checker.standard_type_id(ty))

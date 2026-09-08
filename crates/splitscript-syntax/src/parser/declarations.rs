@@ -431,6 +431,13 @@ impl Parser<'_> {
         let (name, name_span) = self.expect_declared_ident("expected an enum name")?;
         let id = EnumId::from_index(self.next_enum_id);
         self.next_enum_id += 1;
+        let (representation, representation_span) = if self.eat(&TokenKind::Colon).is_some() {
+            let (representation, span) =
+                self.parse_type("expected an integer representation after `:`")?;
+            (Some(representation), Some(span))
+        } else {
+            (None, None)
+        };
         self.expect(TokenKind::LBrace, "expected `{` after the enum name")?;
         let body_depth = self.cursor.brace_depth();
         let mut variants = Vec::new();
@@ -456,12 +463,39 @@ impl Parser<'_> {
                 } else {
                     None
                 };
+                let discriminant = if self.eat(&TokenKind::Assign).is_some() {
+                    let minus = self.eat(&TokenKind::Minus);
+                    let token = self.current().clone();
+                    let TokenKind::Int(text) = token.kind else {
+                        return Err(Diagnostic::new(
+                            "expected an integer enum discriminant after `=`",
+                            token.span,
+                        ));
+                    };
+                    let (magnitude, suffix) = parse_integer(&text)
+                        .map_err(|message| Diagnostic::new(message, token.span))?;
+                    if suffix.is_some() {
+                        return Err(Diagnostic::new(
+                            "enum discriminants use the enum's declared integer representation and must not have a type suffix",
+                            token.span,
+                        ));
+                    }
+                    self.bump();
+                    Some(crate::ast::EnumDiscriminant {
+                        magnitude,
+                        negative: minus.is_some(),
+                        span: minus.map_or(token.span, |minus| minus.join(token.span)),
+                    })
+                } else {
+                    None
+                };
                 let variant = EnumVariant {
                     id: self.new_enum_variant_id(),
                     name: variant_name,
                     name_span: variant_span,
                     documentation,
                     payload,
+                    discriminant,
                     span: variant_span.join(self.previous().span),
                 };
                 self.require_comma_between("enum variants");
@@ -479,6 +513,8 @@ impl Parser<'_> {
             name,
             documentation: None,
             name_span,
+            representation,
+            representation_span,
             variants,
             span: Span { start, end },
         })
@@ -830,6 +866,8 @@ impl Parser<'_> {
                     "The state provider selected for the attached game process.".to_owned(),
                 ),
                 name_span,
+                representation: None,
+                representation_span: None,
                 variants,
                 span: Span { start, end },
             }),
@@ -857,6 +895,7 @@ impl Parser<'_> {
             name_span,
             documentation,
             payload: None,
+            discriminant: None,
             span: name_span,
         };
         let opening_span = self.expect(

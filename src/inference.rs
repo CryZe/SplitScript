@@ -2619,7 +2619,9 @@ pub(crate) fn type_may_have_capability(
             ),
             TypeKind::Enum(_) => matches!(
                 behavior,
-                CapabilityBehavior::StructuralEquality | CapabilityBehavior::StructuralMethods
+                CapabilityBehavior::StructuralEquality
+                    | CapabilityBehavior::StructuralMemoryLayout
+                    | CapabilityBehavior::StructuralMethods
             ),
             TypeKind::ManagedClass(_) => false,
             TypeKind::ManagedReference(_) => false,

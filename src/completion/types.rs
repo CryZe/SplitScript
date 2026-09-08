@@ -10,7 +10,7 @@ use crate::{
     documentation::symbol_uri,
     language::{LanguageCatalog, LanguageItemId},
     lexer::{Token, TokenKind},
-    stdlib::{StandardLibrary, StdlibSymbolId, StdlibTypeKind, TypeConstructorSyntax},
+    stdlib::{CoreTypeId, StandardLibrary, StdlibSymbolId, StdlibTypeKind, TypeConstructorSyntax},
 };
 
 pub(super) fn complete_type_position(
@@ -29,6 +29,41 @@ pub(super) fn complete_type_position(
         .collect::<Vec<_>>();
     let prefix_end = tokens.partition_point(|token| token.span.end <= replacement.start);
     let prefix = &tokens[..prefix_end];
+
+    let in_enum_representation = prefix.iter().enumerate().rev().any(|(index, token)| {
+        matches!(token.kind, TokenKind::Colon)
+            && is_enum_representation_colon(prefix, index)
+            && type_prefix_expects_type(&prefix[index + 1..])
+    });
+    if in_enum_representation {
+        let prefix = source[replacement.start..offset].to_owned();
+        let mut builder = CompletionBuilder::new(prefix, replacement);
+        let language = LanguageCatalog::new();
+        for ty in library.core_types().iter().filter(|ty| {
+            matches!(
+                ty.id,
+                CoreTypeId::I8
+                    | CoreTypeId::U8
+                    | CoreTypeId::I16
+                    | CoreTypeId::U16
+                    | CoreTypeId::I32
+                    | CoreTypeId::U32
+                    | CoreTypeId::I64
+                    | CoreTypeId::U64
+            )
+        }) {
+            if let Some(item) = language.builtin_type(ty.id) {
+                builder.add(catalog_language_completion(
+                    ty.name,
+                    CompletionKind::Type,
+                    item,
+                    ty.name.to_owned(),
+                    false,
+                ));
+            }
+        }
+        return Some(builder.finish());
+    }
 
     let in_type_position = prefix.iter().enumerate().rev().any(|(index, token)| {
         let starts_type = matches!(&token.kind, TokenKind::Ident(name) if name == "as")
@@ -324,6 +359,12 @@ fn is_declaration_type_colon(tokens: &[&Token], colon: usize) -> bool {
     nearest_unclosed(tokens, colon, TokenKind::LBrace, TokenKind::RBrace).is_some_and(|open| {
         is_named_declaration_body(tokens, open, "struct") || is_state_body(tokens, open)
     })
+}
+
+fn is_enum_representation_colon(tokens: &[&Token], colon: usize) -> bool {
+    colon >= 2
+        && matches!(tokens[colon - 1].kind, TokenKind::Ident(_))
+        && matches!(&tokens[colon - 2].kind, TokenKind::Ident(keyword) if keyword == "enum")
 }
 
 fn is_function_return_arrow(tokens: &[&Token], minus: usize) -> bool {

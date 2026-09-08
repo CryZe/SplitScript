@@ -28,7 +28,7 @@ use super::{
     SetFunctions, SettingStorage, Type, application_type_argument, array_element_type, array_value,
     async_frame::{AsyncFrameRef, LeafFutureInstance, LeafFutureLayout},
     emit_array_get, emit_default, emit_failure_transfer, emit_frame_typed_struct_get, emit_int,
-    emit_integer_literal, emit_memory_value, emit_monotonic_nanoseconds, emit_result_error,
+    emit_integer_literal, emit_memory_value_result, emit_monotonic_nanoseconds, emit_result_error,
     emit_result_success, emit_string_literal, emit_struct_get, emit_typed_struct_get,
     enum_variant_payload,
     global_plan::{ATTACH_REJECTED, RuntimeGlobals},
@@ -3099,17 +3099,19 @@ fn emit_managed_read_at_address(
             .instruction(&Instruction::If(BlockType::Result(
                 context.gc.val_type(Type::Result(result)),
             )));
-        emit_memory_value(
+        emit_memory_value_result(
             function,
             field.value_type,
+            result,
+            "managed field could not be read",
             context.abi_read,
             0,
             context.memory,
             context.semantics,
             context.gc,
+            context.failure_payloads,
             MemoryByteOrder::Little,
         );
-        emit_result_success(function, result, context.gc);
         function.instruction(&Instruction::Else);
         emit_result_error(
             function,
@@ -5788,17 +5790,19 @@ fn emit_process_read_from_stack(
         .instruction(&Instruction::If(BlockType::Result(
             context.gc.val_type(Type::Result(result_type)),
         )));
-    emit_memory_value(
+    emit_memory_value_result(
         function,
         ty,
+        result_type,
+        error,
         context.abi_read,
         0,
         context.memory,
         context.semantics,
         context.gc,
+        context.failure_payloads,
         byte_order,
     );
-    emit_result_success(function, result_type, context.gc);
     function.instruction(&Instruction::Else);
     emit_result_error(
         function,
@@ -6236,17 +6240,19 @@ fn compile_provider_read(
         .instruction(&Instruction::If(BlockType::Result(
             context.gc.val_type(Type::Result(result_type)),
         )));
-    emit_memory_value(
+    emit_memory_value_result(
         function,
         read_type,
+        result_type,
+        contract.read_failure,
         context.abi_read,
         0,
         context.memory,
         context.semantics,
         context.gc,
+        context.failure_payloads,
         contract.byte_order.into(),
     );
-    emit_result_success(function, result_type, context.gc);
     function.instruction(&Instruction::Else);
     function
         .instruction(&Instruction::LocalGet(status))

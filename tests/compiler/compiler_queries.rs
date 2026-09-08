@@ -97,6 +97,48 @@ fn compiler_database_publishes_non_fatal_warnings() {
 }
 
 #[test]
+fn represented_enum_hovers_explain_memory_layout_and_effective_discriminants() {
+    use splitscript::tooling::database::CompilerDatabase;
+
+    let source = r#"
+        enum GameState: i32 {
+            Mission = 0,
+            TitleScreen,
+            Results = 6,
+        }
+        state "game.exe" {}
+        whileAttached { print(GameState.Results) }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    database
+        .check()
+        .expect("represented enum hover fixture should check");
+
+    let enum_offset = source.find("GameState: i32").unwrap() + 2;
+    let enum_hover = database.hover(enum_offset).unwrap().unwrap();
+    assert!(enum_hover.markdown.contains("enum GameState: i32"));
+    assert!(
+        enum_hover
+            .markdown
+            .contains("Process-memory representation:** `i32` (4 bytes)")
+    );
+    assert!(enum_hover.markdown.contains("MemoryReadable"));
+
+    let implicit_offset = source.find("TitleScreen").unwrap() + 2;
+    let implicit_hover = database.hover(implicit_offset).unwrap().unwrap();
+    assert!(
+        implicit_hover
+            .markdown
+            .contains("GameState.TitleScreen = 1")
+    );
+    assert!(
+        implicit_hover
+            .markdown
+            .contains("Process-memory discriminant:** `1`")
+    );
+}
+
+#[test]
 fn one_shot_compilation_reports_syntax_and_independent_type_errors_together() {
     let source = r#"
         state GBA {}

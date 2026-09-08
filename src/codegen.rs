@@ -4,7 +4,8 @@
 //! indexed reads, where deferring a trap could change observable effects.
 
 use wasm_encoder::{
-    AbstractHeapType, ConstExpr, Function, HeapType, Instruction, MemArg, RefType, ValType,
+    AbstractHeapType, BlockType, ConstExpr, Function, HeapType, Instruction, MemArg, RefType,
+    ValType,
 };
 
 use crate::ast::{
@@ -1243,6 +1244,41 @@ fn emit_memory_value(
                 byte_order,
             );
         }
+        MemoryTypeLayout::Enum(layout) => {
+            let TypeKind::Enum(enumeration) = semantics.types().kind(layout.ty) else {
+                unreachable!("source enum memory layouts have source enum types")
+            };
+            debug_assert!(!layout.variants.is_empty());
+            for (index, variant) in layout
+                .variants
+                .iter()
+                .take(layout.variants.len().saturating_sub(1))
+                .enumerate()
+            {
+                emit_memory_load(
+                    function,
+                    Type::from_core(layout.representation),
+                    scratch.at(offset),
+                    byte_order,
+                );
+                emit_enum_discriminant(function, layout.representation, variant.value);
+                function
+                    .instruction(&enum_discriminant_equality(layout.representation))
+                    .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+                    .instruction(&Instruction::I32Const(index as i32))
+                    .instruction(&Instruction::Else);
+            }
+            function.instruction(&Instruction::I32Const(
+                layout.variants.len().saturating_sub(1) as i32,
+            ));
+            for _ in 0..layout.variants.len().saturating_sub(1) {
+                function.instruction(&Instruction::End);
+            }
+            for _ in &layout.variants {
+                function.instruction(&Instruction::I32Const(0));
+            }
+            function.instruction(&Instruction::StructNew(gc.index(Type::Enum(*enumeration))));
+        }
         MemoryTypeLayout::Struct(layout) => {
             for field in &layout.fields {
                 emit_memory_value(
@@ -1278,6 +1314,152 @@ fn emit_memory_value(
             };
             array_value::emit_new_fixed(function, gc, array, layout.length);
         }
+    }
+}
+
+/// Emits a boolean only when `ty` contains a represented enum whose raw
+/// discriminant needs validation. The caller can therefore avoid generating
+/// a branch for ordinary scalar/aggregate reads.
+fn emit_memory_value_is_valid(
+    function: &mut Function,
+    ty: TypeId,
+    scratch: memory_plan::AbiReadScratch,
+    offset: u32,
+    memory: &MemoryLayouts,
+    semantics: &SemanticModel,
+    byte_order: MemoryByteOrder,
+) -> bool {
+    match memory
+        .layout(ty, semantics)
+        .expect("checked memory values are MemoryReadable")
+    {
+        MemoryTypeLayout::Scalar { .. } => false,
+        MemoryTypeLayout::Enum(layout) => {
+            if layout.variants.is_empty() {
+                function.instruction(&Instruction::I32Const(0));
+                return true;
+            }
+            for (index, variant) in layout.variants.iter().enumerate() {
+                emit_memory_load(
+                    function,
+                    Type::from_core(layout.representation),
+                    scratch.at(offset),
+                    byte_order,
+                );
+                emit_enum_discriminant(function, layout.representation, variant.value);
+                function.instruction(&enum_discriminant_equality(layout.representation));
+                if index != 0 {
+                    function.instruction(&Instruction::I32Or);
+                }
+            }
+            true
+        }
+        MemoryTypeLayout::Struct(layout) => {
+            let mut emitted = false;
+            for field in &layout.fields {
+                if emit_memory_value_is_valid(
+                    function,
+                    field.ty,
+                    scratch,
+                    offset + field.offset,
+                    memory,
+                    semantics,
+                    byte_order,
+                ) {
+                    if emitted {
+                        function.instruction(&Instruction::I32And);
+                    }
+                    emitted = true;
+                }
+            }
+            emitted
+        }
+        MemoryTypeLayout::FixedArray(layout) => {
+            let mut emitted = false;
+            for index in 0..layout.length {
+                if emit_memory_value_is_valid(
+                    function,
+                    layout.element,
+                    scratch,
+                    offset + index * layout.stride,
+                    memory,
+                    semantics,
+                    byte_order,
+                ) {
+                    if emitted {
+                        function.instruction(&Instruction::I32And);
+                    }
+                    emitted = true;
+                }
+            }
+            emitted
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_memory_value_result(
+    function: &mut Function,
+    ty: TypeId,
+    result: ResultTypeId,
+    error: &str,
+    scratch: memory_plan::AbiReadScratch,
+    offset: u32,
+    memory: &MemoryLayouts,
+    semantics: &SemanticModel,
+    gc: &GcLayout,
+    failure_payloads: &failure_payload::FailurePayloadDemand,
+    byte_order: MemoryByteOrder,
+) {
+    if emit_memory_value_is_valid(function, ty, scratch, offset, memory, semantics, byte_order) {
+        function.instruction(&Instruction::If(BlockType::Result(
+            gc.val_type(Type::Result(result)),
+        )));
+        emit_memory_value(
+            function, ty, scratch, offset, memory, semantics, gc, byte_order,
+        );
+        emit_result_success(function, result, gc);
+        function.instruction(&Instruction::Else);
+        emit_result_error(
+            function,
+            result,
+            semantic_type(ty, semantics),
+            error,
+            gc,
+            failure_payloads,
+        );
+        function.instruction(&Instruction::End);
+    } else {
+        emit_memory_value(
+            function, ty, scratch, offset, memory, semantics, gc, byte_order,
+        );
+        emit_result_success(function, result, gc);
+    }
+}
+
+fn emit_enum_discriminant(
+    function: &mut Function,
+    representation: crate::types::BuiltinType,
+    value: i128,
+) {
+    if matches!(
+        representation,
+        crate::types::BuiltinType::I64 | crate::types::BuiltinType::U64
+    ) {
+        function.instruction(&Instruction::I64Const(value as i64));
+    } else {
+        function.instruction(&Instruction::I32Const(value as i32));
+    }
+}
+
+fn enum_discriminant_equality(representation: crate::types::BuiltinType) -> Instruction<'static> {
+    if matches!(
+        representation,
+        crate::types::BuiltinType::I64 | crate::types::BuiltinType::U64
+    ) {
+        Instruction::I64Eq
+    } else {
+        Instruction::I32Eq
     }
 }
 

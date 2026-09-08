@@ -56,6 +56,11 @@ pub(crate) fn validate(
     let effects = OperationAnalysis::infer(syntax, hir, semantics, &capabilities, &scoped_globals);
     let mut diagnostics = Vec::new();
     diagnostics.extend(scoped_global_diagnostics);
+    diagnostics.extend(validate_enum_memory_layouts(
+        syntax,
+        semantics,
+        &capabilities,
+    ));
     diagnostics.extend(validate_global_initializers(syntax, hir, &effects));
     diagnostics.extend(stdlib_bodies::validate_signatures(
         &standard_library,
@@ -306,6 +311,57 @@ pub(crate) fn validate(
         effects,
         diagnostics,
     }
+}
+
+fn validate_enum_memory_layouts(
+    syntax: &Program,
+    semantics: &SemanticModel,
+    capabilities: &CapabilityAnalysis,
+) -> Vec<Diagnostic> {
+    syntax
+        .enums
+        .iter()
+        .filter(|enumeration| enumeration.representation.is_some())
+        .filter(|enumeration| {
+            enumeration
+                .variants
+                .iter()
+                .all(|variant| variant.payload.is_none())
+        })
+        .filter(|enumeration| {
+            semantics
+                .enum_representation(enumeration.id)
+                .is_some_and(|ty| {
+                    matches!(
+                        semantics.types().kind(ty),
+                        TypeKind::Builtin(
+                            crate::types::BuiltinType::I8
+                                | crate::types::BuiltinType::U8
+                                | crate::types::BuiltinType::I16
+                                | crate::types::BuiltinType::U16
+                                | crate::types::BuiltinType::I32
+                                | crate::types::BuiltinType::U32
+                                | crate::types::BuiltinType::I64
+                                | crate::types::BuiltinType::U64
+                        )
+                    )
+                })
+        })
+        .filter_map(|enumeration| {
+            capabilities
+                .memory()
+                .enumeration(enumeration.id)
+                .err()
+                .map(|error| {
+                    Diagnostic::semantic(
+                        error,
+                        enumeration
+                            .representation_span
+                            .unwrap_or(enumeration.name_span),
+                    )
+                })
+        })
+        .collect()
 }
 
 fn validate_irrefutable_is_patterns(syntax: &Program) -> Vec<Diagnostic> {

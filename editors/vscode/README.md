@@ -87,7 +87,7 @@ virtual workspaces.
   Rust N-API bridge; attached processes appear in **SplitScript Processes**.
   The packaged native bridge currently targets Windows x64. Autosplitter ticks
   run at the requested rate independently of sidebar snapshots, which are
-  coalesced to at most four updates per second.
+  coalesced to at most five updates per second.
 - The WASI filesystem is exposed read-only below `/mnt`; an optional
   `scriptPath` launch property supplies the portable `SCRIPT_PATH` environment
   variable. Unsupported general-purpose WASI calls are reported in the runtime

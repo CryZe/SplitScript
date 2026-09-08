@@ -428,4 +428,23 @@ if (bulkScanReads !== bulkScanReadsAfterAttachment) {
     );
 }
 
+// A fresh process must repeat provider preparation and automatic shape
+// selection. In particular, the old shape-ready state must not survive after
+// its attachment-scoped `edition` discriminator has been cleared.
+const writesBeforeReattach = variableWrites;
+processOpen = true;
+for (let tick = 0; tick < 180 && variableWrites === writesBeforeReattach; tick += 1) {
+    instance.exports.update();
+}
+if (variableWrites === writesBeforeReattach) {
+    throw new Error(`reattachment did not reach state polling: tickRates=${JSON.stringify(tickRates)}`);
+}
+processOpen = false;
+instance.exports.update();
+instance.exports.update();
+if (detaches !== 2) throw new Error(`expected two process detaches, got ${detaches}`);
+if (JSON.stringify(tickRates.slice(-2)) !== JSON.stringify([120, 1])) {
+    throw new Error(`reattachment did not restore both tick rates: ${JSON.stringify(tickRates)}`);
+}
+
 console.log(JSON.stringify({ dlc, starts, splits, resets, pauses, gameTimes, variables: Object.fromEntries(variables), tickRates, messages, bulkScanReads, levelOrSceneReadWidths: [...levelOrSceneReadWidths], levelTimeVectorReads: [...levelTimeVectorReads] }));

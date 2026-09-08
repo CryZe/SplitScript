@@ -532,7 +532,9 @@ pub(super) fn compile_update(
         .instruction(&Instruction::I32Const(-1))
         .instruction(&Instruction::GlobalSet(globals.process_name))
         .instruction(&Instruction::I32Const(0))
-        .instruction(&Instruction::GlobalSet(globals.state_ready));
+        .instruction(&Instruction::GlobalSet(globals.state_ready))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::GlobalSet(globals.attach_ready));
     if let Some(provider_global) = globals.provider_value {
         let provider_type = semantics
             .state_provider()

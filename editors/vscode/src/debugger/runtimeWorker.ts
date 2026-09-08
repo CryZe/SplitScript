@@ -19,7 +19,7 @@ if (port === null) {
     throw new Error('the ASR runtime must run in a Node worker');
 }
 const workerPort = port;
-const SNAPSHOT_INTERVAL_MILLISECONDS = 250;
+const SNAPSHOT_INTERVAL_MILLISECONDS = 200;
 let host: RuntimeHost | undefined;
 
 workerPort.on('message', (message: RuntimeRequest) => {

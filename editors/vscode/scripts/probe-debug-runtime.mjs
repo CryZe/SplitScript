@@ -108,7 +108,7 @@ try {
     snapshotCount = 0;
     await delay(750);
     assert(
-        snapshotCount <= 5,
+        snapshotCount <= 6,
         `runtime emitted ${snapshotCount} snapshots in 750 ms while variables changed at 120 Hz`,
     );
     const running = await configured;

@@ -51,6 +51,13 @@ export interface SettingsSnapshot {
     handleCount: number;
 }
 
+export interface ProcessSnapshot {
+    handle: string;
+    pid: number;
+    path?: string;
+    isOpen: boolean;
+}
+
 export interface RuntimeSnapshot {
     status: 'starting' | 'running' | 'trapped';
     program: string;
@@ -61,6 +68,7 @@ export interface RuntimeSnapshot {
     memoryBytes: number;
     timer: TimerSnapshot;
     settings: SettingsSnapshot;
+    processes: ProcessSnapshot[];
 }
 
 export interface RuntimeLaunchMessage {
@@ -69,6 +77,7 @@ export interface RuntimeLaunchMessage {
     program: string;
     scriptPath?: string;
     settings?: SettingMapSnapshot;
+    nativeModulePath?: string;
 }
 
 export interface RuntimeTimerCommandMessage {
@@ -86,11 +95,16 @@ export interface RuntimeClearSettingsMessage {
     type: 'clearSettings';
 }
 
+export interface RuntimeShutdownMessage {
+    type: 'shutdown';
+}
+
 export type RuntimeRequest =
     | RuntimeLaunchMessage
     | RuntimeTimerCommandMessage
     | RuntimeSetSettingMessage
-    | RuntimeClearSettingsMessage;
+    | RuntimeClearSettingsMessage
+    | RuntimeShutdownMessage;
 
 export interface RuntimeReadyMessage {
     type: 'ready';
@@ -116,8 +130,13 @@ export interface RuntimeFailureMessage {
     stack?: string;
 }
 
+export interface RuntimeStoppedMessage {
+    type: 'stopped';
+}
+
 export type RuntimeResponse =
     | RuntimeReadyMessage
     | RuntimeSnapshotMessage
     | RuntimeLogMessage
-    | RuntimeFailureMessage;
+    | RuntimeFailureMessage
+    | RuntimeStoppedMessage;

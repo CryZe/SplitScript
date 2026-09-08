@@ -3,7 +3,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { Worker } from 'node:worker_threads';
 
 const extension = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -11,16 +12,36 @@ const repository = resolve(extension, '..', '..');
 const temporary = await mkdtemp(join(tmpdir(), 'splitscript-debug-runtime-'));
 const worker = new Worker(resolve(extension, 'dist', 'runtimeWorker.js'));
 const wasiWorker = new Worker(resolve(extension, 'dist', 'runtimeWorker.js'));
+const fixture = process.platform === 'win32' && process.arch === 'x64'
+    ? spawn(
+        resolve(repository, 'target', 'release', 'splitscript-process-fixture.exe'),
+        [],
+        { stdio: ['pipe', 'pipe', 'inherit'] },
+    )
+    : undefined;
 
 try {
+    const fixtureFields = fixture === undefined
+        ? undefined
+        : Object.fromEntries((await firstLine(fixture.stdout)).split(';').map(field => field.split('=', 2)));
     const generatedWasm = resolve(temporary, 'runtime-probe.wasm');
+    const probeSource = resolve(temporary, 'runtime-probe.split');
+    let source = await readFile(resolve(extension, 'test', 'fixtures', 'runtime-probe.split'), 'utf8');
+    if (fixtureFields !== undefined) {
+        source = source.replace(
+            'state "splitscript-process-fixture.exe" {}',
+            `state "splitscript-process-fixture.exe" { marker: u8 at ${fixtureFields.address}; }`,
+        );
+        source += '\nstart { return current.marker == 83 }\n';
+    }
+    await writeFile(probeSource, source, 'utf8');
     const compiled = spawnSync('cargo', [
         'run',
         '--quiet',
         '--bin',
         'splitc',
         '--',
-        resolve(extension, 'test', 'fixtures', 'runtime-probe.split'),
+        probeSource,
         '--output',
         generatedWasm,
         '--profile',
@@ -35,8 +56,7 @@ try {
     const configured = waitFor(
         worker,
         message => message.type === 'snapshot'
-            && message.snapshot.tickCount > 0
-            && message.snapshot.tickRateHz === 30,
+            && message.snapshot.tickCount > 0,
     );
     const setupLog = waitFor(
         worker,
@@ -44,18 +64,45 @@ try {
             && message.source === 'autoSplitter'
             && message.message === 'SplitScript runtime worker ready',
     );
+    const attachedLog = fixture === undefined ? undefined : waitFor(
+        worker,
+        message => message.type === 'log'
+            && message.source === 'autoSplitter'
+            && message.message === 'SplitScript runtime worker probe attached',
+    );
+    const processRead = fixture === undefined ? undefined : waitFor(
+        worker,
+        message => message.type === 'snapshot'
+            && message.snapshot.processes.some(process => process.pid === Number(fixtureFields.pid))
+            && message.snapshot.timer.state === 'running',
+    );
     const bytes = await readFile(generatedWasm);
     worker.postMessage({
         type: 'launch',
         wasm: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
         program: generatedWasm,
+        scriptPath: probeSource,
+        nativeModulePath: fixture === undefined ? undefined : resolve(
+            extension,
+            'dist',
+            'native',
+            'win32-x64',
+            'splitscript_process_native.node',
+        ),
     });
     const readyMessage = await ready;
-    assert(readyMessage.unsupportedImports.includes('env.process_attach'));
+    if (fixture === undefined) {
+        assert(readyMessage.unsupportedImports.includes('env.process_attach'));
+    } else {
+        assert(!readyMessage.unsupportedImports.some(name => name.startsWith('env.process_')));
+    }
     assert(!readyMessage.unsupportedImports.some(name => name.includes('settings')));
     await setupLog;
+    await attachedLog;
+    await processRead;
     const running = await configured;
     assert(running.snapshot.memoryBytes > 0);
+    assert.equal(running.snapshot.tickRateHz, 120);
     assert.equal(running.snapshot.settings.widgets.length, 5);
 
     const changedSetting = waitFor(
@@ -115,11 +162,34 @@ setup {
     assert(!wasiReadyMessage.unsupportedImports.some(name => name.startsWith('wasi_snapshot_preview1.')));
     await wasiRead;
 
-    console.log('Production debug runtime probe passed: launch, tick, log, settings, WASI, timer controls.');
+    console.log('Production debug runtime probe passed: launch, process attach/read, tick, log, settings, WASI, timer controls.');
 } finally {
-    await worker.terminate();
-    await wasiWorker.terminate();
+    await stopWorker(worker);
+    await stopWorker(wasiWorker);
+    if (fixture !== undefined) {
+        fixture.stdin.end('\n');
+        await new Promise(resolvePromise => fixture.once('exit', resolvePromise));
+    }
     await rm(temporary, { recursive: true, force: true });
+}
+
+async function stopWorker(worker) {
+    const stopped = waitFor(worker, message => message.type === 'stopped');
+    worker.postMessage({ type: 'shutdown' });
+    await stopped;
+    await worker.terminate();
+}
+
+async function firstLine(stream) {
+    const lines = createInterface({ input: stream, crlfDelay: Infinity });
+    try {
+        return await new Promise((resolvePromise, reject) => {
+            lines.once('line', resolvePromise);
+            lines.once('error', reject);
+        });
+    } finally {
+        lines.close();
+    }
 }
 
 function nativeToWasi(file) {

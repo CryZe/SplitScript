@@ -276,7 +276,7 @@ export class WasiHost {
 }
 
 export function nativePathToWasi(nativePath: string): string {
-    const resolved = path.resolve(nativePath);
+    const resolved = path.resolve(nativePath.replace(/^\\\\\?\\/, ''));
     if (process.platform === 'win32') {
         const match = /^([a-zA-Z]):[\\/](.*)$/.exec(resolved);
         if (match === null) throw new Error(`Cannot expose ${nativePath} through /mnt.`);

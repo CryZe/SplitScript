@@ -9,6 +9,7 @@
     "src/embeddedCompiler.ts",
     "src/debugger/asr/memory.ts",
     "src/debugger/asr/neutralImports.ts",
+    "src/debugger/asr/process.ts",
     "src/debugger/asr/settings.ts",
     "src/debugger/asr/timer.ts",
     "src/debugger/asr/wasi.ts",

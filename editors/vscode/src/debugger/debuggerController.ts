@@ -8,6 +8,7 @@ import {
     SettingsMapViewProvider,
     SettingsViewProvider,
     VariablesViewProvider,
+    ProcessesViewProvider,
 } from './settingsViews';
 import { nativePathToWasi } from './asr/wasi';
 
@@ -24,6 +25,7 @@ export class SplitScriptDebuggerController implements
     private readonly settingsView = new SettingsViewProvider();
     private readonly settingsMapView = new SettingsMapViewProvider();
     private readonly variablesView = new VariablesViewProvider();
+    private readonly processesView = new ProcessesViewProvider();
     private readonly output = vscode.window.createOutputChannel('SplitScript Runtime');
     private readonly adapters = new Set<SplitScriptDebugAdapter>();
     private compilerModule: Uint8Array | undefined;
@@ -47,6 +49,7 @@ export class SplitScriptDebuggerController implements
             this.settingsView,
             this.settingsMapView,
             this.variablesView,
+            this.processesView,
             this.output,
             vscode.debug.registerDebugConfigurationProvider(DEBUG_TYPE, this),
             vscode.debug.registerDebugAdapterDescriptorFactory(DEBUG_TYPE, this),
@@ -54,6 +57,7 @@ export class SplitScriptDebuggerController implements
             vscode.window.registerTreeDataProvider('splitscript.debug.settings', this.settingsView),
             vscode.window.registerTreeDataProvider('splitscript.debug.settingsMap', this.settingsMapView),
             vscode.window.registerTreeDataProvider('splitscript.debug.variables', this.variablesView),
+            vscode.window.registerTreeDataProvider('splitscript.debug.processes', this.processesView),
             vscode.commands.registerCommand('splitscript.debug.start', async () => this.start()),
             vscode.commands.registerCommand('splitscript.debug.restart', async () => {
                 await this.activeAdapter?.restart();
@@ -110,6 +114,9 @@ export class SplitScriptDebuggerController implements
     public createDebugAdapterDescriptor(): vscode.DebugAdapterDescriptor {
         const adapter = new SplitScriptDebugAdapter(
             this.context.asAbsolutePath('dist/runtimeWorker.js'),
+            this.context.asAbsolutePath(
+                `dist/native/${process.platform}-${process.arch}/splitscript_process_native.node`,
+            ),
             this,
         );
         this.adapters.add(adapter);
@@ -133,6 +140,7 @@ export class SplitScriptDebuggerController implements
             this.settingsView.update(snapshot);
             this.settingsMapView.update(snapshot);
             this.variablesView.update(snapshot);
+            this.processesView.update(snapshot);
         }
     }
 
@@ -156,6 +164,7 @@ export class SplitScriptDebuggerController implements
             this.settingsView.update(undefined);
             this.settingsMapView.update(undefined);
             this.variablesView.update(undefined);
+            this.processesView.update(undefined);
             void this.setActive(false);
         }
     }

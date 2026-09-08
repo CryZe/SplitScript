@@ -23,7 +23,12 @@ interface PlainNode {
     item: vscode.TreeItem;
 }
 
-type DebugTreeNode = WidgetNode | ValueNode | PlainNode;
+interface ProcessNode {
+    kind: 'process';
+    process: import('./runtimeProtocol').ProcessSnapshot;
+}
+
+type DebugTreeNode = WidgetNode | ValueNode | PlainNode | ProcessNode;
 
 abstract class SnapshotTreeProvider implements
     vscode.TreeDataProvider<DebugTreeNode>,
@@ -161,6 +166,33 @@ export class VariablesViewProvider extends SnapshotTreeProvider {
     }
 }
 
+export class ProcessesViewProvider extends SnapshotTreeProvider {
+    public getTreeItem(element: DebugTreeNode): vscode.TreeItem {
+        if (element.kind === 'plain') return element.item;
+        if (element.kind !== 'process') return new vscode.TreeItem('');
+        const process = element.process;
+        const name = process.path?.split(/[\\/]/).at(-1) ?? `PID ${process.pid}`;
+        const item = new vscode.TreeItem(name, vscode.TreeItemCollapsibleState.Collapsed);
+        item.description = `PID ${process.pid} · ${process.isOpen ? 'Open' : 'Closed'}`;
+        item.tooltip = process.path ?? `PID ${process.pid}`;
+        item.iconPath = new vscode.ThemeIcon(process.isOpen ? 'server-process' : 'circle-slash');
+        return item;
+    }
+
+    public getChildren(element?: DebugTreeNode): DebugTreeNode[] {
+        if (element === undefined) {
+            return (this.snapshot?.processes ?? []).map(process => ({ kind: 'process', process }));
+        }
+        if (element.kind !== 'process') return [];
+        return [
+            plainItem('PID', String(element.process.pid), 'symbol-number'),
+            plainItem('Handle', element.process.handle, 'references'),
+            plainItem('State', element.process.isOpen ? 'Open' : 'Closed'),
+            plainItem('Path', element.process.path ?? 'Unavailable', 'file-binary'),
+        ];
+    }
+}
+
 function settingHierarchy(widgets: readonly SettingWidgetSnapshot[]): WidgetNode[] {
     const roots: WidgetNode[] = [];
     const stack: Array<{ level: number; children: WidgetNode[] }> = [{ level: -1, children: roots }];
@@ -191,4 +223,12 @@ function valueIcon(value: SettingValueSnapshot): string {
     if (value.type === 'bool') return value.value ? 'check' : 'circle-large-outline';
     if (value.type === 'string') return 'symbol-string';
     return 'symbol-number';
+}
+
+function plainItem(label: string, description: string, icon?: string): PlainNode {
+    const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
+    item.description = description;
+    item.tooltip = `${label}: ${description}`;
+    if (icon !== undefined) item.iconPath = new vscode.ThemeIcon(icon);
+    return { kind: 'plain', item };
 }

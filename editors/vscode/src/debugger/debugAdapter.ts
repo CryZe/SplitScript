@@ -47,9 +47,14 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
 
     public readonly onDidSendMessage = this.messages.event;
 
-    public constructor(workerPath: string, private readonly host: DebugAdapterHost) {
+    public constructor(
+        workerPath: string,
+        nativeModulePath: string,
+        private readonly host: DebugAdapterHost,
+    ) {
         this.runtime = new DebugRuntimeSession(
             workerPath,
+            nativeModulePath,
             () => host.createCompiler(),
             {
                 snapshot: snapshot => host.snapshot(this, snapshot),

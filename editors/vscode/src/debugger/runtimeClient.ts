@@ -21,6 +21,7 @@ export class RuntimeClient {
 
     public constructor(
         private readonly workerPath: string,
+        private readonly nativeModulePath: string,
         private readonly callbacks: RuntimeClientCallbacks,
     ) {}
 
@@ -71,6 +72,7 @@ export class RuntimeClient {
             program,
             scriptPath,
             settings: this.settings,
+            nativeModulePath: this.nativeModulePath,
         }, [owned.buffer]);
         await ready;
     }
@@ -97,6 +99,21 @@ export class RuntimeClient {
         }
         this.intentionalTermination = true;
         this.worker = undefined;
+        const stopped = new Promise<void>(resolve => {
+            const onMessage = (message: RuntimeResponse) => {
+                if (message.type === 'stopped') {
+                    worker.off('message', onMessage);
+                    resolve();
+                }
+            };
+            worker.on('message', onMessage);
+            setTimeout(() => {
+                worker.off('message', onMessage);
+                resolve();
+            }, 250).unref();
+        });
+        worker.postMessage({ type: 'shutdown' } satisfies RuntimeRequest);
+        await stopped;
         await worker.terminate();
     }
 

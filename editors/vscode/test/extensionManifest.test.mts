@@ -82,6 +82,7 @@ test('runtime view has launch welcome content and active-session actions', () =>
             'splitscript.debug.settings',
             'splitscript.debug.settingsMap',
             'splitscript.debug.variables',
+            'splitscript.debug.processes',
         ],
     );
     assert(manifest.contributes.viewsWelcome.some(

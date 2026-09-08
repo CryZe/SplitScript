@@ -322,6 +322,12 @@
           "name": "SplitScript Variables",
           "icon": "$(symbol-variable)",
           "contextualTitle": "SplitScript Variables"
+        },
+        {
+          "id": "splitscript.debug.processes",
+          "name": "SplitScript Processes",
+          "icon": "$(server-process)",
+          "contextualTitle": "SplitScript Processes"
         }
       ]
     },
@@ -344,6 +350,11 @@
       {
         "view": "splitscript.debug.variables",
         "contents": "Timer variables appear after a SplitScript debugger starts.",
+        "when": "!splitscript.debug.active"
+      },
+      {
+        "view": "splitscript.debug.processes",
+        "contents": "Attached processes appear after a SplitScript debugger starts.",
         "when": "!splitscript.debug.active"
       }
     ],

@@ -2,6 +2,7 @@ import { parentPort } from 'node:worker_threads';
 
 import { GuestMemory } from './asr/memory';
 import { neutralImport } from './asr/neutralImports';
+import { loadNativeProcessBridge, ProcessHost } from './asr/process';
 import { SettingsHost } from './asr/settings';
 import { DebuggerTimer } from './asr/timer';
 import { WasiHost } from './asr/wasi';
@@ -26,7 +27,12 @@ workerPort.on('message', (message: RuntimeRequest) => {
             fail(new Error('this runtime worker has already launched a module'));
             return;
         }
-        host = new RuntimeHost(message.program, message.scriptPath, message.settings);
+        host = new RuntimeHost(
+            message.program,
+            message.scriptPath,
+            message.settings,
+            message.nativeModulePath,
+        );
         void host.launch(message.wasm).catch(fail);
     } else if (message.type === 'timerCommand') {
         host?.timerCommand(message.command);
@@ -34,6 +40,10 @@ workerPort.on('message', (message: RuntimeRequest) => {
         host?.setSetting(message.key, message.value);
     } else if (message.type === 'clearSettings') {
         host?.clearSettings();
+    } else if (message.type === 'shutdown') {
+        host?.dispose();
+        host = undefined;
+        workerPort.postMessage({ type: 'stopped' } satisfies RuntimeResponse);
     }
 });
 
@@ -42,6 +52,8 @@ class RuntimeHost {
     private readonly timer: DebuggerTimer;
     private readonly settings: SettingsHost;
     private readonly wasi: WasiHost;
+    private readonly processes: ProcessHost | undefined;
+    private readonly nativeBridgeError: string | undefined;
     private status: RuntimeSnapshot['status'] = 'starting';
     private tickRateHz = 120;
     private tickCount = 0;
@@ -56,6 +68,7 @@ class RuntimeHost {
         private readonly program: string,
         scriptPath: string | undefined,
         initialSettings: SettingMapSnapshot | undefined,
+        nativeModulePath: string | undefined,
     ) {
         this.timer = new DebuggerTimer(
             () => this.emitSnapshot(true),
@@ -63,6 +76,21 @@ class RuntimeHost {
         );
         this.settings = new SettingsHost(this.memory, initialSettings);
         this.wasi = new WasiHost(this.memory, scriptPath, message => this.emitLog(message));
+        let processes: ProcessHost | undefined;
+        let nativeBridgeError: string | undefined;
+        if (nativeModulePath !== undefined) {
+            try {
+                processes = new ProcessHost(
+                    this.memory,
+                    loadNativeProcessBridge(nativeModulePath),
+                    message => this.emitLog(message),
+                );
+            } catch (error) {
+                nativeBridgeError = error instanceof Error ? error.message : String(error);
+            }
+        }
+        this.processes = processes;
+        this.nativeBridgeError = nativeBridgeError;
     }
 
     public async launch(bytes: ArrayBuffer): Promise<void> {
@@ -94,6 +122,14 @@ class RuntimeHost {
                 message: `Using unavailable-host stubs for: ${unsupportedImports.join(', ')}`,
             });
         }
+        if (unsupportedImports.some(name => name.startsWith('env.process_'))
+            && this.nativeBridgeError !== undefined) {
+            this.emitLog({
+                source: 'runtime',
+                level: 'error',
+                message: `Could not load the native process bridge: ${this.nativeBridgeError}`,
+            });
+        }
         this.emitLog({
             source: 'runtime',
             level: 'info',
@@ -121,6 +157,16 @@ class RuntimeHost {
         this.emitSnapshot(true);
     }
 
+    public dispose(): void {
+        this.status = 'trapped';
+        if (this.tickTimer !== undefined) {
+            clearTimeout(this.tickTimer);
+            this.tickTimer = undefined;
+        }
+        this.processes?.dispose();
+        this.wasi.dispose();
+    }
+
     private scheduleTick(delay: number): void {
         this.tickTimer = setTimeout(() => this.tick(), delay);
     }
@@ -137,8 +183,7 @@ class RuntimeHost {
             initialize?.();
             update();
         } catch (error) {
-            this.status = 'trapped';
-            this.wasi.dispose();
+            this.dispose();
             this.emitSnapshot(true);
             fail(error);
             return;
@@ -149,7 +194,9 @@ class RuntimeHost {
             ? duration
             : this.averageTickMilliseconds * 0.999 + duration * 0.001;
         this.slowestTickMilliseconds = Math.max(this.slowestTickMilliseconds, duration);
-        this.emitSnapshot(this.settings.consumeChanged());
+        this.emitSnapshot(
+            this.settings.consumeChanged() || (this.processes?.consumeChanged() ?? false),
+        );
         this.scheduleTick(1_000 / this.tickRateHz);
     }
 
@@ -184,6 +231,7 @@ class RuntimeHost {
     private availableEnvImports(): Record<string, WebAssembly.ImportValue> {
         return {
             ...this.settings.imports(),
+            ...this.processes?.imports(),
             timer_get_state: () => this.timer.stateNumber(),
             timer_current_split_index: () => this.timer.currentSplitIndex(),
             timer_segment_splitted: (index: bigint) => this.timer.segmentSplitted(index),
@@ -252,6 +300,7 @@ class RuntimeHost {
                 memoryBytes: this.memory.byteLength(),
                 timer: this.timer.snapshot(),
                 settings: this.settings.snapshot(),
+                processes: this.processes?.snapshot() ?? [],
             },
         } satisfies RuntimeResponse);
     }

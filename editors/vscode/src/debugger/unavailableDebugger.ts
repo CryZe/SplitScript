@@ -23,6 +23,7 @@ export function registerUnavailableDebugger(context: vscode.ExtensionContext): v
             'splitscript.debug.settings',
             'splitscript.debug.settingsMap',
             'splitscript.debug.variables',
+            'splitscript.debug.processes',
         ].map(view => vscode.window.registerTreeDataProvider(view, emptyTree)),
         ...[
             'splitscript.debug.start',

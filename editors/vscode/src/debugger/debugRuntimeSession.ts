@@ -35,10 +35,11 @@ export class DebugRuntimeSession implements vscode.Disposable {
 
     public constructor(
         workerPath: string,
+        nativeModulePath: string,
         private readonly createCompiler: () => Promise<EmbeddedCompilerClient>,
         private readonly callbacks: DebugRuntimeSessionCallbacks,
     ) {
-        this.runtime = new RuntimeClient(workerPath, callbacks);
+        this.runtime = new RuntimeClient(workerPath, nativeModulePath, callbacks);
         this.saveSubscription = vscode.workspace.onDidSaveTextDocument(document => {
             if (
                 this.hotReload

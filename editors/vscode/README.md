@@ -81,13 +81,15 @@ virtual workspaces.
 - Running an autosplitter is currently a desktop-only capability and requires a
   trusted local workspace. Browser, virtual, and untrusted workspaces retain
   the compiler and language tooling.
-- The debugger implements the timer, runtime, user-settings, settings
-  map/list/value, and SplitScript WASI imports. The WASI filesystem is exposed
-  read-only below `/mnt`; an optional `scriptPath` launch property supplies the
-  portable `SCRIPT_PATH` environment variable. Unsupported general-purpose
-  WASI calls are reported in the runtime log.
-- Process imports currently use neutral stubs and are reported in the runtime
-  log until the native process bridge is connected in the next milestone.
+- The debugger implements the timer, runtime, process, user-settings, settings
+  map/list/value, and SplitScript WASI imports. Native process attachment,
+  liveness, module lookup, mapped ranges, and read-only memory access run in a
+  Rust N-API bridge; attached processes appear in **SplitScript Processes**.
+  The packaged native bridge currently targets Windows x64.
+- The WASI filesystem is exposed read-only below `/mnt`; an optional
+  `scriptPath` launch property supplies the portable `SCRIPT_PATH` environment
+  variable. Unsupported general-purpose WASI calls are reported in the runtime
+  log.
 - Source breakpoints and stepping are not implemented yet. Debug builds already
   carry source and variable metadata; pausing V8 execution requires the planned
   debugger-instrumented compiler mode.

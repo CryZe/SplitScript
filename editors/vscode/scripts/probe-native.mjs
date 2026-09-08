@@ -34,14 +34,28 @@ try {
     assert(Number.isInteger(pid) && pid > 0);
     assert(Number.isInteger(length) && length > 0);
 
+    assert(native.listProcessesByName('splitscript-process-fixture.exe').includes(pid));
+
     const handle = native.attachByPid(pid);
     assert.equal(native.processId(handle), pid);
     assert.match(native.processPath(handle), /splitscript-process-fixture\.exe$/i);
+    assert.equal(native.isOpen(handle), true);
+    assert(BigInt(native.moduleAddress(handle, 'splitscript-process-fixture.exe')) > 0n);
+    assert(BigInt(native.moduleSize(handle, 'splitscript-process-fixture.exe')) > 0n);
+    assert.match(native.modulePath(handle, 'splitscript-process-fixture.exe'), /splitscript-process-fixture\.exe$/i);
+    const rangeCount = native.memoryRangeCount(handle);
+    assert(rangeCount > 0);
+    assert(BigInt(native.memoryRangeAddress(handle, 0)) > 0n);
+    assert(BigInt(native.memoryRangeSize(handle, 0)) > 0n);
+    assert(BigInt(native.memoryRangeFlags(handle, 0)) > 0n);
     const actual = native.readProcessMemory(handle, fields.address, length);
     assert.equal(Buffer.from(actual).toString('utf8'), fields.expected);
     assert.equal(native.detach(handle), true);
     assert.equal(native.detach(handle), false);
-    console.log(`Native process probe passed: read ${length} bytes from PID ${pid}.`);
+    const namedHandle = native.attachByName('splitscript-process-fixture.exe');
+    assert.equal(native.processId(namedHandle), pid);
+    assert.equal(native.detach(namedHandle), true);
+    console.log(`Native process probe passed: discovery, modules, ranges, and ${length}-byte read from PID ${pid}.`);
 } finally {
     fixture.stdin.end('\n');
     await new Promise(resolvePromise => fixture.once('exit', resolvePromise));

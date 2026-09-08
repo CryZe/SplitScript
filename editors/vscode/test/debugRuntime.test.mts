@@ -6,6 +6,7 @@ import { neutralImport } from '../src/debugger/asr/neutralImports.ts';
 import { DebuggerTimer } from '../src/debugger/asr/timer.ts';
 import { SettingsHost } from '../src/debugger/asr/settings.ts';
 import { nativePathToWasi, WasiHost } from '../src/debugger/asr/wasi.ts';
+import { ProcessHost, type NativeProcessBridge } from '../src/debugger/asr/process.ts';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -164,6 +165,56 @@ test('read-only WASI host opens and reads files through the /mnt preopen', () =>
     } finally {
         rmSync(directory, { recursive: true, force: true });
     }
+});
+
+test('process host translates native operations to the ASR process ABI', () => {
+    const wasmMemory = new WebAssembly.Memory({ initial: 1 });
+    const memory = new GuestMemory();
+    memory.bind(wasmMemory);
+    const detached: number[] = [];
+    const bridge: NativeProcessBridge = {
+        listProcessesByName: name => name === 'game.exe' ? [41, 42] : [],
+        attachByName: () => 7,
+        attachByPid: () => 8,
+        detach: handle => { detached.push(handle); return true; },
+        processId: handle => handle === 7 ? 42 : 43,
+        processPath: () => 'C:\\Games\\game.exe',
+        isOpen: () => true,
+        readProcessMemory: (_handle, _address, length) => new Uint8Array(length).fill(0x2a),
+        moduleAddress: () => '4096',
+        moduleSize: () => '8192',
+        modulePath: () => 'C:\\Games\\game.exe',
+        memoryRangeCount: () => 1,
+        memoryRangeAddress: () => '4096',
+        memoryRangeSize: () => '8192',
+        memoryRangeFlags: () => '27',
+    };
+    const host = new ProcessHost(memory, bridge, () => {});
+    const imports = host.imports() as Record<string, (...arguments_: unknown[]) => unknown>;
+    const name = new TextEncoder().encode('game.exe');
+    memory.writeBytes(128, name);
+
+    const handle = imports.process_attach(128, name.length) as bigint;
+    assert.equal(handle, 1n);
+    assert.deepEqual(host.snapshot(), [{
+        handle: '1', pid: 42, path: '/mnt/c/Games/game.exe', isOpen: true,
+    }]);
+    assert.equal(imports.process_read(handle, 1234n, 256, 4), 1);
+    assert.deepEqual([...memory.readBytes(256, 4)], [0x2a, 0x2a, 0x2a, 0x2a]);
+    assert.equal(imports.process_get_module_address(handle, 128, name.length), 4096n);
+    assert.equal(imports.process_get_module_size(handle, 128, name.length), 8192n);
+    assert.equal(imports.process_get_memory_range_count(handle), 1n);
+    assert.equal(imports.process_get_memory_range_flags(handle, 0n), 27n);
+
+    memory.writeU32(64, 1);
+    assert.equal(imports.process_list_by_name(128, name.length, 320, 64), 1);
+    assert.equal(memory.readU32(64), 2);
+    const listed = new DataView(wasmMemory.buffer).getBigUint64(320, true);
+    assert.equal(listed, 41n);
+
+    imports.process_detach(handle);
+    assert.deepEqual(detached, [7]);
+    assert.deepEqual(host.snapshot(), []);
 });
 
 function writeStrings(

@@ -243,6 +243,15 @@ same in both hosts.
 
 ### 3. Native process host
 
+Status: completed on 2026-09-08 for Windows x64. The Rust N-API bridge now
+adapts the process discovery, attachment, liveness, read-only memory, module,
+and mapped-range behavior from `livesplit-auto-splitting`. The Node worker owns
+ASR-compatible 64-bit guest handles, keeps native handles inside Rust, exposes
+attached processes in the Run and Debug sidebar, and releases them during
+normal shutdown and traps. The production probe compiles a generated
+SplitScript autosplitter, attaches it to the native fixture, reads a known byte,
+and starts the simulated timer from that value.
+
 - Add the minimal Rust process crate and N-API wrapper.
 - Add process import implementations and the Processes view.
 - Package Windows x64 first, then add a CI matrix for the agreed platforms and

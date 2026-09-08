@@ -1,145 +1,222 @@
-//! Native process-memory boundary for the desktop SplitScript debugger.
+//! Native process boundary for the desktop SplitScript debugger.
 //!
-//! The process behavior is intentionally kept close to the implementation in
-//! `livesplit-auto-splitting`. The public boundary uses opaque handles so no OS
-//! handles or pointers are ever exposed to a webview or WebAssembly guest.
+//! The process behavior mirrors `livesplit-auto-splitting`: process discovery
+//! is cached, modules and mapped ranges are refreshed at most once per second,
+//! and OS/process handles never cross into WebAssembly.
+
+#![allow(clippy::unnecessary_cast)]
 
 use std::{
     collections::HashMap,
+    io,
     sync::{Mutex, MutexGuard, OnceLock},
+    time::{Duration, Instant},
 };
 
 use napi::{Error, Result, Status, bindgen_prelude::Buffer};
 use napi_derive::napi;
+use proc_maps::{MapRange, Pid};
+use read_process_memory::{CopyAddress, ProcessHandle};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
 
-#[cfg(windows)]
-mod platform {
-    use std::{ffi::c_void, io, ptr};
+struct SendProcessHandle(ProcessHandle);
 
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, HANDLE},
-        System::{
-            Diagnostics::Debug::ReadProcessMemory,
-            Threading::{
-                OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
-                QueryFullProcessImageNameW,
-            },
-        },
-    };
+// The platform process handles used by read-process-memory are safe to invoke
+// from any thread. The outer table additionally serializes every operation.
+unsafe impl Send for SendProcessHandle {}
 
-    pub struct Process {
-        handle: HANDLE,
-        pid: u32,
+struct Process {
+    handle: SendProcessHandle,
+    pid: Pid,
+    path: Option<Box<str>>,
+    memory_ranges: Vec<MapRange>,
+    next_memory_range_check: Instant,
+    next_open_check: Instant,
+}
+
+impl Process {
+    fn attach(pid: u32, path: Option<Box<str>>) -> io::Result<Self> {
+        let native_pid = pid as Pid;
+        let handle = native_pid.try_into()?;
+        let now = Instant::now();
+        Ok(Self {
+            handle: SendProcessHandle(handle),
+            pid: native_pid,
+            path,
+            memory_ranges: Vec::new(),
+            next_memory_range_check: now,
+            next_open_check: now + Duration::from_secs(1),
+        })
     }
 
-    // A process HANDLE can be used from any thread. Access to Process instances
-    // is additionally serialized by the outer handle table.
-    unsafe impl Send for Process {}
-
-    impl Process {
-        pub fn attach(pid: u32) -> io::Result<Self> {
-            let handle =
-                unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, 0, pid) };
-            if handle.is_null() {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(Self { handle, pid })
-        }
-
-        pub fn pid(&self) -> u32 {
-            self.pid
-        }
-
-        pub fn read(&self, address: u64, length: usize) -> io::Result<Vec<u8>> {
-            let address = usize::try_from(address).map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "address does not fit this host",
-                )
-            })?;
-            let mut bytes = vec![0; length];
-            let mut bytes_read = 0;
-            let succeeded = unsafe {
-                ReadProcessMemory(
-                    self.handle,
-                    address as *const c_void,
-                    bytes.as_mut_ptr().cast(),
-                    length,
-                    &mut bytes_read,
-                )
-            };
-            if succeeded == 0 {
-                return Err(io::Error::last_os_error());
-            }
-            if bytes_read != length {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    format!("read {bytes_read} of {length} requested bytes"),
-                ));
-            }
-            Ok(bytes)
-        }
-
-        pub fn path(&self) -> io::Result<String> {
-            // Windows documents 32,767 UTF-16 code units as the maximum
-            // extended-length path. The API updates `length` to the used size.
-            let mut buffer = vec![0_u16; 32_768];
-            let mut length = u32::try_from(buffer.len()).unwrap();
-            let succeeded = unsafe {
-                QueryFullProcessImageNameW(self.handle, 0, buffer.as_mut_ptr(), &mut length)
-            };
-            if succeeded == 0 {
-                return Err(io::Error::last_os_error());
-            }
-            buffer.truncate(length as usize);
-            String::from_utf16(&buffer)
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-        }
+    fn pid(&self) -> u32 {
+        self.pid as u32
     }
 
-    impl Drop for Process {
-        fn drop(&mut self) {
-            if !self.handle.is_null() {
-                unsafe {
-                    CloseHandle(self.handle);
-                }
-                self.handle = ptr::null_mut();
-            }
+    fn path(&self) -> Option<&str> {
+        self.path.as_deref()
+    }
+
+    fn read(&self, address: u64, length: usize) -> io::Result<Vec<u8>> {
+        let address = usize::try_from(address).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "address does not fit this host",
+            )
+        })?;
+        let mut bytes = vec![0; length];
+        self.handle.0.copy_address(address, &mut bytes)?;
+        Ok(bytes)
+    }
+
+    fn is_open(&mut self, process_list: &mut ProcessList) -> bool {
+        let now = Instant::now();
+        if now >= self.next_open_check {
+            process_list.refresh_pid(self.pid());
+            self.next_open_check = now + Duration::from_secs(1);
         }
+        process_list.is_open(self.pid())
+    }
+
+    fn module_address(&mut self, module: &str) -> io::Result<Option<u64>> {
+        self.refresh_memory_ranges()?;
+        Ok(self
+            .memory_ranges
+            .iter()
+            .find(|range| range.filename().is_some_and(|path| path.ends_with(module)))
+            .map(|range| range.start() as u64))
+    }
+
+    fn module_size(&mut self, module: &str) -> io::Result<Option<u64>> {
+        self.refresh_memory_ranges()?;
+        let mut found = false;
+        let size = self
+            .memory_ranges
+            .iter()
+            .filter(|range| {
+                let matches = range.filename().is_some_and(|path| path.ends_with(module));
+                found |= matches;
+                matches
+            })
+            .map(|range| range.size() as u64)
+            .sum();
+        Ok(found.then_some(size))
+    }
+
+    fn module_path(&mut self, module: &str) -> io::Result<Option<String>> {
+        self.refresh_memory_ranges()?;
+        Ok(self
+            .memory_ranges
+            .iter()
+            .find_map(|range| range.filename().filter(|path| path.ends_with(module)))
+            .map(|path| path.to_string_lossy().into_owned()))
+    }
+
+    fn memory_range_count(&mut self) -> io::Result<usize> {
+        self.refresh_memory_ranges()?;
+        Ok(self.memory_ranges.len())
+    }
+
+    fn memory_range(&mut self, index: usize) -> io::Result<Option<(u64, u64, u64)>> {
+        self.refresh_memory_ranges()?;
+        Ok(self.memory_ranges.get(index).map(|range| {
+            let mut flags = 1;
+            if range.is_read() {
+                flags |= 1 << 1;
+            }
+            if range.is_write() {
+                flags |= 1 << 2;
+            }
+            if range.is_exec() {
+                flags |= 1 << 3;
+            }
+            if range.filename().is_some() {
+                flags |= 1 << 4;
+            }
+            (range.start() as u64, range.size() as u64, flags)
+        }))
+    }
+
+    fn refresh_memory_ranges(&mut self) -> io::Result<()> {
+        let now = Instant::now();
+        if now >= self.next_memory_range_check {
+            self.memory_ranges = proc_maps::get_process_maps(self.pid)?;
+            self.next_memory_range_check = now + Duration::from_secs(1);
+        }
+        Ok(())
     }
 }
 
-#[cfg(not(windows))]
-mod platform {
-    use std::io;
+struct ProcessList {
+    system: System,
+    next_check: Instant,
+}
 
-    pub struct Process;
-
-    impl Process {
-        pub fn attach(_pid: u32) -> io::Result<Self> {
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "the process debugger prototype currently supports Windows only",
-            ))
+impl ProcessList {
+    fn new() -> Self {
+        Self {
+            system: System::new_with_specifics(
+                RefreshKind::nothing().with_processes(multiple_processes()),
+            ),
+            next_check: Instant::now() + Duration::from_secs(1),
         }
+    }
 
-        pub fn pid(&self) -> u32 {
-            0
+    fn refresh(&mut self) {
+        let now = Instant::now();
+        if now >= self.next_check {
+            self.system.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                true,
+                multiple_processes(),
+            );
+            self.next_check = now + Duration::from_secs(1);
         }
+    }
 
-        pub fn read(&self, _address: u64, _length: usize) -> io::Result<Vec<u8>> {
-            unreachable!("unsupported hosts cannot create Process values")
-        }
+    fn refresh_pid(&mut self, pid: u32) {
+        let pid = sysinfo::Pid::from_u32(pid);
+        self.system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            true,
+            single_process(),
+        );
+    }
 
-        pub fn path(&self) -> io::Result<String> {
-            unreachable!("unsupported hosts cannot create Process values")
-        }
+    fn info(&self, pid: u32) -> Option<(u64, Option<Box<str>>)> {
+        self.system
+            .process(sysinfo::Pid::from_u32(pid))
+            .map(|process| {
+                (
+                    process.start_time(),
+                    process
+                        .exe()
+                        .map(|path| path.to_string_lossy().into_owned().into_boxed_str()),
+                )
+            })
+    }
+
+    fn pids_by_name(&self, name: &str) -> Vec<u32> {
+        let expected = name.as_bytes();
+        #[cfg(target_os = "linux")]
+        let expected = &expected[..expected.len().min(15)];
+        self.system
+            .processes()
+            .values()
+            .filter(|process| process.name().as_encoded_bytes() == expected)
+            .map(|process| process.pid().as_u32())
+            .collect()
+    }
+
+    fn is_open(&self, pid: u32) -> bool {
+        self.system.process(sysinfo::Pid::from_u32(pid)).is_some()
     }
 }
 
 struct ProcessTable {
     next_handle: u32,
-    processes: HashMap<u32, platform::Process>,
+    processes: HashMap<u32, Process>,
+    list: ProcessList,
 }
 
 impl Default for ProcessTable {
@@ -147,12 +224,13 @@ impl Default for ProcessTable {
         Self {
             next_handle: 1,
             processes: HashMap::new(),
+            list: ProcessList::new(),
         }
     }
 }
 
 impl ProcessTable {
-    fn insert(&mut self, process: platform::Process) -> Result<u32> {
+    fn insert(&mut self, process: Process) -> Result<u32> {
         for _ in 0..u32::MAX {
             let handle = self.next_handle;
             self.next_handle = self.next_handle.wrapping_add(1).max(1);
@@ -166,6 +244,26 @@ impl ProcessTable {
             "native process handle table is exhausted",
         ))
     }
+
+    fn process(&self, handle: u32) -> Result<&Process> {
+        self.processes
+            .get(&handle)
+            .ok_or_else(|| unknown_handle(handle))
+    }
+
+    fn process_mut(&mut self, handle: u32) -> Result<&mut Process> {
+        self.processes
+            .get_mut(&handle)
+            .ok_or_else(|| unknown_handle(handle))
+    }
+}
+
+fn multiple_processes() -> ProcessRefreshKind {
+    ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet)
+}
+
+fn single_process() -> ProcessRefreshKind {
+    ProcessRefreshKind::nothing()
 }
 
 fn table() -> Result<MutexGuard<'static, ProcessTable>> {
@@ -181,15 +279,56 @@ fn table() -> Result<MutexGuard<'static, ProcessTable>> {
         })
 }
 
-fn native_error(context: &str, error: std::io::Error) -> Error {
+fn unknown_handle(handle: u32) -> Error {
+    Error::new(
+        Status::InvalidArg,
+        format!("unknown process handle {handle}"),
+    )
+}
+
+fn native_error(context: &str, error: io::Error) -> Error {
     Error::new(Status::GenericFailure, format!("{context}: {error}"))
+}
+
+#[napi(js_name = "listProcessesByName")]
+pub fn list_processes_by_name(name: String) -> Result<Vec<u32>> {
+    let mut table = table()?;
+    table.list.refresh();
+    Ok(table.list.pids_by_name(&name))
+}
+
+#[napi(js_name = "attachByName")]
+pub fn attach_by_name(name: String) -> Result<u32> {
+    let mut table = table()?;
+    table.list.refresh();
+    let selected = table
+        .list
+        .pids_by_name(&name)
+        .into_iter()
+        .filter_map(|pid| table.list.info(pid).map(|(start, path)| (start, pid, path)))
+        .max_by_key(|(start, pid, _)| (*start, *pid))
+        .ok_or_else(|| {
+            Error::new(
+                Status::GenericFailure,
+                format!("process `{name}` not found"),
+            )
+        })?;
+    let process = Process::attach(selected.1, selected.2)
+        .map_err(|error| native_error("could not attach to process", error))?;
+    table.insert(process)
 }
 
 #[napi(js_name = "attachByPid")]
 pub fn attach_by_pid(pid: u32) -> Result<u32> {
-    let process = platform::Process::attach(pid)
+    let mut table = table()?;
+    table.list.refresh_pid(pid);
+    let (_, path) = table
+        .list
+        .info(pid)
+        .ok_or_else(|| Error::new(Status::GenericFailure, format!("process {pid} not found")))?;
+    let process = Process::attach(pid, path)
         .map_err(|error| native_error(&format!("could not attach to process {pid}"), error))?;
-    table()?.insert(process)
+    table.insert(process)
 }
 
 #[napi(js_name = "detach")]
@@ -199,35 +338,26 @@ pub fn detach(handle: u32) -> Result<bool> {
 
 #[napi(js_name = "processId")]
 pub fn process_id(handle: u32) -> Result<u32> {
-    table()?
-        .processes
-        .get(&handle)
-        .map(platform::Process::pid)
-        .ok_or_else(|| {
-            Error::new(
-                Status::InvalidArg,
-                format!("unknown process handle {handle}"),
-            )
-        })
+    Ok(table()?.process(handle)?.pid())
 }
 
 #[napi(js_name = "processPath")]
-pub fn process_path(handle: u32) -> Result<String> {
-    let table = table()?;
-    let process = table.processes.get(&handle).ok_or_else(|| {
-        Error::new(
-            Status::InvalidArg,
-            format!("unknown process handle {handle}"),
-        )
-    })?;
-    process
-        .path()
-        .map_err(|error| native_error("could not query process path", error))
+pub fn process_path(handle: u32) -> Result<Option<String>> {
+    Ok(table()?.process(handle)?.path().map(str::to_owned))
 }
 
-/// Reads from an attached process. The address is decimal text so the N-API
-/// surface cannot silently truncate a 64-bit address through a JavaScript
-/// `number`; the TypeScript ASR host will pass its WebAssembly `BigInt` as text.
+#[napi(js_name = "isOpen")]
+pub fn is_open(handle: u32) -> Result<bool> {
+    let mut table = table()?;
+    let ProcessTable {
+        processes, list, ..
+    } = &mut *table;
+    let process = processes
+        .get_mut(&handle)
+        .ok_or_else(|| unknown_handle(handle))?;
+    Ok(process.is_open(list))
+}
+
 #[napi(js_name = "readProcessMemory")]
 pub fn read_process_memory(handle: u32, address: String, length: u32) -> Result<Buffer> {
     let address = address.parse::<u64>().map_err(|_| {
@@ -238,15 +368,66 @@ pub fn read_process_memory(handle: u32, address: String, length: u32) -> Result<
     })?;
     let length = usize::try_from(length)
         .map_err(|_| Error::new(Status::InvalidArg, "read length does not fit this host"))?;
-    let table = table()?;
-    let process = table.processes.get(&handle).ok_or_else(|| {
-        Error::new(
-            Status::InvalidArg,
-            format!("unknown process handle {handle}"),
-        )
-    })?;
-    process
+    table()?
+        .process(handle)?
         .read(address, length)
         .map(Buffer::from)
         .map_err(|error| native_error("could not read process memory", error))
+}
+
+#[napi(js_name = "moduleAddress")]
+pub fn module_address(handle: u32, module: String) -> Result<Option<String>> {
+    table()?
+        .process_mut(handle)?
+        .module_address(&module)
+        .map(|value| value.map(|value| value.to_string()))
+        .map_err(|error| native_error("could not list process modules", error))
+}
+
+#[napi(js_name = "moduleSize")]
+pub fn module_size(handle: u32, module: String) -> Result<Option<String>> {
+    table()?
+        .process_mut(handle)?
+        .module_size(&module)
+        .map(|value| value.map(|value| value.to_string()))
+        .map_err(|error| native_error("could not list process modules", error))
+}
+
+#[napi(js_name = "modulePath")]
+pub fn module_path(handle: u32, module: String) -> Result<Option<String>> {
+    table()?
+        .process_mut(handle)?
+        .module_path(&module)
+        .map_err(|error| native_error("could not list process modules", error))
+}
+
+#[napi(js_name = "memoryRangeCount")]
+pub fn memory_range_count(handle: u32) -> Result<u32> {
+    let count = table()?
+        .process_mut(handle)?
+        .memory_range_count()
+        .map_err(|error| native_error("could not list process memory ranges", error))?;
+    Ok(u32::try_from(count).unwrap_or(u32::MAX))
+}
+
+fn memory_range(handle: u32, index: u32) -> Result<Option<(u64, u64, u64)>> {
+    table()?
+        .process_mut(handle)?
+        .memory_range(index as usize)
+        .map_err(|error| native_error("could not list process memory ranges", error))
+}
+
+#[napi(js_name = "memoryRangeAddress")]
+pub fn memory_range_address(handle: u32, index: u32) -> Result<Option<String>> {
+    Ok(memory_range(handle, index)?.map(|range| range.0.to_string()))
+}
+
+#[napi(js_name = "memoryRangeSize")]
+pub fn memory_range_size(handle: u32, index: u32) -> Result<Option<String>> {
+    Ok(memory_range(handle, index)?.map(|range| range.1.to_string()))
+}
+
+#[napi(js_name = "memoryRangeFlags")]
+pub fn memory_range_flags(handle: u32, index: u32) -> Result<Option<String>> {
+    Ok(memory_range(handle, index)?.map(|range| range.2.to_string()))
 }

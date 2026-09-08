@@ -19,6 +19,7 @@ if (port === null) {
     throw new Error('the ASR runtime must run in a Node worker');
 }
 const workerPort = port;
+const SNAPSHOT_INTERVAL_MILLISECONDS = 250;
 let host: RuntimeHost | undefined;
 
 workerPort.on('message', (message: RuntimeRequest) => {
@@ -71,7 +72,7 @@ class RuntimeHost {
         nativeModulePath: string | undefined,
     ) {
         this.timer = new DebuggerTimer(
-            () => this.emitSnapshot(true),
+            () => {},
             message => this.emitLog(message),
         );
         this.settings = new SettingsHost(this.memory, initialSettings);
@@ -145,6 +146,7 @@ class RuntimeHost {
         } else {
             this.timer.reset();
         }
+        this.emitSnapshot(true);
     }
 
     public setSetting(key: string, value: boolean | string): void {
@@ -194,9 +196,9 @@ class RuntimeHost {
             ? duration
             : this.averageTickMilliseconds * 0.999 + duration * 0.001;
         this.slowestTickMilliseconds = Math.max(this.slowestTickMilliseconds, duration);
-        this.emitSnapshot(
-            this.settings.consumeChanged() || (this.processes?.consumeChanged() ?? false),
-        );
+        this.settings.consumeChanged();
+        this.processes?.consumeChanged();
+        this.emitSnapshot(false);
         this.scheduleTick(1_000 / this.tickRateHz);
     }
 
@@ -264,7 +266,7 @@ class RuntimeHost {
                     level: 'debug',
                     message: `New Tick Rate: ${ticksPerSecond}`,
                 });
-                this.emitSnapshot(true);
+                this.emitSnapshot(false);
             },
             runtime_print_message: (pointer: number, length: number) => {
                 this.emitLog({
@@ -284,7 +286,7 @@ class RuntimeHost {
 
     private emitSnapshot(force: boolean): void {
         const now = performance.now();
-        if (!force && now - this.lastSnapshotTime < 100) {
+        if (!force && now - this.lastSnapshotTime < SNAPSHOT_INTERVAL_MILLISECONDS) {
             return;
         }
         this.lastSnapshotTime = now;

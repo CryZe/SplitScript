@@ -12,6 +12,10 @@ const repository = resolve(extension, '..', '..');
 const temporary = await mkdtemp(join(tmpdir(), 'splitscript-debug-runtime-'));
 const worker = new Worker(resolve(extension, 'dist', 'runtimeWorker.js'));
 const wasiWorker = new Worker(resolve(extension, 'dist', 'runtimeWorker.js'));
+let snapshotCount = 0;
+worker.on('message', message => {
+    if (message.type === 'snapshot') snapshotCount += 1;
+});
 const fixture = process.platform === 'win32' && process.arch === 'x64'
     ? spawn(
         resolve(repository, 'target', 'release', 'splitscript-process-fixture.exe'),
@@ -33,6 +37,7 @@ try {
             `state "splitscript-process-fixture.exe" { marker: u8 at ${fixtureFields.address}; }`,
         );
         source += '\nstart { return current.marker == 83 }\n';
+        source += 'whileAttached { setVariable("Marker", `{current.marker}`) }\n';
     }
     await writeFile(probeSource, source, 'utf8');
     const compiled = spawnSync('cargo', [
@@ -100,6 +105,12 @@ try {
     await setupLog;
     await attachedLog;
     await processRead;
+    snapshotCount = 0;
+    await delay(750);
+    assert(
+        snapshotCount <= 5,
+        `runtime emitted ${snapshotCount} snapshots in 750 ms while variables changed at 120 Hz`,
+    );
     const running = await configured;
     assert(running.snapshot.memoryBytes > 0);
     assert.equal(running.snapshot.tickRateHz, 120);
@@ -225,4 +236,8 @@ function waitFor(worker, predicate, timeoutMs = 5_000) {
         worker.on('message', onMessage);
         worker.on('error', onError);
     });
+}
+
+function delay(milliseconds) {
+    return new Promise(resolvePromise => setTimeout(resolvePromise, milliseconds));
 }

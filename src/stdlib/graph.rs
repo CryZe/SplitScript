@@ -29,6 +29,7 @@ pub(super) struct StandardLibraryGraph {
     pub(super) state_providers: HashMap<StdlibStateProviderId, &'static StdlibStateProvider>,
     pub(super) state_providers_by_name: HashMap<&'static str, &'static StdlibStateProvider>,
     pub(super) capabilities: HashMap<StdlibCapabilityId, &'static StdlibCapability>,
+    pub(super) implied_capabilities: HashMap<StdlibCapabilityId, Vec<StdlibCapabilityId>>,
     pub(super) type_constructors: HashMap<StdlibTypeConstructorId, &'static StdlibTypeConstructor>,
     pub(super) namespaces: HashMap<StdlibNamespaceId, &'static StdlibNamespace>,
     pub(super) namespaces_by_name: HashMap<&'static str, &'static StdlibNamespace>,
@@ -72,6 +73,24 @@ impl StandardLibraryGraph {
             &mut errors,
         );
         let capabilities = index(CAPABILITIES, |value| value.id, "capability ID", &mut errors);
+        // The catalog is immutable. Compute inheritance once, rather than
+        // allocating and walking the same graph for every inference constraint.
+        let implied_capabilities = capabilities
+            .keys()
+            .map(|&capability| {
+                let mut implied = Vec::new();
+                let mut pending = vec![capability];
+                while let Some(candidate) = pending.pop() {
+                    if !implied.contains(&candidate) {
+                        implied.push(candidate);
+                        if let Some(declaration) = capabilities.get(&candidate) {
+                            pending.extend_from_slice(declaration.super_capabilities);
+                        }
+                    }
+                }
+                (capability, implied)
+            })
+            .collect();
         let type_constructors = index(
             TYPE_CONSTRUCTORS,
             |value| value.id,
@@ -292,6 +311,7 @@ impl StandardLibraryGraph {
             state_providers,
             state_providers_by_name,
             capabilities,
+            implied_capabilities,
             type_constructors,
             namespaces,
             namespaces_by_name,

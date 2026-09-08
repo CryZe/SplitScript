@@ -309,6 +309,31 @@ mod tests {
         );
         assert!(library.capability_implies(StdlibCapabilityId::Float, StdlibCapabilityId::Numeric));
         assert!(library.capability_implies(StdlibCapabilityId::Float, StdlibCapabilityId::Display));
+        assert!(
+            library.capability_implies(StdlibCapabilityId::Float, StdlibCapabilityId::Equatable)
+        );
+        assert!(
+            library.capability_implies(StdlibCapabilityId::Iterable, StdlibCapabilityId::Iterable)
+        );
+        assert!(
+            !library.capability_implies(StdlibCapabilityId::Numeric, StdlibCapabilityId::Integer)
+        );
+        assert!(
+            !library.capability_implies(StdlibCapabilityId::Float, StdlibCapabilityId::Integer)
+        );
+        assert!(
+            !library.capability_implies(StdlibCapabilityId::Iterable, StdlibCapabilityId::Iterator)
+        );
+        assert_eq!(
+            library.minimal_capabilities(&[
+                StdlibCapabilityId::Equatable,
+                StdlibCapabilityId::Iterable,
+                StdlibCapabilityId::Float,
+                StdlibCapabilityId::Iterable,
+                StdlibCapabilityId::Display,
+            ]),
+            [StdlibCapabilityId::Iterable, StdlibCapabilityId::Float]
+        );
         assert_eq!(
             library.minimal_capabilities(&[
                 StdlibCapabilityId::Integer,

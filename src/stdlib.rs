@@ -275,17 +275,7 @@ impl StandardLibrary {
         capability: StdlibCapabilityId,
         required: StdlibCapabilityId,
     ) -> bool {
-        let mut pending = vec![capability];
-        let mut visited = HashSet::new();
-        while let Some(candidate) = pending.pop() {
-            if candidate == required {
-                return true;
-            }
-            if visited.insert(candidate) {
-                pending.extend_from_slice(self.capability(candidate).super_capabilities);
-            }
-        }
-        false
+        capability == required || self.graph.implied_capabilities[&capability].contains(&required)
     }
 
     /// Whether any directly provided capability transitively provides the

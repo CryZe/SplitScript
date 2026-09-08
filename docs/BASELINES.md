@@ -26,11 +26,102 @@ type checking or generate Wasm; its Wasm-size column is `-`. Warmups initialize
 the standard-library graph and its caches, so these are repeated in-process
 measurements, not process-startup measurements.
 
+Append `--stages` to measure the public analysis, Wasm-lowering, and encoding
+APIs separately:
+
+```console
+cargo run --profile max-opt --example compiler_baseline -- 200 --stages
+```
+
+Analysis includes parsing, inference, typed-HIR construction, and validation.
+Each phase consumes the preceding phase's product; encoding therefore also
+includes disposing of the checked program and Wasm IR. Disposal of the final
+artifact is outside the encoding timer. These are fresh compilations after
+standard-library initialization, with the same warmup and sample counts as
+the end-to-end runner.
+
 Timing values are diagnostic baselines, not test thresholds. OS scheduling,
 CPU power state, Rust updates, and allocator changes can move them without a
 compiler regression. Generated Wasm byte counts are deterministic, but should
 also be reviewed rather than frozen into brittle assertions because valid
 backend changes can alter them intentionally.
+
+## 2026-09-08 capability inheritance indexing
+
+Source baseline: `27549bf`. Capability implication queries now consult the
+immutable standard-library graph's transitive index instead of allocating a
+worklist and visited set on every query. Production code has no timing probes.
+The new `--stages` benchmark uses the public cancellable compilation phases.
+
+Windows x86-64, Rust 1.98.1; 20 warmups and 50 measured samples per fixture.
+Unrestricted runs varied substantially with scheduling, so the controlled
+comparison pinned every process to logical CPU 0 (affinity mask 1), with
+ordinary priority and sequential runs. These numbers should not be compared
+directly with earlier unpinned baselines. First-run medians, followed by a
+second comparison in reverse order:
+
+| Rust profile | Fixture | Before → after | Reverse-order before → after |
+| --- | --- | ---: | ---: |
+| release | minimal | 28.37 → 27.20 ms | 26.42 → 25.26 ms |
+| release | Lunistice | 31.43 → 30.42 ms | 29.39 → 28.64 ms |
+| release | cancellation | 26.95 → 25.90 ms | 24.54 → 24.23 ms |
+| release | settings | 27.69 → 26.64 ms | 25.52 → 24.75 ms |
+| max-opt | minimal | 26.64 → 24.97 ms | 24.84 → 24.40 ms |
+| max-opt | cancellation | 24.81 → 22.92 ms | 24.29 → 23.06 ms |
+| max-opt | settings | 25.44 → 23.93 ms | 24.29 → 23.08 ms |
+
+The Lunistice fixture was independently edited between the two `max-opt`
+builds (4,567 to 4,674 source bytes), so that pair is excluded. The ordinary
+release comparison embeds identical fixture bytes. The decreasing absolute
+times across run orders also show why the small percentages should not be
+treated as precise guarantees.
+
+The ordinary release stage comparison with the same affinity measured:
+
+| Fixture | Analysis before → after | Wasm lowering before → after | Encoding before → after |
+| --- | ---: | ---: | ---: |
+| minimal | 22.00 → 20.79 ms | 2.67 → 2.63 ms | 1.97 → 1.79 ms |
+| Lunistice | 24.03 → 22.83 ms | 2.77 → 2.79 ms | 2.87 → 3.01 ms |
+| cancellation | 21.47 → 20.10 ms | 2.58 → 2.59 ms | 1.57 → 1.52 ms |
+| settings | 21.76 → 20.52 ms | 2.64 → 2.60 ms | 1.61 → 1.53 ms |
+
+All nine release output comparisons are byte-identical: Lunistice 30,565,
+Minish Cap 45,113, managed instances 15,413, Mono managed instances 22,770,
+cancellation 2,700, settings 8,771, debug-profile fixture 1,589, set runtime
+3,568, and map runtime 4,975 bytes. Both compilers read the same current
+fixture files for these comparisons. No script-size saving is claimed.
+Raw logs and saved executables are under ignored `target/performance-review`
+with `capability` in their names.
+
+Packaged `max-opt` compiler artifacts before → after: `splitc`
+6,296,576 → 6,302,720 bytes, `splitls` 4,318,720 → 4,325,376 bytes,
+and embedded compiler Wasm 6,338,996 → 6,345,311 bytes. The small artifact
+increase is separate from the unchanged generated script sizes.
+
+The actual packaged services were measured with Node 24.14.0, the same
+affinity mask, 20 warmups, 50 samples, and sequential runs in both orders.
+The LSP harness measures `didChange` through versioned diagnostics over stdio
+with the ordinary system allocator. Node and its child server share the
+affinity. Embedded measurements call the public compile ABI and exclude
+instantiation (about 14 ms), using `--single-threaded
+--no-wasm-async-compilation`. Both versions read the same current sources.
+
+| Service | Fixture | Median before → after | Reverse-order before → after |
+| --- | --- | ---: | ---: |
+| LSP | small | 21.54 → 20.71 ms | 21.83 → 20.75 ms |
+| LSP | Lunistice | 22.31 → 21.37 ms | 22.77 → 21.72 ms |
+| LSP | 500 functions | 46.14 → 44.07 ms | 46.14 → 44.68 ms |
+| embedded compiler | minimal | 21.49 → 21.22 ms | 22.03 → 20.66 ms |
+| embedded compiler | Lunistice | 25.22 → 24.89 ms | 25.44 → 24.53 ms |
+
+Embedded p95 remained noisy and did not improve consistently; the table
+supports a modest median benefit, not a guaranteed tail-latency reduction.
+
+Full `cargo xtask check` passed: formatting, strict Clippy, generated
+documentation, 102 syntax tests, 28 loader tests, 420 library tests (one
+ignored), 621 compiler integration tests, 17 CLI tests, the language-server
+unit test, 19 editor tests, browser/embedded workers, Wasm validation, and
+95 runtime scenarios across 67 unique verification modules.
 
 ## 2026-09-04 baseline
 

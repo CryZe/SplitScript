@@ -584,6 +584,44 @@ or larger caches. Reuse of checked library facts remains a candidate, subject
 to the existing semantic requirements; the old parsing-floor measurements no
 longer justify implementing parsed-library templates first.
 
+## Capability inheritance indexing
+
+The next analysis probe found roughly 12 ms in function-body inference, 3 ms
+in typed-HIR construction, and 5 ms in validation on a warm minimal compile.
+Dependency ordering and generic generalization were comparatively small.
+These internal timings were temporary; the reusable `compiler_baseline
+--stages` mode now separates the public analysis, Wasm-lowering, and encoding
+phases without adding production instrumentation.
+
+Capability implication previously allocated traversal containers and walked
+the same immutable catalog hierarchy on each constraint query. The shared
+standard-library graph now indexes transitive implication once. Both script
+profiles and all compiler consumers use the same query. Existing hierarchy
+tests also cover longer transitive paths, unrelated capabilities, direction,
+reflexivity, and constraint reduction order.
+
+Controlled native runs put the analysis saving at about 1.2 ms (5–6%); full
+compilation improves in both Rust profiles and both run orders. Nine release
+outputs remain byte-identical. Detailed measurements and limitations are in
+[baselines](docs/BASELINES.md). This is a compiler latency change; it does not
+reduce generated script Wasm size.
+
+Full `cargo xtask check` passed, including the editor/browser workers and all
+95 runtime scenarios. The packaged native and embedded compilers grow by about
+6 KiB each; generated scripts are unchanged.
+
+Actual `max-opt` LSP edit-to-diagnostics medians improve by roughly 1–2 ms
+across the three fixtures, with the same direction in reverse-order runs.
+The embedded compiler also improves modestly in median, while its p95 remains
+noisy. Both service comparisons read identical sources.
+
+Continue profiling inference and validation. In particular, the associated-type
+solver still revisits all earlier projections after each ordinary unification,
+including a nested scan to discover equal receivers. Measure that work before
+introducing a worklist or dependency index; preserve delayed errors and generic
+signature instantiation. Keep the remaining output-size work separate from
+these inference changes.
+
 ## Evidence and scope
 
 There are three different performance concerns:

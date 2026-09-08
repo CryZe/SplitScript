@@ -4,6 +4,7 @@
 //! Use `--profile max-opt` instead of `--release` to benchmark the packaged compiler.
 //! Append `--frontend` to measure parsing, library augmentation, and declaration
 //! resolution without type checking or Wasm generation (including result drop).
+//! Append `--stages` to time the public analysis, Wasm-lowering, and encoding phases.
 
 use std::{hint::black_box, time::Instant};
 
@@ -31,6 +32,11 @@ fn main() {
     let frontend = match arguments.next().as_deref() {
         None => false,
         Some("--frontend") => true,
+        Some("--stages") => {
+            assert!(arguments.next().is_none(), "too many baseline arguments");
+            run_stages(iterations);
+            return;
+        }
         Some(other) => panic!("unknown baseline option: {other}"),
     };
     assert!(arguments.next().is_none(), "too many baseline arguments");
@@ -109,4 +115,65 @@ fn run(source: &str, frontend: bool) -> Vec<u8> {
 
 fn nanos_to_micros(nanos: u128) -> String {
     format!("{:.1}", nanos as f64 / 1_000.0)
+}
+
+fn run_stages(iterations: usize) {
+    use splitscript::{
+        CompilationCancellation, CompilerContext,
+        analyze_named_with_context_and_options_cancellable, encode_lowered_compilation_cancellable,
+        lower_analyzed_compilation_cancellable,
+    };
+
+    println!("rust_debug_assertions={}", cfg!(debug_assertions));
+    println!("splitscript_profile=release pipeline=stages");
+    println!("warmup_iterations={WARMUP_ITERATIONS} measured_iterations={iterations}");
+    println!("fixture\tphase\tmedian_us\tp95_us");
+    for (name, source) in FIXTURES {
+        let mut samples = [Vec::new(), Vec::new(), Vec::new()];
+        let cancellation = CompilationCancellation::new();
+        for iteration in 0..WARMUP_ITERATIONS + iterations {
+            let start = Instant::now();
+            let analyzed = analyze_named_with_context_and_options_cancellable(
+                CompilerContext::default(),
+                "<baseline>",
+                black_box(source),
+                splitscript::CompilerOptions {
+                    profile: splitscript::BuildProfile::Release,
+                    ..Default::default()
+                },
+                &cancellation,
+            )
+            .expect("baseline analysis succeeds");
+            let analysis_time = start.elapsed().as_nanos();
+            let start = Instant::now();
+            let lowered = lower_analyzed_compilation_cancellable(analyzed, &cancellation)
+                .expect("baseline lowering succeeds");
+            let lowering_time = start.elapsed().as_nanos();
+            let start = Instant::now();
+            let artifact = encode_lowered_compilation_cancellable(lowered, &cancellation)
+                .expect("baseline encoding succeeds");
+            let encoding_time = start.elapsed().as_nanos();
+            black_box(artifact);
+            if iteration >= WARMUP_ITERATIONS {
+                for (samples, duration) in
+                    samples
+                        .iter_mut()
+                        .zip([analysis_time, lowering_time, encoding_time])
+                {
+                    samples.push(duration);
+                }
+            }
+        }
+        for (phase, samples) in ["analysis", "wasm_lowering", "encoding"]
+            .into_iter()
+            .zip(&mut samples)
+        {
+            samples.sort_unstable();
+            println!(
+                "{name}\t{phase}\t{}\t{}",
+                nanos_to_micros(samples[samples.len() / 2]),
+                nanos_to_micros(samples[(samples.len() * 95).div_ceil(100) - 1]),
+            );
+        }
+    }
 }

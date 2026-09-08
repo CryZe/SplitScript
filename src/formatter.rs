@@ -15,8 +15,21 @@ use crate::{
     visit::{self, Visitor},
 };
 
-const INDENT: &str = "    ";
 pub const DEFAULT_MAX_LINE_WIDTH: usize = 100;
+pub const DEFAULT_INDENT_WIDTH: usize = 4;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndentStyle {
+    Spaces,
+    Tabs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineEnding {
+    Lf,
+    CrLf,
+    Cr,
+}
 
 /// Stable formatter policy shared by the CLI and editor frontends.
 ///
@@ -28,12 +41,24 @@ pub struct FormatOptions {
     /// Preferred maximum number of Unicode scalar values on one line.
     /// Unbreakable tokens may still exceed it.
     pub max_line_width: usize,
+    /// Whether indentation is represented by spaces or tabs.
+    pub indent_style: IndentStyle,
+    /// Spaces per indentation level, or the display width of one indentation tab.
+    pub indent_width: usize,
+    /// Line ending written to the formatted document.
+    pub line_ending: LineEnding,
+    /// Whether the formatted document ends with a line ending.
+    pub insert_final_newline: bool,
 }
 
 impl Default for FormatOptions {
     fn default() -> Self {
         Self {
             max_line_width: DEFAULT_MAX_LINE_WIDTH,
+            indent_style: IndentStyle::Spaces,
+            indent_width: DEFAULT_INDENT_WIDTH,
+            line_ending: LineEnding::Lf,
+            insert_final_newline: true,
         }
     }
 }
@@ -60,9 +85,23 @@ pub(crate) fn format_parsed(parsed: &crate::ParsedProgram) -> String {
     format_parsed_with_options(parsed, FormatOptions::default())
 }
 
-fn format_parsed_with_options(parsed: &crate::ParsedProgram, options: FormatOptions) -> String {
-    let formatted = Formatter::new(parsed.source_document(), parsed.syntax()).finish();
-    wrap_long_lines(formatted, options)
+pub(crate) fn format_parsed_with_options(
+    parsed: &crate::ParsedProgram,
+    options: FormatOptions,
+) -> String {
+    let formatted = Formatter::new(parsed.source_document(), parsed.syntax(), options).finish();
+    apply_output_style(wrap_long_lines(formatted, options), options)
+}
+
+fn apply_output_style(mut source: String, options: FormatOptions) -> String {
+    if !options.insert_final_newline {
+        source.pop();
+    }
+    match options.line_ending {
+        LineEnding::Lf => source,
+        LineEnding::CrLf => source.replace('\n', "\r\n"),
+        LineEnding::Cr => source.replace('\n', "\r"),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -666,10 +705,11 @@ struct Formatter<'a> {
     omitted_semicolons: HashSet<usize>,
     brace_stack: Vec<BraceFrame>,
     current_line_indentation: usize,
+    options: FormatOptions,
 }
 
 impl<'a> Formatter<'a> {
-    fn new(document: &'a SourceDocument, syntax: &Program) -> Self {
+    fn new(document: &'a SourceDocument, syntax: &Program, options: FormatOptions) -> Self {
         let mut headers = HeaderCollector::default();
         headers.visit_program(syntax);
         let multiline_headers = headers
@@ -728,6 +768,7 @@ impl<'a> Formatter<'a> {
             omitted_semicolons: value_block_semicolons.spans,
             brace_stack: Vec::new(),
             current_line_indentation: 0,
+            options,
         }
     }
 
@@ -980,7 +1021,14 @@ impl<'a> Formatter<'a> {
             let continuation = self.continuation_indentation(current);
             self.current_line_indentation = self.indentation + continuation;
             for _ in 0..self.current_line_indentation {
-                self.output.push_str(INDENT);
+                match self.options.indent_style {
+                    IndentStyle::Spaces => {
+                        for _ in 0..self.options.indent_width.max(1) {
+                            self.output.push(' ');
+                        }
+                    }
+                    IndentStyle::Tabs => self.output.push('\t'),
+                }
             }
             self.line_start = false;
         }
@@ -1074,7 +1122,7 @@ struct SourceLine {
 fn wrap_long_lines(mut source: String, options: FormatOptions) -> String {
     let max_width = options.max_line_width.max(1);
     for _ in 0..128 {
-        let overlong = overlong_lines(&source, max_width);
+        let overlong = overlong_lines(&source, max_width, options.indent_width.max(1));
         if overlong.is_empty() {
             return source;
         }
@@ -1095,21 +1143,29 @@ fn wrap_long_lines(mut source: String, options: FormatOptions) -> String {
         let Ok(parsed) = crate::parse(&source) else {
             return source;
         };
-        source = Formatter::new(parsed.source_document(), parsed.syntax()).finish();
+        source = Formatter::new(parsed.source_document(), parsed.syntax(), options).finish();
     }
     source
 }
 
-fn overlong_lines(source: &str, max_width: usize) -> Vec<SourceLine> {
+fn overlong_lines(source: &str, max_width: usize, tab_width: usize) -> Vec<SourceLine> {
     let mut lines = Vec::new();
     let mut start = 0usize;
     for line in source.split_inclusive('\n') {
         let content = line.strip_suffix('\n').unwrap_or(line);
-        if content.chars().count() > max_width {
-            let cutoff = content
-                .char_indices()
-                .nth(max_width)
-                .map_or(start + content.len(), |(offset, _)| start + offset);
+        let mut width = 0usize;
+        let mut cutoff = None;
+        for (offset, character) in content.char_indices() {
+            width = if character == '\t' {
+                width.saturating_add(tab_width - width % tab_width)
+            } else {
+                width.saturating_add(1)
+            };
+            if cutoff.is_none() && width > max_width {
+                cutoff = Some(start + offset);
+            }
+        }
+        if let Some(cutoff) = cutoff {
             lines.push(SourceLine {
                 start,
                 end: start + content.len(),
@@ -2844,7 +2900,10 @@ fn snapshot() {
     fn wraps_other_expressions_with_a_configurable_width() {
         let source = r#"state "game.exe"{}
 fn sum(){return alpha+beta+gamma+delta+epsilon+zeta+eta+theta}"#;
-        let options = FormatOptions { max_line_width: 40 };
+        let options = FormatOptions {
+            max_line_width: 40,
+            ..FormatOptions::default()
+        };
         let formatted = format_source_with_options(source, options).unwrap();
 
         assert!(formatted.contains("\n        +"));
@@ -2853,6 +2912,27 @@ fn sum(){return alpha+beta+gamma+delta+epsilon+zeta+eta+theta}"#;
                 .lines()
                 .all(|line| line.chars().count() <= options.max_line_width)
         );
+        assert_eq!(
+            format_source_with_options(&formatted, options).unwrap(),
+            formatted
+        );
+    }
+
+    #[test]
+    fn applies_configurable_indentation_line_endings_and_final_newline() {
+        let source = "state \"game.exe\"{}\nwhileAttached{if true{print(1)}}";
+        let options = FormatOptions {
+            indent_style: IndentStyle::Tabs,
+            indent_width: 3,
+            line_ending: LineEnding::CrLf,
+            insert_final_newline: false,
+            ..FormatOptions::default()
+        };
+        let formatted = format_source_with_options(source, options).unwrap();
+
+        assert!(formatted.contains("\r\n\tif true {\r\n\t\tprint(1)"));
+        assert!(!formatted.ends_with(['\r', '\n']));
+        assert!(!formatted.replace("\r\n", "").contains(['\r', '\n']));
         assert_eq!(
             format_source_with_options(&formatted, options).unwrap(),
             formatted

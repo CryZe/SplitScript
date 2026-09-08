@@ -63,11 +63,13 @@ cargo run --bin splitc -- fmt game.split
 cargo run --bin splitc -- docs
 ```
 
-A failed build leaves the previous successful output untouched. `splitc docs`
-renders the same compiler-owned reference used by the extension; add a symbol
-or search term to open a focused page. The same hierarchy is published as a
-[searchable HTML reference](https://cryze.github.io/SplitScript/) with semantic
-SplitScript highlighting and symbol navigation.
+A `splitc fmt` run applies matching `.editorconfig` formatting properties
+before rewriting the file. A failed build leaves the previous successful
+output untouched. `splitc docs` renders the same compiler-owned reference used
+by the extension; add a symbol or search term to open a focused page. The same
+hierarchy is published as a [searchable HTML
+reference](https://cryze.github.io/SplitScript/) with semantic SplitScript
+highlighting and symbol navigation.
 
 ### Authors porting ASL
 

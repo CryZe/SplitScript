@@ -243,6 +243,50 @@ fn changes_reuse_the_document_database_and_formatting_ignores_type_errors() {
 }
 
 #[test]
+fn formatting_applies_editorconfig_and_explicit_editor_overrides() {
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": "file:///project/game.split",
+                "version": 1,
+                "text": "state \"game.exe\"{}\nwhileAttached{if true{print(1)}}"
+            }
+        }),
+    ));
+
+    let formatting = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": "configured-format",
+        "method": "textDocument/formatting",
+        "params": {
+            "textDocument": { "uri": "file:///project/game.split" },
+            "options": {
+                "tabSize": 8,
+                "insertSpaces": false,
+                "splitscript": {
+                    "documentLineEnding": "lf",
+                    "filesInsertFinalNewline": true,
+                    "editorConfig": [{
+                        "relativePath": "game.split",
+                        "source": "root = true\n[*.split]\nindent_style = space\nindent_size = 2\nend_of_line = crlf\ninsert_final_newline = false"
+                    }],
+                    "indentStyle": "tabs",
+                    "lineEnding": "lf",
+                    "insertFinalNewline": true
+                }
+            }
+        }
+    }));
+    let formatted = formatting[0]["result"][0]["newText"].as_str().unwrap();
+    assert!(formatted.contains("\n\tif true {\n\t\tprint(1)"));
+    assert!(!formatted.contains("\r\n"));
+    assert!(formatted.ends_with('\n'));
+}
+
+#[test]
 fn hover_survives_length_preserving_parser_repairs() {
     let mut server = LanguageServer::default();
     initialize(&mut server);

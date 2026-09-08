@@ -19,6 +19,7 @@ mod database;
 pub use splitscript_syntax::diagnostic;
 mod documentation;
 pub use documentation::{DocumentationIndexEntry, DocumentationPage, DocumentationReference};
+mod editorconfig;
 mod effects;
 mod equality;
 mod formatter;
@@ -67,8 +68,12 @@ pub use diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticFix, DiagnosticFixes, DiagnosticLabel,
     DiagnosticLabelStyle, DiagnosticSeverity, FixApplicability, TextEdit,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use editorconfig::load_for_path as format_options_for_path;
+pub use editorconfig::{EditorConfigLayer, resolve as resolve_editorconfig};
 pub use formatter::{
-    DEFAULT_MAX_LINE_WIDTH, FormatOptions, format_source, format_source_with_options,
+    DEFAULT_INDENT_WIDTH, DEFAULT_MAX_LINE_WIDTH, FormatOptions, IndentStyle, LineEnding,
+    format_source, format_source_with_options,
 };
 
 /// Controls profile-sensitive semantic lowering and WebAssembly generation.

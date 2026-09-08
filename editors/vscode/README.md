@@ -53,6 +53,12 @@ The extension provides:
 - whole-document formatting, including Format on Save;
 - compiler-owned language, lifecycle, migration, and standard-library pages.
 
+Formatting follows ancestor `.editorconfig` files by default. SplitScript uses
+`indent_style`, `indent_size` / `tab_width`, `max_line_length`, `end_of_line`,
+and `insert_final_newline`. The **SplitScript › Formatting** settings can
+override each choice for the editor without requiring an `.editorconfig`; an
+unset setting continues to inherit the file, editor, or formatter default.
+
 The language server and build worker use separate compiler instances. A long or
 failed build therefore does not replace the language server. Source and output
 files are accessed through the VS Code workspace filesystem, including in

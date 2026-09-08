@@ -25,6 +25,9 @@ interface ExtensionManifest {
         configurationDefaults: {
             '[splitscript]': Record<string, unknown>;
         };
+        configuration: {
+            properties: Record<string, { default: unknown }>;
+        };
     };
 }
 
@@ -77,6 +80,20 @@ test('SplitScript inherits the user formatting policy', () => {
     const defaults = manifest.contributes.configurationDefaults['[splitscript]'];
     assert(!Object.hasOwn(defaults, 'editor.formatOnSave'));
     assert(!Object.hasOwn(defaults, 'editor.defaultFormatter'));
+});
+
+test('formatter policy can inherit editorconfig or be overridden per workspace', () => {
+    const properties = manifest.contributes.configuration.properties;
+    assert.equal(properties['splitscript.formatting.useEditorConfig'].default, true);
+    for (const name of [
+        'maxLineWidth',
+        'indentStyle',
+        'indentWidth',
+        'lineEnding',
+        'insertFinalNewline',
+    ]) {
+        assert.equal(properties[`splitscript.formatting.${name}`].default, null);
+    }
 });
 
 test('documentation gives enum variants their dedicated palette color', () => {

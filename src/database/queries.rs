@@ -176,6 +176,14 @@ impl CompilerDatabase {
         self.cache.formatted.as_ref().unwrap().clone()
     }
 
+    pub fn format_with_options(&mut self, options: crate::FormatOptions) -> QueryResult<String> {
+        self.parse().map(|parsed| {
+            Arc::new(crate::formatter::format_parsed_with_options(
+                &parsed, options,
+            ))
+        })
+    }
+
     pub fn semantic_highlights(&mut self) -> QueryResult<SemanticHighlightIndex> {
         if self.cache.highlights.is_none() {
             let snapshot = self.semantic_snapshot().ok();

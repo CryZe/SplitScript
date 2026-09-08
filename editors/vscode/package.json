@@ -241,6 +241,45 @@
         }
       ]
     },
+    "configuration": {
+      "title": "SplitScript",
+      "properties": {
+        "splitscript.formatting.useEditorConfig": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply formatting properties from ancestor .editorconfig files. SplitScript formatting settings override them."
+        },
+        "splitscript.formatting.maxLineWidth": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "default": null,
+          "description": "Preferred maximum line width. When unset, max_line_length from .editorconfig or 100 is used."
+        },
+        "splitscript.formatting.indentStyle": {
+          "type": ["string", "null"],
+          "enum": ["spaces", "tabs", null],
+          "default": null,
+          "description": "Indentation style. When unset, indent_style from .editorconfig or the editor setting is used."
+        },
+        "splitscript.formatting.indentWidth": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "default": null,
+          "description": "Indentation width. When unset, indent_size from .editorconfig or the editor tab size is used."
+        },
+        "splitscript.formatting.lineEnding": {
+          "type": ["string", "null"],
+          "enum": ["lf", "crlf", "cr", null],
+          "default": null,
+          "description": "Formatted line ending. When unset, end_of_line from .editorconfig or the document's current line ending is used."
+        },
+        "splitscript.formatting.insertFinalNewline": {
+          "type": ["boolean", "null"],
+          "default": null,
+          "description": "Whether formatted files end with a line ending. When unset, insert_final_newline from .editorconfig or files.insertFinalNewline is used."
+        }
+      }
+    },
     "configurationDefaults": {
       "[splitscript]": {
         "editor.semanticHighlighting.enabled": true

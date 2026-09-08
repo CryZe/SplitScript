@@ -8,6 +8,7 @@ import {
 import { PortMessageReader, PortMessageWriter } from 'vscode-jsonrpc/node';
 import { errorMessage } from './paths';
 import { documentationMarkdownTrust } from './documentationMarkdown';
+import { provideDocumentFormattingEdits } from './formatting';
 
 export class LanguageClientController implements vscode.Disposable {
     private client: LanguageClient | undefined;
@@ -24,11 +25,25 @@ export class LanguageClientController implements vscode.Disposable {
                 writer: new PortMessageWriter(worker),
             };
         };
+        let client: LanguageClient;
         const clientOptions: LanguageClientOptions = {
             documentSelector: [{ language: 'splitscript' }],
             markdown: documentationMarkdownTrust,
+            middleware: {
+                provideDocumentFormattingEdits: (document, options, token) =>
+                    provideDocumentFormattingEdits(
+                        document,
+                        options,
+                        token,
+                        (method, params, requestToken) => client.sendRequest(
+                            method,
+                            params,
+                            requestToken,
+                        ),
+                    ),
+            },
         };
-        const client = new LanguageClient(
+        client = new LanguageClient(
             'splitscript',
             'SplitScript Language Server',
             serverOptions,

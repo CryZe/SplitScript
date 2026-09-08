@@ -18,8 +18,8 @@ use conversion::{
 use documents::{Document, DocumentStore};
 use protocol::{
     CodeActionParams, DidChangeParams, DidOpenParams, DocumentationPageParams,
-    DocumentationSearchParams, IncomingMessage, InlayHintParams, ReferenceParams, RenameParams,
-    SelectionRangeParams, TextDocumentParams, TextDocumentPositionParams, decode,
+    DocumentationSearchParams, FormattingParams, IncomingMessage, InlayHintParams, ReferenceParams,
+    RenameParams, SelectionRangeParams, TextDocumentParams, TextDocumentPositionParams, decode,
 };
 
 use crate::{
@@ -269,7 +269,7 @@ impl LanguageServer {
     }
 
     fn formatting_response(&mut self, id: Value, params: Value) -> Value {
-        let params = match decode_request::<TextDocumentParams>(&id, params) {
+        let params = match decode_request::<FormattingParams>(&id, params) {
             Ok(params) => params,
             Err(response) => return response,
         };
@@ -277,7 +277,59 @@ impl LanguageServer {
             return error_response(id, -32602, "text document is not open");
         };
         let source = document.database.source().to_owned();
-        let Ok(formatted) = document.database.format() else {
+        let mut options = crate::FormatOptions {
+            indent_style: if params.options.insert_spaces {
+                crate::IndentStyle::Spaces
+            } else {
+                crate::IndentStyle::Tabs
+            },
+            indent_width: params.options.tab_size.max(1),
+            ..crate::FormatOptions::default()
+        };
+        let configured = params.options.splitscript;
+        if let Some(line_ending) = configured
+            .document_line_ending
+            .as_deref()
+            .and_then(parse_line_ending)
+        {
+            options.line_ending = line_ending;
+        }
+        if let Some(insert) = configured.files_insert_final_newline {
+            options.insert_final_newline = insert;
+        }
+        let layers = configured
+            .editor_config
+            .into_iter()
+            .map(|layer| crate::EditorConfigLayer {
+                relative_path: layer.relative_path,
+                source: layer.source,
+            })
+            .collect::<Vec<_>>();
+        options = crate::resolve_editorconfig(options, &layers);
+        if let Some(width) = configured.max_line_width.filter(|width| *width > 0) {
+            options.max_line_width = width;
+        }
+        if let Some(style) = configured.indent_style.as_deref() {
+            options.indent_style = match style {
+                "spaces" => crate::IndentStyle::Spaces,
+                "tabs" => crate::IndentStyle::Tabs,
+                _ => options.indent_style,
+            };
+        }
+        if let Some(width) = configured.indent_width.filter(|width| *width > 0) {
+            options.indent_width = width;
+        }
+        if let Some(line_ending) = configured
+            .line_ending
+            .as_deref()
+            .and_then(parse_line_ending)
+        {
+            options.line_ending = line_ending;
+        }
+        if let Some(insert) = configured.insert_final_newline {
+            options.insert_final_newline = insert;
+        }
+        let Ok(formatted) = document.database.format_with_options(options) else {
             return response(id, json!([]));
         };
         if *formatted == source {
@@ -759,6 +811,15 @@ fn documentation_location_json(path: &str) -> Value {
             "end": { "line": 0, "character": 0 }
         }
     })
+}
+
+fn parse_line_ending(value: &str) -> Option<crate::LineEnding> {
+    match value {
+        "lf" => Some(crate::LineEnding::Lf),
+        "crlf" => Some(crate::LineEnding::CrLf),
+        "cr" => Some(crate::LineEnding::Cr),
+        _ => None,
+    }
 }
 
 fn definition_target_location_json(

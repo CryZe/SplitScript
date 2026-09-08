@@ -358,7 +358,9 @@ fn format_file(input: &Path, check: bool) -> bool {
             return false;
         }
     };
-    let formatted = match splitscript::format_source(&source) {
+    let options =
+        splitscript::format_options_for_path(input, splitscript::FormatOptions::default());
+    let formatted = match splitscript::format_source_with_options(&source, options) {
         Ok(formatted) => formatted,
         Err(errors) => {
             emit_diagnostics(input, &source, &errors);

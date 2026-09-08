@@ -11,6 +11,7 @@ import {
 } from 'vscode-jsonrpc/browser';
 import { errorMessage } from './paths';
 import { documentationMarkdownTrust } from './documentationMarkdown';
+import { provideDocumentFormattingEdits } from './formatting';
 
 export class BrowserLanguageClientController implements vscode.Disposable {
     private client: LanguageClient | undefined;
@@ -27,11 +28,25 @@ export class BrowserLanguageClientController implements vscode.Disposable {
             // not reliable here. Construct the transport explicitly.
             return workerTransports(worker);
         };
+        let client: LanguageClient;
         const clientOptions: LanguageClientOptions = {
             documentSelector: [{ language: 'splitscript' }],
             markdown: documentationMarkdownTrust,
+            middleware: {
+                provideDocumentFormattingEdits: (document, options, token) =>
+                    provideDocumentFormattingEdits(
+                        document,
+                        options,
+                        token,
+                        (method, params, requestToken) => client.sendRequest(
+                            method,
+                            params,
+                            requestToken,
+                        ),
+                    ),
+            },
         };
-        const client = new LanguageClient(
+        client = new LanguageClient(
             'splitscript',
             'SplitScript Language Server',
             serverOptions,

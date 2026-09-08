@@ -43,6 +43,43 @@ pub(super) struct TextDocumentParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct FormattingParams {
+    pub text_document: TextDocumentIdentifier,
+    pub options: FormattingOptions,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct FormattingOptions {
+    pub tab_size: usize,
+    pub insert_spaces: bool,
+    #[serde(default)]
+    pub splitscript: SplitScriptFormattingOptions,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SplitScriptFormattingOptions {
+    pub document_line_ending: Option<String>,
+    pub files_insert_final_newline: Option<bool>,
+    pub max_line_width: Option<usize>,
+    pub indent_style: Option<String>,
+    pub indent_width: Option<usize>,
+    pub line_ending: Option<String>,
+    pub insert_final_newline: Option<bool>,
+    #[serde(default)]
+    pub editor_config: Vec<EditorConfigLayerParams>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct EditorConfigLayerParams {
+    pub relative_path: String,
+    pub source: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct SelectionRangeParams {
     pub text_document: TextDocumentIdentifier,
     pub positions: Vec<Position>,

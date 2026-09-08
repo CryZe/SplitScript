@@ -1,0 +1,28 @@
+[package]
+name = "splitscript-process-native"
+version = "0.1.0"
+edition = "2024"
+description = "Desktop process-memory bridge for the SplitScript VS Code debugger"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "splitscript-process-fixture"
+path = "src/bin/process_fixture.rs"
+
+[dependencies]
+napi = { version = "3.12.2", default-features = false, features = ["napi8"] }
+napi-derive = "3.6.3"
+
+[build-dependencies]
+napi-build = "2.4.1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.0", features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Threading",
+] }

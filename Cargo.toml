@@ -7,6 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [workspace]
 members = [
+    "crates/splitscript-process-native",
     "crates/splitscript-syntax",
     "crates/splitscript-stdlib-loader",
     "crates/splitscript-vscode-wasm",

@@ -1,0 +1,5 @@
+state "splitscript-process-fixture.exe" {}
+
+onAttach {
+    print("SplitScript runtime worker probe attached")
+}

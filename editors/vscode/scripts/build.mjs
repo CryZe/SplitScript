@@ -46,6 +46,8 @@ const destination = resolve(extension, 'dist', 'splitscript_vscode_wasm.wasm');
 await mkdir(dirname(destination), { recursive: true });
 await copyFile(source, destination);
 
+run(process.execPath, [resolve(extension, 'scripts', 'build-native.mjs')]);
+
 function run(command, arguments_) {
     const result = spawnSync(command, arguments_, {
         cwd: repository,

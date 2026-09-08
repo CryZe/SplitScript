@@ -24,6 +24,7 @@ await build({
 for (const [source, output] of [
     ['embeddedCompilerNodeWorker.ts', 'embeddedCompilerNodeWorker.js'],
     ['embeddedLanguageServerNodeWorker.ts', 'embeddedLanguageServerNodeWorker.js'],
+    ['debugger/runtimeProbeWorker.ts', 'runtimeProbeWorker.js'],
 ]) {
     await build({
         ...common,

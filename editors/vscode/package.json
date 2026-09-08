@@ -297,7 +297,10 @@
     "open:web-host": "vscode-test-web --browser=chromium --headless=false --quality=stable --commit=e4c7e7b1d6d060162f4aa7f8225271b67ce1df75 --extensionDevelopmentPath=. test-workspace",
     "watch": "tsc --watch -p ./",
     "check": "tsc --noEmit -p ./",
-    "test": "tsc --noEmit -p tsconfig.test.json && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/*.test.mts"
+    "test": "tsc --noEmit -p tsconfig.test.json && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/*.test.mts",
+    "probe:runtime": "node scripts/probe-runtime.mjs",
+    "probe:native": "node scripts/probe-native.mjs",
+    "probe:package": "node scripts/probe-package.mjs"
   },
   "dependencies": {
     "vscode-jsonrpc": "9.0.1",

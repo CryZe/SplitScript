@@ -20,7 +20,7 @@ use types::{complete_explicit_type_argument, complete_type_position};
 use crate::{
     ast::{
         Block, Expr, ExprKind, FunctionId, MatchPattern, Program, SettingKind, Span, Stmt,
-        TypeRef as SyntaxTypeRef,
+        TypeRef as SyntaxTypeRef, ValueId,
     },
     catalog::Documentation,
     database::{CompilerDatabase, SemanticQueryResult},
@@ -31,6 +31,7 @@ use crate::{
         LanguageCatalog, LanguageCompletionSite, LanguageItem, LanguageItemId, LanguageItemKind,
     },
     lexer::TokenKind,
+    scoped_globals::{GlobalLifetime, ScopedGlobalAnalysis, action_has_attempt_scope},
     semantic::{ResolvedCall, ResolvedMember, ResolvedValue, SemanticModel},
     stdlib::{
         ItemKind, ItemVisibility, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibItemId,
@@ -82,6 +83,7 @@ pub struct CompletionList {
 #[derive(Debug, Clone, Copy)]
 struct ContextAvailability {
     attached_process: bool,
+    active_attempt: bool,
     state_snapshots: bool,
     process_selection: bool,
     statement_position: bool,
@@ -181,11 +183,12 @@ pub(crate) fn complete(
             .map(action_has_state_snapshots)
             .unwrap_or(inside_function);
         let needs_effects = !top_level
-            && (!has_attached_process || !has_state_snapshots)
-            && syntax
-                .functions
-                .iter()
-                .any(|function| function.method_of.is_none());
+            && (syntax.globals.iter().any(|global| global.value.is_none())
+                || ((!has_attached_process || !has_state_snapshots)
+                    && syntax
+                        .functions
+                        .iter()
+                        .any(|function| function.method_of.is_none())));
         let effects = needs_effects
             .then(|| {
                 completion_operation_analysis(
@@ -203,6 +206,7 @@ pub(crate) fn complete(
             standard_library,
             ContextAvailability {
                 attached_process: has_attached_process,
+                active_attempt: inside_function || action.is_some_and(action_has_attempt_scope),
                 state_snapshots: has_state_snapshots,
                 process_selection: action == Some(crate::ast::ActionKind::SelectProcess),
                 statement_position: is_statement_position(
@@ -464,17 +468,24 @@ fn matching_closing_brace(tokens: &[&crate::lexer::Token], open: usize) -> Optio
     None
 }
 
-/// Only source-function availability is needed by root completion. Retaining
-/// full operation analyses or repaired snapshots would keep unrelated call
-/// metadata or entire compiler databases alive.
+/// Compact availability facts needed by root completion. Function-operation
+/// availability and lifecycle-global lifetimes come from their canonical
+/// semantic analyses; retaining the complete analyses or repaired snapshots
+/// here would keep unrelated metadata or entire compiler databases alive.
 #[derive(Debug, Default)]
 struct CompletionEffects {
     attached_process: BTreeSet<FunctionId>,
     state_snapshots: BTreeSet<FunctionId>,
+    global_lifetimes: BTreeMap<ValueId, GlobalLifetime>,
+    attempt_functions: BTreeSet<FunctionId>,
 }
 
 impl CompletionEffects {
-    fn from_analysis(syntax: &Program, analysis: &OperationAnalysis) -> Self {
+    fn from_analysis(
+        syntax: &Program,
+        analysis: &OperationAnalysis,
+        scoped_globals: Option<&ScopedGlobalAnalysis>,
+    ) -> Self {
         let mut facts = Self::default();
         for function in syntax
             .functions
@@ -487,6 +498,17 @@ impl CompletionEffects {
             }
             if effects.requires_state_snapshots {
                 facts.state_snapshots.insert(function.id);
+            }
+            if scoped_globals.is_some_and(|globals| globals.function_requires_attempt(function.id))
+            {
+                facts.attempt_functions.insert(function.id);
+            }
+        }
+        if let Some(scoped_globals) = scoped_globals {
+            for global in &syntax.globals {
+                if let Some(lifetime) = scoped_globals.lifetime(global.id) {
+                    facts.global_lifetimes.insert(global.id, lifetime);
+                }
             }
         }
         facts
@@ -543,9 +565,27 @@ fn completion_operation_analysis(
     if let Ok(snapshot) = database.semantic_snapshot()
         && let Some(effects) = snapshot.effects()
     {
-        let facts = Arc::new(CompletionEffects::from_analysis(snapshot.syntax(), effects));
-        database.completion_effects_cache().direct = Some(Arc::clone(&facts));
-        return Some(facts);
+        let scoped_globals = snapshot.checked().map(|checked| checked.scoped_globals());
+        // Recovery can retain operation effects without the typed program
+        // required by lifecycle-global analysis. A file with bare globals
+        // therefore still needs the inert completion probe below; otherwise
+        // every scoped global would appear universally available while the
+        // user is typing an unresolved identifier.
+        if scoped_globals.is_some()
+            || !snapshot
+                .syntax()
+                .globals
+                .iter()
+                .any(|global| global.value.is_none())
+        {
+            let facts = Arc::new(CompletionEffects::from_analysis(
+                snapshot.syntax(),
+                effects,
+                scoped_globals,
+            ));
+            database.completion_effects_cache().direct = Some(Arc::clone(&facts));
+            return Some(facts);
+        }
     }
 
     // A partially typed root identifier is normally an unknown expression and
@@ -560,9 +600,13 @@ fn completion_operation_analysis(
         database.completion_effects_cache().probes += 1;
     }
     let facts = probe.semantic_snapshot().ok().and_then(|snapshot| {
-        snapshot
-            .effects()
-            .map(|effects| Arc::new(CompletionEffects::from_analysis(snapshot.syntax(), effects)))
+        snapshot.effects().map(|effects| {
+            Arc::new(CompletionEffects::from_analysis(
+                snapshot.syntax(),
+                effects,
+                snapshot.checked().map(|checked| checked.scoped_globals()),
+            ))
+        })
     });
     database
         .completion_effects_cache()
@@ -739,6 +783,7 @@ fn complete_root(
         &mut builder,
         syntax,
         availability.attached_process,
+        availability.active_attempt,
         availability.state_snapshots,
         effects,
     );
@@ -1467,6 +1512,7 @@ fn add_source_declarations(
     builder: &mut CompletionBuilder,
     syntax: &Program,
     has_attached_process: bool,
+    has_active_attempt: bool,
     has_state_snapshots: bool,
     effects: Option<&CompletionEffects>,
 ) {
@@ -1482,6 +1528,17 @@ fn add_source_declarations(
         ));
     }
     for global in &syntax.globals {
+        if effects.is_some_and(|effects| {
+            matches!(
+                effects.global_lifetimes.get(&global.id),
+                Some(GlobalLifetime::Attachment) if !has_attached_process
+            ) || matches!(
+                effects.global_lifetimes.get(&global.id),
+                Some(GlobalLifetime::Attempt) if !has_active_attempt
+            )
+        }) {
+            continue;
+        }
         let mut names = std::collections::HashSet::new();
         global.binding.visit_bindings(&mut |binding| {
             if names.insert(binding.name.clone()) {
@@ -1504,6 +1561,11 @@ fn add_source_declarations(
         }
         if !has_state_snapshots
             && effects.is_none_or(|effects| effects.state_snapshots.contains(&function.id))
+        {
+            continue;
+        }
+        if !has_active_attempt
+            && effects.is_some_and(|effects| effects.attempt_functions.contains(&function.id))
         {
             continue;
         }
@@ -4360,6 +4422,96 @@ fn masked(value) {
                 );
             }
         }
+    }
+
+    #[test]
+    fn attempt_scoped_globals_and_helpers_complete_only_during_an_active_attempt() {
+        let declarations = r#"
+let runTimeSeconds: f64
+state "game.exe" {}
+onStart { runTimeSeconds = 0.0 }
+fn updateRunTime() { runTimeSeconds += 1.0 }
+"#;
+
+        for action in ["setup", "onAttach", "onDetach", "whileAttached", "start"] {
+            for prefix in ["runT", "updateR"] {
+                let source = format!("{declarations}\n{action} {{ {prefix} }}");
+                let mut database = CompilerDatabase::new(source);
+                assert!(
+                    !labels(&mut database, &format!("{action} {{ {prefix}"))
+                        .iter()
+                        .any(|label| label == "runTimeSeconds" || label == "updateRunTime"),
+                    "attempt-scoped declarations must not complete in {action}"
+                );
+            }
+        }
+
+        for action in ["onReset", "split", "reset", "isLoading", "gameTime"] {
+            let source = format!("{declarations}\n{action} {{ runT }}");
+            let mut database = CompilerDatabase::new(source);
+            assert!(
+                labels(&mut database, &format!("{action} {{ runT"))
+                    .contains(&"runTimeSeconds".to_owned()),
+                "attempt-scoped globals should complete in {action}"
+            );
+
+            let source = format!("{declarations}\n{action} {{ updateR }}");
+            let mut database = CompilerDatabase::new(source);
+            assert!(
+                labels(&mut database, &format!("{action} {{ updateR"))
+                    .contains(&"updateRunTime".to_owned()),
+                "attempt-dependent helpers should complete in {action}"
+            );
+        }
+
+        let source = declarations.replace(
+            "onStart { runTimeSeconds = 0.0 }",
+            "onStart { runTimeSeconds = 0.0; runT }",
+        );
+        let mut database = CompilerDatabase::new(source);
+        assert!(
+            labels(&mut database, "; runT").contains(&"runTimeSeconds".to_owned()),
+            "the attempt initializer must be able to complete its own globals"
+        );
+    }
+
+    #[test]
+    fn attachment_scoped_globals_complete_only_with_an_attached_process() {
+        let declarations = r#"
+let moduleBase: address
+state "game.exe" {}
+onAttach { moduleBase = 0x1000 }
+"#;
+
+        for action in ["setup", "onDetach", "onStart", "onReset"] {
+            let source = format!("{declarations}\n{action} {{ moduleB }}");
+            let mut database = CompilerDatabase::new(source);
+            assert!(
+                !labels(&mut database, &format!("{action} {{ moduleB"))
+                    .contains(&"moduleBase".to_owned()),
+                "attachment-scoped globals must not complete in {action}"
+            );
+        }
+
+        for action in ["whileAttached", "start", "split"] {
+            let source = format!("{declarations}\n{action} {{ moduleB }}");
+            let mut database = CompilerDatabase::new(source);
+            assert!(
+                labels(&mut database, &format!("{action} {{ moduleB"))
+                    .contains(&"moduleBase".to_owned()),
+                "attachment-scoped globals should complete in {action}"
+            );
+        }
+
+        let source = declarations.replace(
+            "onAttach { moduleBase = 0x1000 }",
+            "onAttach { moduleBase = 0x1000; moduleB }",
+        );
+        let mut database = CompilerDatabase::new(source);
+        assert!(
+            labels(&mut database, "; moduleB").contains(&"moduleBase".to_owned()),
+            "the attachment initializer must be able to complete its own globals"
+        );
     }
 
     #[test]

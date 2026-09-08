@@ -771,12 +771,43 @@ focused_example!(
     "struct Position {\n    x: f32,\n    y: f32,\n}",
     DECLARATIONS_SOURCE
 );
-focused_example!(
-    ENUM_EXAMPLE,
-    "Describe process-readable game states",
-    "enum GameState: i32 {\n    Mission = 0,\n    TitleScreen = 1,\n    Menu = 2,\n}",
-    DECLARATIONS_SOURCE
-);
+const PAYLOAD_ENUM_SOURCE: &str = r#"state "game.exe" {}
+
+enum LoadState {
+    Loading,
+    Ready(u32),
+    Failed(String),
+}
+"#;
+
+const PROCESS_READABLE_ENUM_SOURCE: &str = r#"enum GameState: i32 {
+    Mission = 0,
+    TitleScreen = 1,
+    Menu = 2,
+}
+
+state "game.exe" {
+    gameState: GameState at 0x1000
+}
+"#;
+
+const ENUM_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Describe distinct states",
+        "enum Mode {\n    Menu,\n    Playing,\n}",
+        DECLARATIONS_SOURCE,
+    ),
+    Example::checked(
+        "Attach data to variants",
+        "enum LoadState {\n    Loading,\n    Ready(u32),\n    Failed(String),\n}",
+        PAYLOAD_ENUM_SOURCE,
+    ),
+    Example::checked(
+        "Read an integer-backed game state",
+        "enum GameState: i32 {\n    Mission = 0,\n    TitleScreen = 1,\n    Menu = 2,\n}\n\nstate \"game.exe\" {\n    gameState: GameState at 0x1000\n}",
+        PROCESS_READABLE_ENUM_SOURCE,
+    ),
+];
 const STATE_DECL_EXAMPLES: &[Example] = &[
     Example::checked(
         "Read state from a native process",
@@ -1390,7 +1421,7 @@ define_language_catalog! {
         "enum Name[: Integer] { Variant[(Type)] [= value] }",
         "Declares a nominal sum type.",
         "Enums support optional variant payloads, exhaustive match expressions, and structural equality when their payloads support it. Writing a fixed-width integer representation after the name, such as `enum GameState: i32`, instead declares the enum's process-memory encoding and derives [`MemoryReadable`]. Process-readable variants cannot carry payloads. Their discriminants start at zero, increase by one when omitted, and may be written explicitly with `= value`; duplicates and values outside the representation are compile errors. Reading an unknown raw discriminant fails the enclosing memory read instead of constructing an invalid enum value. The same validation applies recursively inside readable [`struct`]s and fixed arrays and respects the state provider's byte order.",
-        ENUM_EXAMPLE
+        ENUM_EXAMPLES
     ),
     language_item!(
         ManagedImage,

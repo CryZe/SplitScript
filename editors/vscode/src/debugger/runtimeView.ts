@@ -26,8 +26,12 @@ export class RuntimeViewProvider implements vscode.TreeDataProvider<vscode.TreeI
         }
         return [
             item('Program', path.basename(snapshot.program), 'file-code'),
-            item('Status', snapshot.status, snapshot.status === 'trapped' ? 'error' : 'pulse'),
-            item('Timer State', words(snapshot.timer.state), 'watch'),
+            item(
+                'Timer State',
+                words(snapshot.timer.state),
+                'watch',
+                snapshot.timer.state === 'notRunning' ? 'timerNotRunning' : 'timerStarted',
+            ),
             item('Game Time', formatDuration(snapshot.timer.gameTimeSeconds)),
             item('Game Time State', words(snapshot.timer.gameTimeState)),
             item('Split Index', String(snapshot.timer.splitIndex)),
@@ -39,10 +43,16 @@ export class RuntimeViewProvider implements vscode.TreeDataProvider<vscode.TreeI
     }
 }
 
-function item(label: string, description: string, icon?: string): vscode.TreeItem {
+function item(
+    label: string,
+    description: string,
+    icon?: string,
+    contextValue?: string,
+): vscode.TreeItem {
     const value = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
     value.description = description;
     value.tooltip = `${label}: ${description}`;
+    value.contextValue = contextValue;
     if (icon !== undefined) {
         value.iconPath = new vscode.ThemeIcon(icon);
     }

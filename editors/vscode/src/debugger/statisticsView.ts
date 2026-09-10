@@ -48,6 +48,7 @@ export class StatisticsViewProvider implements
                 formatBytes(snapshot.memoryBytes),
                 'Current linear memory used by the debugged WebAssembly module, excluding its code.',
                 'database',
+                'wasmMemory',
             ),
         ];
     }
@@ -57,10 +58,17 @@ export class StatisticsViewProvider implements
     }
 }
 
-function item(label: string, description: string, tooltip?: string, icon?: string): vscode.TreeItem {
+function item(
+    label: string,
+    description: string,
+    tooltip?: string,
+    icon?: string,
+    contextValue?: string,
+): vscode.TreeItem {
     const value = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
     value.description = description;
     value.tooltip = tooltip ?? `${label}: ${description}`;
+    value.contextValue = contextValue;
     if (icon !== undefined) value.iconPath = new vscode.ThemeIcon(icon);
     return value;
 }

@@ -114,8 +114,6 @@ test('runtime view has launch welcome content and active-session actions', () =>
         .filter(item => item.when?.includes('view == splitscript.debugger.runtime'))
         .map(item => item.command);
     assert.deepEqual(actions, [
-        'splitscript.debug.timerStart',
-        'splitscript.debug.timerReset',
         'splitscript.debug.restart',
         'splitscript.debug.stop',
         'splitscript.debug.showLogs',
@@ -129,13 +127,29 @@ test('runtime view has launch welcome content and active-session actions', () =>
         .map(item => item.command);
     assert.deepEqual(statisticsActions, [
         'splitscript.debug.resetStatistics',
-        'splitscript.debug.openMemory',
     ]);
-    assert.deepEqual(manifest.contributes.menus['view/item/context'], [{
-        command: 'splitscript.debug.openProcessMemory',
-        when: 'view == splitscript.debugger.processes && viewItem == openProcess && splitscript.debug.active',
-        group: 'inline@1',
-    }]);
+    assert.deepEqual(manifest.contributes.menus['view/item/context'], [
+        {
+            command: 'splitscript.debug.timerStart',
+            when: 'view == splitscript.debugger.runtime && viewItem == timerNotRunning && splitscript.debug.active',
+            group: 'inline@1',
+        },
+        {
+            command: 'splitscript.debug.timerReset',
+            when: 'view == splitscript.debugger.runtime && viewItem == timerStarted && splitscript.debug.active',
+            group: 'inline@1',
+        },
+        {
+            command: 'splitscript.debug.openMemory',
+            when: 'view == splitscript.debugger.statistics && viewItem == wasmMemory && splitscript.debug.active',
+            group: 'inline@1',
+        },
+        {
+            command: 'splitscript.debug.openProcessMemory',
+            when: 'view == splitscript.debugger.processes && viewItem == openProcess && splitscript.debug.active',
+            group: 'inline@1',
+        },
+    ]);
 });
 
 test('symbol documentation is available from the SplitScript editor context', () => {

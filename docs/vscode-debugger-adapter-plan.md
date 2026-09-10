@@ -118,7 +118,7 @@ Debug views remain uncluttered; users can still rearrange individual views.
 | `asr-debugger` tab | VS Code equivalent |
 | --- | --- |
 | Main | Runtime view plus debug toolbar commands: launch, restart, stop/kill, reload script; timer state and controls remain in the view |
-| Statistics | Statistics tree: tick rate, average/slowest tick, handles, Wasm memory size, reset/open-memory actions |
+| Statistics | Statistics tree: tick rate, average/slowest tick, handles, Wasm memory size, reset action, and inline memory action |
 | Logs | `SplitScript Runtime` Output channel and Debug Console events, with clear/save supplied by VS Code |
 | Variables | Live Variables tree while running; later also standard DAP Scopes/Variables while paused |
 | Settings GUI | Webview view for bool, title, choice, text, and file-select widgets with tooltips and nesting |
@@ -270,9 +270,9 @@ reads memory, and drives the simulated timer.
 
 Status: completed on 2026-09-10. Runtime timing now uses a bounded 2,048-sample
 window and the dedicated Statistics view reports tick rate, average and slowest
-update duration, handles, and linear-memory usage. View-title actions reset
-timing collection and open the read-only Wasm linear memory directly in
-VS Code's Hex Editor. Both Wasm and attached-process memory use the same lazy
+update duration, handles, and linear-memory usage. A view-title action resets
+timing collection, while the memory row opens the read-only Wasm linear memory
+directly in VS Code's Hex Editor. Both Wasm and attached-process memory use the same lazy
 DAP `readMemory` path. Wasm requests use zero-based offsets, while process
 requests preserve their absolute virtual addresses so the Hex Editor can open
 at the selected mapping's base. Sidebar snapshot delivery remains coalesced to

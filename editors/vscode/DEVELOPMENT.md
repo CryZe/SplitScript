@@ -53,6 +53,11 @@ For a local build, `build-native.mjs` builds the bridge for the current supporte
 host. CI supplies a directory of prebuilt platform folders through
 `SPLITSCRIPT_NATIVE_ARTIFACTS`; `SPLITSCRIPT_REQUIRED_NATIVE_PLATFORMS` makes a
 missing artifact fail the build rather than silently producing a partial VSIX.
+The Windows and Linux jobs probe a spawned fixture end to end. GitHub-hosted
+macOS runners cannot provide interactive `task_for_pid` authorization, so the
+macOS jobs probe discovery, modules, mapped ranges, and Mach memory reads against
+the current Node process instead. This keeps native behavior covered without
+pretending that CI can grant permission to inspect another process.
 
 ## Worker architecture
 

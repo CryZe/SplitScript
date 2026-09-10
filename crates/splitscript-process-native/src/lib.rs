@@ -45,7 +45,7 @@ struct Process {
 impl Process {
     fn attach(pid: u32, path: Option<Box<str>>) -> io::Result<Self> {
         let native_pid = pid as Pid;
-        let handle = native_pid.try_into()?;
+        let handle = native_pid.try_into().map_err(process_attach_error)?;
         let now = Instant::now();
         Ok(Self {
             handle,
@@ -152,6 +152,19 @@ impl Process {
         }
         Ok(())
     }
+}
+
+#[cfg(target_os = "macos")]
+fn process_attach_error(_: io::Error) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        "macOS task_for_pid denied access; process memory attachment requires debugger authorization and a target that permits inspection",
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn process_attach_error(error: io::Error) -> io::Error {
+    error
 }
 
 struct ProcessList {

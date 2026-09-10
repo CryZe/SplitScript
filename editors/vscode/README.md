@@ -99,6 +99,9 @@ virtual workspaces.
   coalesced to at most five updates per second. The **Statistics** panel keeps
   a bounded window of 2,048 tick timings and provides reset and lazy Wasm-memory
   actions without stopping the runtime.
+  On macOS, attaching to another process uses `task_for_pid` and is subject to
+  the operating system's debugger authorization and target code-signing rules.
+  A denied attachment reports that permission boundary explicitly.
 - WASI snapshot preview1 (WASI 0.1) is available with a read-only filesystem
   below `/mnt`. Arguments and environment variables are deliberately empty,
   and filesystem-mutating operations return `NOTCAPABLE`.

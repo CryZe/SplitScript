@@ -66,15 +66,16 @@ export class DebugRuntimeSession implements vscode.Disposable {
 
     public async launch(configuration: SplitScriptLaunchConfiguration): Promise<void> {
         if (!vscode.workspace.isTrusted) {
-            throw new Error('SplitScript debugging requires a trusted workspace.');
+            throw new Error('Auto Splitter debugging requires a trusted workspace.');
         }
         const uri = programUri(configuration.program);
         if (uri.scheme !== 'file') {
-            throw new Error('SplitScript debugging currently requires a local file.');
+            throw new Error('Auto Splitter debugging currently requires a local file.');
         }
-        this.hotReload = configuration.hotReload !== false;
+        const sourceProgram = uri.path.toLowerCase().endsWith('.split');
+        this.hotReload = configuration.hotReload ?? sourceProgram;
         this.scriptPath = configuration.scriptPath;
-        this.compiler = await this.createCompiler();
+        this.compiler = sourceProgram ? await this.createCompiler() : undefined;
         const artifact = await this.buildArtifact(uri);
         this.programUri = uri;
         this.callbacks.memoryReset();

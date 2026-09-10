@@ -198,67 +198,67 @@
       },
       {
         "command": "splitscript.debug.start",
-        "title": "SplitScript: Debug Active Script",
-        "shortTitle": "Debug Script",
+        "title": "Auto Splitter Debugger: Debug Active File",
+        "shortTitle": "Debug",
         "icon": "$(debug-start)"
       },
       {
         "command": "splitscript.debug.restart",
-        "title": "SplitScript Debugger: Restart",
+        "title": "Auto Splitter Debugger: Restart",
         "shortTitle": "Restart",
         "icon": "$(debug-restart)"
       },
       {
         "command": "splitscript.debug.stop",
-        "title": "SplitScript Debugger: Stop",
+        "title": "Auto Splitter Debugger: Stop",
         "shortTitle": "Stop",
         "icon": "$(debug-stop)"
       },
       {
         "command": "splitscript.debug.timerStart",
-        "title": "SplitScript Debugger: Start Timer",
+        "title": "Auto Splitter Debugger: Start Timer",
         "shortTitle": "Start Timer",
         "icon": "$(play)"
       },
       {
         "command": "splitscript.debug.timerReset",
-        "title": "SplitScript Debugger: Reset Timer",
+        "title": "Auto Splitter Debugger: Reset Timer",
         "shortTitle": "Reset Timer",
         "icon": "$(discard)"
       },
       {
         "command": "splitscript.debug.showLogs",
-        "title": "SplitScript Debugger: Show Logs",
+        "title": "Auto Splitter Debugger: Show Logs",
         "shortTitle": "Show Logs",
         "icon": "$(output)"
       },
       {
         "command": "splitscript.debug.editSetting",
-        "title": "SplitScript Debugger: Edit Setting",
+        "title": "Auto Splitter Debugger: Edit Setting",
         "shortTitle": "Edit Setting",
         "icon": "$(edit)"
       },
       {
         "command": "splitscript.debug.clearSettings",
-        "title": "SplitScript Debugger: Clear Settings Map",
+        "title": "Auto Splitter Debugger: Clear Settings Map",
         "shortTitle": "Clear",
         "icon": "$(clear-all)"
       },
       {
         "command": "splitscript.debug.resetStatistics",
-        "title": "SplitScript Debugger: Reset Statistics",
+        "title": "Auto Splitter Debugger: Reset Statistics",
         "shortTitle": "Reset Statistics",
         "icon": "$(clear-all)"
       },
       {
         "command": "splitscript.debug.openMemory",
-        "title": "SplitScript Debugger: Open WebAssembly Memory",
+        "title": "Auto Splitter Debugger: Open WebAssembly Memory",
         "shortTitle": "Open Memory",
         "icon": "$(file-binary)"
       },
       {
         "command": "splitscript.debug.openProcessMemory",
-        "title": "SplitScript Debugger: Open Process Memory",
+        "title": "Auto Splitter Debugger: Open Process Memory",
         "shortTitle": "Open Memory",
         "icon": "$(file-binary)"
       }
@@ -266,9 +266,10 @@
     "debuggers": [
       {
         "type": "splitscript",
-        "label": "SplitScript",
+        "label": "Auto Splitter",
         "languages": [
-          "splitscript"
+          "splitscript",
+          "wasm"
         ],
         "configurationAttributes": {
           "launch": {
@@ -282,8 +283,7 @@
               },
               "hotReload": {
                 "type": "boolean",
-                "default": true,
-                "description": "Recompile and restart a .split runtime when the source is saved."
+                "description": "Reload when the program is saved. Defaults to enabled for .split sources and disabled for .wasm modules."
               },
               "scriptPath": {
                 "type": "string",
@@ -296,21 +296,19 @@
           {
             "type": "splitscript",
             "request": "launch",
-            "name": "Debug SplitScript",
-            "program": "${file}",
-            "hotReload": true
+            "name": "Debug Active Auto Splitter",
+            "program": "${file}"
           }
         ],
         "configurationSnippets": [
           {
-            "label": "SplitScript: Debug active script",
-            "description": "Compile and run a SplitScript autosplitter in the VS Code debugger.",
+            "label": "Auto Splitter: Debug active SplitScript or WebAssembly file",
+            "description": "Compile a SplitScript source or directly run a WebAssembly module in the Auto Splitter Debugger.",
             "body": {
               "type": "splitscript",
               "request": "launch",
-              "name": "Debug SplitScript",
-              "program": "${file}",
-              "hotReload": true
+              "name": "Debug Active Auto Splitter",
+              "program": "${file}"
             }
           }
         ]
@@ -320,7 +318,7 @@
       "activitybar": [
         {
           "id": "splitscript-debugger",
-          "title": "SplitScript Debugger",
+          "title": "Auto Splitter Debugger",
           "icon": "media/splitscript-debugger.svg"
         }
       ]
@@ -368,32 +366,32 @@
     "viewsWelcome": [
       {
         "view": "splitscript.debugger.runtime",
-        "contents": "No SplitScript debugger is running.\n[Debug Active SplitScript](command:splitscript.debug.start)",
+        "contents": "No Auto Splitter Debugger is running.\n[Debug a SplitScript or WebAssembly File](command:splitscript.debug.start)",
         "when": "!splitscript.debug.active"
       },
       {
         "view": "splitscript.debugger.settings",
-        "contents": "Settings appear after a SplitScript debugger starts.",
+        "contents": "Settings appear after the Auto Splitter Debugger starts.",
         "when": "!splitscript.debug.active"
       },
       {
         "view": "splitscript.debugger.statistics",
-        "contents": "Runtime statistics appear after a SplitScript debugger starts.",
+        "contents": "Runtime statistics appear after the Auto Splitter Debugger starts.",
         "when": "!splitscript.debug.active"
       },
       {
         "view": "splitscript.debugger.settingsMap",
-        "contents": "The runtime settings map appears after a SplitScript debugger starts.",
+        "contents": "The runtime settings map appears after the Auto Splitter Debugger starts.",
         "when": "!splitscript.debug.active"
       },
       {
         "view": "splitscript.debugger.variables",
-        "contents": "Timer variables appear after a SplitScript debugger starts.",
+        "contents": "Timer variables appear after the Auto Splitter Debugger starts.",
         "when": "!splitscript.debug.active"
       },
       {
         "view": "splitscript.debugger.processes",
-        "contents": "Attached processes appear after a SplitScript debugger starts.",
+        "contents": "Attached processes appear after the Auto Splitter Debugger starts.",
         "when": "!splitscript.debug.active"
       }
     ],
@@ -435,7 +433,7 @@
       "editor/title/run": [
         {
           "command": "splitscript.debug.start",
-          "when": "resourceLangId == splitscript && !splitscript.debug.active",
+          "when": "(resourceLangId == splitscript || resourceExtname == .wasm) && !splitscript.debug.active",
           "group": "run@1"
         }
       ],

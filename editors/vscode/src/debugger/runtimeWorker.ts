@@ -123,19 +123,10 @@ class RuntimeHost {
         const imports = this.createImports(moduleImports, unsupportedImports);
         const instance = await WebAssembly.instantiate(module, imports);
         const memory = instance.exports.memory;
-        if (!(memory instanceof WebAssembly.Memory)) {
-            throw new Error('the ASR module does not export its memory');
-        }
+        if (memory instanceof WebAssembly.Memory) this.memory.bind(memory);
         const update = instance.exports.update;
-        if (typeof update !== 'function') {
-            throw new Error('the ASR module does not export update');
-        }
-        this.memory.bind(memory);
-        const initialize = instance.exports._initialize ?? instance.exports._start;
-        this.initialize = typeof initialize === 'function'
-            ? initialize as () => void
-            : undefined;
-        this.update = update as () => void;
+        this.update = typeof update === 'function' ? update as () => void : undefined;
+        this.initialize = initialEntryPoint(instance.exports, this.update !== undefined);
         this.status = 'running';
         workerPort.postMessage({ type: 'ready', unsupportedImports } satisfies RuntimeResponse);
         if (unsupportedImports.length > 0) {
@@ -159,7 +150,7 @@ class RuntimeHost {
             message: `Loaded ${this.program}`,
         });
         this.emitSnapshot(true);
-        this.scheduleTick(0);
+        if (this.initialize !== undefined || this.update !== undefined) this.scheduleTick(0);
     }
 
     public timerCommand(command: 'start' | 'reset'): void {
@@ -238,15 +229,15 @@ class RuntimeHost {
 
     private tick(): void {
         const update = this.update;
-        if (this.status !== 'running' || update === undefined) {
+        const initialize = this.initialize;
+        if (this.status !== 'running' || (initialize === undefined && update === undefined)) {
             return;
         }
         const started = performance.now();
         try {
-            const initialize = this.initialize;
             this.initialize = undefined;
             initialize?.();
-            update();
+            update?.();
         } catch (error) {
             this.dispose();
             this.emitSnapshot(true);
@@ -259,7 +250,11 @@ class RuntimeHost {
         this.settings.consumeChanged();
         this.processes?.consumeChanged();
         this.emitSnapshot(false);
-        this.scheduleTick(1_000 / this.tickRateHz);
+        if (update !== undefined) {
+            this.scheduleTick(1_000 / this.tickRateHz);
+        } else {
+            this.emitSnapshot(true);
+        }
     }
 
     private createImports(
@@ -459,6 +454,25 @@ function parseU64(value: string, description: string): bigint {
         throw new Error(`the ${description} must be an unsigned 64-bit integer`);
     }
     return parsed;
+}
+
+function initialEntryPoint(
+    exports: WebAssembly.Exports,
+    hasUpdateLoop: boolean,
+): (() => void) | undefined {
+    const initialize = exportedFunction(exports._initialize);
+    const start = exportedFunction(exports._start);
+    if (hasUpdateLoop) return initialize ?? start;
+    if (initialize === undefined) return start;
+    if (start === undefined || start === initialize) return initialize;
+    return () => {
+        initialize();
+        start();
+    };
+}
+
+function exportedFunction(value: WebAssembly.ExportValue | undefined): (() => void) | undefined {
+    return typeof value === 'function' ? value as () => void : undefined;
 }
 
 function asrOperatingSystem(): string {

@@ -14,6 +14,7 @@ const runtimeWorker = process.env.SPLITSCRIPT_RUNTIME_WORKER_PATH
     ?? resolve(extension, 'dist', 'runtimeWorker.js');
 const worker = new Worker(runtimeWorker);
 const wasiWorker = new Worker(runtimeWorker);
+const genericWorker = new Worker(runtimeWorker);
 let snapshotCount = 0;
 worker.on('message', message => {
     if (message.type === 'snapshot') snapshotCount += 1;
@@ -238,10 +239,36 @@ setup {
     assert(!wasiReadyMessage.unsupportedImports.some(name => name.startsWith('wasi_snapshot_preview1.')));
     await wasiRead;
 
-    console.log('Production debug runtime probe passed: launch, process attach/read, lazy memory, tick statistics, log, settings, WASI, timer controls.');
+    const genericReady = waitFor(genericWorker, message => message.type === 'ready');
+    const genericRan = waitFor(
+        genericWorker,
+        message => message.type === 'snapshot' && message.snapshot.tickCount === 1,
+    );
+    const genericWasm = new Uint8Array([
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
+        0x03, 0x02, 0x01, 0x00,
+        0x05, 0x03, 0x01, 0x00, 0x01,
+        0x07, 0x13, 0x02,
+        0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00,
+        0x06, 0x5f, 0x73, 0x74, 0x61, 0x72, 0x74, 0x00, 0x00,
+        0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,
+    ]);
+    genericWorker.postMessage({
+        type: 'launch',
+        wasm: genericWasm.buffer,
+        program: 'generic.wasm',
+    }, [genericWasm.buffer]);
+    const genericReadyMessage = await genericReady;
+    assert.deepEqual(genericReadyMessage.unsupportedImports, []);
+    const genericSnapshot = await genericRan;
+    assert.equal(genericSnapshot.snapshot.memoryBytes, 65_536);
+
+    console.log('Production debug runtime probe passed: ASR and generic Wasm launch, process attach/read, lazy memory, tick statistics, log, settings, WASI, timer controls.');
 } finally {
     await stopWorker(worker);
     await stopWorker(wasiWorker);
+    await stopWorker(genericWorker);
     if (fixture !== undefined) {
         fixture.stdin.end('\n');
         await new Promise(resolvePromise => fixture.once('exit', resolvePromise));

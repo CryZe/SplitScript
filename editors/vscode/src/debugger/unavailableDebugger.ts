@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-const MESSAGE = 'Running SplitScript autosplitters is available in desktop VS Code with a trusted local workspace.';
+const MESSAGE = 'The Auto Splitter Debugger is available in desktop VS Code with a trusted local workspace.';
 
 export function registerUnavailableDebugger(context: vscode.ExtensionContext): void {
     const unavailable = async () => {

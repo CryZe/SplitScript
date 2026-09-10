@@ -38,8 +38,10 @@ interface ExtensionManifest {
         viewsWelcome: Array<{ view: string; when?: string }>;
         menus: {
             'editor/title': MenuContribution[];
+            'editor/title/run': MenuContribution[];
             'editor/context': MenuContribution[];
             'view/title': MenuContribution[];
+            'view/item/context': MenuContribution[];
         };
         configurationDefaults: {
             '[splitscript]': Record<string, unknown>;
@@ -65,13 +67,13 @@ test('documentation has direct, contextual, and searchable commands', () => {
     assert(commands.has('splitscript.searchDocumentation'));
 });
 
-test('desktop debugger contribution launches SplitScript files', () => {
+test('desktop debugger contribution launches SplitScript and WebAssembly files', () => {
     assert(manifest.categories.includes('Debuggers'));
     const debuggerContribution = manifest.contributes.debuggers.find(
         contribution => contribution.type === 'splitscript',
     );
     assert(debuggerContribution !== undefined);
-    assert.deepEqual(debuggerContribution.languages, ['splitscript']);
+    assert.deepEqual(debuggerContribution.languages, ['splitscript', 'wasm']);
     assert.deepEqual(debuggerContribution.configurationAttributes.launch.required, ['program']);
     assert('hotReload' in debuggerContribution.configurationAttributes.launch.properties);
     assert('scriptPath' in debuggerContribution.configurationAttributes.launch.properties);
@@ -83,7 +85,7 @@ test('runtime view has launch welcome content and active-session actions', () =>
     assert.deepEqual(manifest.contributes.viewsContainers.activitybar, [
         {
             id: 'splitscript-debugger',
-            title: 'SplitScript Debugger',
+            title: 'Auto Splitter Debugger',
             icon: 'media/splitscript-debugger.svg',
         },
     ]);
@@ -150,6 +152,14 @@ test('runtime view has launch welcome content and active-session actions', () =>
             group: 'inline@1',
         },
     ]);
+});
+
+test('the debugger run action is available for SplitScript and WebAssembly editors', () => {
+    assert.deepEqual(manifest.contributes.menus['editor/title/run'], [{
+        command: 'splitscript.debug.start',
+        when: '(resourceLangId == splitscript || resourceExtname == .wasm) && !splitscript.debug.active',
+        group: 'run@1',
+    }]);
 });
 
 test('symbol documentation is available from the SplitScript editor context', () => {

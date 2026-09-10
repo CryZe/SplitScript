@@ -159,7 +159,7 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
                 this.respond(request);
                 break;
             case 'threads':
-                this.respond(request, { threads: [{ id: 1, name: 'ASR Runtime' }] });
+                this.respond(request, { threads: [{ id: 1, name: 'Auto Splitting Runtime' }] });
                 break;
             case 'stackTrace':
                 this.respond(request, { stackFrames: [], totalFrames: 0 });
@@ -210,7 +210,7 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
                 break;
             default:
                 this.respond(request, undefined, new Error(
-                    `SplitScript debugger does not support the ${request.command} request yet.`,
+                    `The Auto Splitter Debugger does not support the ${request.command} request yet.`,
                 ));
                 break;
         }

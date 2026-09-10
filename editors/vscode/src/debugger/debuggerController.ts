@@ -33,7 +33,7 @@ export class SplitScriptDebuggerController implements
     private readonly settingsMapView = new SettingsMapViewProvider();
     private readonly variablesView = new VariablesViewProvider();
     private readonly processesView = new ProcessesViewProvider();
-    private readonly output = vscode.window.createOutputChannel('SplitScript Runtime');
+    private readonly output = vscode.window.createOutputChannel('Auto Splitting Runtime');
     private readonly adapters = new Set<SplitScriptDebugAdapter>();
     private compilerModule: Uint8Array | undefined;
     private activeAdapter: SplitScriptDebugAdapter | undefined;
@@ -68,7 +68,9 @@ export class SplitScriptDebuggerController implements
             vscode.window.registerTreeDataProvider('splitscript.debugger.settingsMap', this.settingsMapView),
             vscode.window.registerTreeDataProvider('splitscript.debugger.variables', this.variablesView),
             vscode.window.registerTreeDataProvider('splitscript.debugger.processes', this.processesView),
-            vscode.commands.registerCommand('splitscript.debug.start', async () => this.start()),
+            vscode.commands.registerCommand('splitscript.debug.start', async resource => {
+                await this.start(resource);
+            }),
             vscode.commands.registerCommand('splitscript.debug.restart', async () => {
                 await this.activeAdapter?.restart();
             }),
@@ -105,16 +107,18 @@ export class SplitScriptDebuggerController implements
         configuration: vscode.DebugConfiguration,
     ): vscode.DebugConfiguration | undefined {
         if (!configuration.type && !configuration.request && !configuration.name) {
-            const editor = vscode.window.activeTextEditor;
-            if (editor?.document.languageId !== 'splitscript') {
-                void vscode.window.showInformationMessage('Open a SplitScript file to debug it.');
+            const uri = activeDebugProgram();
+            if (uri === undefined) {
+                void vscode.window.showInformationMessage(
+                    'Open a SplitScript or WebAssembly file to debug it.',
+                );
                 return undefined;
             }
             configuration.type = DEBUG_TYPE;
             configuration.request = 'launch';
-            configuration.name = 'Debug SplitScript';
-            configuration.program = editor.document.uri.fsPath;
-            configuration.hotReload = true;
+            configuration.name = `Debug ${path.basename(uri.fsPath)}`;
+            configuration.program = uri.fsPath;
+            configuration.hotReload = isSplitScript(uri);
         }
         return configuration;
     }
@@ -203,18 +207,29 @@ export class SplitScriptDebuggerController implements
         this.compilerModule = undefined;
     }
 
-    private async start(): Promise<void> {
-        const editor = vscode.window.activeTextEditor;
-        if (editor?.document.languageId !== 'splitscript') {
-            void vscode.window.showInformationMessage('Open a SplitScript file to debug it.');
-            return;
+    private async start(resource: unknown): Promise<void> {
+        let uri = debugProgram(resource) ?? activeDebugProgram();
+        if (uri === undefined) {
+            const selected = await vscode.window.showOpenDialog({
+                title: 'Select a SplitScript or WebAssembly Program',
+                canSelectFiles: true,
+                canSelectFolders: false,
+                canSelectMany: false,
+                filters: {
+                    'Debug Programs': ['split', 'wasm'],
+                    'WebAssembly Modules': ['wasm'],
+                    'SplitScript Sources': ['split'],
+                },
+            });
+            uri = selected?.[0];
         }
+        if (uri === undefined) return;
         await vscode.debug.startDebugging(undefined, {
             type: DEBUG_TYPE,
             request: 'launch',
-            name: `Debug ${editor.document.fileName}`,
-            program: editor.document.uri.fsPath,
-            hotReload: true,
+            name: `Debug ${path.basename(uri.fsPath)}`,
+            program: uri.fsPath,
+            hotReload: isSplitScript(uri),
         });
     }
 
@@ -331,6 +346,30 @@ export class SplitScriptDebuggerController implements
     private setActive(active: boolean): Thenable<unknown> {
         return vscode.commands.executeCommand('setContext', ACTIVE_CONTEXT, active);
     }
+}
+
+function activeDebugProgram(): vscode.Uri | undefined {
+    const document = vscode.window.activeTextEditor?.document;
+    const textUri = document?.uri;
+    if (textUri !== undefined && isDebugProgram(textUri)) return textUri;
+    return debugProgram(vscode.window.tabGroups.activeTabGroup.activeTab?.input);
+}
+
+function debugProgram(value: unknown): vscode.Uri | undefined {
+    if (value instanceof vscode.Uri) return isDebugProgram(value) ? value : undefined;
+    if (typeof value !== 'object' || value === null || !('uri' in value)) return undefined;
+    const uri = value.uri;
+    return uri instanceof vscode.Uri && isDebugProgram(uri) ? uri : undefined;
+}
+
+function isDebugProgram(uri: vscode.Uri): boolean {
+    if (uri.scheme !== 'file') return false;
+    const extension = path.extname(uri.fsPath).toLowerCase();
+    return extension === '.split' || extension === '.wasm';
+}
+
+function isSplitScript(uri: vscode.Uri): boolean {
+    return path.extname(uri.fsPath).toLowerCase() === '.split';
 }
 
 function asError(error: unknown): Error {

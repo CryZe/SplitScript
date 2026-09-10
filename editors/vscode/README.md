@@ -14,11 +14,12 @@ separate native executable.
 3. Run **SplitScript: Open Documentation** and open **Getting started**. That
    compiler-checked guide introduces process attachment, a typed setting, one
    memory field, `old` / `current` snapshots, and the first timer decision.
-4. On desktop, use **SplitScript: Debug Active Script** to compile and run the
-   script inside VS Code. The dedicated **SplitScript Debugger** sidebar shows
+4. On desktop, use **Auto Splitter Debugger: Debug Active File** to compile and
+   run a `.split` source or directly launch a `.wasm` module inside VS Code. The
+   dedicated **Auto Splitter Debugger** sidebar shows
    the simulated timer, runtime statistics, user settings, the raw settings map,
    timer variables, and controls; runtime output is sent to the
-   **SplitScript Runtime** Output channel and Debug Console.
+   **Auto Splitting Runtime** Output channel and Debug Console.
 5. Use **SplitScript: Start Debug Watch** when you only want to continuously
    rebuild a `.wasm` file without launching it.
 6. Use **SplitScript: Build Release** when the module is ready to distribute.
@@ -40,14 +41,14 @@ Use the host's normal local-Wasm workflow to load the generated file.
 | **SplitScript: Search Documentation** | Searches symbols, concepts, signatures, summaries, and migration terms. |
 | **SplitScript: Start Debug Watch** | Saves and builds the active script with the debug profile, then rebuilds it after later saves. |
 | **SplitScript: Stop Debug Watch** | Stops the watcher shown in the status bar. |
-| **SplitScript: Debug Active Script** | Starts a VS Code debug session that compiles and runs the active script in an isolated Node WebAssembly worker. |
-| **SplitScript Debugger: Restart** | Recompiles and replaces the running WebAssembly instance. |
-| **SplitScript Debugger: Start/Reset Timer** | Controls the debugger's simulated timer. |
-| **SplitScript Debugger: Clear Settings Map** | Removes all values currently overridden in the runtime settings map. |
-| **SplitScript Debugger: Reset Statistics** | Clears collected tick timings while leaving the autosplitter running. |
-| **SplitScript Debugger: Open WebAssembly Memory** | Opens linear memory through lazily loaded Debug Adapter Protocol pages in VS Code's Hex Editor. |
-| **SplitScript Debugger: Open Process Memory** | Selects and opens a readable mapped range of an attached process in the Hex Editor. |
-| **SplitScript Debugger: Show Logs** | Opens the runtime Output channel. |
+| **Auto Splitter Debugger: Debug Active File** | Compiles an active `.split` source or directly runs an active `.wasm` module in an isolated Node WebAssembly worker. If neither is active, prompts for one. |
+| **Auto Splitter Debugger: Restart** | Recompiles or rereads and replaces the running WebAssembly instance. |
+| **Auto Splitter Debugger: Start/Reset Timer** | Controls the debugger's simulated timer. |
+| **Auto Splitter Debugger: Clear Settings Map** | Removes all values currently overridden in the runtime settings map. |
+| **Auto Splitter Debugger: Reset Statistics** | Clears collected tick timings while leaving the auto splitter running. |
+| **Auto Splitter Debugger: Open WebAssembly Memory** | Opens linear memory through lazily loaded Debug Adapter Protocol pages in VS Code's Hex Editor. |
+| **Auto Splitter Debugger: Open Process Memory** | Selects a starting mapping and opens a process-wide lazy memory view in the Hex Editor. |
+| **Auto Splitter Debugger: Show Logs** | Opens the runtime Output channel. |
 | **SplitScript: Build Release** | Saves and performs one optimized build of the active script. |
 | **SplitScript: Restart Language Server** | Replaces the language-service worker without reloading the editor window. |
 
@@ -104,6 +105,10 @@ virtual workspaces.
 - Source breakpoints and stepping are not implemented yet. Debug builds already
   carry source and variable metadata; pausing V8 execution requires the planned
   debugger-instrumented compiler mode.
+- A directly launched `.wasm` file is instantiated as-is. Modules exporting
+  `update` use the recurring auto-splitting loop; otherwise `_initialize` and
+  `_start` are invoked once when present. A module with no conventional entry
+  point still runs its WebAssembly start section during instantiation.
 - Building requires a saved `.split` resource and write access beside it.
 - Generated modules require an autosplitting host with WebAssembly GC enabled.
   Older host engines that disable WebAssembly GC cannot instantiate them.

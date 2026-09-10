@@ -1,4 +1,4 @@
-# VS Code ASR debugger adapter plan
+# VS Code Auto Splitter debugger adapter plan
 
 ## Goal
 
@@ -110,16 +110,16 @@ pointers. Webviews must never call it directly.
 
 ## VS Code surface
 
-Contribute a `splitscript` debugger with `launch` support and a default
-configuration for the active `.split` file. Put the debugger views in a
-dedicated SplitScript Debugger Activity Bar container so the standard Run and
+Contribute a `splitscript` debugger type with `launch` support for active
+`.split` and `.wasm` files. Put the debugger views in a dedicated Auto Splitter
+Debugger Activity Bar container so the standard Run and
 Debug views remain uncluttered; users can still rearrange individual views.
 
 | `asr-debugger` tab | VS Code equivalent |
 | --- | --- |
 | Main | Runtime view plus debug toolbar commands: launch, restart, stop/kill, reload script; timer state and controls remain in the view |
 | Statistics | Statistics tree: tick rate, average/slowest tick, handles, Wasm memory size, reset action, and inline memory action |
-| Logs | `SplitScript Runtime` Output channel and Debug Console events, with clear/save supplied by VS Code |
+| Logs | `Auto Splitting Runtime` Output channel and Debug Console events, with clear/save supplied by VS Code |
 | Variables | Live Variables tree while running; later also standard DAP Scopes/Variables while paused |
 | Settings GUI | Webview view for bool, title, choice, text, and file-select widgets with tooltips and nesting |
 | Settings Map | Read-only hierarchical tree plus Clear action |
@@ -131,12 +131,14 @@ example 5-10 Hz), not one message per 120 Hz tick.
 
 ## Launch model
 
-Support two inputs, with the first as the default:
+Support two equally accessible inputs:
 
 1. A saved `.split` file. Compile a debug artifact in memory and launch it
    directly. Save-triggered hot reload reuses the existing compiler worker.
-2. An arbitrary `.wasm` file, with an optional script path for generic ASR
-   runtimes such as JavaScript or C# hosts.
+2. An arbitrary `.wasm` file, with an optional script path. Modules with an
+   `update` export use the recurring auto-splitting loop; other modules invoke
+   `_initialize` / `_start` once when present and otherwise finish running
+   their WebAssembly start section during instantiation.
 
 Suggested initial `launch.json` shape:
 
@@ -144,7 +146,7 @@ Suggested initial `launch.json` shape:
 {
   "type": "splitscript",
   "request": "launch",
-  "name": "Debug SplitScript",
+  "name": "Debug Active Auto Splitter",
   "program": "${file}",
   "stopOnEntry": false,
   "hotReload": true

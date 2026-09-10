@@ -10,6 +10,8 @@ import type {
     RuntimeLogMessage,
     RuntimeRequest,
     RuntimeResponse,
+    RuntimeMemoryRead,
+    RuntimeMemoryTarget,
     RuntimeSnapshot,
     SettingMapSnapshot,
 } from './runtimeProtocol';
@@ -45,15 +47,22 @@ workerPort.on('message', (message: RuntimeRequest) => {
         host?.clearSettings();
     } else if (message.type === 'resetStatistics') {
         host?.resetStatistics();
-    } else if (message.type === 'dumpMemory') {
+    } else if (message.type === 'readMemory') {
         if (host === undefined) {
-            workerPort.postMessage({
-                type: 'memoryDumpFailure',
-                requestId: message.requestId,
-                message: 'the ASR runtime has not loaded its memory yet',
-            } satisfies RuntimeResponse);
+            requestFailure(message.requestId, 'the ASR runtime has not loaded its memory yet');
         } else {
-            host.dumpMemory(message.requestId);
+            host.readMemory(
+                message.requestId,
+                message.target,
+                message.offset,
+                message.count,
+            );
+        }
+    } else if (message.type === 'listProcessMemoryRanges') {
+        if (host === undefined) {
+            requestFailure(message.requestId, 'the ASR runtime is not running');
+        } else {
+            host.listProcessMemoryRanges(message.requestId, message.handle);
         }
     } else if (message.type === 'shutdown') {
         host?.dispose();
@@ -177,20 +186,38 @@ class RuntimeHost {
         this.emitSnapshot(true);
     }
 
-    public dumpMemory(requestId: number): void {
+    public readMemory(
+        requestId: number,
+        target: RuntimeMemoryTarget,
+        offset: number,
+        count: number,
+    ): void {
         try {
-            const bytes = this.memory.copy();
+            const result = this.readMemoryTarget(target, offset, count);
+            const bytes = ownedBytes(result.bytes);
             workerPort.postMessage({
-                type: 'memoryDump',
+                type: 'memoryRead',
                 requestId,
+                address: result.address,
                 bytes: bytes.buffer,
+                unreadableBytes: result.unreadableBytes,
             } satisfies RuntimeResponse, [bytes.buffer]);
         } catch (error) {
+            requestFailure(requestId, error instanceof Error ? error.message : String(error));
+        }
+    }
+
+    public listProcessMemoryRanges(requestId: number, handle: string): void {
+        try {
+            const processes = this.processes;
+            if (processes === undefined) throw new Error('the native process bridge is unavailable');
             workerPort.postMessage({
-                type: 'memoryDumpFailure',
+                type: 'processMemoryRanges',
                 requestId,
-                message: error instanceof Error ? error.message : String(error),
+                ranges: processes.memoryRanges(handle),
             } satisfies RuntimeResponse);
+        } catch (error) {
+            requestFailure(requestId, error instanceof Error ? error.message : String(error));
         }
     }
 
@@ -316,6 +343,60 @@ class RuntimeHost {
         };
     }
 
+    private readMemoryTarget(
+        target: RuntimeMemoryTarget,
+        offset: number,
+        count: number,
+    ): RuntimeMemoryRead {
+        if (!Number.isSafeInteger(offset)) throw new Error('the memory offset must be a safe integer');
+        if (!Number.isSafeInteger(count) || count < 0 || count > 128 * 1_024) {
+            throw new Error('the memory read size must be between 0 and 131072 bytes');
+        }
+        if (offset < 0) throw new Error('memory before the selected region is unavailable');
+
+        if (target.kind === 'wasm') {
+            const available = this.memory.byteLength();
+            const readable = Math.max(0, Math.min(count, available - offset));
+            const bytes = readable === 0
+                ? new Uint8Array()
+                : this.memory.readBytes(offset, readable);
+            return {
+                address: `0x${offset.toString(16)}`,
+                bytes,
+                unreadableBytes: count - readable,
+            };
+        }
+
+        const base = parseU64(target.address, 'process memory address');
+        const size = parseU64(target.size, 'process memory range size');
+        const relative = BigInt(offset);
+        const address = base + relative;
+        if (address > 0xffff_ffff_ffff_ffffn) {
+            throw new Error('the process memory address exceeds 64 bits');
+        }
+        const remaining = relative < size ? size - relative : 0n;
+        const readable = Number(remaining < BigInt(count) ? remaining : BigInt(count));
+        let bytes: Uint8Array<ArrayBufferLike> = new Uint8Array();
+        if (readable > 0) {
+            const processes = this.processes;
+            if (processes === undefined) throw new Error('the native process bridge is unavailable');
+            try {
+                bytes = processes.readMemory(
+                    target.handle,
+                    address.toString(),
+                    readable,
+                );
+            } catch {
+                // DAP represents inaccessible memory as unreadable bytes, not a failed request.
+            }
+        }
+        return {
+            address: `0x${address.toString(16)}`,
+            bytes,
+            unreadableBytes: count - bytes.byteLength,
+        };
+    }
+
     private emitSnapshot(force: boolean): void {
         const now = performance.now();
         if (!force && now - this.lastSnapshotTime < SNAPSHOT_INTERVAL_MILLISECONDS) {
@@ -357,6 +438,28 @@ function fail(error: unknown): void {
         message: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
     } satisfies RuntimeResponse);
+}
+
+function requestFailure(requestId: number, message: string): void {
+    workerPort.postMessage({
+        type: 'requestFailure',
+        requestId,
+        message,
+    } satisfies RuntimeResponse);
+}
+
+function ownedBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+    const owned = new Uint8Array(bytes.byteLength);
+    owned.set(bytes);
+    return owned;
+}
+
+function parseU64(value: string, description: string): bigint {
+    const parsed = BigInt(value);
+    if (parsed < 0n || parsed > 0xffff_ffff_ffff_ffffn) {
+        throw new Error(`the ${description} must be an unsigned 64-bit integer`);
+    }
+    return parsed;
 }
 
 function asrOperatingSystem(): string {

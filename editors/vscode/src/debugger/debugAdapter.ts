@@ -5,7 +5,12 @@ import {
     DebugRuntimeSession,
     type SplitScriptLaunchConfiguration,
 } from './debugRuntimeSession';
-import type { RuntimeLogMessage, RuntimeSnapshot } from './runtimeProtocol';
+import type {
+    ProcessMemoryRange,
+    RuntimeLogMessage,
+    RuntimeMemoryTarget,
+    RuntimeSnapshot,
+} from './runtimeProtocol';
 
 interface DapRequest {
     seq: number;
@@ -44,6 +49,8 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
     private readonly runtime: DebugRuntimeSession;
     private sequence = 1;
     private terminated = false;
+    private nextMemoryReference = 1;
+    private readonly memoryReferences = new Map<string, RuntimeMemoryTarget>();
 
     public readonly onDidSendMessage = this.messages.event;
 
@@ -51,6 +58,7 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
         workerPath: string,
         nativeModulePath: string,
         private readonly host: DebugAdapterHost,
+        public readonly sessionId: string,
     ) {
         this.runtime = new DebugRuntimeSession(
             workerPath,
@@ -63,6 +71,7 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
                     this.output(message);
                 },
                 failure: error => this.runtimeFailure(error),
+                memoryReset: () => this.memoryReferences.clear(),
             },
         );
     }
@@ -96,8 +105,24 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
         this.runtime.resetStatistics();
     }
 
-    public dumpMemory(): Promise<Uint8Array> {
-        return this.runtime.dumpMemory();
+    public wasmMemoryReference(): string {
+        return this.registerMemory({ kind: 'wasm' });
+    }
+
+    public listProcessMemoryRanges(handle: string): Promise<ProcessMemoryRange[]> {
+        return this.runtime.listProcessMemoryRanges(handle);
+    }
+
+    public processMemoryReference(
+        handle: string,
+        range: ProcessMemoryRange,
+    ): string {
+        return this.registerMemory({
+            kind: 'process',
+            handle,
+            address: range.address,
+            size: range.size,
+        });
     }
 
     public async stop(): Promise<void> {
@@ -116,6 +141,7 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
             case 'initialize':
                 this.respond(request, {
                     supportsConfigurationDoneRequest: true,
+                    supportsReadMemoryRequest: true,
                     supportsRestartRequest: true,
                     supportsTerminateRequest: true,
                 });
@@ -151,6 +177,36 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
                 await this.restart();
                 this.respond(request);
                 break;
+            case 'readMemory': {
+                const arguments_ = request.arguments ?? {};
+                const memoryReference = arguments_.memoryReference;
+                const offset = arguments_.offset ?? 0;
+                const count = arguments_.count;
+                if (typeof memoryReference !== 'string') {
+                    throw new Error('readMemory requires a memory reference');
+                }
+                if (typeof offset !== 'number' || !Number.isSafeInteger(offset)) {
+                    throw new Error('readMemory requires a safe integer offset');
+                }
+                if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) {
+                    throw new Error('readMemory requires a non-negative integer byte count');
+                }
+                const target = this.memoryReferences.get(memoryReference);
+                if (target === undefined) {
+                    throw new Error('the memory reference is no longer available');
+                }
+                const result = await this.runtime.readMemory(target, offset, count);
+                this.respond(request, {
+                    address: result.address,
+                    data: Buffer.from(
+                        result.bytes.buffer,
+                        result.bytes.byteOffset,
+                        result.bytes.byteLength,
+                    ).toString('base64'),
+                    unreadableBytes: result.unreadableBytes,
+                });
+                break;
+            }
             case 'disconnect':
             case 'terminate':
                 await this.runtime.stop();
@@ -214,6 +270,12 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
         this.terminated = true;
         this.host.stopped(this);
         this.event('terminated');
+    }
+
+    private registerMemory(target: RuntimeMemoryTarget): string {
+        const reference = `splitscript-memory-${this.nextMemoryReference++}`;
+        this.memoryReferences.set(reference, target);
+        return reference;
     }
 }
 

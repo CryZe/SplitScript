@@ -255,6 +255,12 @@
         "title": "SplitScript Debugger: Open WebAssembly Memory",
         "shortTitle": "Open Memory",
         "icon": "$(file-binary)"
+      },
+      {
+        "command": "splitscript.debug.openProcessMemory",
+        "title": "SplitScript Debugger: Open Process Memory",
+        "shortTitle": "Open Memory",
+        "icon": "$(file-binary)"
       }
     ],
     "debuggers": [
@@ -473,6 +479,13 @@
           "command": "splitscript.debug.openMemory",
           "when": "view == splitscript.debugger.statistics && splitscript.debug.active",
           "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "splitscript.debug.openProcessMemory",
+          "when": "view == splitscript.debugger.processes && viewItem == openProcess && splitscript.debug.active",
+          "group": "inline@1"
         }
       ]
     },

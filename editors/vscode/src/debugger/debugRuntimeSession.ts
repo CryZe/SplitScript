@@ -6,7 +6,13 @@ import {
 } from '../embeddedCompiler';
 import type { EmbeddedCompilerClient } from '../compilerTasks';
 import { RuntimeClient } from './runtimeClient';
-import type { RuntimeLogMessage, RuntimeSnapshot } from './runtimeProtocol';
+import type {
+    ProcessMemoryRange,
+    RuntimeLogMessage,
+    RuntimeMemoryRead,
+    RuntimeMemoryTarget,
+    RuntimeSnapshot,
+} from './runtimeProtocol';
 
 export interface SplitScriptLaunchConfiguration extends vscode.DebugConfiguration {
     type: 'splitscript';
@@ -20,6 +26,7 @@ export interface DebugRuntimeSessionCallbacks {
     snapshot(snapshot: RuntimeSnapshot | undefined): void;
     log(message: RuntimeLogMessage): void;
     failure(error: Error): void;
+    memoryReset(): void;
 }
 
 export class DebugRuntimeSession implements vscode.Disposable {
@@ -70,6 +77,7 @@ export class DebugRuntimeSession implements vscode.Disposable {
         this.compiler = await this.createCompiler();
         const artifact = await this.buildArtifact(uri);
         this.programUri = uri;
+        this.callbacks.memoryReset();
         await this.runtime.launch(artifact, uri.fsPath, this.scriptPath);
     }
 
@@ -82,6 +90,7 @@ export class DebugRuntimeSession implements vscode.Disposable {
             this.callbacks.log(runtimeLog('debug', `Rebuilding ${uri.fsPath}`));
             const artifact = await this.buildArtifact(uri);
             this.callbacks.snapshot(undefined);
+            this.callbacks.memoryReset();
             await this.runtime.launch(artifact, uri.fsPath, this.scriptPath);
             this.callbacks.log(runtimeLog('info', `Reloaded ${uri.fsPath}`));
         });
@@ -105,8 +114,16 @@ export class DebugRuntimeSession implements vscode.Disposable {
         this.runtime.resetStatistics();
     }
 
-    public dumpMemory(): Promise<Uint8Array> {
-        return this.runtime.dumpMemory();
+    public readMemory(
+        target: RuntimeMemoryTarget,
+        offset: number,
+        count: number,
+    ): Promise<RuntimeMemoryRead> {
+        return this.runtime.readMemory(target, offset, count);
+    }
+
+    public listProcessMemoryRanges(handle: string): Promise<ProcessMemoryRange[]> {
+        return this.runtime.listProcessMemoryRanges(handle);
     }
 
     public async stop(): Promise<void> {

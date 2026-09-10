@@ -1,6 +1,10 @@
 import { createRequire } from 'node:module';
 
-import type { ProcessSnapshot, RuntimeLogMessage } from '../runtimeProtocol';
+import type {
+    ProcessMemoryRange,
+    ProcessSnapshot,
+    RuntimeLogMessage,
+} from '../runtimeProtocol';
 import { GuestMemory } from './memory.ts';
 import { nativePathToWasi } from './wasi.ts';
 
@@ -190,6 +194,26 @@ export class ProcessHost {
         }));
     }
 
+    public memoryRanges(handle: string): ProcessMemoryRange[] {
+        const process = this.process(parseHandle(handle));
+        const count = this.bridge.memoryRangeCount(process.nativeHandle);
+        const ranges: ProcessMemoryRange[] = [];
+        for (let index = 0; index < count; index += 1) {
+            const address = this.bridge.memoryRangeAddress(process.nativeHandle, index);
+            const size = this.bridge.memoryRangeSize(process.nativeHandle, index);
+            const flags = this.bridge.memoryRangeFlags(process.nativeHandle, index);
+            if (address !== null && size !== null && flags !== null) {
+                ranges.push({ address, size, flags });
+            }
+        }
+        return ranges;
+    }
+
+    public readMemory(handle: string, address: string, length: number): Uint8Array {
+        const process = this.process(parseHandle(handle));
+        return this.bridge.readProcessMemory(process.nativeHandle, address, length);
+    }
+
     public consumeChanged(): boolean {
         const changed = this.changed;
         this.changed = false;
@@ -287,4 +311,10 @@ export function loadNativeProcessBridge(modulePath: string): NativeProcessBridge
 
 function parseNativeU64(value: string | null): bigint {
     return value === null ? 0n : BigInt(value);
+}
+
+function parseHandle(value: string): bigint {
+    const handle = BigInt(value);
+    if (handle < 0n) throw new Error(`invalid process handle ${value}`);
+    return handle;
 }

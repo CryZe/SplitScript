@@ -1,7 +1,10 @@
 import { Worker } from 'node:worker_threads';
 
 import type {
+    ProcessMemoryRange,
     RuntimeLogMessage,
+    RuntimeMemoryRead,
+    RuntimeMemoryTarget,
     RuntimeRequest,
     RuntimeResponse,
     RuntimeSnapshot,
@@ -19,9 +22,13 @@ export class RuntimeClient {
     private intentionalTermination = false;
     private settings: SettingMapSnapshot | undefined;
     private nextRequestId = 1;
-    private readonly memoryDumps = new Map<
+    private readonly memoryReads = new Map<
         number,
-        { resolve(bytes: Uint8Array): void; reject(error: Error): void }
+        { resolve(result: RuntimeMemoryRead): void; reject(error: Error): void }
+    >();
+    private readonly processMemoryRanges = new Map<
+        number,
+        { resolve(ranges: ProcessMemoryRange[]): void; reject(error: Error): void }
     >();
 
     public constructor(
@@ -101,17 +108,37 @@ export class RuntimeClient {
         if (this.worker !== undefined) this.post({ type: 'resetStatistics' });
     }
 
-    public dumpMemory(): Promise<Uint8Array> {
+    public readMemory(
+        target: RuntimeMemoryTarget,
+        offset: number,
+        count: number,
+    ): Promise<RuntimeMemoryRead> {
         if (this.worker === undefined) {
             return Promise.reject(new Error('the ASR runtime worker is not running'));
         }
         const requestId = this.nextRequestId++;
         return new Promise((resolve, reject) => {
-            this.memoryDumps.set(requestId, { resolve, reject });
+            this.memoryReads.set(requestId, { resolve, reject });
             try {
-                this.post({ type: 'dumpMemory', requestId });
+                this.post({ type: 'readMemory', requestId, target, offset, count });
             } catch (error) {
-                this.memoryDumps.delete(requestId);
+                this.memoryReads.delete(requestId);
+                reject(asError(error));
+            }
+        });
+    }
+
+    public listProcessMemoryRanges(handle: string): Promise<ProcessMemoryRange[]> {
+        if (this.worker === undefined) {
+            return Promise.reject(new Error('the ASR runtime worker is not running'));
+        }
+        const requestId = this.nextRequestId++;
+        return new Promise((resolve, reject) => {
+            this.processMemoryRanges.set(requestId, { resolve, reject });
+            try {
+                this.post({ type: 'listProcessMemoryRanges', requestId, handle });
+            } catch (error) {
+                this.processMemoryRanges.delete(requestId);
                 reject(asError(error));
             }
         });
@@ -124,7 +151,7 @@ export class RuntimeClient {
         }
         this.intentionalTermination = true;
         this.worker = undefined;
-        this.rejectMemoryDumps(new Error('the ASR runtime worker stopped before dumping memory'));
+        this.rejectRequests(new Error('the ASR runtime worker stopped before completing the request'));
         const stopped = new Promise<void>(resolve => {
             const onMessage = (message: RuntimeResponse) => {
                 if (message.type === 'stopped') {
@@ -163,27 +190,41 @@ export class RuntimeClient {
             this.callbacks.log(message);
         } else if (message.type === 'failure') {
             this.handleFailure(runtimeError(message));
-        } else if (message.type === 'memoryDump') {
-            const pending = this.memoryDumps.get(message.requestId);
-            this.memoryDumps.delete(message.requestId);
-            pending?.resolve(new Uint8Array(message.bytes));
-        } else if (message.type === 'memoryDumpFailure') {
-            const pending = this.memoryDumps.get(message.requestId);
-            this.memoryDumps.delete(message.requestId);
-            pending?.reject(new Error(message.message));
+        } else if (message.type === 'memoryRead') {
+            const pending = this.memoryReads.get(message.requestId);
+            this.memoryReads.delete(message.requestId);
+            pending?.resolve({
+                address: message.address,
+                bytes: new Uint8Array(message.bytes),
+                unreadableBytes: message.unreadableBytes,
+            });
+        } else if (message.type === 'processMemoryRanges') {
+            const pending = this.processMemoryRanges.get(message.requestId);
+            this.processMemoryRanges.delete(message.requestId);
+            pending?.resolve(message.ranges);
+        } else if (message.type === 'requestFailure') {
+            const error = new Error(message.message);
+            const memoryRead = this.memoryReads.get(message.requestId);
+            this.memoryReads.delete(message.requestId);
+            memoryRead?.reject(error);
+            const ranges = this.processMemoryRanges.get(message.requestId);
+            this.processMemoryRanges.delete(message.requestId);
+            ranges?.reject(error);
         }
     }
 
     private handleFailure(error: Error): void {
-        this.rejectMemoryDumps(error);
+        this.rejectRequests(error);
         if (!this.intentionalTermination) {
             this.callbacks.failure(error);
         }
     }
 
-    private rejectMemoryDumps(error: Error): void {
-        for (const pending of this.memoryDumps.values()) pending.reject(error);
-        this.memoryDumps.clear();
+    private rejectRequests(error: Error): void {
+        for (const pending of this.memoryReads.values()) pending.reject(error);
+        this.memoryReads.clear();
+        for (const pending of this.processMemoryRanges.values()) pending.reject(error);
+        this.processMemoryRanges.clear();
     }
 }
 

@@ -58,6 +58,27 @@ export interface ProcessSnapshot {
     isOpen: boolean;
 }
 
+export interface ProcessMemoryRange {
+    address: string;
+    size: string;
+    flags: string;
+}
+
+export type RuntimeMemoryTarget =
+    | { kind: 'wasm' }
+    | {
+        kind: 'process';
+        handle: string;
+        address: string;
+        size: string;
+    };
+
+export interface RuntimeMemoryRead {
+    address: string;
+    bytes: Uint8Array;
+    unreadableBytes: number;
+}
+
 export interface RuntimeSnapshot {
     status: 'starting' | 'running' | 'trapped';
     program: string;
@@ -101,9 +122,18 @@ export interface RuntimeResetStatisticsMessage {
     type: 'resetStatistics';
 }
 
-export interface RuntimeDumpMemoryMessage {
-    type: 'dumpMemory';
+export interface RuntimeReadMemoryMessage {
+    type: 'readMemory';
     requestId: number;
+    target: RuntimeMemoryTarget;
+    offset: number;
+    count: number;
+}
+
+export interface RuntimeListProcessMemoryRangesMessage {
+    type: 'listProcessMemoryRanges';
+    requestId: number;
+    handle: string;
 }
 
 export interface RuntimeShutdownMessage {
@@ -116,7 +146,8 @@ export type RuntimeRequest =
     | RuntimeSetSettingMessage
     | RuntimeClearSettingsMessage
     | RuntimeResetStatisticsMessage
-    | RuntimeDumpMemoryMessage
+    | RuntimeReadMemoryMessage
+    | RuntimeListProcessMemoryRangesMessage
     | RuntimeShutdownMessage;
 
 export interface RuntimeReadyMessage {
@@ -147,14 +178,22 @@ export interface RuntimeStoppedMessage {
     type: 'stopped';
 }
 
-export interface RuntimeMemoryDumpMessage {
-    type: 'memoryDump';
+export interface RuntimeMemoryReadMessage {
+    type: 'memoryRead';
     requestId: number;
+    address: string;
     bytes: ArrayBuffer;
+    unreadableBytes: number;
 }
 
-export interface RuntimeMemoryDumpFailureMessage {
-    type: 'memoryDumpFailure';
+export interface RuntimeProcessMemoryRangesMessage {
+    type: 'processMemoryRanges';
+    requestId: number;
+    ranges: ProcessMemoryRange[];
+}
+
+export interface RuntimeRequestFailureMessage {
+    type: 'requestFailure';
     requestId: number;
     message: string;
 }
@@ -164,6 +203,7 @@ export type RuntimeResponse =
     | RuntimeSnapshotMessage
     | RuntimeLogMessage
     | RuntimeFailureMessage
-    | RuntimeMemoryDumpMessage
-    | RuntimeMemoryDumpFailureMessage
+    | RuntimeMemoryReadMessage
+    | RuntimeProcessMemoryRangesMessage
+    | RuntimeRequestFailureMessage
     | RuntimeStoppedMessage;

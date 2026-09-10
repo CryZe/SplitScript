@@ -37,6 +37,7 @@ export function registerUnavailableDebugger(context: vscode.ExtensionContext): v
             'splitscript.debug.clearSettings',
             'splitscript.debug.resetStatistics',
             'splitscript.debug.openMemory',
+            'splitscript.debug.openProcessMemory',
         ].map(command => vscode.commands.registerCommand(command, unavailable)),
     );
 }

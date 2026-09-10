@@ -106,7 +106,7 @@ try {
     assert(!readyMessage.unsupportedImports.some(name => name.includes('settings')));
     await setupLog;
     await attachedLog;
-    await processRead;
+    const attachedSnapshot = await processRead;
     snapshotCount = 0;
     await delay(750);
     assert(
@@ -120,13 +120,59 @@ try {
     assert(running.snapshot.retainedTickCount > 0);
     assert.equal(running.snapshot.settings.widgets.length, 5);
 
-    const memoryDump = waitFor(
+    const memoryRead = waitFor(
         worker,
-        message => message.type === 'memoryDump' && message.requestId === 1,
+        message => message.type === 'memoryRead' && message.requestId === 1,
     );
-    worker.postMessage({ type: 'dumpMemory', requestId: 1 });
-    const dumped = await memoryDump;
-    assert(dumped.bytes.byteLength > 0);
+    worker.postMessage({
+        type: 'readMemory',
+        requestId: 1,
+        target: { kind: 'wasm' },
+        offset: 0,
+        count: 16,
+    });
+    const wasmMemory = await memoryRead;
+    assert.equal(wasmMemory.address, '0x0');
+    assert.equal(wasmMemory.bytes.byteLength, 16);
+    assert.equal(wasmMemory.unreadableBytes, 0);
+
+    if (attachedSnapshot !== undefined) {
+        const process = attachedSnapshot.snapshot.processes.find(
+            candidate => candidate.pid === Number(fixtureFields.pid),
+        );
+        assert(process);
+        const listedRanges = waitFor(
+            worker,
+            message => message.type === 'processMemoryRanges' && message.requestId === 2,
+        );
+        worker.postMessage({
+            type: 'listProcessMemoryRanges',
+            requestId: 2,
+            handle: process.handle,
+        });
+        const ranges = await listedRanges;
+        assert(ranges.ranges.some(range => (BigInt(range.flags) & 2n) !== 0n));
+
+        const processMemoryRead = waitFor(
+            worker,
+            message => message.type === 'memoryRead' && message.requestId === 3,
+        );
+        worker.postMessage({
+            type: 'readMemory',
+            requestId: 3,
+            target: {
+                kind: 'process',
+                handle: process.handle,
+                address: fixtureFields.address,
+                size: '1',
+            },
+            offset: 0,
+            count: 4,
+        });
+        const processMemory = await processMemoryRead;
+        assert.deepEqual([...new Uint8Array(processMemory.bytes)], [83]);
+        assert.equal(processMemory.unreadableBytes, 3);
+    }
 
     const resetStatistics = waitFor(
         worker,
@@ -193,7 +239,7 @@ setup {
     assert(!wasiReadyMessage.unsupportedImports.some(name => name.startsWith('wasi_snapshot_preview1.')));
     await wasiRead;
 
-    console.log('Production debug runtime probe passed: launch, process attach/read, tick statistics, memory dump, log, settings, WASI, timer controls.');
+    console.log('Production debug runtime probe passed: launch, process attach/read, lazy memory, tick statistics, log, settings, WASI, timer controls.');
 } finally {
     await stopWorker(worker);
     await stopWorker(wasiWorker);

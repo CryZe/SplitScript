@@ -45,7 +45,8 @@ Use the host's normal local-Wasm workflow to load the generated file.
 | **SplitScript Debugger: Start/Reset Timer** | Controls the debugger's simulated timer. |
 | **SplitScript Debugger: Clear Settings Map** | Removes all values currently overridden in the runtime settings map. |
 | **SplitScript Debugger: Reset Statistics** | Clears collected tick timings while leaving the autosplitter running. |
-| **SplitScript Debugger: Open WebAssembly Memory** | Opens a point-in-time, read-only copy of the autosplitter's linear memory in VS Code's Hex Editor without creating a dump file. |
+| **SplitScript Debugger: Open WebAssembly Memory** | Opens linear memory through lazily loaded Debug Adapter Protocol pages in VS Code's Hex Editor. |
+| **SplitScript Debugger: Open Process Memory** | Selects and opens a readable mapped range of an attached process in the Hex Editor. |
 | **SplitScript Debugger: Show Logs** | Opens the runtime Output channel. |
 | **SplitScript: Build Release** | Saves and performs one optimized build of the active script. |
 | **SplitScript: Restart Language Server** | Replaces the language-service worker without reloading the editor window. |
@@ -88,10 +89,12 @@ virtual workspaces.
   map/list/value, and SplitScript WASI imports. Native process attachment,
   liveness, module lookup, mapped ranges, and read-only memory access run in a
   Rust N-API bridge; attached processes appear in **Processes**.
+  Each open process has an inline memory action that queries its readable mapped
+  ranges on demand and opens the selected range without copying the entire process.
   The packaged native bridge currently targets Windows x64. Autosplitter ticks
   run at the requested rate independently of sidebar snapshots, which are
   coalesced to at most five updates per second. The **Statistics** panel keeps
-  a bounded window of 2,048 tick timings and provides reset and memory-inspection
+  a bounded window of 2,048 tick timings and provides reset and lazy Wasm-memory
   actions without stopping the runtime.
 - The WASI filesystem is exposed read-only below `/mnt`; an optional
   `scriptPath` launch property supplies the portable `SCRIPT_PATH` environment

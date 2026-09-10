@@ -167,6 +167,10 @@ export class VariablesViewProvider extends SnapshotTreeProvider {
 }
 
 export class ProcessesViewProvider extends SnapshotTreeProvider {
+    public processFor(element: unknown): import('./runtimeProtocol').ProcessSnapshot | undefined {
+        return isProcessNode(element) ? element.process : undefined;
+    }
+
     public getTreeItem(element: DebugTreeNode): vscode.TreeItem {
         if (element.kind === 'plain') return element.item;
         if (element.kind !== 'process') return new vscode.TreeItem('');
@@ -176,6 +180,7 @@ export class ProcessesViewProvider extends SnapshotTreeProvider {
         item.description = `PID ${process.pid} · ${process.isOpen ? 'Open' : 'Closed'}`;
         item.tooltip = process.path ?? `PID ${process.pid}`;
         item.iconPath = new vscode.ThemeIcon(process.isOpen ? 'server-process' : 'circle-slash');
+        item.contextValue = process.isOpen ? 'openProcess' : 'closedProcess';
         return item;
     }
 
@@ -191,6 +196,14 @@ export class ProcessesViewProvider extends SnapshotTreeProvider {
             plainItem('Path', element.process.path ?? 'Unavailable', 'file-binary'),
         ];
     }
+}
+
+function isProcessNode(element: unknown): element is ProcessNode {
+    return typeof element === 'object'
+        && element !== null
+        && 'kind' in element
+        && element.kind === 'process'
+        && 'process' in element;
 }
 
 function settingHierarchy(widgets: readonly SettingWidgetSnapshot[]): WidgetNode[] {

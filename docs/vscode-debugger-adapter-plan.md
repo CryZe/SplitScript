@@ -123,7 +123,7 @@ Debug views remain uncluttered; users can still rearrange individual views.
 | Variables | Live Variables tree while running; later also standard DAP Scopes/Variables while paused |
 | Settings GUI | Webview view for bool, title, choice, text, and file-select widgets with tooltips and nesting |
 | Settings Map | Read-only hierarchical tree plus Clear action |
-| Processes | Tree/table-like view with PID and executable path |
+| Processes | Tree/table-like view with PID and executable path plus lazy mapped-range memory inspection |
 | Performance | Deferred webview histogram; collect bounded samples from the beginning so adding the graph does not change the runtime protocol |
 
 Views should consume immutable session snapshots at a throttled UI rate (for
@@ -251,6 +251,9 @@ attached processes in the dedicated debugger sidebar, and releases them during
 normal shutdown and traps. The production probe compiles a generated
 SplitScript autosplitter, attaches it to the native fixture, reads a known byte,
 and starts the simulated timer from that value.
+Readable mapped ranges can be selected from each process row and are served to
+VS Code's Hex Editor in bounded pages through DAP `readMemory`; the full process
+is never copied into the extension host.
 
 - Add the minimal Rust process crate and N-API wrapper.
 - Add process import implementations and the Processes view.
@@ -268,13 +271,13 @@ reads memory, and drives the simulated timer.
 Status: completed on 2026-09-10. Runtime timing now uses a bounded 2,048-sample
 window and the dedicated Statistics view reports tick rate, average and slowest
 update duration, handles, and linear-memory usage. View-title actions reset
-timing collection and open an isolated, read-only memory snapshot directly in
-VS Code's Hex Editor through an ephemeral in-memory filesystem. Snapshot delivery
-remains coalesced to five updates per second; histogram rendering stays
-deferred.
+timing collection and open the read-only Wasm linear memory directly in
+VS Code's Hex Editor. Both Wasm and attached-process memory use the same lazy
+DAP `readMemory` path. Sidebar snapshot delivery remains coalesced to five
+updates per second; histogram rendering stays deferred.
 
 - Add tick duration sampling, average/slowest tick, handle count, Wasm memory
-  size, reset, and opening a read-only memory snapshot in VS Code's Hex Editor.
+  size, reset, and lazy read-only memory inspection in VS Code's Hex Editor.
 - Add bounded retention and UI throttling.
 - Defer the histogram rendering unless profiling proves it valuable.
 

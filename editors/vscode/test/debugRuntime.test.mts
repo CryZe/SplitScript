@@ -37,20 +37,6 @@ test('guest memory rejects out-of-bounds and invalid UTF-8 reads', () => {
     assert.throws(() => memory.readString(0, 1), TypeError);
 });
 
-test('guest memory dumps are independent copies', () => {
-    const wasmMemory = new WebAssembly.Memory({ initial: 1 });
-    const memory = new GuestMemory();
-    memory.bind(wasmMemory);
-    memory.writeU8(0, 42);
-
-    const dumped = memory.copy();
-    memory.writeU8(0, 7);
-
-    assert.equal(dumped.byteLength, 65_536);
-    assert.equal(dumped[0], 42);
-    assert.equal(memory.readBytes(0, 1)[0], 7);
-});
-
 test('tick statistics retain a bounded recent window and reset cleanly', () => {
     const statistics = new TickStatistics(3);
     statistics.record(1);
@@ -245,6 +231,13 @@ test('process host translates native operations to the ASR process ABI', () => {
     assert.equal(imports.process_get_module_size(handle, 128, name.length), 8192n);
     assert.equal(imports.process_get_memory_range_count(handle), 1n);
     assert.equal(imports.process_get_memory_range_flags(handle, 0n), 27n);
+    assert.deepEqual(host.memoryRanges(handle.toString()), [{
+        address: '4096', size: '8192', flags: '27',
+    }]);
+    assert.deepEqual(
+        [...host.readMemory(handle.toString(), '4096', 4)],
+        [0x2a, 0x2a, 0x2a, 0x2a],
+    );
 
     memory.writeU32(64, 1);
     assert.equal(imports.process_list_by_name(128, name.length, 320, 64), 1);

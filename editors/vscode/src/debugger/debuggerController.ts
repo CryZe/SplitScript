@@ -8,11 +8,8 @@ import type { RuntimeLogMessage, RuntimeSnapshot } from './runtimeProtocol';
 import { RuntimeViewProvider } from './runtimeView';
 import { StatisticsViewProvider } from './statisticsView';
 import {
-    HEX_EDITOR_VIEW_TYPE,
-    MemorySnapshotFileSystem,
-    MEMORY_SNAPSHOT_SCHEME,
-    openMemorySnapshotUris,
-} from './memorySnapshotFileSystem';
+    openDebugMemory,
+} from './debugMemory';
 import {
     SettingsMapViewProvider,
     SettingsViewProvider,
@@ -37,7 +34,6 @@ export class SplitScriptDebuggerController implements
     private readonly variablesView = new VariablesViewProvider();
     private readonly processesView = new ProcessesViewProvider();
     private readonly output = vscode.window.createOutputChannel('SplitScript Runtime');
-    private readonly memorySnapshots = new MemorySnapshotFileSystem();
     private readonly adapters = new Set<SplitScriptDebugAdapter>();
     private compilerModule: Uint8Array | undefined;
     private activeAdapter: SplitScriptDebugAdapter | undefined;
@@ -64,15 +60,6 @@ export class SplitScriptDebuggerController implements
             this.variablesView,
             this.processesView,
             this.output,
-            this.memorySnapshots,
-            vscode.workspace.registerFileSystemProvider(
-                MEMORY_SNAPSHOT_SCHEME,
-                this.memorySnapshots,
-                { isCaseSensitive: true, isReadonly: true },
-            ),
-            vscode.window.tabGroups.onDidChangeTabs(() => {
-                this.memorySnapshots.retainOpen(openMemorySnapshotUris());
-            }),
             vscode.debug.registerDebugConfigurationProvider(DEBUG_TYPE, this),
             vscode.debug.registerDebugAdapterDescriptorFactory(DEBUG_TYPE, this),
             vscode.window.registerTreeDataProvider('splitscript.debugger.runtime', this.runtimeView),
@@ -107,6 +94,9 @@ export class SplitScriptDebuggerController implements
             vscode.commands.registerCommand('splitscript.debug.openMemory', async () => {
                 await this.openMemory();
             }),
+            vscode.commands.registerCommand('splitscript.debug.openProcessMemory', async element => {
+                await this.openProcessMemory(element);
+            }),
         );
     }
 
@@ -140,13 +130,14 @@ export class SplitScriptDebuggerController implements
         return configuration;
     }
 
-    public createDebugAdapterDescriptor(): vscode.DebugAdapterDescriptor {
+    public createDebugAdapterDescriptor(session: vscode.DebugSession): vscode.DebugAdapterDescriptor {
         const adapter = new SplitScriptDebugAdapter(
             this.context.asAbsolutePath('dist/runtimeWorker.js'),
             this.context.asAbsolutePath(
                 `dist/native/${process.platform}-${process.arch}/splitscript_process_native.node`,
             ),
             this,
+            session.id,
         );
         this.adapters.add(adapter);
         return new vscode.DebugAdapterInlineImplementation(adapter);
@@ -273,26 +264,66 @@ export class SplitScriptDebuggerController implements
     private async openMemory(): Promise<void> {
         const adapter = this.activeAdapter;
         if (adapter === undefined) return;
-        let uri: vscode.Uri | undefined;
         try {
-            const bytes = await adapter.dumpMemory();
             const program = this.activeSnapshot?.program;
             const name = program === undefined
-                ? 'memory.bin'
-                : `${path.basename(program, path.extname(program))}-memory.bin`;
-            uri = this.memorySnapshots.create(name, bytes);
-            await vscode.commands.executeCommand(
-                'vscode.openWith',
-                uri,
-                HEX_EDITOR_VIEW_TYPE,
-                { preview: false },
+                ? 'wasm-memory'
+                : `${path.basename(program, path.extname(program))}-wasm-memory`;
+            await openDebugMemory(
+                adapter.sessionId,
+                adapter.wasmMemoryReference(),
+                name,
             );
-            this.memorySnapshots.markOpened(uri);
-            this.memorySnapshots.retainOpen(openMemorySnapshotUris());
         } catch (error) {
-            if (uri !== undefined) this.memorySnapshots.remove(uri);
             void vscode.window.showErrorMessage(
                 `Could not open WebAssembly memory in the Hex Editor: ${asError(error).message}`,
+            );
+        }
+    }
+
+    private async openProcessMemory(element: unknown): Promise<void> {
+        const adapter = this.activeAdapter;
+        const process = this.processesView.processFor(element);
+        if (adapter === undefined || process === undefined || !process.isOpen) return;
+        try {
+            const ranges = (await adapter.listProcessMemoryRanges(process.handle))
+                .filter(range => isReadableRange(range.flags) && BigInt(range.size) > 0n);
+            if (ranges.length === 0) {
+                void vscode.window.showInformationMessage(
+                    `PID ${process.pid} has no readable mapped memory ranges.`,
+                );
+                return;
+            }
+            const selected = await vscode.window.showQuickPick(
+                ranges.map(range => {
+                    const address = BigInt(range.address);
+                    const size = BigInt(range.size);
+                    return {
+                        label: `${hex(address)} – ${hex(address + size)}`,
+                        description: memoryPermissions(range.flags),
+                        detail: formatBytes(size),
+                        range,
+                    };
+                }),
+                {
+                    title: `Open Memory for PID ${process.pid}`,
+                    placeHolder: 'Select a readable mapped range',
+                    matchOnDescription: true,
+                    matchOnDetail: true,
+                },
+            );
+            if (selected === undefined) return;
+            const address = BigInt(selected.range.address);
+            const executable = process.path?.split(/[\\/]/).at(-1) ?? `pid-${process.pid}`;
+            await openDebugMemory(
+                adapter.sessionId,
+                adapter.processMemoryReference(process.handle, selected.range),
+                `${executable}-${address.toString(16)}`,
+                selected.range.address,
+            );
+        } catch (error) {
+            void vscode.window.showErrorMessage(
+                `Could not open process memory in the Hex Editor: ${asError(error).message}`,
             );
         }
     }
@@ -304,6 +335,38 @@ export class SplitScriptDebuggerController implements
 
 function asError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
+}
+
+function isReadableRange(flags: string): boolean {
+    return (BigInt(flags) & 2n) !== 0n;
+}
+
+function memoryPermissions(flags: string): string {
+    const value = BigInt(flags);
+    return [
+        (value & 2n) !== 0n ? 'r' : '-',
+        (value & 4n) !== 0n ? 'w' : '-',
+        (value & 8n) !== 0n ? 'x' : '-',
+    ].join('');
+}
+
+function hex(value: bigint): string {
+    return `0x${value.toString(16).padStart(8, '0')}`;
+}
+
+function formatBytes(bytes: bigint): string {
+    const kibibyte = 1_024n;
+    const mebibyte = kibibyte * kibibyte;
+    const gibibyte = mebibyte * kibibyte;
+    if (bytes >= gibibyte) return `${formatRatio(bytes, gibibyte)} GiB`;
+    if (bytes >= mebibyte) return `${formatRatio(bytes, mebibyte)} MiB`;
+    if (bytes >= kibibyte) return `${formatRatio(bytes, kibibyte)} KiB`;
+    return `${bytes} B`;
+}
+
+function formatRatio(value: bigint, unit: bigint): string {
+    const tenths = value * 10n / unit;
+    return `${tenths / 10n}.${tenths % 10n}`;
 }
 
 function fileFilters(

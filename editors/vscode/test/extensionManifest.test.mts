@@ -131,6 +131,11 @@ test('runtime view has launch welcome content and active-session actions', () =>
         'splitscript.debug.resetStatistics',
         'splitscript.debug.openMemory',
     ]);
+    assert.deepEqual(manifest.contributes.menus['view/item/context'], [{
+        command: 'splitscript.debug.openProcessMemory',
+        when: 'view == splitscript.debugger.processes && viewItem == openProcess && splitscript.debug.active',
+        group: 'inline@1',
+    }]);
 });
 
 test('symbol documentation is available from the SplitScript editor context', () => {

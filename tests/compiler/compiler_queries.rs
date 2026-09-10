@@ -258,12 +258,27 @@ fn vscode_manifest_tracks_the_lsp_semantic_token_legend() {
     let editor_actions = manifest["contributes"]["menus"]["editor/title"]
         .as_array()
         .unwrap();
-    for command in [
-        "splitscript.buildRelease",
-        "splitscript.startDebugWatch",
-        "splitscript.stopDebugWatch",
-    ] {
-        assert!(editor_actions.iter().any(|menu| menu["command"] == command));
+    assert!(
+        editor_actions
+            .iter()
+            .any(|menu| menu["command"] == "splitscript.buildRelease")
+    );
+    for command in ["splitscript.startDebugWatch", "splitscript.stopDebugWatch"] {
+        assert!(
+            !editor_actions.iter().any(|menu| menu["command"] == command),
+            "debug watch commands should not duplicate the debugger button in the editor title"
+        );
+    }
+    let editor_context_actions = manifest["contributes"]["menus"]["editor/context"]
+        .as_array()
+        .unwrap();
+    for command in ["splitscript.startDebugWatch", "splitscript.stopDebugWatch"] {
+        assert!(
+            editor_context_actions
+                .iter()
+                .any(|menu| menu["command"] == command),
+            "debug watch command `{command}` should remain available in the editor context menu"
+        );
     }
     assert!(
         manifest["contributes"]["configuration"]["properties"]["splitScript.compiler.profile"]

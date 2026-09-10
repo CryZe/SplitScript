@@ -1,9 +1,18 @@
+import * as path from 'node:path';
+
 import * as vscode from 'vscode';
 
 import type { EmbeddedCompilerClient, EmbeddedCompilerFactory } from '../compilerTasks';
 import { SplitScriptDebugAdapter, type DebugAdapterHost } from './debugAdapter';
 import type { RuntimeLogMessage, RuntimeSnapshot } from './runtimeProtocol';
 import { RuntimeViewProvider } from './runtimeView';
+import { StatisticsViewProvider } from './statisticsView';
+import {
+    HEX_EDITOR_VIEW_TYPE,
+    MemorySnapshotFileSystem,
+    MEMORY_SNAPSHOT_SCHEME,
+    openMemorySnapshotUris,
+} from './memorySnapshotFileSystem';
 import {
     SettingsMapViewProvider,
     SettingsViewProvider,
@@ -22,14 +31,17 @@ export class SplitScriptDebuggerController implements
     vscode.Disposable
 {
     private readonly runtimeView = new RuntimeViewProvider();
+    private readonly statisticsView = new StatisticsViewProvider();
     private readonly settingsView = new SettingsViewProvider();
     private readonly settingsMapView = new SettingsMapViewProvider();
     private readonly variablesView = new VariablesViewProvider();
     private readonly processesView = new ProcessesViewProvider();
     private readonly output = vscode.window.createOutputChannel('SplitScript Runtime');
+    private readonly memorySnapshots = new MemorySnapshotFileSystem();
     private readonly adapters = new Set<SplitScriptDebugAdapter>();
     private compilerModule: Uint8Array | undefined;
     private activeAdapter: SplitScriptDebugAdapter | undefined;
+    private activeSnapshot: RuntimeSnapshot | undefined;
 
     public constructor(
         private readonly context: vscode.ExtensionContext,
@@ -46,14 +58,25 @@ export class SplitScriptDebuggerController implements
         this.context.subscriptions.push(
             this,
             this.runtimeView,
+            this.statisticsView,
             this.settingsView,
             this.settingsMapView,
             this.variablesView,
             this.processesView,
             this.output,
+            this.memorySnapshots,
+            vscode.workspace.registerFileSystemProvider(
+                MEMORY_SNAPSHOT_SCHEME,
+                this.memorySnapshots,
+                { isCaseSensitive: true, isReadonly: true },
+            ),
+            vscode.window.tabGroups.onDidChangeTabs(() => {
+                this.memorySnapshots.retainOpen(openMemorySnapshotUris());
+            }),
             vscode.debug.registerDebugConfigurationProvider(DEBUG_TYPE, this),
             vscode.debug.registerDebugAdapterDescriptorFactory(DEBUG_TYPE, this),
             vscode.window.registerTreeDataProvider('splitscript.debugger.runtime', this.runtimeView),
+            vscode.window.registerTreeDataProvider('splitscript.debugger.statistics', this.statisticsView),
             vscode.window.registerTreeDataProvider('splitscript.debugger.settings', this.settingsView),
             vscode.window.registerTreeDataProvider('splitscript.debugger.settingsMap', this.settingsMapView),
             vscode.window.registerTreeDataProvider('splitscript.debugger.variables', this.variablesView),
@@ -77,6 +100,12 @@ export class SplitScriptDebuggerController implements
             }),
             vscode.commands.registerCommand('splitscript.debug.clearSettings', () => {
                 this.activeAdapter?.clearSettings();
+            }),
+            vscode.commands.registerCommand('splitscript.debug.resetStatistics', () => {
+                this.activeAdapter?.resetStatistics();
+            }),
+            vscode.commands.registerCommand('splitscript.debug.openMemory', async () => {
+                await this.openMemory();
             }),
         );
     }
@@ -136,7 +165,9 @@ export class SplitScriptDebuggerController implements
         snapshot: RuntimeSnapshot | undefined,
     ): void {
         if (this.activeAdapter === adapter) {
+            this.activeSnapshot = snapshot;
             this.runtimeView.update(snapshot);
+            this.statisticsView.update(snapshot);
             this.settingsView.update(snapshot);
             this.settingsMapView.update(snapshot);
             this.variablesView.update(snapshot);
@@ -160,7 +191,9 @@ export class SplitScriptDebuggerController implements
         this.adapters.delete(adapter);
         if (this.activeAdapter === adapter) {
             this.activeAdapter = undefined;
+            this.activeSnapshot = undefined;
             this.runtimeView.update(undefined);
+            this.statisticsView.update(undefined);
             this.settingsView.update(undefined);
             this.settingsMapView.update(undefined);
             this.variablesView.update(undefined);
@@ -175,6 +208,7 @@ export class SplitScriptDebuggerController implements
         }
         this.adapters.clear();
         this.activeAdapter = undefined;
+        this.activeSnapshot = undefined;
         this.compilerModule = undefined;
     }
 
@@ -236,9 +270,40 @@ export class SplitScriptDebuggerController implements
         }
     }
 
+    private async openMemory(): Promise<void> {
+        const adapter = this.activeAdapter;
+        if (adapter === undefined) return;
+        let uri: vscode.Uri | undefined;
+        try {
+            const bytes = await adapter.dumpMemory();
+            const program = this.activeSnapshot?.program;
+            const name = program === undefined
+                ? 'memory.bin'
+                : `${path.basename(program, path.extname(program))}-memory.bin`;
+            uri = this.memorySnapshots.create(name, bytes);
+            await vscode.commands.executeCommand(
+                'vscode.openWith',
+                uri,
+                HEX_EDITOR_VIEW_TYPE,
+                { preview: false },
+            );
+            this.memorySnapshots.markOpened(uri);
+            this.memorySnapshots.retainOpen(openMemorySnapshotUris());
+        } catch (error) {
+            if (uri !== undefined) this.memorySnapshots.remove(uri);
+            void vscode.window.showErrorMessage(
+                `Could not open WebAssembly memory in the Hex Editor: ${asError(error).message}`,
+            );
+        }
+    }
+
     private setActive(active: boolean): Thenable<unknown> {
         return vscode.commands.executeCommand('setContext', ACTIVE_CONTEXT, active);
     }
+}
+
+function asError(error: unknown): Error {
+    return error instanceof Error ? error : new Error(String(error));
 }
 
 function fileFilters(

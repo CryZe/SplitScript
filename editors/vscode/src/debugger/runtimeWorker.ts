@@ -13,6 +13,7 @@ import type {
     RuntimeSnapshot,
     SettingMapSnapshot,
 } from './runtimeProtocol';
+import { TickStatistics } from './runtimeStatistics';
 
 const port = parentPort;
 if (port === null) {
@@ -20,6 +21,7 @@ if (port === null) {
 }
 const workerPort = port;
 const SNAPSHOT_INTERVAL_MILLISECONDS = 200;
+const RETAINED_TICK_SAMPLES = 2_048;
 let host: RuntimeHost | undefined;
 
 workerPort.on('message', (message: RuntimeRequest) => {
@@ -41,6 +43,18 @@ workerPort.on('message', (message: RuntimeRequest) => {
         host?.setSetting(message.key, message.value);
     } else if (message.type === 'clearSettings') {
         host?.clearSettings();
+    } else if (message.type === 'resetStatistics') {
+        host?.resetStatistics();
+    } else if (message.type === 'dumpMemory') {
+        if (host === undefined) {
+            workerPort.postMessage({
+                type: 'memoryDumpFailure',
+                requestId: message.requestId,
+                message: 'the ASR runtime has not loaded its memory yet',
+            } satisfies RuntimeResponse);
+        } else {
+            host.dumpMemory(message.requestId);
+        }
     } else if (message.type === 'shutdown') {
         host?.dispose();
         host = undefined;
@@ -58,8 +72,7 @@ class RuntimeHost {
     private status: RuntimeSnapshot['status'] = 'starting';
     private tickRateHz = 120;
     private tickCount = 0;
-    private averageTickMilliseconds = 0;
-    private slowestTickMilliseconds = 0;
+    private readonly tickStatistics = new TickStatistics(RETAINED_TICK_SAMPLES);
     private lastSnapshotTime = 0;
     private initialize: (() => void) | undefined;
     private update: (() => void) | undefined;
@@ -159,6 +172,28 @@ class RuntimeHost {
         this.emitSnapshot(true);
     }
 
+    public resetStatistics(): void {
+        this.tickStatistics.reset();
+        this.emitSnapshot(true);
+    }
+
+    public dumpMemory(requestId: number): void {
+        try {
+            const bytes = this.memory.copy();
+            workerPort.postMessage({
+                type: 'memoryDump',
+                requestId,
+                bytes: bytes.buffer,
+            } satisfies RuntimeResponse, [bytes.buffer]);
+        } catch (error) {
+            workerPort.postMessage({
+                type: 'memoryDumpFailure',
+                requestId,
+                message: error instanceof Error ? error.message : String(error),
+            } satisfies RuntimeResponse);
+        }
+    }
+
     public dispose(): void {
         this.status = 'trapped';
         if (this.tickTimer !== undefined) {
@@ -192,10 +227,7 @@ class RuntimeHost {
         }
         const duration = performance.now() - started;
         this.tickCount += 1;
-        this.averageTickMilliseconds = this.tickCount === 1
-            ? duration
-            : this.averageTickMilliseconds * 0.999 + duration * 0.001;
-        this.slowestTickMilliseconds = Math.max(this.slowestTickMilliseconds, duration);
+        this.tickStatistics.record(duration);
         this.settings.consumeChanged();
         this.processes?.consumeChanged();
         this.emitSnapshot(false);
@@ -290,6 +322,7 @@ class RuntimeHost {
             return;
         }
         this.lastSnapshotTime = now;
+        const statistics = this.tickStatistics.snapshot();
         workerPort.postMessage({
             type: 'snapshot',
             snapshot: {
@@ -297,8 +330,10 @@ class RuntimeHost {
                 program: this.program,
                 tickRateHz: this.tickRateHz,
                 tickCount: this.tickCount,
-                averageTickMilliseconds: this.averageTickMilliseconds,
-                slowestTickMilliseconds: this.slowestTickMilliseconds,
+                sampledTickCount: statistics.sampleCount,
+                retainedTickCount: statistics.retainedSampleCount,
+                averageTickMilliseconds: statistics.averageMilliseconds,
+                slowestTickMilliseconds: statistics.slowestMilliseconds,
                 memoryBytes: this.memory.byteLength(),
                 timer: this.timer.snapshot(),
                 settings: this.settings.snapshot(),

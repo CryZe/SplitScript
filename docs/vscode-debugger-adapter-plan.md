@@ -111,14 +111,14 @@ pointers. Webviews must never call it directly.
 ## VS Code surface
 
 Contribute a `splitscript` debugger with `launch` support and a default
-configuration for the active `.split` file. Put the debugger views in the
-existing Run and Debug container so they follow VS Code's normal debugging UI
-and can be rearranged by users.
+configuration for the active `.split` file. Put the debugger views in a
+dedicated SplitScript Debugger Activity Bar container so the standard Run and
+Debug views remain uncluttered; users can still rearrange individual views.
 
 | `asr-debugger` tab | VS Code equivalent |
 | --- | --- |
 | Main | Runtime view plus debug toolbar commands: launch, restart, stop/kill, reload script; timer state and controls remain in the view |
-| Statistics | Statistics tree: requested tick interval, average/slowest tick, handles, Wasm memory size, reset/dump actions |
+| Statistics | Statistics tree: tick rate, average/slowest tick, handles, Wasm memory size, reset/open-memory actions |
 | Logs | `SplitScript Runtime` Output channel and Debug Console events, with clear/save supplied by VS Code |
 | Variables | Live Variables tree while running; later also standard DAP Scopes/Variables while paused |
 | Settings GUI | Webview view for bool, title, choice, text, and file-select widgets with tooltips and nesting |
@@ -227,7 +227,7 @@ Status: completed on 2026-09-08. The worker now implements the ASR settings
 map/list/value handle APIs, bool/title/choice/text/file widgets and tooltips,
 settings preservation across runtime replacement, and a read-only WASI Preview
 1 host for SplitScript clocks and file operations. An optional `scriptPath`
-launch property is exposed as `SCRIPT_PATH`. The Run and Debug sidebar now has
+launch property is exposed as `SCRIPT_PATH`. The dedicated debugger sidebar has
 interactive Settings, recursive Settings Map, and timer Variables views. Unit
 tests cover the handle and filesystem contracts; generated SplitScript probes
 and the reference debugger's settings-heavy Wasm modules validate the actual
@@ -247,7 +247,7 @@ Status: completed on 2026-09-08 for Windows x64. The Rust N-API bridge now
 adapts the process discovery, attachment, liveness, read-only memory, module,
 and mapped-range behavior from `livesplit-auto-splitting`. The Node worker owns
 ASR-compatible 64-bit guest handles, keeps native handles inside Rust, exposes
-attached processes in the Run and Debug sidebar, and releases them during
+attached processes in the dedicated debugger sidebar, and releases them during
 normal shutdown and traps. The production probe compiles a generated
 SplitScript autosplitter, attaches it to the native fixture, reads a known byte,
 and starts the simulated timer from that value.
@@ -265,8 +265,16 @@ reads memory, and drives the simulated timer.
 
 ### 4. Diagnostics and statistics
 
+Status: completed on 2026-09-10. Runtime timing now uses a bounded 2,048-sample
+window and the dedicated Statistics view reports tick rate, average and slowest
+update duration, handles, and linear-memory usage. View-title actions reset
+timing collection and open an isolated, read-only memory snapshot directly in
+VS Code's Hex Editor through an ephemeral in-memory filesystem. Snapshot delivery
+remains coalesced to five updates per second; histogram rendering stays
+deferred.
+
 - Add tick duration sampling, average/slowest tick, handle count, Wasm memory
-  size, clear/reset, and memory dump through the VS Code save dialog.
+  size, reset, and opening a read-only memory snapshot in VS Code's Hex Editor.
 - Add bounded retention and UI throttling.
 - Defer the histogram rendering unless profiling proves it valuable.
 

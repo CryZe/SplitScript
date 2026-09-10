@@ -91,11 +91,20 @@ test('runtime view has launch welcome content and active-session actions', () =>
         manifest.contributes.views['splitscript-debugger'].map(view => view.id),
         [
             'splitscript.debugger.runtime',
+            'splitscript.debugger.statistics',
             'splitscript.debugger.settings',
             'splitscript.debugger.settingsMap',
             'splitscript.debugger.variables',
             'splitscript.debugger.processes',
         ],
+    );
+    assert.deepEqual(
+        manifest.contributes.views['splitscript-debugger'].map(view => view.name),
+        ['Runtime', 'Statistics', 'Settings', 'Settings Map', 'Variables', 'Processes'],
+    );
+    assert.deepEqual(
+        manifest.contributes.views['splitscript-debugger'].map(view => view.contextualTitle),
+        ['Runtime', 'Statistics', 'Settings', 'Settings Map', 'Variables', 'Processes'],
     );
     assert(manifest.contributes.viewsWelcome.some(
         welcome => welcome.view === 'splitscript.debugger.runtime'
@@ -115,6 +124,13 @@ test('runtime view has launch welcome content and active-session actions', () =>
         item => item.command === 'splitscript.debug.clearSettings'
             && item.when?.includes('view == splitscript.debugger.settingsMap'),
     ));
+    const statisticsActions = manifest.contributes.menus['view/title']
+        .filter(item => item.when?.includes('view == splitscript.debugger.statistics'))
+        .map(item => item.command);
+    assert.deepEqual(statisticsActions, [
+        'splitscript.debug.resetStatistics',
+        'splitscript.debug.openMemory',
+    ]);
 });
 
 test('symbol documentation is available from the SplitScript editor context', () => {

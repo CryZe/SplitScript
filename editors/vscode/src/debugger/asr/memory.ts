@@ -11,6 +11,16 @@ export class GuestMemory {
         return this.memory?.buffer.byteLength ?? 0;
     }
 
+    public copy(): Uint8Array<ArrayBuffer> {
+        const memory = this.memory;
+        if (memory === undefined) {
+            throw new WebAssembly.RuntimeError('guest memory is not available yet');
+        }
+        const copy = new Uint8Array(new ArrayBuffer(memory.buffer.byteLength));
+        copy.set(new Uint8Array(memory.buffer));
+        return copy;
+    }
+
     public readString(pointer: number, length: number): string {
         return this.decoder.decode(this.slice(pointer, length));
     }

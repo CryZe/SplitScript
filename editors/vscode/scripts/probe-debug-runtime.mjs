@@ -10,8 +10,10 @@ import { Worker } from 'node:worker_threads';
 const extension = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repository = resolve(extension, '..', '..');
 const temporary = await mkdtemp(join(tmpdir(), 'splitscript-debug-runtime-'));
-const worker = new Worker(resolve(extension, 'dist', 'runtimeWorker.js'));
-const wasiWorker = new Worker(resolve(extension, 'dist', 'runtimeWorker.js'));
+const runtimeWorker = process.env.SPLITSCRIPT_RUNTIME_WORKER_PATH
+    ?? resolve(extension, 'dist', 'runtimeWorker.js');
+const worker = new Worker(runtimeWorker);
+const wasiWorker = new Worker(runtimeWorker);
 let snapshotCount = 0;
 worker.on('message', message => {
     if (message.type === 'snapshot') snapshotCount += 1;
@@ -114,7 +116,25 @@ try {
     const running = await configured;
     assert(running.snapshot.memoryBytes > 0);
     assert.equal(running.snapshot.tickRateHz, 120);
+    assert(running.snapshot.sampledTickCount > 0);
+    assert(running.snapshot.retainedTickCount > 0);
     assert.equal(running.snapshot.settings.widgets.length, 5);
+
+    const memoryDump = waitFor(
+        worker,
+        message => message.type === 'memoryDump' && message.requestId === 1,
+    );
+    worker.postMessage({ type: 'dumpMemory', requestId: 1 });
+    const dumped = await memoryDump;
+    assert(dumped.bytes.byteLength > 0);
+
+    const resetStatistics = waitFor(
+        worker,
+        message => message.type === 'snapshot'
+            && message.snapshot.sampledTickCount === 0,
+    );
+    worker.postMessage({ type: 'resetStatistics' });
+    await resetStatistics;
 
     const changedSetting = waitFor(
         worker,
@@ -173,7 +193,7 @@ setup {
     assert(!wasiReadyMessage.unsupportedImports.some(name => name.startsWith('wasi_snapshot_preview1.')));
     await wasiRead;
 
-    console.log('Production debug runtime probe passed: launch, process attach/read, tick, log, settings, WASI, timer controls.');
+    console.log('Production debug runtime probe passed: launch, process attach/read, tick statistics, memory dump, log, settings, WASI, timer controls.');
 } finally {
     await stopWorker(worker);
     await stopWorker(wasiWorker);

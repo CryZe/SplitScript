@@ -18,6 +18,11 @@ export class RuntimeClient {
     private worker: Worker | undefined;
     private intentionalTermination = false;
     private settings: SettingMapSnapshot | undefined;
+    private nextRequestId = 1;
+    private readonly memoryDumps = new Map<
+        number,
+        { resolve(bytes: Uint8Array): void; reject(error: Error): void }
+    >();
 
     public constructor(
         private readonly workerPath: string,
@@ -92,6 +97,26 @@ export class RuntimeClient {
         if (this.worker !== undefined) this.post({ type: 'clearSettings' });
     }
 
+    public resetStatistics(): void {
+        if (this.worker !== undefined) this.post({ type: 'resetStatistics' });
+    }
+
+    public dumpMemory(): Promise<Uint8Array> {
+        if (this.worker === undefined) {
+            return Promise.reject(new Error('the ASR runtime worker is not running'));
+        }
+        const requestId = this.nextRequestId++;
+        return new Promise((resolve, reject) => {
+            this.memoryDumps.set(requestId, { resolve, reject });
+            try {
+                this.post({ type: 'dumpMemory', requestId });
+            } catch (error) {
+                this.memoryDumps.delete(requestId);
+                reject(asError(error));
+            }
+        });
+    }
+
     public async terminate(): Promise<void> {
         const worker = this.worker;
         if (worker === undefined) {
@@ -99,6 +124,7 @@ export class RuntimeClient {
         }
         this.intentionalTermination = true;
         this.worker = undefined;
+        this.rejectMemoryDumps(new Error('the ASR runtime worker stopped before dumping memory'));
         const stopped = new Promise<void>(resolve => {
             const onMessage = (message: RuntimeResponse) => {
                 if (message.type === 'stopped') {
@@ -137,13 +163,27 @@ export class RuntimeClient {
             this.callbacks.log(message);
         } else if (message.type === 'failure') {
             this.handleFailure(runtimeError(message));
+        } else if (message.type === 'memoryDump') {
+            const pending = this.memoryDumps.get(message.requestId);
+            this.memoryDumps.delete(message.requestId);
+            pending?.resolve(new Uint8Array(message.bytes));
+        } else if (message.type === 'memoryDumpFailure') {
+            const pending = this.memoryDumps.get(message.requestId);
+            this.memoryDumps.delete(message.requestId);
+            pending?.reject(new Error(message.message));
         }
     }
 
     private handleFailure(error: Error): void {
+        this.rejectMemoryDumps(error);
         if (!this.intentionalTermination) {
             this.callbacks.failure(error);
         }
+    }
+
+    private rejectMemoryDumps(error: Error): void {
+        for (const pending of this.memoryDumps.values()) pending.reject(error);
+        this.memoryDumps.clear();
     }
 }
 
@@ -154,4 +194,8 @@ function runtimeError(message: Extract<RuntimeResponse, { type: 'failure' }>): E
         error.stack = message.stack;
     }
     return error;
+}
+
+function asError(error: unknown): Error {
+    return error instanceof Error ? error : new Error(String(error));
 }

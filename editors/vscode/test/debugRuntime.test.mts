@@ -7,6 +7,7 @@ import { DebuggerTimer } from '../src/debugger/asr/timer.ts';
 import { SettingsHost } from '../src/debugger/asr/settings.ts';
 import { nativePathToWasi, WasiHost } from '../src/debugger/asr/wasi.ts';
 import { ProcessHost, type NativeProcessBridge } from '../src/debugger/asr/process.ts';
+import { TickStatistics } from '../src/debugger/runtimeStatistics.ts';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,6 +35,45 @@ test('guest memory rejects out-of-bounds and invalid UTF-8 reads', () => {
 
     assert.throws(() => memory.readString(65_535, 2), WebAssembly.RuntimeError);
     assert.throws(() => memory.readString(0, 1), TypeError);
+});
+
+test('guest memory dumps are independent copies', () => {
+    const wasmMemory = new WebAssembly.Memory({ initial: 1 });
+    const memory = new GuestMemory();
+    memory.bind(wasmMemory);
+    memory.writeU8(0, 42);
+
+    const dumped = memory.copy();
+    memory.writeU8(0, 7);
+
+    assert.equal(dumped.byteLength, 65_536);
+    assert.equal(dumped[0], 42);
+    assert.equal(memory.readBytes(0, 1)[0], 7);
+});
+
+test('tick statistics retain a bounded recent window and reset cleanly', () => {
+    const statistics = new TickStatistics(3);
+    statistics.record(1);
+    statistics.record(2);
+    statistics.record(3);
+    statistics.record(4);
+
+    assert.deepEqual(statistics.snapshot(), {
+        sampleCount: 4,
+        retainedSampleCount: 3,
+        averageMilliseconds: 3,
+        slowestMilliseconds: 4,
+    });
+    assert.deepEqual(statistics.recentSamples(), [2, 3, 4]);
+
+    statistics.reset();
+    assert.deepEqual(statistics.snapshot(), {
+        sampleCount: 0,
+        retainedSampleCount: 0,
+        averageMilliseconds: 0,
+        slowestMilliseconds: 0,
+    });
+    assert.deepEqual(statistics.recentSamples(), []);
 });
 
 test('debugger timer mirrors ASR timer transitions and variables', () => {

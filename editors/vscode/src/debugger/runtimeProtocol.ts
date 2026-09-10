@@ -63,6 +63,8 @@ export interface RuntimeSnapshot {
     program: string;
     tickRateHz: number;
     tickCount: number;
+    sampledTickCount: number;
+    retainedTickCount: number;
     averageTickMilliseconds: number;
     slowestTickMilliseconds: number;
     memoryBytes: number;
@@ -95,6 +97,15 @@ export interface RuntimeClearSettingsMessage {
     type: 'clearSettings';
 }
 
+export interface RuntimeResetStatisticsMessage {
+    type: 'resetStatistics';
+}
+
+export interface RuntimeDumpMemoryMessage {
+    type: 'dumpMemory';
+    requestId: number;
+}
+
 export interface RuntimeShutdownMessage {
     type: 'shutdown';
 }
@@ -104,6 +115,8 @@ export type RuntimeRequest =
     | RuntimeTimerCommandMessage
     | RuntimeSetSettingMessage
     | RuntimeClearSettingsMessage
+    | RuntimeResetStatisticsMessage
+    | RuntimeDumpMemoryMessage
     | RuntimeShutdownMessage;
 
 export interface RuntimeReadyMessage {
@@ -134,9 +147,23 @@ export interface RuntimeStoppedMessage {
     type: 'stopped';
 }
 
+export interface RuntimeMemoryDumpMessage {
+    type: 'memoryDump';
+    requestId: number;
+    bytes: ArrayBuffer;
+}
+
+export interface RuntimeMemoryDumpFailureMessage {
+    type: 'memoryDumpFailure';
+    requestId: number;
+    message: string;
+}
+
 export type RuntimeResponse =
     | RuntimeReadyMessage
     | RuntimeSnapshotMessage
     | RuntimeLogMessage
     | RuntimeFailureMessage
+    | RuntimeMemoryDumpMessage
+    | RuntimeMemoryDumpFailureMessage
     | RuntimeStoppedMessage;

@@ -243,6 +243,18 @@
         "title": "SplitScript Debugger: Clear Settings Map",
         "shortTitle": "Clear",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "splitscript.debug.resetStatistics",
+        "title": "SplitScript Debugger: Reset Statistics",
+        "shortTitle": "Reset Statistics",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "splitscript.debug.openMemory",
+        "title": "SplitScript Debugger: Open WebAssembly Memory",
+        "shortTitle": "Open Memory",
+        "icon": "$(file-binary)"
       }
     ],
     "debuggers": [
@@ -311,33 +323,39 @@
       "splitscript-debugger": [
         {
           "id": "splitscript.debugger.runtime",
-          "name": "SplitScript Runtime",
+          "name": "Runtime",
           "icon": "$(pulse)",
-          "contextualTitle": "SplitScript Runtime"
+          "contextualTitle": "Runtime"
+        },
+        {
+          "id": "splitscript.debugger.statistics",
+          "name": "Statistics",
+          "icon": "$(dashboard)",
+          "contextualTitle": "Statistics"
         },
         {
           "id": "splitscript.debugger.settings",
-          "name": "SplitScript Settings",
+          "name": "Settings",
           "icon": "$(settings-gear)",
-          "contextualTitle": "SplitScript Settings"
+          "contextualTitle": "Settings"
         },
         {
           "id": "splitscript.debugger.settingsMap",
-          "name": "SplitScript Settings Map",
+          "name": "Settings Map",
           "icon": "$(json)",
-          "contextualTitle": "SplitScript Settings Map"
+          "contextualTitle": "Settings Map"
         },
         {
           "id": "splitscript.debugger.variables",
-          "name": "SplitScript Variables",
+          "name": "Variables",
           "icon": "$(symbol-variable)",
-          "contextualTitle": "SplitScript Variables"
+          "contextualTitle": "Variables"
         },
         {
           "id": "splitscript.debugger.processes",
-          "name": "SplitScript Processes",
+          "name": "Processes",
           "icon": "$(server-process)",
-          "contextualTitle": "SplitScript Processes"
+          "contextualTitle": "Processes"
         }
       ]
     },
@@ -350,6 +368,11 @@
       {
         "view": "splitscript.debugger.settings",
         "contents": "Settings appear after a SplitScript debugger starts.",
+        "when": "!splitscript.debug.active"
+      },
+      {
+        "view": "splitscript.debugger.statistics",
+        "contents": "Runtime statistics appear after a SplitScript debugger starts.",
         "when": "!splitscript.debug.active"
       },
       {
@@ -440,6 +463,16 @@
           "command": "splitscript.debug.clearSettings",
           "when": "view == splitscript.debugger.settingsMap && splitscript.debug.active",
           "group": "navigation@1"
+        },
+        {
+          "command": "splitscript.debug.resetStatistics",
+          "when": "view == splitscript.debugger.statistics && splitscript.debug.active",
+          "group": "navigation@1"
+        },
+        {
+          "command": "splitscript.debug.openMemory",
+          "when": "view == splitscript.debugger.statistics && splitscript.debug.active",
+          "group": "navigation@2"
         }
       ]
     },

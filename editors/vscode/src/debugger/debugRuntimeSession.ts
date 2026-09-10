@@ -101,6 +101,14 @@ export class DebugRuntimeSession implements vscode.Disposable {
         this.runtime.clearSettings();
     }
 
+    public resetStatistics(): void {
+        this.runtime.resetStatistics();
+    }
+
+    public dumpMemory(): Promise<Uint8Array> {
+        return this.runtime.dumpMemory();
+    }
+
     public async stop(): Promise<void> {
         if (this.stopped) {
             return;

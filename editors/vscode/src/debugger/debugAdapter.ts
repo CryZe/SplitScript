@@ -92,6 +92,14 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
         this.runtime.clearSettings();
     }
 
+    public resetStatistics(): void {
+        this.runtime.resetStatistics();
+    }
+
+    public dumpMemory(): Promise<Uint8Array> {
+        return this.runtime.dumpMemory();
+    }
+
     public async stop(): Promise<void> {
         await this.runtime.stop();
         this.sendTerminated();

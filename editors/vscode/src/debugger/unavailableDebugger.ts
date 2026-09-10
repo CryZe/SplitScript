@@ -20,6 +20,7 @@ export function registerUnavailableDebugger(context: vscode.ExtensionContext): v
         vscode.debug.registerDebugConfigurationProvider('splitscript', provider),
         ...[
             'splitscript.debugger.runtime',
+            'splitscript.debugger.statistics',
             'splitscript.debugger.settings',
             'splitscript.debugger.settingsMap',
             'splitscript.debugger.variables',
@@ -34,6 +35,8 @@ export function registerUnavailableDebugger(context: vscode.ExtensionContext): v
             'splitscript.debug.showLogs',
             'splitscript.debug.editSetting',
             'splitscript.debug.clearSettings',
+            'splitscript.debug.resetStatistics',
+            'splitscript.debug.openMemory',
         ].map(command => vscode.commands.registerCommand(command, unavailable)),
     );
 }

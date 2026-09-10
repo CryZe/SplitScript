@@ -73,13 +73,59 @@ jobs:
       - name: Run the repository verification matrix
         run: cargo xtask check
 
-  vscode-release:
-    name: Publish latest VS Code extension
-    needs: repository
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+  vscode-native:
+    name: VS Code native bridge (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win32-x64
+            runner: windows-latest
+          - platform: linux-x64
+            runner: ubuntu-latest
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: darwin-x64
+            runner: macos-15-intel
+          - platform: darwin-arm64
+            runner: macos-15
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Test the native process bridge
+        run: cargo test --package splitscript-process-native
+
+      - name: Build the native process bridge
+        run: node editors/vscode/scripts/build-native.mjs
+
+      - name: Probe process discovery and memory access
+        run: node editors/vscode/scripts/probe-native.mjs
+
+      - name: Upload the native process bridge
+        uses: actions/upload-artifact@v7
+        with:
+          name: vscode-native-${{ matrix.platform }}
+          path: editors/vscode/dist/native
+          if-no-files-found: error
+
+  vscode-package:
+    name: Assemble VS Code extension
+    needs:
+      - repository
+      - vscode-native
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Check out the repository
@@ -101,9 +147,55 @@ jobs:
         working-directory: editors/vscode
         run: npm ci
 
+      - name: Download native process bridges
+        uses: actions/download-artifact@v7
+        with:
+          pattern: vscode-native-*
+          path: ${{ runner.temp }}/splitscript-native
+          merge-multiple: true
+
       - name: Package the extension
         working-directory: editors/vscode
+        env:
+          SPLITSCRIPT_NATIVE_ARTIFACTS: ${{ runner.temp }}/splitscript-native
+          SPLITSCRIPT_REQUIRED_NATIVE_PLATFORMS: win32-x64,linux-x64,linux-arm64,darwin-x64,darwin-arm64
         run: npm run package:vsix -- --out splitscript-latest.vsix
+
+      - name: Verify native bridges in the VSIX
+        shell: bash
+        run: |
+          archive="editors/vscode/splitscript-latest.vsix"
+          for platform in win32-x64 linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+            if ! unzip -Z1 "$archive" | grep -Fxq "extension/dist/native/$platform/splitscript_process_native.node"; then
+              echo "Missing native bridge for $platform" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload the assembled VSIX
+        uses: actions/upload-artifact@v7
+        with:
+          name: splitscript-vscode-extension
+          path: editors/vscode/splitscript-latest.vsix
+          if-no-files-found: error
+
+  vscode-release:
+    name: Publish latest VS Code extension
+    needs: vscode-package
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Download the assembled VSIX
+        uses: actions/download-artifact@v7
+        with:
+          name: splitscript-vscode-extension
+          path: editors/vscode
 
       - name: Publish the latest release
         shell: bash

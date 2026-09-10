@@ -40,10 +40,19 @@ continue to use `release`. These Rust profiles do not change which SplitScript
 debug/release builds the extension can produce.
 
 After the complete verification job succeeds for a push to `master`, CI runs
-the same production packaging path with the stable asset name
-`splitscript-latest.vsix`. It moves the `latest` tag to that verified commit and
-replaces the asset on the existing **Latest SplitScript VS Code Extension**
-release. Pull requests and pushes to other branches never publish a package.
+native bridge builds on Windows x64, Linux x64/ARM64, and macOS Intel/Apple
+Silicon runners. A separate assembly job downloads those five `.node` files,
+runs the production extension build, verifies that every bridge is present in
+`splitscript-latest.vsix`, and uploads the VSIX as a workflow artifact. This
+assembly also runs for pull requests, so packaging failures are caught before a
+merge. On `master`, the publish job moves the `latest` tag to the verified
+commit and replaces the asset on the existing **Latest SplitScript VS Code
+Extension** release.
+
+For a local build, `build-native.mjs` builds the bridge for the current supported
+host. CI supplies a directory of prebuilt platform folders through
+`SPLITSCRIPT_NATIVE_ARTIFACTS`; `SPLITSCRIPT_REQUIRED_NATIVE_PLATFORMS` makes a
+missing artifact fail the build rather than silently producing a partial VSIX.
 
 ## Worker architecture
 

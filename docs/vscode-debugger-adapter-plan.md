@@ -135,7 +135,7 @@ Support two equally accessible inputs:
 
 1. A saved `.split` file. Compile a debug artifact in memory and launch it
    directly. Save-triggered hot reload reuses the existing compiler worker.
-2. An arbitrary `.wasm` file, with an optional script path. Modules with an
+2. An arbitrary `.wasm` file. Modules with an
    `update` export use the recurring auto-splitting loop; other modules invoke
    `_initialize` / `_start` once when present and otherwise finish running
    their WebAssembly start section during instantiation.
@@ -170,8 +170,8 @@ Implement and test every import currently exposed by
    widgets.
 4. Process attachment, PID listing, liveness, reads, module queries, executable
    paths, and memory ranges through the Rust add-on.
-5. WASI preview 1 for script-runtime modules, with narrowly scoped read-only
-   preopens based on the selected script path.
+5. Hermetic WASI preview 1 for script-runtime modules, with empty arguments and
+   environment variables and a read-only `/mnt` preopen.
 
 Mirror the ABI's exact i32/i64/f32/f64 signatures. JavaScript i64 values are
 `BigInt`; handles should be opaque nonzero `BigInt` values with generation
@@ -245,22 +245,25 @@ same in both hosts.
 
 ### 3. Native process host
 
-Status: completed on 2026-09-08 for Windows x64. The Rust N-API bridge now
+Status: completed on 2026-09-10 for Windows x64, Linux x64/ARM64, and macOS
+Intel/Apple Silicon. The Rust N-API bridge now
 adapts the process discovery, attachment, liveness, read-only memory, module,
 and mapped-range behavior from `livesplit-auto-splitting`. The Node worker owns
 ASR-compatible 64-bit guest handles, keeps native handles inside Rust, exposes
 attached processes in the dedicated debugger sidebar, and releases them during
 normal shutdown and traps. The production probe compiles a generated
 SplitScript autosplitter, attaches it to the native fixture, reads a known byte,
-and starts the simulated timer from that value.
+and starts the simulated timer from that value. Linux module sizing also reads
+validated PE `SizeOfImage` metadata for sparse Wine/Proton mappings, matching
+the current `livesplit-auto-splitting` behavior.
 Readable mapped ranges can be selected from each process row and are served to
 VS Code's Hex Editor in bounded pages through DAP `readMemory`; the full process
 is never copied into the extension host.
 
 - Add the minimal Rust process crate and N-API wrapper.
 - Add process import implementations and the Processes view.
-- Package Windows x64 first, then add a CI matrix for the agreed platforms and
-  architectures.
+- Build and probe the native bridge on all five supported platform/architecture
+  pairs. Assemble their artifacts into one VSIX in a separate CI job.
 - Gate debugger activation on desktop, supported native binary, local file
   workspace, and workspace trust. Keep language/compiler functionality
   available in browser, virtual, and untrusted workspaces.
@@ -327,11 +330,22 @@ ordinary and async code.
 - Compiler tests for checkpoint placement and source/variable metadata before
   implementing DAP stepping.
 
+## Merge readiness and deferred work
+
+Milestones 0 through 4 are complete. Pull requests now exercise the repository
+checks, all supported native process bridges, and final multi-platform VSIX
+assembly. The package is ready to merge without making source breakpoints a
+release requirement. Milestone 5 remains a separate compiler-instrumentation
+project; V8 does not expose the pause/locals machinery needed to implement it as
+a small adapter-only follow-up. The optional performance histogram remains
+deferred because the Statistics view already retains bounded timing samples and
+the graph was explicitly lower priority.
+
 ## Risks and explicit tradeoffs
 
-- **Native packaging:** a native add-on turns one portable VSIX into a platform
-  matrix. Starting with Windows x64 contains this cost but must be an explicit
-  product decision.
+- **Native packaging:** a native add-on requires five platform builds. CI keeps
+  them independent and only the assembly job produces the final VSIX, so a
+  missing or unloadable bridge fails before publication.
 - **Runtime parity:** duplicating the ASR ABI can drift from livesplit-core.
   Keep an import manifest/conformance suite and record the upstream revision
   from which native code was copied.
@@ -348,19 +362,16 @@ ordinary and async code.
   the VS Code UI. Either make that behavior explicit or disable unsupported
   remote scenarios initially.
 
-## Decisions needed before implementation
+## Resolved decisions
 
-1. Is Windows x64 the acceptable first native target, or must the first usable
-   version also cover Linux/macOS and ARM64?
-2. Should the default launch target be the active `.split` source (recommended),
-   while retaining arbitrary `.wasm` as an advanced mode?
-3. Should the debugger always use a simulated timer like `asr-debugger`
-   (recommended), or is connecting to a real LiveSplit instance in scope?
-4. On hot reload, should only settings survive (recommended), or should the
-   simulated timer state also survive?
-5. Is generic ASR-Wasm compatibility required for the first release, or can the
-   first end-to-end slice support SplitScript-generated modules only and fill
-   out the remaining ABI immediately afterward?
-6. For the copied native process code, should we track a specific livesplit-core
-   commit manually, or is adding a small reusable crate upstream and consuming
-   it later an acceptable follow-up?
+1. Release packages support Windows x64, Linux x64/ARM64, and macOS
+   Intel/Apple Silicon.
+2. The active `.split` file is the default launch target; arbitrary `.wasm`
+   modules are also supported.
+3. The debugger uses a simulated timer and does not connect to LiveSplit.
+4. Hot reload preserves settings only.
+5. The host implements the complete ASR import surface and WASI preview 1.
+6. The native bridge is an attributed local adaptation. It currently tracks
+   the Wine/Proton module-size behavior from livesplit-core commit `46126e76`;
+   extracting a reusable upstream process crate can still replace the copy
+   later without changing the JavaScript boundary.

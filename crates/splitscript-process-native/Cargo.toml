@@ -17,7 +17,7 @@ path = "src/bin/process_fixture.rs"
 napi = { version = "3.12.2", default-features = false, features = ["napi8"] }
 napi-derive = "3.6.3"
 proc-maps = { version = "0.4.0", default-features = false }
-read-process-memory = { version = "0.1.4", default-features = false }
+read-process-memory = { version = "0.2.0", default-features = false }
 sysinfo = { version = "0.39.3", default-features = false, features = [
     "multithread",
     "system",

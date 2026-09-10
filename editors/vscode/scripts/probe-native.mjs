@@ -5,23 +5,35 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
-if (process.platform !== 'win32' || process.arch !== 'x64') {
-    console.log(`Skipping native process probe on ${process.platform}-${process.arch}.`);
+const supportedPlatforms = new Set([
+    'win32-x64',
+    'linux-x64',
+    'linux-arm64',
+    'darwin-x64',
+    'darwin-arm64',
+]);
+const platform = `${process.platform}-${process.arch}`;
+if (!supportedPlatforms.has(platform)) {
+    console.log(`Skipping native process probe on unsupported host ${platform}.`);
     process.exit(0);
 }
 
 const extension = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repository = resolve(extension, '..', '..');
+const nativeRoot = resolve(
+    process.env.SPLITSCRIPT_NATIVE_OUTPUT_ROOT ?? resolve(extension, 'dist', 'native'),
+);
 const require = createRequire(import.meta.url);
 const native = require(resolve(
-    extension,
-    'dist',
-    'native',
-    'win32-x64',
+    nativeRoot,
+    platform,
     'splitscript_process_native.node',
 ));
+const fixtureName = process.platform === 'win32'
+    ? 'splitscript-process-fixture.exe'
+    : 'splitscript-process-fixture';
 const fixture = spawn(
-    resolve(repository, 'target', 'release', 'splitscript-process-fixture.exe'),
+    resolve(repository, 'target', 'release', fixtureName),
     [],
     { stdio: ['pipe', 'pipe', 'inherit'] },
 );
@@ -34,15 +46,18 @@ try {
     assert(Number.isInteger(pid) && pid > 0);
     assert(Number.isInteger(length) && length > 0);
 
-    assert(native.listProcessesByName('splitscript-process-fixture.exe').includes(pid));
+    assert(native.listProcessesByName(fixtureName).includes(pid));
 
     const handle = native.attachByPid(pid);
     assert.equal(native.processId(handle), pid);
-    assert.match(native.processPath(handle), /splitscript-process-fixture\.exe$/i);
+    assert.match(native.processPath(handle), new RegExp(`${escapeRegExp(fixtureName)}$`, 'i'));
     assert.equal(native.isOpen(handle), true);
-    assert(BigInt(native.moduleAddress(handle, 'splitscript-process-fixture.exe')) > 0n);
-    assert(BigInt(native.moduleSize(handle, 'splitscript-process-fixture.exe')) > 0n);
-    assert.match(native.modulePath(handle, 'splitscript-process-fixture.exe'), /splitscript-process-fixture\.exe$/i);
+    assert(BigInt(native.moduleAddress(handle, fixtureName)) > 0n);
+    assert(BigInt(native.moduleSize(handle, fixtureName)) > 0n);
+    assert.match(
+        native.modulePath(handle, fixtureName),
+        new RegExp(`${escapeRegExp(fixtureName)}$`, 'i'),
+    );
     const rangeCount = native.memoryRangeCount(handle);
     assert(rangeCount > 0);
     assert(BigInt(native.memoryRangeAddress(handle, 0)) > 0n);
@@ -52,10 +67,12 @@ try {
     assert.equal(Buffer.from(actual).toString('utf8'), fields.expected);
     assert.equal(native.detach(handle), true);
     assert.equal(native.detach(handle), false);
-    const namedHandle = native.attachByName('splitscript-process-fixture.exe');
+    const namedHandle = native.attachByName(fixtureName);
     assert.equal(native.processId(namedHandle), pid);
     assert.equal(native.detach(namedHandle), true);
-    console.log(`Native process probe passed: discovery, modules, ranges, and ${length}-byte read from PID ${pid}.`);
+    console.log(
+        `Native ${platform} process probe passed: discovery, modules, ranges, and ${length}-byte read from PID ${pid}.`,
+    );
 } finally {
     fixture.stdin.end('\n');
     await new Promise(resolvePromise => fixture.once('exit', resolvePromise));
@@ -71,4 +88,8 @@ async function firstLine(stream) {
     } finally {
         lines.close();
     }
+}
+
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

@@ -93,8 +93,9 @@ virtual workspaces.
   Each open process has an inline memory action that queries its readable mapped
   ranges on demand and opens a process-wide lazy view at the selected range's base
   without copying the entire process.
-  The packaged native bridge currently targets Windows x64. Autosplitter ticks
-  run at the requested rate independently of sidebar snapshots, which are
+  Release VSIX packages include native bridges for Windows x64, Linux x64 and
+  ARM64, and macOS Intel and Apple Silicon. Autosplitter ticks run at the
+  requested rate independently of sidebar snapshots, which are
   coalesced to at most five updates per second. The **Statistics** panel keeps
   a bounded window of 2,048 tick timings and provides reset and lazy Wasm-memory
   actions without stopping the runtime.

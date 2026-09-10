@@ -19,14 +19,22 @@ use proc_maps::{MapRange, Pid};
 use read_process_memory::{CopyAddress, ProcessHandle};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
 
-struct SendProcessHandle(ProcessHandle);
+// Adapted from livesplit-core commit 46126e76 (Fix Wine Module Size Reporting).
+#[cfg(any(target_os = "linux", test))]
+mod process_linux;
 
-// The platform process handles used by read-process-memory are safe to invoke
-// from any thread. The outer table additionally serializes every operation.
-unsafe impl Send for SendProcessHandle {}
+#[cfg(target_os = "linux")]
+fn platform_module_size(process: &Process, address: u64, mapped_size: u64) -> u64 {
+    process_linux::module_size(process, address, mapped_size)
+}
+
+#[cfg(not(target_os = "linux"))]
+const fn platform_module_size(_: &Process, _: u64, mapped_size: u64) -> u64 {
+    mapped_size
+}
 
 struct Process {
-    handle: SendProcessHandle,
+    handle: ProcessHandle,
     pid: Pid,
     path: Option<Box<str>>,
     memory_ranges: Vec<MapRange>,
@@ -40,7 +48,7 @@ impl Process {
         let handle = native_pid.try_into()?;
         let now = Instant::now();
         Ok(Self {
-            handle: SendProcessHandle(handle),
+            handle,
             pid: native_pid,
             path,
             memory_ranges: Vec::new(),
@@ -65,7 +73,7 @@ impl Process {
             )
         })?;
         let mut bytes = vec![0; length];
-        self.handle.0.copy_address(address, &mut bytes)?;
+        self.handle.copy_address(address, &mut bytes)?;
         Ok(bytes)
     }
 
@@ -89,18 +97,17 @@ impl Process {
 
     fn module_size(&mut self, module: &str) -> io::Result<Option<u64>> {
         self.refresh_memory_ranges()?;
-        let mut found = false;
-        let size = self
+        let mut ranges = self
             .memory_ranges
             .iter()
-            .filter(|range| {
-                let matches = range.filename().is_some_and(|path| path.ends_with(module));
-                found |= matches;
-                matches
-            })
-            .map(|range| range.size() as u64)
-            .sum();
-        Ok(found.then_some(size))
+            .filter(|range| range.filename().is_some_and(|path| path.ends_with(module)));
+        let Some(first_range) = ranges.next() else {
+            return Ok(None);
+        };
+        let address = first_range.start() as u64;
+        let mapped_size =
+            first_range.size() as u64 + ranges.map(|range| range.size() as u64).sum::<u64>();
+        Ok(Some(platform_module_size(self, address, mapped_size)))
     }
 
     fn module_path(&mut self, module: &str) -> io::Result<Option<String>> {

@@ -5,7 +5,12 @@ import { GuestMemory } from '../src/debugger/asr/memory.ts';
 import { neutralImport } from '../src/debugger/asr/neutralImports.ts';
 import { DebuggerTimer } from '../src/debugger/asr/timer.ts';
 import { SettingsHost } from '../src/debugger/asr/settings.ts';
-import { nativePathToWasi, WasiHost } from '../src/debugger/asr/wasi.ts';
+import {
+    nativePathToWasi,
+    WASI_PREVIEW1_IMPORTS,
+    WasiExit,
+    WasiHost,
+} from '../src/debugger/asr/wasi.ts';
 import { ProcessHost, type NativeProcessBridge } from '../src/debugger/asr/process.ts';
 import { TickStatistics } from '../src/debugger/runtimeStatistics.ts';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -173,20 +178,51 @@ test('read-only WASI host opens and reads files through the /mnt preopen', () =>
         const wasmMemory = new WebAssembly.Memory({ initial: 1 });
         const memory = new GuestMemory();
         memory.bind(wasmMemory);
-        const host = new WasiHost(memory, file, () => {});
+        const host = new WasiHost(memory, () => {});
         const imports = host.imports() as Record<string, (...arguments_: unknown[]) => unknown>;
+        assert.deepEqual(Object.keys(imports).sort(), [...WASI_PREVIEW1_IMPORTS].sort());
+        assert.equal(imports.args_sizes_get(68, 72), 0);
+        assert.equal(memory.readU32(68), 0);
+        assert.equal(memory.readU32(72), 0);
+        assert.equal(imports.environ_sizes_get(76, 80), 0);
+        assert.equal(memory.readU32(76), 0);
+        assert.equal(memory.readU32(80), 0);
         const relative = nativePathToWasi(file).slice('/mnt/'.length);
         memory.writeBytes(128, new TextEncoder().encode(relative));
         assert.equal(imports.path_open(3, 0, 128, relative.length, 0, 2n, 0n, 0, 32), 0);
         const descriptor = memory.readU32(32);
+        assert.equal(imports.fd_fdstat_get(descriptor, 96), 0);
+        assert.equal(memory.readU8(96), 4);
+        assert.equal(imports.fd_filestat_get(descriptor, 512), 0);
+        assert.equal(memory.readU8(528), 4);
+        assert.equal(imports.path_filestat_get(3, 0, 128, relative.length, 576), 0);
+        assert.equal(memory.readU8(592), 4);
         memory.writeU32(48, 256);
         memory.writeU32(52, 32);
         assert.equal(imports.fd_read(descriptor, 48, 1, 40), 0);
         assert.equal(memory.readString(256, memory.readU32(40)), 'wasi probe');
+        assert.equal(imports.fd_pread(descriptor, 48, 1, 0n, 44), 0);
+        assert.equal(memory.readString(256, memory.readU32(44)), 'wasi probe');
         assert.equal(imports.fd_close(descriptor), 0);
 
-        assert.equal(imports.environ_sizes_get(60, 64), 0);
-        assert.equal(memory.readU32(60), 1);
+        const relativeDirectory = nativePathToWasi(directory).slice('/mnt/'.length);
+        memory.writeBytes(640, new TextEncoder().encode(relativeDirectory));
+        assert.equal(imports.path_open(
+            3, 0, 640, relativeDirectory.length, 2, 1n << 14n, 0n, 0, 84,
+        ), 0);
+        const directoryDescriptor = memory.readU32(84);
+        assert.equal(imports.fd_readdir(directoryDescriptor, 768, 256, 0n, 88), 0);
+        assert(memory.readU32(88) > 24);
+        assert.equal(imports.fd_close(directoryDescriptor), 0);
+
+        assert.equal(imports.path_unlink_file(3, 128, relative.length), 76);
+        memory.writeBytes(1_024, new TextEncoder().encode('../escape'));
+        assert.equal(imports.path_open(3, 0, 1_024, 9, 0, 2n, 0n, 0, 92), 76);
+        assert.throws(() => imports.proc_exit(0), error => {
+            assert(error instanceof WasiExit);
+            assert.equal(error.code, 0);
+            return true;
+        });
         host.dispose();
     } finally {
         rmSync(directory, { recursive: true, force: true });

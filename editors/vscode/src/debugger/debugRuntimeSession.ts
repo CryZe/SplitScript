@@ -19,7 +19,6 @@ export interface SplitScriptLaunchConfiguration extends vscode.DebugConfiguratio
     request: 'launch';
     program: string;
     hotReload?: boolean;
-    scriptPath?: string;
 }
 
 export interface DebugRuntimeSessionCallbacks {
@@ -34,7 +33,6 @@ export class DebugRuntimeSession implements vscode.Disposable {
     private compiler: EmbeddedCompilerClient | undefined;
     private programUri: vscode.Uri | undefined;
     private hotReload = true;
-    private scriptPath: string | undefined;
     private reloadChain = Promise.resolve();
     private readonly saveSubscription: vscode.Disposable;
     private stopped = false;
@@ -74,12 +72,11 @@ export class DebugRuntimeSession implements vscode.Disposable {
         }
         const sourceProgram = uri.path.toLowerCase().endsWith('.split');
         this.hotReload = configuration.hotReload ?? sourceProgram;
-        this.scriptPath = configuration.scriptPath;
         this.compiler = sourceProgram ? await this.createCompiler() : undefined;
         const artifact = await this.buildArtifact(uri);
         this.programUri = uri;
         this.callbacks.memoryReset();
-        await this.runtime.launch(artifact, uri.fsPath, this.scriptPath);
+        await this.runtime.launch(artifact, uri.fsPath);
     }
 
     public reload(): Promise<void> {
@@ -92,7 +89,7 @@ export class DebugRuntimeSession implements vscode.Disposable {
             const artifact = await this.buildArtifact(uri);
             this.callbacks.snapshot(undefined);
             this.callbacks.memoryReset();
-            await this.runtime.launch(artifact, uri.fsPath, this.scriptPath);
+            await this.runtime.launch(artifact, uri.fsPath);
             this.callbacks.log(runtimeLog('info', `Reloaded ${uri.fsPath}`));
         });
         this.reloadChain = operation.catch(() => {});

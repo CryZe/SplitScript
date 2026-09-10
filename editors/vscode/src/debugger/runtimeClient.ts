@@ -37,7 +37,7 @@ export class RuntimeClient {
         private readonly callbacks: RuntimeClientCallbacks,
     ) {}
 
-    public async launch(wasm: Uint8Array, program: string, scriptPath?: string): Promise<void> {
+    public async launch(wasm: Uint8Array, program: string): Promise<void> {
         await this.terminate();
         const worker = new Worker(this.workerPath);
         this.worker = worker;
@@ -82,7 +82,6 @@ export class RuntimeClient {
             type: 'launch',
             wasm: owned.buffer,
             program,
-            scriptPath,
             settings: this.settings,
             nativeModulePath: this.nativeModulePath,
         }, [owned.buffer]);

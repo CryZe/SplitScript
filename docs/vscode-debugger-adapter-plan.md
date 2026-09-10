@@ -225,11 +225,11 @@ logs appear in VS Code, saves hot reload it, and Stop always returns control.
 
 ### 2. Complete ASR compatibility
 
-Status: completed on 2026-09-08. The worker now implements the ASR settings
+Status: completed on 2026-09-10. The worker now implements the ASR settings
 map/list/value handle APIs, bool/title/choice/text/file widgets and tooltips,
-settings preservation across runtime replacement, and a read-only WASI Preview
-1 host for SplitScript clocks and file operations. An optional `scriptPath`
-launch property is exposed as `SCRIPT_PATH`. The dedicated debugger sidebar has
+settings preservation across runtime replacement, and the complete WASI
+snapshot-preview1 import surface with an empty argument/environment context and
+a read-only `/mnt` filesystem. The dedicated debugger sidebar has
 interactive Settings, recursive Settings Map, and timer Variables views. Unit
 tests cover the handle and filesystem contracts; generated SplitScript probes
 and the reference debugger's settings-heavy Wasm modules validate the actual
@@ -237,7 +237,7 @@ import signatures and runtime behavior.
 
 - Implement settings handles/maps/lists/values and all user-setting widgets.
 - Add Settings, Settings Map, and Variables views.
-- Add WASI/script-path support.
+- Add hermetic WASI snapshot-preview1 support.
 - Add import signature/conformance tests against representative modules.
 
 Exit criterion: the settings-heavy modules used by `asr-debugger` behave the

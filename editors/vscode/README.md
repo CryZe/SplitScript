@@ -86,8 +86,8 @@ virtual workspaces.
 - Running an autosplitter is currently a desktop-only capability and requires a
   trusted local workspace. Browser, virtual, and untrusted workspaces retain
   the compiler and language tooling.
-- The debugger implements the timer, runtime, process, user-settings, settings
-  map/list/value, and SplitScript WASI imports. Native process attachment,
+- The debugger implements the complete timer, runtime, process, user-settings,
+  and settings map/list/value ASR APIs. Native process attachment,
   liveness, module lookup, mapped ranges, and read-only memory access run in a
   Rust N-API bridge; attached processes appear in **Processes**.
   Each open process has an inline memory action that queries its readable mapped
@@ -98,10 +98,9 @@ virtual workspaces.
   coalesced to at most five updates per second. The **Statistics** panel keeps
   a bounded window of 2,048 tick timings and provides reset and lazy Wasm-memory
   actions without stopping the runtime.
-- The WASI filesystem is exposed read-only below `/mnt`; an optional
-  `scriptPath` launch property supplies the portable `SCRIPT_PATH` environment
-  variable. Unsupported general-purpose WASI calls are reported in the runtime
-  log.
+- WASI snapshot preview1 (WASI 0.1) is available with a read-only filesystem
+  below `/mnt`. Arguments and environment variables are deliberately empty,
+  and filesystem-mutating operations return `NOTCAPABLE`.
 - Source breakpoints and stepping are not implemented yet. Debug builds already
   carry source and variable metadata; pausing V8 execution requires the planned
   debugger-instrumented compiler mode.

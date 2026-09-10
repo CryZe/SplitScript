@@ -39,8 +39,27 @@ export class GuestMemory {
         return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true);
     }
 
+    public readU8(pointer: number): number {
+        return this.slice(pointer, 1)[0];
+    }
+
+    public readU16(pointer: number): number {
+        const bytes = this.slice(pointer, 2);
+        return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(0, true);
+    }
+
+    public readU64(pointer: number): bigint {
+        const bytes = this.slice(pointer, 8);
+        return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(0, true);
+    }
+
     public writeU8(pointer: number, value: number): void {
         this.slice(pointer, 1)[0] = value;
+    }
+
+    public writeU16(pointer: number, value: number): void {
+        const bytes = this.slice(pointer, 2);
+        new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setUint16(0, value, true);
     }
 
     public writeU32(pointer: number, value: number): void {
@@ -64,9 +83,16 @@ export class GuestMemory {
     }
 
     private slice(pointer: number, length: number): Uint8Array {
-        if (!Number.isInteger(pointer) || pointer < 0 || !Number.isInteger(length) || length < 0) {
+        if (!Number.isInteger(pointer)
+            || pointer < -0x8000_0000
+            || pointer > 0xffff_ffff
+            || !Number.isInteger(length)
+            || length < -0x8000_0000
+            || length > 0xffff_ffff) {
             throw new WebAssembly.RuntimeError('guest pointer and length must be unsigned integers');
         }
+        pointer >>>= 0;
+        length >>>= 0;
         const memory = this.memory;
         if (memory === undefined) {
             throw new WebAssembly.RuntimeError('guest memory is not available yet');

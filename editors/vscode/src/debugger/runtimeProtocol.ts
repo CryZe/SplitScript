@@ -96,7 +96,6 @@ export interface RuntimeLaunchMessage {
     type: 'launch';
     wasm: ArrayBuffer;
     program: string;
-    scriptPath?: string;
     settings?: SettingMapSnapshot;
     nativeModulePath?: string;
 }

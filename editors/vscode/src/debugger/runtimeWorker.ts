@@ -5,7 +5,7 @@ import { neutralImport } from './asr/neutralImports';
 import { loadNativeProcessBridge, ProcessHost } from './asr/process';
 import { SettingsHost } from './asr/settings';
 import { DebuggerTimer } from './asr/timer';
-import { WasiHost } from './asr/wasi';
+import { WasiExit, WasiHost } from './asr/wasi';
 import type {
     RuntimeLogMessage,
     RuntimeRequest,
@@ -34,7 +34,6 @@ workerPort.on('message', (message: RuntimeRequest) => {
         }
         host = new RuntimeHost(
             message.program,
-            message.scriptPath,
             message.settings,
             message.nativeModulePath,
         );
@@ -89,7 +88,6 @@ class RuntimeHost {
 
     public constructor(
         private readonly program: string,
-        scriptPath: string | undefined,
         initialSettings: SettingMapSnapshot | undefined,
         nativeModulePath: string | undefined,
     ) {
@@ -98,7 +96,7 @@ class RuntimeHost {
             message => this.emitLog(message),
         );
         this.settings = new SettingsHost(this.memory, initialSettings);
-        this.wasi = new WasiHost(this.memory, scriptPath, message => this.emitLog(message));
+        this.wasi = new WasiHost(this.memory, message => this.emitLog(message));
         let processes: ProcessHost | undefined;
         let nativeBridgeError: string | undefined;
         if (nativeModulePath !== undefined) {
@@ -239,6 +237,15 @@ class RuntimeHost {
             initialize?.();
             update?.();
         } catch (error) {
+            if (error instanceof WasiExit && error.code === 0) {
+                const duration = performance.now() - started;
+                this.tickCount += 1;
+                this.tickStatistics.record(duration);
+                this.processes?.dispose();
+                this.wasi.dispose();
+                this.emitSnapshot(true);
+                return;
+            }
             this.dispose();
             this.emitSnapshot(true);
             fail(error);

@@ -76,7 +76,7 @@ test('desktop debugger contribution launches SplitScript and WebAssembly files',
     assert.deepEqual(debuggerContribution.languages, ['splitscript', 'wasm']);
     assert.deepEqual(debuggerContribution.configurationAttributes.launch.required, ['program']);
     assert('hotReload' in debuggerContribution.configurationAttributes.launch.properties);
-    assert('scriptPath' in debuggerContribution.configurationAttributes.launch.properties);
+    assert(!('scriptPath' in debuggerContribution.configurationAttributes.launch.properties));
 });
 
 test('runtime view has launch welcome content and active-session actions', () => {
@@ -105,7 +105,9 @@ test('runtime view has launch welcome content and active-session actions', () =>
         ['Runtime', 'Statistics', 'Settings', 'Settings Map', 'Variables', 'Processes'],
     );
     assert.deepEqual(
-        manifest.contributes.views['splitscript-debugger'].map(view => view.contextualTitle),
+        manifest.contributes.views['splitscript-debugger'].map(
+            view => 'contextualTitle' in view ? view.contextualTitle : undefined,
+        ),
         ['Runtime', 'Statistics', 'Settings', 'Settings Map', 'Variables', 'Processes'],
     );
     assert(manifest.contributes.viewsWelcome.some(

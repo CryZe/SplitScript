@@ -284,10 +284,6 @@
               "hotReload": {
                 "type": "boolean",
                 "description": "Reload when the program is saved. Defaults to enabled for .split sources and disabled for .wasm modules."
-              },
-              "scriptPath": {
-                "type": "string",
-                "description": "Optional native path exposed to WASI as the SCRIPT_PATH environment variable."
               }
             }
           }

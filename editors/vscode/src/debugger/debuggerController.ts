@@ -317,7 +317,7 @@ export class SplitScriptDebuggerController implements
             const executable = process.path?.split(/[\\/]/).at(-1) ?? `pid-${process.pid}`;
             await openDebugMemory(
                 adapter.sessionId,
-                adapter.processMemoryReference(process.handle, selected.range),
+                adapter.processMemoryReference(process.handle),
                 `${executable}-${address.toString(16)}`,
                 selected.range.address,
             );

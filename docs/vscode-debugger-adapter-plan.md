@@ -273,8 +273,10 @@ window and the dedicated Statistics view reports tick rate, average and slowest
 update duration, handles, and linear-memory usage. View-title actions reset
 timing collection and open the read-only Wasm linear memory directly in
 VS Code's Hex Editor. Both Wasm and attached-process memory use the same lazy
-DAP `readMemory` path. Sidebar snapshot delivery remains coalesced to five
-updates per second; histogram rendering stays deferred.
+DAP `readMemory` path. Wasm requests use zero-based offsets, while process
+requests preserve their absolute virtual addresses so the Hex Editor can open
+at the selected mapping's base. Sidebar snapshot delivery remains coalesced to
+five updates per second; histogram rendering stays deferred.
 
 - Add tick duration sampling, average/slowest tick, handle count, Wasm memory
   size, reset, and lazy read-only memory inspection in VS Code's Hex Editor.

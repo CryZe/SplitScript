@@ -211,10 +211,11 @@ class RuntimeHost {
         try {
             const processes = this.processes;
             if (processes === undefined) throw new Error('the native process bridge is unavailable');
+            const ranges = processes.memoryRanges(handle);
             workerPort.postMessage({
                 type: 'processMemoryRanges',
                 requestId,
-                ranges: processes.memoryRanges(handle),
+                ranges,
             } satisfies RuntimeResponse);
         } catch (error) {
             requestFailure(requestId, error instanceof Error ? error.message : String(error));
@@ -367,24 +368,22 @@ class RuntimeHost {
             };
         }
 
-        const base = parseU64(target.address, 'process memory address');
-        const size = parseU64(target.size, 'process memory range size');
-        const relative = BigInt(offset);
-        const address = base + relative;
+        // Hex Editor interprets its baseAddress query as the initial file offset,
+        // so process-view offsets are absolute virtual addresses. The mapping picked
+        // in the UI is only the starting point; the view itself spans the process.
+        const address = BigInt(offset);
         if (address > 0xffff_ffff_ffff_ffffn) {
             throw new Error('the process memory address exceeds 64 bits');
         }
-        const remaining = relative < size ? size - relative : 0n;
-        const readable = Number(remaining < BigInt(count) ? remaining : BigInt(count));
         let bytes: Uint8Array<ArrayBufferLike> = new Uint8Array();
-        if (readable > 0) {
+        if (count > 0) {
             const processes = this.processes;
             if (processes === undefined) throw new Error('the native process bridge is unavailable');
             try {
                 bytes = processes.readMemory(
                     target.handle,
                     address.toString(),
-                    readable,
+                    count,
                 );
             } catch {
                 // DAP represents inaccessible memory as unreadable bytes, not a failed request.

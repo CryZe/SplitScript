@@ -113,15 +113,10 @@ export class SplitScriptDebugAdapter implements vscode.DebugAdapter {
         return this.runtime.listProcessMemoryRanges(handle);
     }
 
-    public processMemoryReference(
-        handle: string,
-        range: ProcessMemoryRange,
-    ): string {
+    public processMemoryReference(handle: string): string {
         return this.registerMemory({
             kind: 'process',
             handle,
-            address: range.address,
-            size: range.size,
         });
     }
 

@@ -69,8 +69,6 @@ export type RuntimeMemoryTarget =
     | {
         kind: 'process';
         handle: string;
-        address: string;
-        size: string;
     };
 
 export interface RuntimeMemoryRead {

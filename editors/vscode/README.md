@@ -90,7 +90,8 @@ virtual workspaces.
   liveness, module lookup, mapped ranges, and read-only memory access run in a
   Rust N-API bridge; attached processes appear in **Processes**.
   Each open process has an inline memory action that queries its readable mapped
-  ranges on demand and opens the selected range without copying the entire process.
+  ranges on demand and opens a process-wide lazy view at the selected range's base
+  without copying the entire process.
   The packaged native bridge currently targets Windows x64. Autosplitter ticks
   run at the requested rate independently of sidebar snapshots, which are
   coalesced to at most five updates per second. The **Statistics** panel keeps

@@ -163,15 +163,14 @@ try {
             target: {
                 kind: 'process',
                 handle: process.handle,
-                address: fixtureFields.address,
-                size: '1',
             },
-            offset: 0,
+            offset: Number(fixtureFields.address),
             count: 4,
         });
         const processMemory = await processMemoryRead;
-        assert.deepEqual([...new Uint8Array(processMemory.bytes)], [83]);
-        assert.equal(processMemory.unreadableBytes, 3);
+        assert.equal(new Uint8Array(processMemory.bytes)[0], 83);
+        assert.equal(processMemory.bytes.byteLength, 4);
+        assert.equal(processMemory.unreadableBytes, 0);
     }
 
     const resetStatistics = waitFor(

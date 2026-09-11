@@ -329,6 +329,7 @@ fn managed_reference_snapshot_reads_the_complete_layout_refined_shape() {
         onAttach { edition = Edition.Base }
 
         whileAttached {
+            print(current.manager)
             print(current.manager.points)
             let player = current.manager.player
             let health = player.health else 0.0
@@ -357,6 +358,12 @@ fn managed_reference_snapshot_reads_the_complete_layout_refined_shape() {
         names
             .iter()
             .any(|(_, name)| { name == "__splitscript::managed::GameManager::snapshot" })
+    );
+    assert!(
+        names
+            .iter()
+            .any(|(_, name)| name == "__splitscript::debug::GameManager"),
+        "displaying a managed snapshot should materialize its structural formatter"
     );
 
     let unused = splitscript::compile_with_options(

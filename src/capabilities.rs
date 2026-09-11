@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{EnumDecl, FunctionDecl, FunctionId, StructDecl},
+    ast::{EnumDecl, FunctionDecl, FunctionId, ManagedClassDecl, StructDecl},
     equality::EqualityCapabilities,
     memory::MemoryLayouts,
     semantic::SemanticModel,
@@ -77,6 +77,7 @@ impl CapabilityAnalysis {
     pub fn build(
         structs: &[StructDecl],
         enums: &[EnumDecl],
+        managed_classes: &[&ManagedClassDecl],
         functions: &[FunctionDecl],
         semantics: &SemanticModel,
         standard_library: StandardLibrary,
@@ -95,7 +96,7 @@ impl CapabilityAnalysis {
             };
             if matches!(
                 semantics.types().kind(receiver),
-                TypeKind::Struct(_) | TypeKind::Enum(_)
+                TypeKind::Struct(_) | TypeKind::Enum(_) | TypeKind::ManagedClass(_)
             ) {
                 source_methods
                     .entry(receiver)
@@ -103,7 +104,7 @@ impl CapabilityAnalysis {
                     .insert(function.name.clone(), function.id);
             }
         }
-        let structural = StructuralTypes::build(structs, enums, semantics);
+        let structural = StructuralTypes::build(structs, enums, managed_classes, semantics);
         let structural_requirements = standard_library
             .capabilities()
             .iter()
@@ -566,7 +567,6 @@ impl CapabilityAnalysis {
             TypeKind::Standard(_)
             | TypeKind::StateSnapshot
             | TypeKind::SettingsView
-            | TypeKind::ManagedClass(_)
             | TypeKind::ManagedReference(_)
             | TypeKind::Array { .. }
             | TypeKind::Option { .. }
@@ -576,7 +576,7 @@ impl CapabilityAnalysis {
             | TypeKind::Range { .. }
             | TypeKind::Set { .. }
             | TypeKind::Application { .. } => Some(DerivedDebugKind::Opaque),
-            TypeKind::Struct(_) | TypeKind::Enum(_) => {
+            TypeKind::Struct(_) | TypeKind::Enum(_) | TypeKind::ManagedClass(_) => {
                 unreachable!("source aggregates were classified above")
             }
         }

@@ -3,9 +3,11 @@
 ## 2026-09-11: every runtime value has lazy Debug formatting
 
 - Made `Debug` a total capability for concrete runtime values and preserved
-  `Display` as its user-facing fallback. Source structs, enums, and opted-in
-  containers keep recursive structural output, while closures, futures, and
-  representation-only standard-library types receive stable opaque output.
+  `Display` as its user-facing fallback. Source structs, enums, managed class
+  snapshots, and opted-in containers keep recursive structural output, while
+  live managed references, closures, futures, and representation-only
+  standard-library types receive stable opaque output. Conditional managed
+  snapshot fields are shown only while their attachment shape is active.
 - Centralized the universal fallback and structural-versus-opaque decision in
   capability analysis. Removed repeated iterator `Debug` declarations, kept
   private cursor and captured closure state hidden, and retained custom

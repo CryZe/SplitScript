@@ -2537,12 +2537,15 @@ capability Equatable<T> {
 
 /// Produces an unambiguous structural representation of a value.
 ///
-/// [`String`] and [`char`] values are quoted and escaped. Source structs and
-/// enums derive a multiline representation recursively. Standard-library
-/// containers may opt into the same structural representation for their public
-/// contents. Every other runtime value receives a stable opaque representation
-/// automatically; iterator cursors and closures therefore remain printable
-/// without exposing private traversal state or captured values.
+/// [`String`] and [`char`] values are quoted and escaped. Source structs, enums,
+/// and immutable managed class snapshots derive a multiline representation
+/// recursively. Conditional managed fields appear only while their declared
+/// attachment shape is active. Standard-library containers may opt into the
+/// same structural representation for their public contents. Every other
+/// runtime value receives a stable opaque representation automatically;
+/// managed references, iterator cursors, and closures therefore remain
+/// printable without exposing remote addresses, private traversal state, or
+/// captured values.
 ///
 /// Every [`Debug`] value also implements [`Display`]. A custom
 /// [`Display.toString`] remains the user-facing representation, while
@@ -2561,10 +2564,10 @@ capability Equatable<T> {
 capability Debug<T: Display> {
     /// Converts the receiver to its unambiguous structural representation.
     ///
-    /// User structs and enums receive a recursive derived implementation when
-    /// this method is absent. Defining an exact method with this signature
-    /// overrides that representation without changing the user-facing
-    /// [`Display.toString`] method.
+    /// User structs, enums, and managed class snapshots receive a recursive
+    /// derived implementation when this method is absent. Defining an exact
+    /// method with this signature overrides that representation without
+    /// changing the user-facing [`Display.toString`] method.
     ///
     /// # Example
     ///

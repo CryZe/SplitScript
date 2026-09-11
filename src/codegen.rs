@@ -767,6 +767,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         &gc,
     );
     let display_bodies = display::compile(&display::DisplayInputs {
+        program,
         structural: capabilities.structural_types(),
         arrays: array_types,
         semantics,
@@ -774,6 +775,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         users: &user_functions,
         helpers: &runtime_helpers,
         debug_depth: runtime_globals.debug_depth,
+        globals: &global_indices,
         gc: &gc,
     });
     let array_bodies = array_functions::compile(array_types, &array_functions, semantics, &gc);

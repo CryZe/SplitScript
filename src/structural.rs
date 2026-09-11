@@ -7,7 +7,10 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{EnumDecl, EnumId, EnumVariantId, StructDecl, StructFieldId, StructId},
+    ast::{
+        EnumDecl, EnumId, EnumVariantId, ManagedClassDecl, ManagedClassId, ManagedFieldId,
+        StructDecl, StructFieldId, StructId,
+    },
     semantic::SemanticModel,
     types::{TypeId, TypeKind},
 };
@@ -16,6 +19,9 @@ use crate::{
 pub(crate) enum StructuralTypeId {
     Struct(StructId),
     Enum(EnumId),
+    /// An immutable local snapshot produced from a live managed reference.
+    /// Managed references themselves are not structural values.
+    ManagedClass(ManagedClassId),
 }
 
 #[derive(Debug, Clone)]
@@ -30,6 +36,7 @@ pub(crate) struct StructuralMember {
 pub(crate) enum StructuralMemberId {
     StructField(StructFieldId),
     EnumVariant(EnumVariantId),
+    ManagedField(ManagedFieldId),
 }
 
 #[derive(Debug, Clone)]
@@ -48,13 +55,19 @@ pub(crate) struct StructuralTypes {
 }
 
 impl StructuralTypes {
-    pub fn build(structs: &[StructDecl], enums: &[EnumDecl], semantics: &SemanticModel) -> Self {
+    pub fn build(
+        structs: &[StructDecl],
+        enums: &[EnumDecl],
+        managed_classes: &[&ManagedClassDecl],
+        semantics: &SemanticModel,
+    ) -> Self {
         let semantic_types = semantics
             .types()
             .iter()
             .filter_map(|(ty, kind)| match kind {
                 TypeKind::Struct(structure) => Some((StructuralTypeId::Struct(*structure), ty)),
                 TypeKind::Enum(enumeration) => Some((StructuralTypeId::Enum(*enumeration), ty)),
+                TypeKind::ManagedClass(class) => Some((StructuralTypeId::ManagedClass(*class), ty)),
                 _ => None,
             })
             .collect::<HashMap<_, _>>();
@@ -106,6 +119,30 @@ impl StructuralTypes {
                 },
             );
             enum_types.push(ty);
+        }
+        for class in managed_classes {
+            let id = StructuralTypeId::ManagedClass(class.id);
+            let ty = semantic_types[&id];
+            by_type.insert(
+                ty,
+                StructuralType {
+                    id,
+                    name: class.name.clone(),
+                    members: class
+                        .all_fields()
+                        .filter(|field| !field.is_static)
+                        .map(|field| StructuralMember {
+                            name: field.name.clone(),
+                            source: StructuralMemberId::ManagedField(field.id),
+                            ty: Some(
+                                semantics
+                                    .managed_field_value_type(field.id)
+                                    .expect("checked managed fields have semantic value types"),
+                            ),
+                        })
+                        .collect(),
+                },
+            );
         }
         Self {
             by_type,

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use wasm_encoder::{BlockType, Function, HeapType, Instruction, ValType};
 
 use crate::{
-    ast::RangeKind,
+    ast::{Program, RangeKind, ValueId},
     capabilities::DerivedDebugKind,
     intrinsic_registry::RuntimeHelperId,
     semantic::{FunctionInstance, SemanticModel},
@@ -17,10 +17,12 @@ use crate::{
 use super::{
     DisplayFunctions, GcLayout, RuntimeHelperPlan, Type, array_value, emit_array_get,
     emit_string_literal, emit_typed_struct_get, enum_variant_payload,
-    function_plan::UserFunctionPlan, semantic_type, struct_field_type, try_array_element_type,
+    function_plan::UserFunctionPlan, managed_snapshot_field_type, semantic_type, struct_field_type,
+    try_array_element_type,
 };
 
 pub(super) struct DisplayInputs<'a> {
+    pub program: &'a Program,
     pub structural: &'a StructuralTypes,
     pub arrays: &'a [ResolvedArrayType],
     pub semantics: &'a SemanticModel,
@@ -28,6 +30,7 @@ pub(super) struct DisplayInputs<'a> {
     pub users: &'a HashMap<FunctionInstance, UserFunctionPlan>,
     pub helpers: &'a RuntimeHelperPlan,
     pub debug_depth: u32,
+    pub globals: &'a HashMap<ValueId, u32>,
     pub gc: &'a GcLayout,
 }
 
@@ -44,6 +47,7 @@ pub(super) fn compile(inputs: &DisplayInputs<'_>) -> Vec<Function> {
                 return match structural.id {
                     StructuralTypeId::Struct(_) => compile_struct(structural, inputs),
                     StructuralTypeId::Enum(_) => compile_enum(structural, inputs),
+                    StructuralTypeId::ManagedClass(_) => compile_managed_class(structural, inputs),
                 };
             }
             match inputs.semantics.types().kind(ty) {
@@ -103,7 +107,6 @@ fn compile_opaque(ty: TypeId, inputs: &DisplayInputs<'_>) -> Function {
         ),
         TypeKind::StateSnapshot => "StateSnapshot { .. }".to_owned(),
         TypeKind::SettingsView => "SettingsView { .. }".to_owned(),
-        TypeKind::ManagedClass(_) => "<managed class snapshot>".to_owned(),
         TypeKind::ManagedReference(_) => "<managed class reference>".to_owned(),
         TypeKind::Array { .. } => "array { .. }".to_owned(),
         TypeKind::Option { .. } => "optional value { .. }".to_owned(),
@@ -126,7 +129,8 @@ fn compile_opaque(ty: TypeId, inputs: &DisplayInputs<'_>) -> Function {
         | TypeKind::Builtin(_)
         | TypeKind::GenericParameter { .. }
         | TypeKind::Struct(_)
-        | TypeKind::Enum(_) => unreachable!("opaque Debug received a non-opaque type"),
+        | TypeKind::Enum(_)
+        | TypeKind::ManagedClass(_) => unreachable!("opaque Debug received a non-opaque type"),
     };
     emit_string_literal(&mut function, &text, inputs.gc);
     function.instruction(&Instruction::End);
@@ -258,6 +262,88 @@ fn compile_struct(structure: &StructuralType, inputs: &DisplayInputs<'_>) -> Fun
     );
     finish_recursion_guard(&mut function, inputs);
     function
+}
+
+fn compile_managed_class(structure: &StructuralType, inputs: &DisplayInputs<'_>) -> Function {
+    let mut function = Function::new([]);
+    begin_recursion_guard(&mut function, inputs);
+    let StructuralTypeId::ManagedClass(class) = structure.id else {
+        unreachable!()
+    };
+    let type_index = inputs.gc.index(Type::ManagedClass(class));
+    emit_string_literal(
+        &mut function,
+        &format!("{} {{\n", structure.name),
+        inputs.gc,
+    );
+    for (field_index, field) in structure.members.iter().enumerate() {
+        let StructuralMemberId::ManagedField(field_id) = field.source else {
+            unreachable!()
+        };
+        if let Some(predicate) = inputs.semantics.managed_field_shape_predicate(field_id) {
+            super::update::emit_shape_predicate(
+                &mut function,
+                inputs.program,
+                predicate,
+                inputs.semantics,
+                inputs.gc,
+                inputs.globals,
+                super::update::PredicateState::Unavailable,
+            );
+            function.instruction(&Instruction::If(BlockType::Result(
+                inputs.gc.val_type(Type::Standard(StdlibTypeId::String)),
+            )));
+            emit_managed_field_segment(
+                &mut function,
+                type_index,
+                field_index as u32,
+                field,
+                field_id,
+                inputs,
+            );
+            function.instruction(&Instruction::Else);
+            emit_string_literal(&mut function, "", inputs.gc);
+            function.instruction(&Instruction::End);
+        } else {
+            emit_managed_field_segment(
+                &mut function,
+                type_index,
+                field_index as u32,
+                field,
+                field_id,
+                inputs,
+            );
+        }
+    }
+    emit_string_literal(&mut function, "}", inputs.gc);
+    join_pieces(&mut function, 2 + structure.members.len() as u32, inputs);
+    finish_recursion_guard(&mut function, inputs);
+    function
+}
+
+fn emit_managed_field_segment(
+    function: &mut Function,
+    type_index: u32,
+    field_index: u32,
+    field: &crate::structural::StructuralMember,
+    field_id: crate::ast::ManagedFieldId,
+    inputs: &DisplayInputs<'_>,
+) {
+    emit_string_literal(function, &format!("    {}: ", field.name), inputs.gc);
+    let field_type_id = field
+        .ty
+        .expect("managed snapshot fields have semantic types");
+    let field_type = managed_snapshot_field_type(field_id, inputs.semantics);
+    function
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull);
+    emit_typed_struct_get(function, type_index, field_index, field_type);
+    emit_value(function, field_type_id, field_type, inputs);
+    function.instruction(&Instruction::Call(
+        inputs.helpers.function(RuntimeHelperId::IndentDisplay),
+    ));
+    emit_string_literal(function, ",\n", inputs.gc);
+    join_pieces(function, 3, inputs);
 }
 
 fn compile_enum(enumeration: &StructuralType, inputs: &DisplayInputs<'_>) -> Function {

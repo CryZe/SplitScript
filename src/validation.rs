@@ -49,6 +49,7 @@ pub(crate) fn validate(
     let capabilities = CapabilityAnalysis::build(
         &syntax.structs,
         enum_types,
+        &syntax.managed_class_declarations(),
         &syntax.functions,
         semantics,
         standard_library.clone(),

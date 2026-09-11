@@ -34,7 +34,7 @@ impl EqualityCapabilities {
         semantics: &SemanticModel,
         standard_library: StandardLibrary,
     ) -> Self {
-        let structural = StructuralTypes::build(structs, enums, semantics);
+        let structural = StructuralTypes::build(structs, enums, &[], semantics);
         Self::build_with_structural(structural, semantics, standard_library)
     }
 
@@ -58,6 +58,9 @@ impl EqualityCapabilities {
                 }
                 StructuralTypeId::Enum(enumeration) => {
                     capabilities.enums.entry(enumeration).or_insert(result);
+                }
+                StructuralTypeId::ManagedClass(_) => {
+                    unreachable!("managed snapshots do not derive structural equality")
                 }
             }
         }
@@ -181,6 +184,10 @@ impl EqualityCapabilities {
                     ),
                     StructuralTypeId::Enum(_) => format!(
                         "enum `{}.{}` does not support equality: {error}",
+                        aggregate.name, member.name
+                    ),
+                    StructuralTypeId::ManagedClass(_) => format!(
+                        "managed class `{}.{}` does not support equality: {error}",
                         aggregate.name, member.name
                     ),
                 })?;

@@ -18,7 +18,10 @@ use crate::{
     },
 };
 
-use super::{STATE_PROVIDER_INDEX_URI, StandardLibraryDocumentation, bundled, code, intra_doc};
+use super::{
+    STATE_PROVIDER_INDEX_URI, StandardLibraryDocumentation, bundled, code, escape_markdown_symbol,
+    intra_doc,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -976,8 +979,9 @@ impl DocumentationReference {
     ) -> DocumentationPage {
         let uri = symbol_uri(symbol, &self.library);
         let mut markdown = format!(
-            "{}\n\n# {title}\n\n_{kind}_",
-            self.symbol_breadcrumb(symbol, &uri)
+            "{}\n\n# {}\n\n_{kind}_",
+            self.symbol_breadcrumb(symbol, &uri),
+            escape_markdown_symbol(&title),
         );
         if let Some(signature) = signature {
             markdown.push_str("\n\n");
@@ -1425,7 +1429,7 @@ impl DocumentationReference {
             for entry in section {
                 markdown.push_str(&format!(
                     "\n| [{}]({}) | {} |",
-                    escape_markdown_table_cell(&entry.title),
+                    escape_markdown_symbol(&entry.title),
                     relative_document_link("/index.md", &entry.uri),
                     table_prose(entry.raw_summary, "/index.md", &self.library)
                 ));
@@ -1454,7 +1458,7 @@ impl DocumentationReference {
         for entry in providers {
             markdown.push_str(&format!(
                 "\n| [{}]({}) | {} |",
-                escape_markdown_table_cell(&entry.title),
+                escape_markdown_symbol(&entry.title),
                 relative_document_link(STATE_PROVIDER_INDEX_URI, &entry.uri),
                 table_prose(entry.raw_summary, STATE_PROVIDER_INDEX_URI, &self.library)
             ));
@@ -1745,7 +1749,7 @@ fn member_markdown(
             None,
         ),
     };
-    let label = escape_markdown_table_cell(&label);
+    let label = escape_markdown_symbol(&label);
     let member_link = format!(
         "[{label}]({})",
         relative_document_link(current_uri, &target)
@@ -2073,11 +2077,12 @@ fn reference_breadcrumb(uri: &str, ancestors: Vec<(String, String)>, current: &s
     );
     for (label, target) in ancestors {
         markdown.push_str(&format!(
-            " / [{label}]({})",
+            " / [{}]({})",
+            escape_markdown_symbol(&label),
             relative_document_link(uri, &target)
         ));
     }
-    markdown.push_str(&format!(" / {current}"));
+    markdown.push_str(&format!(" / {}", escape_markdown_symbol(current)));
     markdown
 }
 
@@ -3154,7 +3159,7 @@ mod tests {
         let exclusive_range = reference
             .page("/stdlib/type-forms/exclusive-range/index.md")
             .expect("T..<T has a page with a URL-safe path");
-        assert!(exclusive_range.markdown.contains("# T..<T"));
+        assert!(exclusive_range.markdown.contains("# T..\\<T"));
         assert!(exclusive_range.markdown.contains("where"));
         assert!(exclusive_range.markdown.contains("Integer"));
         assert!(exclusive_range.markdown.contains("upper bound is excluded"));

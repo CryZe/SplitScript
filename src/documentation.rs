@@ -15,6 +15,30 @@ pub(crate) use reference::{language_item_uri, symbol_uri};
 
 pub(crate) const STATE_PROVIDER_INDEX_URI: &str = "/stdlib/state-providers/index.md";
 
+/// Escapes a compiler-generated symbol spelling for insertion into ordinary
+/// Markdown text or a link label.
+///
+/// CommonMark delimiters that can reinterpret plain symbol text are
+/// backslash-escaped. Besides protecting brackets, pipes, and formatting
+/// markers, this prevents a unary generic spelling such as `Set<T>` from being
+/// parsed as an inline HTML tag while a multi-parameter spelling happens to
+/// survive. Keep catalog names raw everywhere else; escaping belongs
+/// exclusively at the Markdown serialization boundary.
+#[doc(hidden)]
+pub fn escape_markdown_symbol(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(
+            character,
+            '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '|'
+        ) {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
 /// Joins the short and extended prose without manufacturing an empty or
 /// duplicated paragraph. Catalog producers preserve these as distinct fields,
 /// while this defensive equality check also keeps externally supplied or old
@@ -31,7 +55,7 @@ pub(crate) fn prose_markdown(summary: &str, details: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::prose_markdown;
+    use super::{escape_markdown_symbol, prose_markdown};
 
     #[test]
     fn prose_omits_empty_and_repeated_details() {
@@ -40,6 +64,14 @@ mod tests {
         assert_eq!(
             prose_markdown("Summary.", "Useful details."),
             "Summary.\n\nUseful details."
+        );
+    }
+
+    #[test]
+    fn compiler_symbols_escape_markdown_delimiters_without_rewriting_operators() {
+        assert_eq!(
+            escape_markdown_symbol("[T] Map<K, V>.value | T? + T!"),
+            "\\[T\\] Map\\<K, V\\>.value \\| T? + T!"
         );
     }
 }

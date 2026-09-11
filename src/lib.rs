@@ -18,7 +18,9 @@ mod constant;
 mod database;
 pub use splitscript_syntax::diagnostic;
 mod documentation;
-pub use documentation::{DocumentationIndexEntry, DocumentationPage, DocumentationReference};
+pub use documentation::{
+    DocumentationIndexEntry, DocumentationPage, DocumentationReference, escape_markdown_symbol,
+};
 mod editorconfig;
 mod effects;
 mod equality;

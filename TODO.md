@@ -1398,11 +1398,15 @@ remaining work is product hardening and distribution.
 
 ## P2 — documentation and editor evolution
 
-- [ ] Render generic type parameters consistently in generated documentation
-  indexes and navigation. `Map<K, V>` and `Set<T>` must follow the same rule,
-  as must other generic catalog types; derive the displayed parameter list from
-  canonical type metadata instead of per-type titles, and test both the HTML
-  and terminal/reference renderers.
+- [x] Render generic type parameters consistently in generated documentation
+  indexes and navigation. All spellings already derive from canonical type-
+  constructor metadata; the inconsistency came from serializing a unary form
+  such as `Set<T>` as raw Markdown, where `<T>` was consumed as an HTML tag
+  while `Map<K, V>` happened to survive. Compiler-generated symbol labels now
+  share one Markdown-boundary escaping function, while catalog identities stay
+  raw. Catalog-wide terminal and HTML tests round-trip every current and future
+  type constructor through root indexes, declaration headings, breadcrumbs,
+  and search results, preventing the same class of drift from recurring.
 - [ ] Make exact documentation queries for concrete generic members resolve to
   their canonical operation instead of only returning a ranked type list. For
   example, `splitc docs SetIterator.next` should show the specialized signature,

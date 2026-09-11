@@ -702,4 +702,36 @@ mod tests {
         assert!(!SITE_CSS.contains("p, li { max-width:"));
         assert!(SITE_CSS.contains("[data-splitscript-token=\"enumMember\"] { color: #F397FF; }"));
     }
+
+    #[test]
+    fn every_catalog_type_constructor_survives_html_markdown_rendering() {
+        let reference = DocumentationReference::default();
+        let constructors = reference
+            .index()
+            .into_iter()
+            .filter(|entry| entry.kind == "type constructor")
+            .collect::<Vec<_>>();
+        let root = reference.page("/index.md").expect("reference index exists");
+        let (root_html, _) = markdown_to_html(&root.markdown);
+
+        for entry in constructors {
+            let mut escaped = String::new();
+            escape_html(&mut escaped, &entry.title);
+            assert!(
+                root_html.contains(&escaped),
+                "type-constructor index lost `{}` while rendering:\n{}",
+                entry.title,
+                root.markdown
+            );
+
+            let page = reference.page(&entry.uri).expect("constructor page exists");
+            let (page_html, _) = markdown_to_html(&page.markdown);
+            assert!(
+                page_html.contains(&format!(">{escaped}</h1>")),
+                "type-constructor heading lost `{}` while rendering:\n{}",
+                entry.title,
+                page.markdown
+            );
+        }
+    }
 }

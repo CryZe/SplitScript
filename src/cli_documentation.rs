@@ -590,7 +590,7 @@ pub(crate) fn search_results_markdown(
     for result in results.iter().take(SEARCH_RESULT_LIMIT) {
         markdown.push_str(&format!(
             "\n| {} | {} | {} |",
-            escape_table_cell(&result.title),
+            splitscript::escape_markdown_symbol(&result.title),
             escape_table_cell(result.kind),
             escape_table_cell(&result.summary),
         ));
@@ -1073,5 +1073,49 @@ mod tests {
         assert!(rendered.contains("Attachment state declaration"));
         assert!(!rendered.contains("Topic | Kind"));
         assert!(!rendered.contains("splitscript-reference-table"));
+    }
+
+    #[test]
+    fn every_catalog_type_constructor_survives_terminal_markdown_rendering() {
+        let reference = splitscript::DocumentationReference::default();
+        let constructors = reference
+            .index()
+            .into_iter()
+            .filter(|entry| entry.kind == "type constructor")
+            .collect::<Vec<_>>();
+        let root = reference.page("/index.md").expect("reference index exists");
+        let mut root_buffer = Buffer::no_color();
+        emit(&mut root_buffer, &root.markdown, 160).unwrap();
+        let root_rendered = String::from_utf8(root_buffer.into_inner()).unwrap();
+
+        for entry in constructors {
+            assert!(
+                root_rendered.contains(&entry.title),
+                "type-constructor index lost `{}` while rendering:\n{}",
+                entry.title,
+                root.markdown
+            );
+
+            let page = reference.page(&entry.uri).expect("constructor page exists");
+            let mut page_buffer = Buffer::no_color();
+            emit(&mut page_buffer, &page.markdown, 160).unwrap();
+            let page_rendered = String::from_utf8(page_buffer.into_inner()).unwrap();
+            assert!(
+                page_rendered.contains(&entry.title),
+                "type-constructor heading lost `{}` while rendering:\n{}",
+                entry.title,
+                page.markdown
+            );
+
+            let search = search_results_markdown(&entry.title, std::slice::from_ref(&entry));
+            let mut search_buffer = Buffer::no_color();
+            emit(&mut search_buffer, &search, 160).unwrap();
+            let search_rendered = String::from_utf8(search_buffer.into_inner()).unwrap();
+            assert!(
+                search_rendered.contains(&entry.title),
+                "search result lost `{}` while rendering:\n{search}",
+                entry.title
+            );
+        }
     }
 }

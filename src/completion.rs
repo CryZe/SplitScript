@@ -941,24 +941,6 @@ fn complete_member(
             }
         }
         [name] => {
-            if let Some(enumeration) = syntax.enum_declarations().find(|item| item.name == *name) {
-                for variant in &enumeration.variants {
-                    let (insert_text, is_snippet) = if variant.payload.is_some() {
-                        (format!("{}(${{1:value}})", variant.name), true)
-                    } else {
-                        (variant.name.clone(), false)
-                    };
-                    builder.add(CompletionItem {
-                        label: variant.name.clone(),
-                        kind: CompletionKind::EnumMember,
-                        detail: Some(format!("{}.{}", enumeration.name, variant.name)),
-                        documentation: None,
-                        documentation_uri: None,
-                        insert_text,
-                        is_snippet,
-                    });
-                }
-            }
             if let Some(provider) = selected_provider_at(syntax, &standard_library, context.dot)
                 && provider.value_name == *name
             {
@@ -1052,23 +1034,7 @@ fn complete_member(
         _ => {}
     }
 
-    let enum_name = path.join(".");
-    if let Some(enumeration) = syntax
-        .enum_declarations()
-        .find(|item| item.name == enum_name)
-    {
-        for variant in &enumeration.variants {
-            builder.add(CompletionItem {
-                label: variant.name.clone(),
-                kind: CompletionKind::EnumMember,
-                detail: Some(format!("{}.{}", enumeration.name, variant.name)),
-                documentation: variant.documentation.clone(),
-                documentation_uri: None,
-                insert_text: variant.name.clone(),
-                is_snippet: false,
-            });
-        }
-    }
+    add_source_enum_variant_completions(&mut builder, syntax, &path.join("."), false);
 
     if !path.is_empty() {
         add_standard_library_path_members(&mut builder, &path, &standard_library);
@@ -1593,12 +1559,62 @@ fn add_source_declarations(
             "struct type",
         ));
     }
-    for enumeration in syntax.enum_declarations() {
+    add_source_enum_type_completions(builder, syntax, None, false);
+}
+
+pub(super) fn add_source_enum_type_completions(
+    builder: &mut CompletionBuilder,
+    syntax: &Program,
+    required_name: Option<&str>,
+    require_payloadless_variant: bool,
+) {
+    for enumeration in syntax.enum_declarations().filter(|enumeration| {
+        required_name.is_none_or(|required| enumeration.name == required)
+            && (!require_payloadless_variant
+                || enumeration
+                    .variants
+                    .iter()
+                    .any(|variant| variant.payload.is_none()))
+    }) {
         builder.add(simple_completion(
             &enumeration.name,
             CompletionKind::Enum,
             "enum type",
         ));
+    }
+}
+
+pub(super) fn add_source_enum_variant_completions(
+    builder: &mut CompletionBuilder,
+    syntax: &Program,
+    enum_name: &str,
+    payloadless_only: bool,
+) {
+    let Some(enumeration) = syntax
+        .enum_declarations()
+        .find(|enumeration| enumeration.name == enum_name)
+    else {
+        return;
+    };
+    for variant in enumeration
+        .variants
+        .iter()
+        .filter(|variant| !payloadless_only || variant.payload.is_none())
+    {
+        let (insert_text, is_snippet) = if variant.payload.is_some() {
+            (format!("{}(${{1:value}})", variant.name), true)
+        } else {
+            (variant.name.clone(), false)
+        };
+        builder.add(CompletionItem {
+            label: variant.name.clone(),
+            kind: CompletionKind::EnumMember,
+            detail: Some(format!("{}.{}", enumeration.name, variant.name)),
+            documentation: variant.documentation.clone(),
+            documentation_uri: None,
+            insert_text,
+            is_snippet,
+        });
     }
 }
 
@@ -3596,6 +3612,40 @@ whileAttached {
         assert!(labels.contains(&"named filter".to_owned()));
         assert!(labels.contains(&"fallback filter".to_owned()));
         assert!(labels.contains(&"MIME filter".to_owned()));
+    }
+
+    #[test]
+    fn choice_setting_values_complete_source_enums_and_payloadless_variants() {
+        let declarations = r#"
+enum Mode { Fast, Slow, Custom(u8) }
+enum Other { First }
+enum PayloadOnly { Value(u8) }
+state "game.exe" {}
+"#;
+
+        let source = format!(
+            "{declarations}settings {{\n    \"Mode\" => mode: choice {{\n        \"Fast\" => Mo\n    }},\n}}"
+        );
+        let mut enum_type = CompilerDatabase::new(source);
+        assert_eq!(labels(&mut enum_type, "=> Mo"), vec!["Mode"]);
+
+        let source = format!(
+            "{declarations}settings {{\n    \"Mode\" => mode: choice {{\n        \"Slow\" => Mode.S\n    }},\n}}"
+        );
+        let mut variant = CompilerDatabase::new(source);
+        assert_eq!(labels(&mut variant, "Mode.S"), vec!["Slow"]);
+
+        let source = format!(
+            "{declarations}settings {{\n    \"Mode\" => mode: choice {{\n        \"Fast\" => Mode.Fast,\n        \"Slow\" => \n    }},\n}}"
+        );
+        let mut constrained = CompilerDatabase::new(source);
+        assert_eq!(labels(&mut constrained, "\"Slow\" => "), vec!["Mode"]);
+
+        let source = format!(
+            "{declarations}settings {{\n    \"Mode\" => mode: choice {{\n        \"Fast\" => Mode.\n    }},\n}}"
+        );
+        let mut payloadless = CompilerDatabase::new(source);
+        assert_eq!(labels(&mut payloadless, "Mode."), vec!["Fast", "Slow"]);
     }
 
     #[test]

@@ -1,6 +1,9 @@
 //! Contextual completion for the declarative settings grammar.
 
-use super::{CompletionBuilder, CompletionItem, CompletionKind, CompletionList, CompletionRequest};
+use super::{
+    CompletionBuilder, CompletionItem, CompletionKind, CompletionList, CompletionRequest,
+    add_source_enum_type_completions, add_source_enum_variant_completions,
+};
 use crate::{ast::Span, lexer::TokenKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,14 +72,18 @@ pub(super) fn complete_settings_dsl(request: &CompletionRequest<'_>) -> Option<C
                 add_entry_completions(&mut builder);
             }
         }
-        Context::ChoiceOptions if segment_is_empty_or_prefix(&segment, replacement) => {
-            add_snippet(
-                &mut builder,
-                "choice option",
-                "choice option",
-                "\"${1:Label}\" => ${2:Enum}.${3:Variant}${4: default},",
-                "Adds one enum-backed choice option. Exactly one option may be marked `default`.",
-            );
+        Context::ChoiceOptions => {
+            if !add_choice_value_completions(&mut builder, request, open, &segment, replacement)
+                && segment_is_empty_or_prefix(&segment, replacement)
+            {
+                add_snippet(
+                    &mut builder,
+                    "choice option",
+                    "choice option",
+                    "\"${1:Label}\" => ${2:Enum}.${3:Variant}${4: default},",
+                    "Adds one enum-backed choice option. Exactly one option may be marked `default`.",
+                );
+            }
         }
         Context::FileFilters if segment_is_empty_or_prefix(&segment, replacement) => {
             add_snippet(
@@ -101,9 +108,109 @@ pub(super) fn complete_settings_dsl(request: &CompletionRequest<'_>) -> Option<C
                 "Adds a MIME-type filter.",
             );
         }
-        Context::ChoiceOptions | Context::FileFilters | Context::FamilyEntry => {}
+        Context::FileFilters | Context::FamilyEntry => {}
     }
     Some(builder.finish())
+}
+
+fn add_choice_value_completions(
+    builder: &mut CompletionBuilder,
+    request: &CompletionRequest<'_>,
+    open: usize,
+    segment: &[&crate::lexer::Token],
+    replacement: Span,
+) -> bool {
+    let significant = segment
+        .iter()
+        .copied()
+        .filter(|token| !matches!(token.kind, TokenKind::DocComment(_)))
+        .collect::<Vec<_>>();
+    let Some(arrow) = significant
+        .iter()
+        .position(|token| matches!(token.kind, TokenKind::FatArrow))
+    else {
+        return false;
+    };
+    let tail = &significant[arrow + 1..];
+    let constrained_enum = prior_choice_enum_name(&request.tokens, open, significant[0].span.start);
+
+    match tail {
+        [] => add_source_enum_type_completions(
+            builder,
+            request.syntax,
+            constrained_enum.as_deref(),
+            true,
+        ),
+        [candidate]
+            if matches!(candidate.kind, TokenKind::Ident(_)) && candidate.span == replacement =>
+        {
+            add_source_enum_type_completions(
+                builder,
+                request.syntax,
+                constrained_enum.as_deref(),
+                true,
+            );
+        }
+        [enumeration, dot]
+            if matches!(enumeration.kind, TokenKind::Ident(_))
+                && matches!(dot.kind, TokenKind::Dot) =>
+        {
+            add_choice_variant_completions(
+                builder,
+                request,
+                enumeration,
+                constrained_enum.as_deref(),
+            );
+        }
+        [enumeration, dot, candidate]
+            if matches!(enumeration.kind, TokenKind::Ident(_))
+                && matches!(dot.kind, TokenKind::Dot)
+                && matches!(candidate.kind, TokenKind::Ident(_))
+                && candidate.span == replacement =>
+        {
+            add_choice_variant_completions(
+                builder,
+                request,
+                enumeration,
+                constrained_enum.as_deref(),
+            );
+        }
+        _ => {}
+    }
+    true
+}
+
+fn add_choice_variant_completions(
+    builder: &mut CompletionBuilder,
+    request: &CompletionRequest<'_>,
+    enumeration: &crate::lexer::Token,
+    constrained_enum: Option<&str>,
+) {
+    let TokenKind::Ident(enum_name) = &enumeration.kind else {
+        return;
+    };
+    if constrained_enum.is_some_and(|required| required != enum_name) {
+        return;
+    }
+    add_source_enum_variant_completions(builder, request.syntax, enum_name, true);
+}
+
+fn prior_choice_enum_name(
+    tokens: &[&crate::lexer::Token],
+    open: usize,
+    segment_start: usize,
+) -> Option<String> {
+    let prior = tokens[open + 1..]
+        .iter()
+        .copied()
+        .take_while(|token| token.span.end <= segment_start)
+        .collect::<Vec<_>>();
+    prior.windows(3).find_map(
+        |window| match (&window[0].kind, &window[1].kind, &window[2].kind) {
+            (TokenKind::FatArrow, TokenKind::Ident(name), TokenKind::Dot) => Some(name.clone()),
+            _ => None,
+        },
+    )
 }
 
 fn segment_starts_with_for(

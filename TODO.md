@@ -551,13 +551,16 @@ concepts rather than maintaining a parallel inventory.
   contributors without making the `examples` directory part of the authoring
   path. User guides must remain self-contained and must not link to disposable
   full autosplitter scripts.
-- [ ] Add type-directed completion for enum-backed choice settings. Inside
+- [x] Add type-directed completion for enum-backed choice settings. Inside
   every choice option and its `default` value, offer enum types in expression
   position and, after a qualified enum name, only that enum's variants. Reuse
   ordinary expression/type completion and the setting checker's inferred enum
   identity rather than maintaining a settings-only symbol list; cover empty,
   partially written, and already-constrained choice declarations in the shared
-  compiler completion tests used by every editor frontend.
+  compiler completion tests used by every editor frontend. The implementation
+  reuses the source-enum candidate builders, narrows later options from the
+  preceding choice entries even while the declaration is incomplete, and
+  excludes payload variants that the choice-setting contract rejects.
 
 ### Make every documentation surface agree
 

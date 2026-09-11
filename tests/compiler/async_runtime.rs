@@ -980,6 +980,77 @@ fn shared_pointer_prefixes_remain_lazy_for_inactive_layout_fields() {
 }
 
 #[test]
+fn dynamic_state_discriminators_poll_only_the_active_mcc_watcher_group() {
+    let source = r#"
+        enum Game {
+            Halo1,
+            Halo2,
+            Unknown,
+        }
+
+        state "MCC-Win64-Shipping.exe" {
+            game: Game = match process.read<u8>(0x1000)? {
+                0 => Game.Halo1,
+                1 => Game.Halo2,
+                _ => Game.Unknown,
+            };
+
+            if game is Game.Halo1 {
+                halo1Level: u32 at 0x2000;
+            } else if game is Game.Halo2 {
+                halo2Level: u32 at 0x3000;
+            }
+        }
+
+        whileAttached {
+            match current.game {
+                Game.Halo1 => print(`h1:{current.halo1Level}`),
+                Game.Halo2 => print(`h2:{current.halo2Level}`),
+                Game.Unknown => print("unknown"),
+            }
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    store.data_mut().memory_regions =
+        vec![(0x1000, vec![0]), (0x2000, 12u32.to_le_bytes().to_vec())];
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().process_reads, [0x1000, 0x2000]);
+    assert!(store.data().messages.is_empty());
+
+    // Selecting Halo 2 makes only that game's group active. A failed read is
+    // transactional: the accepted Halo 1 snapshot remains stored, the tick's
+    // lifecycle actions are skipped, and its pointer is not polled merely to
+    // retain that value.
+    store.data_mut().process_reads.clear();
+    store.data_mut().memory_regions = vec![(0x1000, vec![1])];
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().process_reads, [0x1000, 0x3000]);
+    assert!(store.data().messages.is_empty());
+
+    // Once the newly selected group succeeds, its first value seeds old and
+    // current together and becomes the visible snapshot shape.
+    store.data_mut().process_reads.clear();
+    store.data_mut().memory_regions =
+        vec![(0x1000, vec![1]), (0x3000, 34u32.to_le_bytes().to_vec())];
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().process_reads, [0x1000, 0x3000]);
+    assert_eq!(store.data().messages, ["h2:34"]);
+
+    // Unknown game IDs select no game-specific group, which is safer than
+    // making a process-readable enum reject a future MCC discriminator.
+    store.data_mut().process_reads.clear();
+    store.data_mut().memory_regions = vec![(0x1000, vec![99])];
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().process_reads, [0x1000]);
+    assert_eq!(store.data().messages, ["h2:34", "unknown"]);
+}
+
+#[test]
 fn float_display_matches_zmij_for_special_boundaries_and_sampled_bits() {
     use std::fmt::Write as _;
 

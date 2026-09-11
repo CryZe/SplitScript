@@ -551,6 +551,13 @@ concepts rather than maintaining a parallel inventory.
   contributors without making the `examples` directory part of the authoring
   path. User guides must remain self-contained and must not link to disposable
   full autosplitter scripts.
+- [ ] Add type-directed completion for enum-backed choice settings. Inside
+  every choice option and its `default` value, offer enum types in expression
+  position and, after a qualified enum name, only that enum's variants. Reuse
+  ordinary expression/type completion and the setting checker's inferred enum
+  identity rather than maintaining a settings-only symbol list; cover empty,
+  partially written, and already-constrained choice declarations in the shared
+  compiler completion tests used by every editor frontend.
 
 ### Make every documentation surface agree
 
@@ -723,20 +730,19 @@ concepts rather than maintaining a parallel inventory.
 
 ### Polling, mutable watcher patterns, and settings
 
-- [ ] Design runtime-dependent state-field activation using the MCC
-  `gameIndicator` watcher groups as the first acceptance case and Outer Wilds,
-  Rain World, and Bloodstained as cross-checks. An inactive game's required
-  pointer must not block initial attachment, and inactive fields must not be
-  read merely to retain the previous value. Compare a discriminator-dependent
-  enum snapshot, explicitly conditional fields/groups, and ordinary on-demand
-  reads before choosing syntax. The design must define initialization order,
-  dependencies on already-read discriminator fields, `old` / `current`
-  availability, inactive-value semantics, failure retention, layout
-  interaction, and whether a discriminator change can alter the visible
-  snapshot shape. Reuse the existing state dependency graph and transactional
-  lowering rather than adding a mutable `MemoryWatcherList` compatibility
-  object. Bring this language and state-model decision back for approval before
-  implementation.
+- [x] Support runtime-dependent state-field activation through ordinary
+  conditional field groups selected by enum-valued state discriminators. The
+  existing state dependency graph polls each discriminator before its selected
+  group, inactive groups perform no reads, and a failed newly active group
+  skips that tick without partially replacing the previous accepted snapshot.
+  A successful shape transition seeds newly visible `old` / `current` fields
+  equally. The MCC acceptance regression maps unknown `gameIndicator` bytes to
+  an explicit source enum fallback, proves that Halo 1 and Halo 2 pointers are
+  mutually exclusive, and proves that an unknown future game ID reads neither
+  group. Attachment-static enum globals cover build-dependent Outer Wilds
+  shapes; Rain World and Bloodstained's pointers that become stale while the
+  process stays open remain part of the separate provider-refresh lifecycle
+  design, not a reason to add a mutable `MemoryWatcherList` object.
 - [x] Design and implement one typed associative `Map<K, V>` now that the MGS
   signature/checker dispatch, MGS2 room callbacks, Halo objective guards,
   Bully route tables, and Uncharted Waters route data demonstrate genuine
@@ -1389,6 +1395,11 @@ remaining work is product hardening and distribution.
 
 ## P2 — documentation and editor evolution
 
+- [ ] Render generic type parameters consistently in generated documentation
+  indexes and navigation. `Map<K, V>` and `Set<T>` must follow the same rule,
+  as must other generic catalog types; derive the displayed parameter list from
+  canonical type metadata instead of per-type titles, and test both the HTML
+  and terminal/reference renderers.
 - [ ] Make exact documentation queries for concrete generic members resolve to
   their canonical operation instead of only returning a ranked type list. For
   example, `splitc docs SetIterator.next` should show the specialized signature,

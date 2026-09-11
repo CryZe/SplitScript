@@ -4515,3 +4515,20 @@ language catalog document the refinement rule.
 - Documented the lifecycle, state-replacement timing, and canonical division:
   ordinary one-time discovery belongs in `onAttach`; suspending
   `whileAttached` is for resources that can move while the process stays open.
+
+# 2026-09-11: runtime-varying watched values
+
+- Evaluated the FNaF Security Breach interactible watchers, which replace two
+  dynamically typed ASL watcher slots with Boolean, integer, floating-point,
+  and multi-value readers selected by the current interaction.
+- Kept this out of the language surface: one ordinary source enum with
+  semantically named payload variants is the canonical statically typed state
+  value. Struct payloads cover cases that read several related values.
+- A selected match arm performs only its typed reads; failure retains the last
+  accepted complete enum value, success atomically advances it, and variant
+  changes remain visible through ordinary `old` / `current` matching. Separate
+  optional payload fields would admit invalid or independently stale states,
+  while a dynamic watcher type would add no required expressiveness.
+- Added no redundant feature-specific test because payload enums, lazy match
+  evaluation, persistent expression-backed fields, and snapshot transitions
+  are already independently covered by their owning compiler/runtime tests.

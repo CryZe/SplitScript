@@ -68,9 +68,11 @@ running timer decisions against stale snapshots. Continue with the remaining
 P0 porting gaps below. Do not begin managed
 collection support itself until ASR has a tested
 representation, and bring every language, standard-library, provider, or
-host-surface decision below back to the user. The next product decisions are,
-in order, runtime-dependent state-field activation and a typed associative map;
-neither should be skipped merely because it needs design approval.
+host-surface decision below back to the user. The next compiler-side product
+decision is the shared readable-address-space capability for native processes
+and emulator providers. Bring its names, membership, failure behavior, and
+source-defined helper boundary back for approval rather than duplicating
+process helpers across providers.
 
 ## Unity schema foundation and deferred follow-ups
 
@@ -770,14 +772,6 @@ concepts rather than maintaining a parallel inventory.
   follow-up if port evidence shows that generic unknown-name diagnostics are
   insufficient. Keep heterogeneous `ExpandoObject` data and runtime settings
   registration as separate designs.
-- [ ] Design the canonical representation for runtime-varying watched value
-  types using the FNaF Security Breach interactible rules as the acceptance
-  case. Compare a source-authored enum/tag plus typed optional payloads with a
-  first-class tagged state value; preserve static exhaustiveness, per-variant
-  read failure, old/current transitions, and efficient polling. If ordinary
-  source already expresses the behavior cleanly after focused guidance, prefer
-  documenting that pattern over adding a dynamic watcher type. Bring the
-  language and state-model choice back for approval before implementation.
 - [ ] Add conditional settings visibility or enablement only with explicit host
   semantics for persisted hidden values and parent changes. Until then,
   document that headings are visual and parent boolean settings must gate child
@@ -1619,10 +1613,10 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Design runtime-dependent state-field activation from MCC, then the typed
-   associative `Map` proven by MGS, MGS2, Halo, Bully, and Uncharted Waters.
-   Bring both language and standard-library decisions back for approval, then
-   implement them on the existing state graph and capability foundations.
+1. Design the shared readable-address-space capability for `Process`, emulator
+   providers, and future memory views. Reuse source-defined helpers where the
+   current translated-read ABI is sufficient; do not invent a new host
+   primitive without a tested ASR contract.
 2. Bound recovery on large foreign inputs and close the exact migration-search
    holes exposed by the latest porting pass. A compiler-clean port is not a
    success when inactive state fields prevent attachment or existing canonical
@@ -1632,9 +1626,8 @@ remaining work is product hardening and distribution.
    enumeration with their host-runtime contracts. Abe's Oddysee, Outer Wilds,
    Ato, Spider-Man, and the SEGA Master Splitter are the acceptance evidence;
    deterministic executable identity already exists through `Module.md5()`.
-4. Resolve the FNaF runtime-varying watched-value design, then resume measured
-   compiler/editor performance, release hardening, hosted IDE, and debugging
-   work after the correctness and product-design sequence above.
+4. Resume measured compiler/editor performance, release hardening, hosted IDE,
+   and debugging work after the correctness and product-design sequence above.
 5. Keep only the portions of shared readable-memory helpers that need a new
    host primitive, the PS2 low-memory domain, `unity.time`, Sega CD, SNES, and
    managed collections gated on tested ASR evidence. Keep writes/injection,

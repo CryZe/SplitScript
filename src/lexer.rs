@@ -3,7 +3,7 @@
 use splitscript_syntax::SyntaxMode;
 pub use splitscript_syntax::{Lexed, Lexeme, Token, TokenKind, TriviaKind};
 
-use crate::{Diagnostic, ast::Span};
+use crate::Diagnostic;
 
 #[cfg(test)]
 pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
@@ -15,47 +15,14 @@ pub fn lex_lossless(source: &str) -> Result<Lexed, Diagnostic> {
 }
 
 /// Produces an offset-preserving token stream for editor recovery even when
-/// strict lexing encounters malformed text. Each failing source span is
-/// replaced by same-width whitespace in a private probe buffer, so tokens from
-/// valid regions keep their exact original offsets. Strict compilation keeps
-/// using [`lex_lossless`] and therefore still rejects every lexical error.
+/// strict lexing encounters malformed text. The shared lexer resumes from the
+/// affected token boundary after replacing malformed bytes with same-width
+/// whitespace, so valid regions keep their exact original offsets without
+/// rescanning the complete prefix. Strict compilation still rejects every
+/// collected lexical error.
 pub fn lex_lossless_recovering(source: &str) -> (Lexed, Vec<Diagnostic>) {
-    let mut probe = source.as_bytes().to_vec();
-    let mut diagnostics = Vec::new();
-    loop {
-        let probe_source = std::str::from_utf8(&probe)
-            .expect("offset-preserving lexical repairs retain valid UTF-8");
-        match splitscript_syntax::lex_lossless(probe_source, SyntaxMode::Program) {
-            Ok(lexed) => return (lexed, diagnostics),
-            Err(error) => {
-                let span = lexical_repair_span(source, error.span);
-                diagnostics.push(Diagnostic::lexical(error.message, span));
-                for (offset, byte) in probe[span.start..span.end].iter_mut().enumerate() {
-                    if !matches!(source.as_bytes()[span.start + offset], b'\r' | b'\n') {
-                        *byte = b' ';
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn lexical_repair_span(source: &str, span: Span) -> Span {
-    let mut start = span.start.min(source.len());
-    while start > 0 && !source.is_char_boundary(start) {
-        start -= 1;
-    }
-    let mut end = span.end.max(start.saturating_add(1)).min(source.len());
-    while end < source.len() && !source.is_char_boundary(end) {
-        end += 1;
-    }
-    if start == end {
-        start = source[..start]
-            .char_indices()
-            .next_back()
-            .map_or(0, |(offset, _)| offset);
-    }
-    Span { start, end }
+    let (lexed, errors) = splitscript_syntax::lex_lossless_recovering(source, SyntaxMode::Program);
+    (lexed, errors.into_iter().map(into_diagnostic).collect())
 }
 
 fn into_diagnostic(error: splitscript_syntax::Error) -> Diagnostic {

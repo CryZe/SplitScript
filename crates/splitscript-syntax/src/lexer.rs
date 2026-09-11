@@ -133,6 +133,90 @@ pub fn lex_lossless(source: &str, syntax_mode: SyntaxMode) -> Result<Lexed, Erro
     .run()
 }
 
+/// Lexes a source file while retaining every independently valid token after
+/// malformed text.
+///
+/// Recovery resumes from the token boundary preceding an error. This keeps
+/// work proportional to the affected token rather than re-lexing the complete
+/// source once for every malformed character.
+pub fn lex_lossless_recovering(source: &str, syntax_mode: SyntaxMode) -> (Lexed, Vec<Error>) {
+    let mut probe = source.as_bytes().to_vec();
+    let mut diagnostics = Vec::new();
+    let mut lexemes = Vec::new();
+    let mut pos = 0;
+    let mut modes = vec![LexMode::Code];
+
+    loop {
+        let probe_source = std::str::from_utf8(&probe)
+            .expect("offset-preserving lexical repairs retain valid UTF-8");
+        let lexer = Lexer {
+            source: probe_source,
+            bytes: &probe,
+            pos,
+            modes,
+            syntax_mode,
+        };
+        match lexer.run_from(lexemes) {
+            Ok(lexed) => return (lexed, diagnostics),
+            Err(failure) => {
+                let diagnostic_span = lexical_repair_span(source, failure.error.span);
+                if diagnostics.last().is_none_or(|previous: &Error| {
+                    previous.span != diagnostic_span || previous.message != failure.error.message
+                }) {
+                    diagnostics.push(Error::lexical(failure.error.message, diagnostic_span));
+                }
+                let changed = blank_recovery_span(&mut probe, source, diagnostic_span);
+                if !changed {
+                    // Some diagnostics intentionally highlight only the invalid
+                    // contents, such as a character literal with too many
+                    // scalars. If repairing that exact span reproduces the same
+                    // error, consume its opening token boundary as well.
+                    let repair_span = lexical_repair_span(
+                        source,
+                        Span {
+                            start: failure.pos.min(diagnostic_span.start),
+                            end: diagnostic_span.end,
+                        },
+                    );
+                    blank_recovery_span(&mut probe, source, repair_span);
+                }
+                lexemes = failure.lexemes;
+                pos = failure.pos;
+                modes = failure.modes;
+            }
+        }
+    }
+}
+
+fn blank_recovery_span(probe: &mut [u8], source: &str, span: Span) -> bool {
+    let mut changed = false;
+    for (offset, byte) in probe[span.start..span.end].iter_mut().enumerate() {
+        if !matches!(source.as_bytes()[span.start + offset], b'\r' | b'\n') && *byte != b' ' {
+            *byte = b' ';
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn lexical_repair_span(source: &str, span: Span) -> Span {
+    let mut start = span.start.min(source.len());
+    while start > 0 && !source.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = span.end.max(start.saturating_add(1)).min(source.len());
+    while end < source.len() && !source.is_char_boundary(end) {
+        end += 1;
+    }
+    if start == end {
+        start = source[..start]
+            .char_indices()
+            .next_back()
+            .map_or(0, |(offset, _)| offset);
+    }
+    Span { start, end }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum LexMode {
     Code,
@@ -148,139 +232,165 @@ struct Lexer<'a> {
     syntax_mode: SyntaxMode,
 }
 
-impl Lexer<'_> {
-    fn run(mut self) -> Result<Lexed, Error> {
-        let mut lexemes = Vec::new();
-        loop {
-            if matches!(self.modes.last(), Some(LexMode::Template { .. })) {
-                lexemes.push(Lexeme::Token(self.template_token()?));
-                continue;
-            }
-            if let Some(token) = self.skip_trivia(&mut lexemes)? {
-                lexemes.push(Lexeme::Token(token));
-                continue;
-            }
-            let start = self.pos;
-            if self.pos == self.bytes.len() {
-                if let Some(mode) = self.modes.last()
-                    && !matches!(mode, LexMode::Code)
-                {
-                    let start = match mode {
-                        LexMode::Template { start } | LexMode::Interpolation { start, .. } => {
-                            *start
-                        }
-                        LexMode::Code => unreachable!(),
-                    };
-                    return Err(Error::lexical(
-                        "unterminated template literal",
-                        Span {
-                            start,
-                            end: self.pos,
-                        },
-                    ));
-                }
-                lexemes.push(Lexeme::Token(Token {
-                    kind: TokenKind::Eof,
-                    span: Span { start, end: start },
-                }));
-                return Ok(Lexed { lexemes });
-            }
+struct LexFailure {
+    error: Error,
+    lexemes: Vec<Lexeme>,
+    pos: usize,
+    modes: Vec<LexMode>,
+}
 
-            let kind = match self.bytes[self.pos] {
-                byte if crate::is_identifier_start_byte(byte) => self.identifier(),
-                b'0'..=b'9' => self.number()?,
-                b'"' => self.string()?,
-                b'\'' => self.character()?,
-                b'`' => {
-                    self.pos += 1;
-                    self.modes.push(LexMode::Template { start });
-                    TokenKind::TemplateStart
-                }
-                b'@' if self.syntax_mode == SyntaxMode::StandardLibrary => self.one(TokenKind::At),
-                b'(' => self.one(TokenKind::LParen),
-                b')' => self.one(TokenKind::RParen),
-                b'{' => {
-                    if let Some(LexMode::Interpolation { brace_depth, .. }) = self.modes.last_mut()
-                    {
-                        *brace_depth += 1;
-                    }
-                    self.one(TokenKind::LBrace)
-                }
-                b'}' => {
-                    let ends_interpolation = matches!(
-                        self.modes.last(),
-                        Some(LexMode::Interpolation { brace_depth: 0, .. })
-                    );
-                    if ends_interpolation {
-                        self.pos += 1;
-                        self.modes.pop();
-                        TokenKind::TemplateExprEnd
-                    } else {
-                        if let Some(LexMode::Interpolation { brace_depth, .. }) =
-                            self.modes.last_mut()
-                        {
-                            *brace_depth -= 1;
-                        }
-                        self.one(TokenKind::RBrace)
-                    }
-                }
-                b'[' => self.one(TokenKind::LBracket),
-                b']' => self.one(TokenKind::RBracket),
-                b':' => self.one(TokenKind::Colon),
-                b',' => self.one(TokenKind::Comma),
-                b';' => self.one(TokenKind::Semicolon),
-                b'.' if self.starts_with(b"..<") => self.many(3, TokenKind::DotDotLt),
-                b'.' if self.starts_with(b"..=") => self.many(3, TokenKind::DotDotEq),
-                b'.' if self.starts_with(b"..") => self.many(2, TokenKind::DotDot),
-                b'.' => self.one(TokenKind::Dot),
-                b'+' if self.starts_with(b"+=") => self.many(2, TokenKind::PlusAssign),
-                b'+' => self.one(TokenKind::Plus),
-                b'-' if self.starts_with(b"-=") => self.many(2, TokenKind::MinusAssign),
-                b'-' => self.one(TokenKind::Minus),
-                b'*' if self.starts_with(b"*=") => self.many(2, TokenKind::StarAssign),
-                b'*' => self.one(TokenKind::Star),
-                b'/' if self.starts_with(b"/=") => self.many(2, TokenKind::SlashAssign),
-                b'/' => self.one(TokenKind::Slash),
-                b'%' if self.starts_with(b"%=") => self.many(2, TokenKind::PercentAssign),
-                b'%' => self.one(TokenKind::Percent),
-                b'~' => self.one(TokenKind::Tilde),
-                b'^' if self.starts_with(b"^=") => self.many(2, TokenKind::CaretAssign),
-                b'^' => self.one(TokenKind::Caret),
-                b'=' if self.starts_with(b"=>") => self.many(2, TokenKind::FatArrow),
-                b'=' if self.starts_with(b"===") => self.many(3, TokenKind::EqEq),
-                b'=' if self.starts_with(b"==") => self.many(2, TokenKind::EqEq),
-                b'=' => self.one(TokenKind::Assign),
-                b'!' if self.starts_with(b"!==") => self.many(3, TokenKind::BangEq),
-                b'!' if self.starts_with(b"!=") => self.many(2, TokenKind::BangEq),
-                b'!' => self.one(TokenKind::Bang),
-                b'?' => self.one(TokenKind::Question),
-                b'|' if self.starts_with(b"|=") => self.many(2, TokenKind::OrAssign),
-                b'|' if self.starts_with(b"||") => self.many(2, TokenKind::OrOr),
-                b'|' => self.one(TokenKind::Or),
-                b'&' if self.starts_with(b"&=") => self.many(2, TokenKind::AndAssign),
-                b'&' if self.starts_with(b"&&") => self.many(2, TokenKind::AndAnd),
-                b'&' => self.one(TokenKind::And),
-                b'<' if self.starts_with(b"<<=") => self.many(3, TokenKind::ShlAssign),
-                b'<' if self.starts_with(b"<<") => self.many(2, TokenKind::Shl),
-                b'<' if self.starts_with(b"<=") => self.many(2, TokenKind::Le),
-                b'<' => self.one(TokenKind::Lt),
-                b'>' if self.starts_with(b">>=") => self.many(3, TokenKind::ShrAssign),
-                b'>' if self.starts_with(b">>") => self.many(2, TokenKind::Shr),
-                b'>' if self.starts_with(b">=") => self.many(2, TokenKind::Ge),
-                b'>' => self.one(TokenKind::Gt),
-                _ => {
-                    let end = (self.pos + 1).min(self.bytes.len());
-                    return Err(Error::lexical("unexpected character", Span { start, end }));
+impl Lexer<'_> {
+    fn run(self) -> Result<Lexed, Error> {
+        self.run_from(Vec::new()).map_err(|failure| failure.error)
+    }
+
+    fn run_from(mut self, mut lexemes: Vec<Lexeme>) -> Result<Lexed, LexFailure> {
+        loop {
+            let checkpoint_pos = self.pos;
+            let checkpoint_modes = self.modes.clone();
+            let checkpoint_lexemes = lexemes.len();
+            let token = match self.next_token(&mut lexemes) {
+                Ok(token) => token,
+                Err(error) => {
+                    lexemes.truncate(checkpoint_lexemes);
+                    return Err(LexFailure {
+                        error,
+                        lexemes,
+                        pos: checkpoint_pos,
+                        modes: checkpoint_modes,
+                    });
                 }
             };
-            lexemes.push(Lexeme::Token(Token {
-                kind,
-                span: Span {
-                    start,
-                    end: self.pos,
-                },
-            }));
+            let done = token.kind == TokenKind::Eof;
+            lexemes.push(Lexeme::Token(token));
+            if done {
+                return Ok(Lexed { lexemes });
+            }
         }
+    }
+
+    fn next_token(&mut self, lexemes: &mut Vec<Lexeme>) -> Result<Token, Error> {
+        if matches!(self.modes.last(), Some(LexMode::Template { .. })) {
+            return self.template_token();
+        }
+        if let Some(token) = self.skip_trivia(lexemes)? {
+            return Ok(token);
+        }
+        let start = self.pos;
+        if self.pos == self.bytes.len() {
+            if let Some(mode) = self.modes.last()
+                && !matches!(mode, LexMode::Code)
+            {
+                let start = match mode {
+                    LexMode::Template { start } | LexMode::Interpolation { start, .. } => *start,
+                    LexMode::Code => unreachable!(),
+                };
+                return Err(Error::lexical(
+                    "unterminated template literal",
+                    Span {
+                        start,
+                        end: self.pos,
+                    },
+                ));
+            }
+            return Ok(Token {
+                kind: TokenKind::Eof,
+                span: Span { start, end: start },
+            });
+        }
+
+        let kind = match self.bytes[self.pos] {
+            byte if crate::is_identifier_start_byte(byte) => self.identifier(),
+            b'0'..=b'9' => self.number()?,
+            b'"' => self.string()?,
+            b'\'' => self.character()?,
+            b'`' => {
+                self.pos += 1;
+                self.modes.push(LexMode::Template { start });
+                TokenKind::TemplateStart
+            }
+            b'@' if self.syntax_mode == SyntaxMode::StandardLibrary => self.one(TokenKind::At),
+            b'(' => self.one(TokenKind::LParen),
+            b')' => self.one(TokenKind::RParen),
+            b'{' => {
+                if let Some(LexMode::Interpolation { brace_depth, .. }) = self.modes.last_mut() {
+                    *brace_depth += 1;
+                }
+                self.one(TokenKind::LBrace)
+            }
+            b'}' => {
+                let ends_interpolation = matches!(
+                    self.modes.last(),
+                    Some(LexMode::Interpolation { brace_depth: 0, .. })
+                );
+                if ends_interpolation {
+                    self.pos += 1;
+                    self.modes.pop();
+                    TokenKind::TemplateExprEnd
+                } else {
+                    if let Some(LexMode::Interpolation { brace_depth, .. }) = self.modes.last_mut()
+                    {
+                        *brace_depth -= 1;
+                    }
+                    self.one(TokenKind::RBrace)
+                }
+            }
+            b'[' => self.one(TokenKind::LBracket),
+            b']' => self.one(TokenKind::RBracket),
+            b':' => self.one(TokenKind::Colon),
+            b',' => self.one(TokenKind::Comma),
+            b';' => self.one(TokenKind::Semicolon),
+            b'.' if self.starts_with(b"..<") => self.many(3, TokenKind::DotDotLt),
+            b'.' if self.starts_with(b"..=") => self.many(3, TokenKind::DotDotEq),
+            b'.' if self.starts_with(b"..") => self.many(2, TokenKind::DotDot),
+            b'.' => self.one(TokenKind::Dot),
+            b'+' if self.starts_with(b"+=") => self.many(2, TokenKind::PlusAssign),
+            b'+' => self.one(TokenKind::Plus),
+            b'-' if self.starts_with(b"-=") => self.many(2, TokenKind::MinusAssign),
+            b'-' => self.one(TokenKind::Minus),
+            b'*' if self.starts_with(b"*=") => self.many(2, TokenKind::StarAssign),
+            b'*' => self.one(TokenKind::Star),
+            b'/' if self.starts_with(b"/=") => self.many(2, TokenKind::SlashAssign),
+            b'/' => self.one(TokenKind::Slash),
+            b'%' if self.starts_with(b"%=") => self.many(2, TokenKind::PercentAssign),
+            b'%' => self.one(TokenKind::Percent),
+            b'~' => self.one(TokenKind::Tilde),
+            b'^' if self.starts_with(b"^=") => self.many(2, TokenKind::CaretAssign),
+            b'^' => self.one(TokenKind::Caret),
+            b'=' if self.starts_with(b"=>") => self.many(2, TokenKind::FatArrow),
+            b'=' if self.starts_with(b"===") => self.many(3, TokenKind::EqEq),
+            b'=' if self.starts_with(b"==") => self.many(2, TokenKind::EqEq),
+            b'=' => self.one(TokenKind::Assign),
+            b'!' if self.starts_with(b"!==") => self.many(3, TokenKind::BangEq),
+            b'!' if self.starts_with(b"!=") => self.many(2, TokenKind::BangEq),
+            b'!' => self.one(TokenKind::Bang),
+            b'?' => self.one(TokenKind::Question),
+            b'|' if self.starts_with(b"|=") => self.many(2, TokenKind::OrAssign),
+            b'|' if self.starts_with(b"||") => self.many(2, TokenKind::OrOr),
+            b'|' => self.one(TokenKind::Or),
+            b'&' if self.starts_with(b"&=") => self.many(2, TokenKind::AndAssign),
+            b'&' if self.starts_with(b"&&") => self.many(2, TokenKind::AndAnd),
+            b'&' => self.one(TokenKind::And),
+            b'<' if self.starts_with(b"<<=") => self.many(3, TokenKind::ShlAssign),
+            b'<' if self.starts_with(b"<<") => self.many(2, TokenKind::Shl),
+            b'<' if self.starts_with(b"<=") => self.many(2, TokenKind::Le),
+            b'<' => self.one(TokenKind::Lt),
+            b'>' if self.starts_with(b">>=") => self.many(3, TokenKind::ShrAssign),
+            b'>' if self.starts_with(b">>") => self.many(2, TokenKind::Shr),
+            b'>' if self.starts_with(b">=") => self.many(2, TokenKind::Ge),
+            b'>' => self.one(TokenKind::Gt),
+            _ => {
+                let end = (self.pos + 1).min(self.bytes.len());
+                return Err(Error::lexical("unexpected character", Span { start, end }));
+            }
+        };
+        Ok(Token {
+            kind,
+            span: Span {
+                start,
+                end: self.pos,
+            },
+        })
     }
 
     fn template_token(&mut self) -> Result<Token, Error> {
@@ -858,6 +968,42 @@ mod tests {
             assert_eq!(error.message, "unexpected character");
             assert_eq!(&source[error.span.start..error.span.end], "$");
         }
+    }
+
+    #[test]
+    fn recovering_lexing_advances_past_errors_whose_span_excludes_the_token_start() {
+        let source = "'unterminated\nfn after() {}";
+        let (lexed, errors) = lex_lossless_recovering(source, SyntaxMode::Program);
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].message,
+            "a character literal must contain exactly one Unicode scalar value"
+        );
+        assert!(
+            lexed
+                .tokens()
+                .any(|token| matches!(&token.kind, TokenKind::Ident(name) if name == "after"))
+        );
+    }
+
+    #[test]
+    fn recovering_lexing_handles_many_independent_errors_in_source_order() {
+        let source = format!("{}fn after() {{}}", "$ ".repeat(4_096));
+        let (lexed, errors) = lex_lossless_recovering(&source, SyntaxMode::Program);
+
+        assert_eq!(errors.len(), 4_096);
+        assert!(
+            errors
+                .windows(2)
+                .all(|pair| pair[0].span.start < pair[1].span.start)
+        );
+        assert_eq!(errors[0].message, "unexpected character");
+        assert!(
+            lexed
+                .tokens()
+                .any(|token| matches!(&token.kind, TokenKind::Ident(name) if name == "after"))
+        );
     }
 
     #[test]

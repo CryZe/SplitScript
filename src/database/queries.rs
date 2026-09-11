@@ -27,6 +27,8 @@ use super::{
     },
 };
 
+const MAX_PUBLISHED_ERROR_DIAGNOSTICS: usize = 100;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceRevision(u64);
 
@@ -1034,13 +1036,37 @@ impl CompilerDatabase {
                             }
                         }
                     }
-                    self.warning_policy.apply(diagnostics)
+                    bound_error_diagnostics(
+                        self.warning_policy.apply(diagnostics),
+                        self.source.len(),
+                    )
                 }
             };
             self.cache.diagnostics = Some(Arc::from(diagnostics));
         }
         Arc::clone(self.cache.diagnostics.as_ref().unwrap())
     }
+}
+
+fn bound_error_diagnostics(mut diagnostics: Vec<Diagnostic>, source_len: usize) -> Vec<Diagnostic> {
+    if diagnostics.len() <= MAX_PUBLISHED_ERROR_DIAGNOSTICS {
+        return diagnostics;
+    }
+
+    let omitted = diagnostics.len() - MAX_PUBLISHED_ERROR_DIAGNOSTICS;
+    diagnostics.truncate(MAX_PUBLISHED_ERROR_DIAGNOSTICS);
+    diagnostics.push(
+        Diagnostic::new(
+            format!("stopped after {MAX_PUBLISHED_ERROR_DIAGNOSTICS} diagnostics"),
+            Span {
+                start: source_len,
+                end: source_len,
+            },
+        )
+        .with_primary_label(format!("{omitted} additional diagnostics were omitted"))
+        .with_note("fix earlier errors and compile again to reveal later diagnostics"),
+    );
+    diagnostics
 }
 
 fn pattern_alternation_at(program: &crate::ast::Program, offset: usize) -> bool {

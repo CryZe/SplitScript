@@ -65,16 +65,13 @@ complete, the approved finite `process.scanOnce` primitive now reports
 bounded-range exhaustion without changing waiting scans, and suspending
 `whileAttached` now supports cancellable post-attachment rediscovery without
 running timer decisions against stale snapshots. Continue with the remaining
-P0 porting gaps below. Do not begin managed
-collection support itself until ASR has a tested
-representation, and bring every language, standard-library, provider, or
-host-surface decision below back to the user. The next compiler-side product
-decision is target-contextual physical memory layout. In particular, a native
-`address` read must use the attached process's pointer width recursively inside
-structs and arrays, because its width and alignment can move later fields and
-change aggregate stride. Bring the inferred native-path API and explicit
-mixed-width override spelling back for approval before changing that public
-surface.
+P0 porting gaps below. Do not begin managed collection support itself until ASR
+has a tested representation, and bring every language, standard-library,
+provider, or host-surface decision below back to the user. Large foreign-input
+recovery is now bounded and prompt. Continue with the corpus-proven exact
+migration-search gaps: lead authors from unambiguous ASL/C#/Rust spellings to
+the existing canonical SplitScript facilities without adding compatibility
+aliases.
 
 ## Unity schema foundation and deferred follow-ups
 
@@ -869,7 +866,7 @@ concepts rather than maintaining a parallel inventory.
 
 ### Engine and emulator providers
 
-- [ ] Make physical `MemoryReadable` layout depend on the concrete reader
+- [x] Make physical `MemoryReadable` layout depend on the concrete reader
   context. Native `address` fields use the attached process's detected pointer
   width and alignment; nested structs, fixed arrays, field offsets, aggregate
   sizes, and array strides derive recursively from that context. Emulator
@@ -877,8 +874,8 @@ concepts rather than maintaining a parallel inventory.
   by type and context, reserve bounded scratch for the largest supported
   layout, and show both offsets in hover when a native struct differs between
   32-bit and 64-bit targets. Ordinary native pointer paths should infer the
-  process width; retain a clearly named explicit override for genuinely
-  mixed-width data after its public spelling is approved.
+  process width. Explicit mixed-width reads remain deliberately unimplemented
+  until a real target proves the need and their public spelling is approved.
 - [ ] Decide the source-defined provider refresh lifecycle before claiming
   parity for emulator cores that unload without their host process exiting.
   `state PS2` validates RetroArch's core mapping on every read and fails safely
@@ -941,16 +938,17 @@ concepts rather than maintaining a parallel inventory.
   parse, diagnostics, semantic tokens, hover, and completion on one database
   before and after, rather than hiding the issue behind additional `Clone`
   implementations.
-- [ ] Bound recovery and diagnostic construction on large foreign inputs. A
-  release build at revision `57f2564` processed a 165,809-byte legacy ASL file
-  for more than 60 seconds without producing its first diagnostic, so recent
-  sharing work has not eliminated this failure mode. Profile lexing, parser
-  recovery, migration recognition, type checking, and diagnostic rendering
-  separately; remove superlinear retry and cascading-error paths rather than
-  adding a spinner or a special bounded mode. Add a compact or generated
-  in-tree stress fixture with budgets for time to first useful diagnostic and
-  total work, cap redundant cascades, and keep the test independent of the
-  disposable external corpus.
+- [x] Bound recovery and diagnostic construction on large foreign inputs. The
+  shared recovering lexer now resumes from the failed token boundary instead of
+  re-lexing the complete prefix after every error, with an explicit no-progress
+  fallback for diagnostics whose span excludes the triggering token. Published
+  compiler errors have a deterministic 100-diagnostic budget plus an omitted
+  count while semantic recovery still sees the complete source. Generated
+  regressions cover thousands of independent lexical failures and token-local
+  no-progress recovery without depending on the disposable corpus. The same
+  165,809-byte legacy ASL that exceeded 60 seconds at revision `57f2564` now
+  returns the bounded, useful diagnostic set in about 0.11 seconds through the
+  `max-opt` CLI on the same machine.
 
 ## P1 — source-level debugging after the debugger boundary is chosen
 
@@ -1609,22 +1607,17 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Make `MemoryReadable` layouts reader-contextual so native `address` values,
-   including nested struct and array members, follow the target process's
-   pointer width. Finalize the ordinary inferred `MemoryPath` API and the
-   explicit mixed-width escape hatch with the user first.
-2. Bound recovery on large foreign inputs and close the exact migration-search
-   holes exposed by the latest porting pass. A compiler-clean port is not a
-   success when inactive state fields prevent attachment or existing canonical
-   APIs remain undiscoverable.
-3. Coordinate the read-only timer metadata/time surface, imperative timer
+1. Close the exact migration-search holes exposed by the latest porting pass. A
+   compiler-clean port is not a success when inactive state fields prevent
+   attachment or existing canonical APIs remain undiscoverable.
+2. Coordinate the read-only timer metadata/time surface, imperative timer
    control, writable files, read-only file metadata, JSON, and safe module
    enumeration with their host-runtime contracts. Abe's Oddysee, Outer Wilds,
    Ato, Spider-Man, and the SEGA Master Splitter are the acceptance evidence;
    deterministic executable identity already exists through `Module.md5()`.
-4. Resume measured compiler/editor performance, release hardening, hosted IDE,
+3. Resume measured compiler/editor performance, release hardening, hosted IDE,
    and debugging work after the correctness and product-design sequence above.
-5. Keep only the portions of shared readable-memory helpers that need a new
+4. Keep only the portions of shared readable-memory helpers that need a new
    host primitive, the PS2 low-memory domain, `unity.time`, Sega CD, SNES, and
    managed collections gated on tested ASR evidence. Keep writes/injection,
    physical `None` specialization, and other broad host powers deferred until

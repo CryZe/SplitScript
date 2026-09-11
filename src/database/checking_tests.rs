@@ -8,6 +8,23 @@ const SOURCE: &str = "// Unicode 🦊\nstate \"game.exe\" { level: u32 at 0x100 
     whileAttached { let f = value => value; print(identity(f(current.level))) }\n";
 
 #[test]
+fn published_syntax_errors_have_a_deterministic_budget() {
+    let source = format!("state \"game.exe\" {{}}\n{}", "$\n".repeat(250));
+    let mut database = CompilerDatabase::new(source);
+    let diagnostics = database.diagnostics();
+
+    assert_eq!(diagnostics.len(), 101);
+    assert_eq!(
+        diagnostics.last().unwrap().message,
+        "stopped after 100 diagnostics"
+    );
+    assert_eq!(
+        diagnostics.last().unwrap().labels[0].message.as_deref(),
+        Some("150 additional diagnostics were omitted")
+    );
+}
+
+#[test]
 fn failed_strict_checks_retain_inference_and_validation_results() {
     for (suffix, has_effects) in [
         ("fn broken() -> bool { return 42 }", false),

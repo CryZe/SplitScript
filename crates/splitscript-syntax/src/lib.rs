@@ -18,7 +18,9 @@ pub mod visit;
 use std::fmt;
 
 pub use cursor::TokenCursor;
-pub use lexer::{Lexed, Lexeme, Token, TokenKind, Trivia, TriviaKind, lex, lex_lossless};
+pub use lexer::{
+    Lexed, Lexeme, Token, TokenKind, Trivia, TriviaKind, lex, lex_lossless, lex_lossless_recovering,
+};
 
 /// Returns whether `byte` can begin a SplitScript identifier.
 ///

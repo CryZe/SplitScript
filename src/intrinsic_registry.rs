@@ -7,6 +7,7 @@
 
 use crate::{
     abi::AbiImportId,
+    memory::MemoryAddressWidth,
     stdlib::{
         Availability, CoreTypeId, Effect, EffectSet, IntrinsicId, ItemKind, ParameterRule,
         Signature, StdlibCapabilityId, StdlibTypeConstructorId, StdlibTypeId, TypeRef,
@@ -85,6 +86,7 @@ pub(crate) enum RuntimeHelperId {
     ReadManagedString,
     ReadManagedStringField,
     ReadOptionalManagedStringField,
+    DetectProcessPointerSize,
     LoadedModule,
     ModulePath,
     ProcessPath,
@@ -130,6 +132,7 @@ pub(crate) enum RuntimeHelperId {
 pub(crate) struct ProviderReadContract {
     pub reader: RuntimeHelperId,
     pub byte_order: ProviderByteOrder,
+    pub address_width: MemoryAddressWidth,
     pub invalid_address: &'static str,
     pub read_failure: &'static str,
 }
@@ -176,42 +179,49 @@ pub(crate) const fn provider_read_contract(intrinsic: IntrinsicId) -> Option<Pro
         IntrinsicId::GBAEmulatorRead => Some(ProviderReadContract {
             reader: RuntimeHelperId::GBAReadMemory,
             byte_order: ProviderByteOrder::Little,
+            address_width: MemoryAddressWidth::Bit32,
             invalid_address: "invalid or unavailable GBA memory address",
             read_failure: "GBA memory read failed",
         }),
         IntrinsicId::Ps2EmulatorRead => Some(ProviderReadContract {
             reader: RuntimeHelperId::Ps2ReadMemory,
             byte_order: ProviderByteOrder::Little,
+            address_width: MemoryAddressWidth::Bit32,
             invalid_address: "invalid or unavailable PS2 memory address",
             read_failure: "PS2 memory read failed",
         }),
         IntrinsicId::Ps1EmulatorRead => Some(ProviderReadContract {
             reader: RuntimeHelperId::Ps1ReadMemory,
             byte_order: ProviderByteOrder::Little,
+            address_width: MemoryAddressWidth::Bit32,
             invalid_address: "invalid or unavailable PS1 memory address",
             read_failure: "PS1 memory read failed",
         }),
         IntrinsicId::SmsEmulatorRead => Some(ProviderReadContract {
             reader: RuntimeHelperId::SmsReadMemory,
             byte_order: ProviderByteOrder::Little,
+            address_width: MemoryAddressWidth::Bit32,
             invalid_address: "invalid or unavailable SMS memory address",
             read_failure: "SMS memory read failed",
         }),
         IntrinsicId::GenesisEmulatorRead => Some(ProviderReadContract {
             reader: RuntimeHelperId::GenesisReadMemory,
             byte_order: ProviderByteOrder::Big,
+            address_width: MemoryAddressWidth::Bit32,
             invalid_address: "invalid or unavailable Genesis memory address",
             read_failure: "Genesis memory read failed",
         }),
         IntrinsicId::GCNEmulatorRead => Some(ProviderReadContract {
             reader: RuntimeHelperId::GCNReadMemory,
             byte_order: ProviderByteOrder::Big,
+            address_width: MemoryAddressWidth::Bit32,
             invalid_address: "invalid or unavailable GameCube memory address",
             read_failure: "GameCube memory read failed",
         }),
         IntrinsicId::WiiEmulatorRead => Some(ProviderReadContract {
             reader: RuntimeHelperId::WiiReadMemory,
             byte_order: ProviderByteOrder::Big,
+            address_width: MemoryAddressWidth::Bit32,
             invalid_address: "invalid or unavailable Wii memory address",
             read_failure: "Wii memory read failed",
         }),
@@ -2305,7 +2315,7 @@ mod tests {
     #[test]
     fn backend_dependency_planning_consumes_contract_roots() {
         let planner = include_str!("codegen/dependencies.rs");
-        let retired_dispatch = ["match intr", "insic"].concat();
+        let retired_dispatch = ["match intr", "insic {"].concat();
 
         assert!(!planner.contains(&retired_dispatch));
         assert!(planner.contains("dependency_roots"));

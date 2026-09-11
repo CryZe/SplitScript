@@ -419,7 +419,11 @@ mod tests {
             .id_for_standard(StdlibTypeId::CatalogStructProbe);
         let MemoryTypeLayout::Struct(memory) = checked
             .memory_layouts()
-            .layout(ty, checked.semantics())
+            .layout(
+                ty,
+                checked.semantics(),
+                crate::memory::MemoryAddressWidth::Bit64,
+            )
             .expect("the declared capability should produce a generic memory layout")
         else {
             panic!("the catalog fixture should have a struct memory layout")

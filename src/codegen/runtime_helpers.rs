@@ -491,6 +491,10 @@ pub(super) fn build_follow_address(inputs: &RuntimeHelperInputs<'_>) -> Function
     process::compile_follow_address(inputs.abi, array, storage, inputs.memory.scratch().abi_read)
 }
 
+pub(super) fn build_detect_process_pointer_size(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    process::compile_detect_process_pointer_size(inputs.abi, inputs.memory.scratch().abi_read)
+}
+
 pub(super) fn build_gba_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
     gba::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
 }

@@ -342,7 +342,6 @@ fn readLoading(path: MemoryPath?) -> bool {
 #     loadingPath = module.address.memoryPath(
 #         [0x20, 0x18],
 #         0x4,
-#         PointerSize.Bit32,
 #     )
 # }
 ```
@@ -351,8 +350,9 @@ fn readLoading(path: MemoryPath?) -> bool {
 created or replaced later becomes visible without guest-managed cancellation.
 The explicit `else false` matches ASL `ReadFailAction.SetZeroOrNull`. Letting a
 fallible read escape the field instead keeps its last accepted value, matching
-the default persistent-watcher behavior. Use the target's actual
-[`PointerSize`]; do not infer it from the host running the timer.
+the default persistent-watcher behavior. Native pointer reads use the attached
+executable's detected PE, ELF, or Mach-O pointer width rather than the host's
+width.
 
 ## Bounded native `stringN` state
 
@@ -1357,12 +1357,10 @@ The same policy remains available to a discovered-address expression with
 path is static so the declaration shows both the memory layout and its absence
 semantics in one place.
 
-Pointer width is a property of traversal. Static [`at`](syntax@at) fields use the attached
-process's native width. When a 64-bit host reads a PE32 or other 32-bit target,
-construct an explicit path with
-`base.memoryPath(offsets, finalOffset, PointerSize.Bit32)` and resolve it before
-the final read. This keeps mixed-width discovery auditable without an `at32`
-pseudo-keyword. See the maintained ABZÛ and Borderlands examples for the full
+Pointer width is a property of the attached executable. Static [`at`](syntax@at)
+fields and reusable `base.memoryPath(offsets, finalOffset)` values both detect
+and use it automatically, including when a 64-bit host reads a PE32 or another
+32-bit target. See the maintained ABZÛ and Borderlands examples for full
 discovery and PE32 forms.
 
 ## Background signature scans

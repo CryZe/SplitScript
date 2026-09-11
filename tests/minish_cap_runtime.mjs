@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { portableExecutableImage } from "./support/splitscript_host.mjs";
 
 const wasmPath = process.argv[2];
 if (!wasmPath) throw new Error("usage: node tests/minish_cap_runtime.mjs <autosplitter.wasm>");
@@ -13,6 +14,10 @@ const processMemory = new Uint8Array(0x600000);
 const processView = new DataView(processMemory.buffer);
 const hostBase = 0x100000n;
 const moduleBase = 0x500000n;
+processMemory.set(
+    portableExecutableImage(backend === "vba" ? 4 : 8),
+    Number(moduleBase),
+);
 const gbaMemory = processMemory.subarray(Number(hostBase), Number(hostBase) + 0x48000);
 let activeBase = Number(hostBase);
 const attachNames = [];
@@ -130,7 +135,8 @@ const env = {
     },
     process_get_module_address(_process, pointer, length) {
         const name = decoder.decode(new Uint8Array(instance.exports.memory.buffer, pointer, length));
-        return backend === "vba" && name === "visualboyadvance-m.exe" ? moduleBase : 0n;
+        const expected = backend === "vba" ? "visualboyadvance-m.exe" : "mGBA.exe";
+        return name === expected ? moduleBase : 0n;
     },
     process_get_module_size(_process, pointer, length) {
         const name = decoder.decode(new Uint8Array(instance.exports.memory.buffer, pointer, length));
@@ -173,7 +179,14 @@ for (let tick = 0; tick < 64 && !variables.has("Hearts"); tick += 1) {
     update();
 }
 if (!variables.has("Hearts")) {
-    throw new Error("GBA discovery did not complete within 64 cooperative updates");
+    throw new Error(
+        `GBA discovery did not complete within 64 cooperative updates: ${JSON.stringify({
+            attachNames,
+            invalidReads,
+            rangeAddressCalls,
+            rangeAddressCallsPerTick,
+        })}`,
+    );
 }
 setI32(0x0300187a, 145);
 setU16(0x0300100c, 101);

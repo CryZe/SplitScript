@@ -28,9 +28,10 @@ use super::{
     SetFunctions, SettingStorage, Type, application_type_argument, array_element_type, array_value,
     async_frame::{AsyncFrameRef, LeafFutureInstance, LeafFutureLayout},
     emit_array_get, emit_default, emit_failure_transfer, emit_frame_typed_struct_get, emit_int,
-    emit_integer_literal, emit_memory_value_result, emit_monotonic_nanoseconds, emit_result_error,
-    emit_result_success, emit_string_literal, emit_struct_get, emit_typed_struct_get,
-    enum_variant_payload,
+    emit_integer_literal, emit_memory_value_result, emit_monotonic_nanoseconds,
+    emit_native_memory_read_destination_and_size, emit_native_memory_value_result,
+    emit_result_error, emit_result_success, emit_string_literal, emit_struct_get,
+    emit_typed_struct_get, enum_variant_payload,
     global_plan::{ATTACH_REJECTED, RuntimeGlobals},
     imports::Abi,
     managed_state_reads::ManagedStateReadCache,
@@ -3087,21 +3088,22 @@ fn emit_managed_read_at_address(
         );
         function.instruction(&Instruction::End);
     } else {
-        let size = context
-            .memory
-            .layout(field.value_type, context.semantics)
-            .expect("checked managed value fields are MemoryReadable")
-            .size();
+        emit_native_memory_read_destination_and_size(
+            function,
+            field.value_type,
+            context.abi_read,
+            context.memory,
+            context.semantics,
+            context.runtime_globals.process_pointer_size,
+        );
         function
-            .instruction(&Instruction::I32Const(context.abi_read.destination(size)))
-            .instruction(&Instruction::I32Const(size as i32))
             .instruction(&Instruction::Call(
                 context.abi.function(AbiImportId::ProcessRead),
             ))
             .instruction(&Instruction::If(BlockType::Result(
                 context.gc.val_type(Type::Result(result)),
             )));
-        emit_memory_value_result(
+        emit_native_memory_value_result(
             function,
             field.value_type,
             result,
@@ -3112,6 +3114,7 @@ fn emit_managed_read_at_address(
             context.semantics,
             context.gc,
             context.failure_payloads,
+            context.runtime_globals.process_pointer_size,
             MemoryByteOrder::Little,
         );
         function.instruction(&Instruction::Else);
@@ -4739,6 +4742,12 @@ fn compile_expr_unconverted(
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);
                 compile_expr(function, args[1], context);
+                function.instruction(&Instruction::GlobalGet(
+                    context
+                        .runtime_globals
+                        .process_pointer_size
+                        .expect("process.follow plans pointer-width storage"),
+                ));
                 function.instruction(&Instruction::Call(
                     context
                         .runtime_helpers
@@ -5762,21 +5771,22 @@ fn emit_process_read_from_stack(
 ) {
     let ty = context.type_id(ty);
     let physical_type = semantic_type(ty, context.semantics);
-    let size = context
-        .memory
-        .layout(ty, context.semantics)
-        .expect("checked process reads are MemoryReadable")
-        .size();
+    emit_native_memory_read_destination_and_size(
+        function,
+        ty,
+        context.abi_read,
+        context.memory,
+        context.semantics,
+        context.runtime_globals.process_pointer_size,
+    );
     function
-        .instruction(&Instruction::I32Const(context.abi_read.destination(size)))
-        .instruction(&Instruction::I32Const(size as i32))
         .instruction(&Instruction::Call(
             context.abi.function(AbiImportId::ProcessRead),
         ))
         .instruction(&Instruction::If(BlockType::Result(
             context.gc.val_type(Type::Result(result_type)),
         )));
-    emit_memory_value_result(
+    emit_native_memory_value_result(
         function,
         ty,
         result_type,
@@ -5787,6 +5797,7 @@ fn emit_process_read_from_stack(
         context.semantics,
         context.gc,
         context.failure_payloads,
+        context.runtime_globals.process_pointer_size,
         byte_order,
     );
     function.instruction(&Instruction::Else);
@@ -6320,7 +6331,7 @@ fn compile_provider_read(
     compile_expr(function, address_expression, context);
     let size = context
         .memory
-        .layout(read_type, context.semantics)
+        .layout(read_type, context.semantics, contract.address_width)
         .expect("checked provider reads are MemoryReadable")
         .size();
     function
@@ -6346,6 +6357,7 @@ fn compile_provider_read(
         context.semantics,
         context.gc,
         context.failure_payloads,
+        contract.address_width,
         contract.byte_order.into(),
     );
     function.instruction(&Instruction::Else);

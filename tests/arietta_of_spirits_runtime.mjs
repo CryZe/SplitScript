@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { portableExecutableImage } from "./support/splitscript_host.mjs";
 
 const wasmPath = process.argv[2];
 if (!wasmPath) {
@@ -6,6 +7,7 @@ if (!wasmPath) {
 }
 
 const moduleBase = 0x10000000n;
+const executableHeader = portableExecutableImage(8);
 const stagePointer = 0x20000000n;
 const pausePointer1 = 0x30000000n;
 const pausePointer2 = 0x31000000n;
@@ -74,6 +76,13 @@ const env = {
         return moduleBase;
     },
     process_read(_process, address, destination, size) {
+        const headerOffset = Number(address - moduleBase);
+        if ((headerOffset === 0 && size === 64) || (headerOffset === 0x80 && size === 26)) {
+            new Uint8Array(instance.exports.memory.buffer, destination, size).set(
+                executableHeader.subarray(headerOffset, headerOffset + size),
+            );
+            return 1;
+        }
         reads.push([address, size]);
         if (address === stageRoot && size === 8) {
             writePointer(destination, stagePointer);

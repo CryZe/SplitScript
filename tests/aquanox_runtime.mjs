@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { portableExecutableImage } from "./support/splitscript_host.mjs";
 
 const wasmPath = process.argv[2];
 if (!wasmPath) {
@@ -8,6 +9,7 @@ if (!wasmPath) {
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 const mainModule = 0x10000000n;
+const executableHeader = portableExecutableImage(8);
 const binkModule = 0x11000000n;
 const pointers = new Map([
     [mainModule + 0x10dbc0n, 0x20000000n],
@@ -86,6 +88,13 @@ const env = {
         return 0n;
     },
     process_read(_process, address, destination, size) {
+        const headerOffset = Number(address - mainModule);
+        if ((headerOffset === 0 && size === 64) || (headerOffset === 0x80 && size === 26)) {
+            new Uint8Array(instance.exports.memory.buffer, destination, size).set(
+                executableHeader.subarray(headerOffset, headerOffset + size),
+            );
+            return 1;
+        }
         if (pointers.has(address)) {
             if (size !== 8) throw new Error(`pointer read used ${size} bytes`);
             writePointer(destination, pointers.get(address));

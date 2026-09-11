@@ -515,7 +515,19 @@ fn validate_provider_guest_memory_ranges(
                     continue;
                 };
                 let size = if path.offsets.is_empty() {
-                    state_field_read_size(field, semantics, capabilities)
+                    let crate::stdlib::Implementation::Intrinsic(direct_read) =
+                        standard_library.item(provider.direct_read).implementation
+                    else {
+                        continue;
+                    };
+                    state_field_read_size(
+                        field,
+                        semantics,
+                        capabilities,
+                        crate::intrinsic_registry::provider_read_contract(direct_read)
+                            .expect("guest-memory ranges belong to provider reads")
+                            .address_width,
+                    )
                 } else {
                     // Provider pointer paths read a 32-bit guest pointer at
                     // every intermediate hop.
@@ -572,7 +584,18 @@ fn validate_provider_guest_memory_ranges(
         let Some(memory_ty) = type_arguments.first().copied() else {
             continue;
         };
-        let Ok(layout) = capabilities.memory().layout(memory_ty, semantics) else {
+        let crate::stdlib::Implementation::Intrinsic(direct_read) =
+            standard_library.item(provider.direct_read).implementation
+        else {
+            continue;
+        };
+        let address_width = crate::intrinsic_registry::provider_read_contract(direct_read)
+            .expect("guest-memory ranges belong to provider reads")
+            .address_width;
+        let Ok(layout) = capabilities
+            .memory()
+            .layout(memory_ty, semantics, address_width)
+        else {
             continue;
         };
         let size = layout.size();
@@ -598,6 +621,7 @@ fn state_field_read_size(
     field: &crate::ast::StateField,
     semantics: &SemanticModel,
     capabilities: &CapabilityAnalysis,
+    address_width: crate::memory::MemoryAddressWidth,
 ) -> Option<u32> {
     let StateSource::Pointer(path) = &field.source else {
         return None;
@@ -613,7 +637,7 @@ fn state_field_read_size(
             };
             capabilities
                 .memory()
-                .layout(memory_ty, semantics)
+                .layout(memory_ty, semantics, address_width)
                 .ok()
                 .map(crate::memory::MemoryTypeLayout::size)
         }

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { portableExecutableImage } from "./support/splitscript_host.mjs";
 
 const wasmPath = process.argv[2];
 if (!wasmPath) throw new Error("usage: node tests/dds_runtime.mjs <dds.wasm>");
@@ -8,6 +9,8 @@ const values = new Map();
 const valueHandles = new Map();
 const widgets = [];
 const tooltips = new Map();
+const executableBase = 0x60000000n;
+const executableHeader = portableExecutableImage(8);
 const pointers = [0x1000_0000n, 0x2000_0000n, 0x3000_0000n, 0x4000_0000n, 0x5000_0000n];
 let nextValueHandle = 1n;
 let instance;
@@ -36,8 +39,15 @@ const env = {
   },
   process_detach() { detaches += 1; },
   process_is_open: () => processOpen ? 1 : 0,
-  process_get_module_address: () => 0n,
+  process_get_module_address: () => executableBase,
   process_read(_process, address, destination, size) {
+    const headerOffset = Number(address - executableBase);
+    if ((headerOffset === 0 && size === 64) || (headerOffset === 0x80 && size === 26)) {
+      new Uint8Array(instance.exports.memory.buffer, destination, size).set(
+        executableHeader.subarray(headerOffset, headerOffset + size),
+      );
+      return 1;
+    }
     const view = new DataView(instance.exports.memory.buffer);
     const pointerReads = [
       [0x02fd_8bb0n, pointers[0]],

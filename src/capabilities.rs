@@ -143,9 +143,7 @@ impl CapabilityAnalysis {
         let declaration = self.standard_library.capability(capability);
         match declaration.behavior {
             CapabilityBehavior::StructuralEquality => self.equality.require(ty, semantics),
-            CapabilityBehavior::StructuralMemoryLayout => {
-                self.memory.layout(ty, semantics).map(|_| ())
-            }
+            CapabilityBehavior::StructuralMemoryLayout => self.memory.require_layout(ty, semantics),
             CapabilityBehavior::StructuralMethods => {
                 let declared = match semantics.types().kind(ty) {
                     TypeKind::Builtin(core)

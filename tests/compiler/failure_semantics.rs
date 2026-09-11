@@ -1328,17 +1328,14 @@ fn replaceable_deep_pointer_flags_do_not_require_background_watcher_registration
             teleporterLoadingPath = teleporter.memoryPath(
                 [0x30, 0xd5c],
                 0xe90 + 0x5a,
-                PointerSize.Bit32,
             )
             teleporterTransitionPath = teleporter.memoryPath(
                 [0x30, 0xd5c],
                 0xe90 + 0x59,
-                PointerSize.Bit32,
             )
             loadingScreenPath = mono.address.offset(0x1f696c).memoryPath(
                 [0x80, 0x90, 0x40, 0x1c, 0x4, 0xc],
                 0x4,
-                PointerSize.Bit32,
             )
         }
 

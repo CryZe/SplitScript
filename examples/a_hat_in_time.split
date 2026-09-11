@@ -1586,17 +1586,16 @@ onAttach {
     }
 
     let offsets = saveDataOffsets(saveDataLayout)
-    yarnPath = saveDataRoot.memoryPath([offsets.root], offsets.yarn, PointerSize.Bit64)
-    chapterPath = saveDataRoot.memoryPath([offsets.root], offsets.chapter, PointerSize.Bit64)
-    actPath = saveDataRoot.memoryPath([offsets.root], offsets.act, PointerSize.Bit64)
+    yarnPath = saveDataRoot.memoryPath([offsets.root], offsets.yarn)
+    chapterPath = saveDataRoot.memoryPath([offsets.root], offsets.chapter)
+    actPath = saveDataRoot.memoryPath([offsets.root], offsets.act)
     checkpointPath = saveDataRoot.memoryPath(
         [offsets.root],
         offsets.checkpoint,
-        PointerSize.Bit64,
     )
-    xPath = actorsRoot.memoryPath([0x6dc, 0, 0x68, hatKidOffset], 0x80, PointerSize.Bit64)
-    yPath = actorsRoot.memoryPath([0x6dc, 0, 0x68, hatKidOffset], 0x84, PointerSize.Bit64)
-    zPath = actorsRoot.memoryPath([0x6dc, 0, 0x68, hatKidOffset], 0x88, PointerSize.Bit64)
+    xPath = actorsRoot.memoryPath([0x6dc, 0, 0x68, hatKidOffset], 0x80)
+    yPath = actorsRoot.memoryPath([0x6dc, 0, 0x68, hatKidOffset], 0x84)
+    zPath = actorsRoot.memoryPath([0x6dc, 0, 0x68, hatKidOffset], 0x88)
 
     observedSplitIndex = timer.currentSplitIndex()
     lastSplitAt = Instant.now()

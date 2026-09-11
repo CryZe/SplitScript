@@ -154,7 +154,13 @@ impl StaticData {
                 // Word-swapped emulator storage may need one leading byte and
                 // one trailing byte while normalizing an unaligned guest read
                 // in place before the shared decoder consumes it.
-                abi_read_capacity: memory.maximum_size().saturating_add(2).max(16),
+                abi_read_capacity: memory.maximum_size().saturating_add(2).max(
+                    if dependencies.needs_native_pointer_size() {
+                        64
+                    } else {
+                        16
+                    },
+                ),
                 maximum_signature_len: signatures.maximum_len(),
             },
         );

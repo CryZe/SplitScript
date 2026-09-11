@@ -2001,22 +2001,23 @@ onAttach {
 Unsupported builds should remain suspended with `await process.closed()`
 rather than complete without initializing a required attachment value.
 
-Pointer width belongs to the resolved memory path, not to the state-field
-declaration. Use `PointerSize.Bit32` for a 32-bit target even when SplitScript
-and the host run on 64-bit systems:
+Pointer width belongs to the attached executable, not to the state-field
+declaration or the host running SplitScript. Native reads detect PE, ELF, and
+Mach-O pointer width from the executable image, including 32-bit targets on a
+64-bit host:
 
 ```text
 state "game.exe" {
     loading: bool = process.read<bool>(
-        executableBase.memoryPath([0x00480af0], 0, PointerSize.Bit32).resolve()?
+        executableBase.memoryPath([0x00480af0], 0).resolve()?
     )?;
 }
 ```
 
-This is why there is no separate `at32` spelling: static [`at`](syntax@at) paths use the
-attached process's native pointer width, while discovered or cross-width paths
-state their `PointerSize` exactly where traversal occurs. The maintained
-Borderlands PE32 layout has a host-executed fixture for this form.
+This is why there is no separate `at32` spelling: static [`at`](syntax@at)
+paths, `process.follow`, and `MemoryPath.resolve` all use the attached
+executable's detected native width. The maintained Borderlands PE32 layout has
+a host-executed fixture for this form.
 
 ## Structured async initialization
 
@@ -2327,8 +2328,9 @@ let found = await process.scan(target, 0x200, sig"48 8B ?? ??")
 Use `address.offset(displacement)` when the displacement is signed and
 `address.add(delta)` when an unsigned full-width `u64` delta is already
 available. Both preserve the nominal `address` type and wrap modulo 2^64.
-`address.memoryPath(dereferences, finalOffset, pointerSize)` stores signed
-`i64` dereference and final offsets and resolves them with `offset`.
+`address.memoryPath(dereferences, finalOffset)` stores signed `i64` dereference
+and final offsets and resolves them with `offset`. Pointer reads automatically
+use the attached executable's native pointer width.
 
 `print` is a regular typed builtin available in every action block and writes
 through the runtime debug-message API. Its argument is any `String` expression,

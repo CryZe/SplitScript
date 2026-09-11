@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { portableExecutableImage } from "./support/splitscript_host.mjs";
 
 const wasmPath = process.argv[2];
 const mode = process.argv[3] ?? "v8";
@@ -23,6 +24,7 @@ const layouts = {
 const unknown = mode === "unknown";
 const selected = layouts[mode] ?? layouts.v8;
 const moduleBase = 0x10000000n;
+const executableHeader = portableExecutableImage(8);
 const decoder = new TextDecoder();
 const reads = [];
 const messages = [];
@@ -75,6 +77,13 @@ const env = {
     process_get_module_address: () => moduleBase,
     process_get_module_size: () => unknown ? 1n : selected.size,
     process_read(_process, address, destination, size) {
+        const headerOffset = Number(address - moduleBase);
+        if ((headerOffset === 0 && size === 64) || (headerOffset === 0x80 && size === 26)) {
+            new Uint8Array(instance.exports.memory.buffer, destination, size).set(
+                executableHeader.subarray(headerOffset, headerOffset + size),
+            );
+            return 1;
+        }
         reads.push([address, size]);
         const view = new DataView(instance.exports.memory.buffer);
         if (pointerTargets.has(address) && size === 8) {

@@ -101,6 +101,7 @@ const host = await SplitScriptHost.instantiate(wasmPath, {
     settings: { reset_death: true },
 });
 host.addProcess("AxiomVerge.exe", {
+    pointerSize: 4,
     modules: {
         "steam_api.dll": {
             address: 0x7000n,

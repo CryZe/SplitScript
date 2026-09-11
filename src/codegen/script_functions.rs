@@ -124,7 +124,7 @@ pub(super) fn compile_read(
         if let Some(contract) = crate::intrinsic_registry::provider_read_contract(direct_read) {
             let field_size = lowering
                 .memory
-                .layout(memory_type_id, lowering.semantics)
+                .layout(memory_type_id, lowering.semantics, contract.address_width)
                 .expect("provider pointer fields are MemoryReadable")
                 .size();
             return compile_provider_direct_read(
@@ -255,14 +255,30 @@ pub(super) fn compile_read(
         gc: lowering.gc,
         failure_payloads: lowering.failure_payloads,
         abi_read: lowering.abi_read,
+        memory: lowering.memory,
+        semantics: lowering.semantics,
+        process_pointer_size: lowering.runtime_globals.process_pointer_size,
         read_failure: "process read failed",
     };
     let offset_start = shared_prefix.map_or(0, |prefix| prefix.offset_start);
     for offset in &offsets[offset_start..] {
-        emit_process_read(&mut function, &process_read, 8);
+        let address_type = lowering
+            .semantics
+            .types()
+            .id_for_core(crate::stdlib::CoreTypeId::Address);
+        emit_process_read(&mut function, &process_read, address_type);
+        emit_native_memory_value(
+            &mut function,
+            address_type,
+            lowering.abi_read,
+            0,
+            lowering.memory,
+            lowering.semantics,
+            lowering.gc,
+            lowering.runtime_globals.process_pointer_size,
+            MemoryByteOrder::Little,
+        );
         function
-            .instruction(&Instruction::I32Const(lowering.abi_read.start()))
-            .instruction(&Instruction::I64Load(memarg()))
             .instruction(&Instruction::I64Const(*offset))
             .instruction(&Instruction::I64Add)
             .instruction(&Instruction::LocalSet(address_local));
@@ -310,13 +326,8 @@ pub(super) fn compile_read(
         return function;
     }
 
-    let field_size = lowering
-        .memory
-        .layout(memory_type_id, lowering.semantics)
-        .expect("checked undecoded pointer fields are MemoryReadable")
-        .size();
-    emit_process_read(&mut function, &process_read, field_size);
-    emit_memory_validation_failure(
+    emit_process_read(&mut function, &process_read, memory_type_id);
+    emit_native_memory_validation_failure(
         &mut function,
         memory_type_id,
         result_type,
@@ -326,7 +337,7 @@ pub(super) fn compile_read(
         MemoryByteOrder::Little,
         lowering,
     );
-    emit_memory_value(
+    emit_native_memory_value(
         &mut function,
         memory_type_id,
         lowering.abi_read,
@@ -334,6 +345,7 @@ pub(super) fn compile_read(
         lowering.memory,
         lowering.semantics,
         lowering.gc,
+        lowering.runtime_globals.process_pointer_size,
         MemoryByteOrder::Little,
     );
     emit_pointer_read_success(&mut function, result_type, optional, lowering.gc);
@@ -509,6 +521,7 @@ fn compile_provider_direct_read(
             &mut function,
             Type::U32,
             lowering.abi_read.start(),
+            contract.address_width,
             contract.byte_order.into(),
         );
         function
@@ -535,6 +548,7 @@ fn compile_provider_direct_read(
         field_type,
         optional,
         contract.read_failure,
+        contract.address_width,
         contract.byte_order.into(),
         lowering,
     );
@@ -546,6 +560,7 @@ fn compile_provider_direct_read(
         lowering.memory,
         lowering.semantics,
         lowering.gc,
+        contract.address_width,
         contract.byte_order.into(),
     );
     emit_pointer_read_success(&mut function, result_type, optional, lowering.gc);
@@ -626,15 +641,29 @@ struct ProcessReadEmission<'a> {
     gc: &'a GcLayout,
     failure_payloads: &'a super::failure_payload::FailurePayloadDemand,
     abi_read: memory_plan::AbiReadScratch,
+    memory: &'a crate::memory::MemoryLayouts,
+    semantics: &'a crate::semantic::SemanticModel,
+    process_pointer_size: Option<u32>,
     read_failure: &'a str,
 }
 
-fn emit_process_read(function: &mut Function, emission: &ProcessReadEmission<'_>, size: u32) {
+fn emit_process_read(
+    function: &mut Function,
+    emission: &ProcessReadEmission<'_>,
+    ty: crate::types::TypeId,
+) {
     function
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::LocalGet(emission.address_local))
-        .instruction(&Instruction::I32Const(emission.abi_read.destination(size)))
-        .instruction(&Instruction::I32Const(size as i32))
+        .instruction(&Instruction::LocalGet(emission.address_local));
+    emit_native_memory_read_destination_and_size(
+        function,
+        ty,
+        emission.abi_read,
+        emission.memory,
+        emission.semantics,
+        emission.process_pointer_size,
+    );
+    function
         .instruction(&Instruction::Call(
             emission.abi.function(AbiImportId::ProcessRead),
         ))
@@ -688,6 +717,7 @@ fn emit_memory_validation_failure(
     field_type: Type,
     optional: Option<crate::ast::OptionTypeId>,
     message: &str,
+    address_width: crate::memory::MemoryAddressWidth,
     byte_order: MemoryByteOrder,
     lowering: &EmissionContext<'_>,
 ) {
@@ -698,6 +728,47 @@ fn emit_memory_validation_failure(
         0,
         lowering.memory,
         lowering.semantics,
+        address_width,
+        byte_order,
+    ) {
+        return;
+    }
+    function
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_pointer_read_failure(
+        function,
+        result_type,
+        field_type,
+        optional,
+        message,
+        lowering.gc,
+        lowering.failure_payloads,
+    );
+    function
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_native_memory_validation_failure(
+    function: &mut Function,
+    memory_type: crate::types::TypeId,
+    result_type: ResultTypeId,
+    field_type: Type,
+    optional: Option<crate::ast::OptionTypeId>,
+    message: &str,
+    byte_order: MemoryByteOrder,
+    lowering: &EmissionContext<'_>,
+) {
+    if !emit_native_memory_value_is_valid(
+        function,
+        memory_type,
+        lowering.abi_read,
+        0,
+        lowering.memory,
+        lowering.semantics,
+        lowering.runtime_globals.process_pointer_size,
         byte_order,
     ) {
         return;
@@ -1567,13 +1638,15 @@ use super::{
     context::EmissionContext,
     data_plan::StringPool,
     emit_default, emit_memory_load, emit_memory_value, emit_memory_value_is_valid,
-    emit_result_error, emit_result_success, emit_struct_get, emit_typed_struct_get,
+    emit_native_memory_read_destination_and_size, emit_native_memory_value,
+    emit_native_memory_value_is_valid, emit_result_error, emit_result_success, emit_struct_get,
+    emit_typed_struct_get,
     expression::{
         BareReturn, ClosureEnvironment, ExprContext, LocalStorage, MatchLayout, compile_block,
         compile_resolved_path, emit_path_fields,
     },
     imports::Abi,
-    memarg, memory_plan, semantic_type, state_storage_index, value_type,
+    memory_plan, semantic_type, state_storage_index, value_type,
 };
 
 pub(super) fn compile_async_function_init(

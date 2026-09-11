@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { portableExecutableImage } from "./support/splitscript_host.mjs";
 
 const wasmPath = process.argv[2];
 const mode = process.argv[3] ?? "steam";
@@ -33,6 +34,7 @@ const unknown = mode === "unknown";
 const layout = layouts[mode] ?? layouts.steam;
 const moduleSize = unknown ? 1n : layout.size;
 const moduleBase = 0x10000000n;
+const executableHeader = portableExecutableImage(4);
 const firstLevelPointer = 0x20000000n;
 const finalLevelPointer = 0x30000000n;
 const videoPointer = 0x40000000n;
@@ -93,7 +95,12 @@ const env = {
         return moduleSize;
     },
     process_read(_process, address, destination, size) {
-        if (address === moduleBase && size === 2) {
+        const headerOffset = Number(address - moduleBase);
+        if ((headerOffset === 0 && size === 64) || (headerOffset === 0x80 && size === 26)) {
+            new Uint8Array(instance.exports.memory.buffer, destination, size).set(
+                executableHeader.subarray(headerOffset, headerOffset + size),
+            );
+        } else if (address === moduleBase && size === 2) {
             write(destination, size, 0x5a4d);
         } else if (address === moduleBase + 0x3cn && size === 4) {
             write(destination, size, 0x80);
@@ -165,7 +172,7 @@ if (unknown) {
     instance.exports.update();
 }
 
-if (moduleNames.join(",") !== "AlanWake.exe,AlanWake.exe") {
+if (moduleNames.join(",") !== "AlanWake.exe,AlanWake.exe,AlanWake.exe") {
     throw new Error(`unexpected main-module queries: ${JSON.stringify(moduleNames)}`);
 }
 if (unknown) {

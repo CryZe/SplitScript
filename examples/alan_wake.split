@@ -13,36 +13,36 @@ struct AlanWakeLayout {
     video: MemoryPath,
 }
 
-fn directPath(base, offset, pointerSize) {
-    return base.memoryPath([], offset, pointerSize)
+fn directPath(base, offset) {
+    return base.memoryPath([], offset)
 }
 
-fn pointerPath(base, dereferences, finalOffset, pointerSize) {
-    return base.memoryPath(dereferences, finalOffset, pointerSize)
+fn pointerPath(base, dereferences, finalOffset) {
+    return base.memoryPath(dereferences, finalOffset)
 }
 
-fn alanWakeLayout(build, base, pointerSize) {
+fn alanWakeLayout(build, base) {
     return match build {
         AlanWakeBuild.Steam => AlanWakeLayout {
-            isLoading: directPath(base, 0x36ba34, pointerSize),
-            level: pointerPath(base, [0x36d8b4, 0x3f0], 0x174, pointerSize),
-            video: pointerPath(base, [0x2c0934], 0x5c8, pointerSize),
+            isLoading: directPath(base, 0x36ba34),
+            level: pointerPath(base, [0x36d8b4, 0x3f0], 0x174),
+            video: pointerPath(base, [0x2c0934], 0x5c8),
         },
         AlanWakeBuild.GOG => AlanWakeLayout {
-            isLoading: directPath(base, 0x36ca74, pointerSize),
-            level: pointerPath(base, [0x36e618], 0x208, pointerSize),
-            video: pointerPath(base, [0x2c1974], 0x5c8, pointerSize),
+            isLoading: directPath(base, 0x36ca74),
+            level: pointerPath(base, [0x36e618], 0x208),
+            video: pointerPath(base, [0x2c1974], 0x5c8),
         },
         AlanWakeBuild.Epic => AlanWakeLayout {
-            isLoading: directPath(base, 0x36aa74, pointerSize),
-            level: pointerPath(base, [0x36c618], 0x208, pointerSize),
-            video: pointerPath(base, [0x2bf974], 0x5c8, pointerSize),
+            isLoading: directPath(base, 0x36aa74),
+            level: pointerPath(base, [0x36c618], 0x208),
+            video: pointerPath(base, [0x2bf974], 0x5c8),
         },
     }
 }
 
 fn selectedLayout() {
-    return alanWakeLayout(build, executableBase, pointerSize)
+    return alanWakeLayout(build, executableBase)
 }
 
 state "AlanWake.exe" {
@@ -53,14 +53,10 @@ state "AlanWake.exe" {
 
 let build = AlanWakeBuild.Steam
 let executableBase: address = 0x0
-let pointerSize = PointerSize.Bit32
 
 onAttach {
     let executable = await process.mainModule()
-    let detectedPointerSize = retry executable.pointerSize()
-    pointerSize = detectedPointerSize
-
-    if pointerSize != PointerSize.Bit32 {
+    if retry executable.pointerSize() != PointerSize.Bit32 {
         print("unsupported 64-bit Alan Wake executable")
         await process.closed()
     }

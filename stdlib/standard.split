@@ -906,9 +906,10 @@ intrinsic type Process {
 
     /// Follows a pointer path.
     ///
-    /// Each signed offset is applied with wrapping 64-bit address arithmetic
-    /// before reading the next 64-bit target pointer. A failed or null pointer
-    /// read returns an error; use retry in onAttach to wait for success.
+    /// Each signed offset is applied with wrapping address arithmetic before
+    /// reading the next pointer at the attached executable's automatically
+    /// detected native width. A failed or null pointer read returns an error;
+    /// use retry in onAttach to wait for success.
     ///
     /// # Example
     ///
@@ -3185,7 +3186,7 @@ capability MemoryReadable<T> {}
 
 /// Reads typed values and bounded strings from an address space.
 ///
-/// `MemoryReader` is the source-side counterpart to [`MemoryReadable`]. The
+/// [`MemoryReader`] is the source-side counterpart to [`MemoryReadable`]. The
 /// reader chooses the address domain, byte order, address validation, and
 /// physical read implementation; the requested value chooses the decoded
 /// memory layout. Native [`Process`] values use [`address`], while emulator
@@ -4321,21 +4322,18 @@ extend address {
     /// Describe a player health path
     ///
     /// ```splitscript
-    /// let health = 0x1000.memoryPath([0x100, 0x20], 0x18, PointerSize.Bit64)
+    /// let health = 0x1000.memoryPath([0x100, 0x20], 0x18)
     /// ```
     fn memoryPath(
         /// Signed offsets that each end in a native pointer read.
         dereferences: [i64],
         /// Signed offset applied after the final pointer read.
         finalOffset: i64,
-        /// Native pointer width used by the target executable.
-        pointerSize: PointerSize,
     ) -> MemoryPath {
         return MemoryPath {
             base: self,
             dereferences,
-            finalOffset,
-            pointerSize
+            finalOffset
         }
     }
 }
@@ -5797,14 +5795,15 @@ struct MemoryRange {
 /// Describes a native pointer chain rooted at an address.
 ///
 /// A path keeps version-specific pointer data separate from state polling and
-/// resolves every intermediate pointer according to the executable's width.
+/// resolves every intermediate pointer according to the attached executable's
+/// automatically detected width.
 ///
 /// # Example
 ///
 /// Build a reusable pointer path
 ///
 /// ```splitscript
-/// let healthPath = 0x1000.memoryPath([0x20, 0x18], 0x8, PointerSize.Bit64)
+/// let healthPath = 0x1000.memoryPath([0x20, 0x18], 0x8)
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(structField, enumPayload, stateField, localVariable, globalVariable)
@@ -5816,7 +5815,7 @@ struct MemoryPath {
     /// Inspect a path's starting address
     ///
     /// ```splitscript
-    /// let path = 0x1000.memoryPath([0x20], 0x8, PointerSize.Bit64)
+    /// let path = 0x1000.memoryPath([0x20], 0x8)
     /// let start = path.base
     /// ```
     base: address,
@@ -5828,7 +5827,7 @@ struct MemoryPath {
     /// Inspect intermediate dereferences
     ///
     /// ```splitscript
-    /// let path = 0x2000.memoryPath([0x30, 0x10], 0x4, PointerSize.Bit32)
+    /// let path = 0x2000.memoryPath([0x30, 0x10], 0x4)
     /// let offsets = path.dereferences
     /// ```
     dereferences: [i64],
@@ -5840,22 +5839,10 @@ struct MemoryPath {
     /// Inspect a path's final offset
     ///
     /// ```splitscript
-    /// let path = 0x3000.memoryPath([], 0x14, PointerSize.Bit64)
+    /// let path = 0x3000.memoryPath([], 0x14)
     /// let trailingOffset = path.finalOffset
     /// ```
     finalOffset: i64,
-
-    /// Returns the native pointer width used during traversal.
-    ///
-    /// # Example
-    ///
-    /// Inspect a path's pointer width
-    ///
-    /// ```splitscript
-    /// let path = 0x4000.memoryPath([0x40], 0, PointerSize.Bit32)
-    /// let width = path.pointerSize
-    /// ```
-    pointerSize: PointerSize,
 
     /// Appends one pointer dereference and a new final offset.
     ///
@@ -5868,7 +5855,7 @@ struct MemoryPath {
     /// Follow a singleton to one of its fields
     ///
     /// ```splitscript
-    /// let singleton = 0x1000.memoryPath([], 0x20, PointerSize.Bit64)
+    /// let singleton = 0x1000.memoryPath([], 0x20)
     /// let health = singleton.dereference(0x18)
     /// ```
     @mustUse("Pointer paths are immutable; dereference returns an extended path.")
@@ -5883,7 +5870,6 @@ struct MemoryPath {
             base: self.base,
             dereferences,
             finalOffset: offset,
-            pointerSize: self.pointerSize,
         }
     }
 
@@ -5896,18 +5882,11 @@ struct MemoryPath {
     /// Resolve a discovered path
     ///
     /// ```splitscript
-    /// let health = 0x1000.memoryPath([0x20], 0x18, PointerSize.Bit64)
+    /// let health = 0x1000.memoryPath([0x20], 0x18)
     /// let healthAddress = health.resolve() else return
     /// ```
     fn resolve() -> address! {
-        let current = self.base
-        for offset in self.dereferences {
-            let pointerAddress = current.offset(offset)
-            current = match self.pointerSize {
-                PointerSize.Bit32 => process.read<u32>(pointerAddress)? as address,
-                PointerSize.Bit64 => process.read<u64>(pointerAddress)? as address
-            }
-        }
+        let current = process.follow(self.base, self.dereferences)?
         return Ok(current.offset(self.finalOffset))
     }
 }
@@ -8329,7 +8308,7 @@ private struct MonoClass {
     ) -> async MemoryPath {
         let table = await self.staticTable()
         let offset = await self.field(name)
-        return table.memoryPath([], offset as i64, self.module.pointerSize)
+        return table.memoryPath([], offset as i64)
     }
 }
 

@@ -839,7 +839,6 @@ fn attachment_scoped_memory_paths_still_infer_from_initialization_and_use() {
             roomPath = executable.address.memoryPath(
                 [0x5eab88],
                 0x56e183,
-                PointerSize.Bit32,
             )
         }
     "#;

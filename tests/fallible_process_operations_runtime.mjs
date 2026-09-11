@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { portableExecutableImage } from "./support/splitscript_host.mjs";
 
 const wasmPath = process.argv[2];
 if (!wasmPath) {
@@ -8,6 +9,8 @@ if (!wasmPath) {
 const bytes = fs.readFileSync(wasmPath);
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
+const executableBase = 0x8000n;
+const executableHeader = portableExecutableImage(8);
 let instance;
 let observed;
 
@@ -21,7 +24,15 @@ const env = {
     process_attach: () => 1n,
     process_detach() {},
     process_is_open: () => 1,
+    process_get_module_address: () => executableBase,
     process_read(_process, address, destination, size) {
+        const headerOffset = Number(address - executableBase);
+        if ((headerOffset === 0 && size === 64) || (headerOffset === 0x80 && size === 26)) {
+            new Uint8Array(instance.exports.memory.buffer, destination, size).set(
+                executableHeader.subarray(headerOffset, headerOffset + size),
+            );
+            return 1;
+        }
         const source = Number(address);
         const view = new DataView(instance.exports.memory.buffer);
         if (source === 0x1000 && size === 8) {

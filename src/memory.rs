@@ -18,6 +18,29 @@ use crate::{
 pub const MAX_FIXED_ARRAY_ELEMENTS: u32 = 4_096;
 pub const MAX_FIXED_ARRAY_BYTES: u32 = 65_536;
 
+/// Physical width of an `address` stored in a reader's memory domain.
+///
+/// SplitScript keeps the logical value 64-bit in both cases. This context only
+/// controls the bytes, alignment, aggregate offsets, and array strides used at
+/// the memory boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemoryAddressWidth {
+    Bit32,
+    Bit64,
+}
+
+impl MemoryAddressWidth {
+    pub const fn bytes(self) -> u32 {
+        match self {
+            Self::Bit32 => 4,
+            Self::Bit64 => 8,
+        }
+    }
+}
+
+const ADDRESS_WIDTHS: [MemoryAddressWidth; 2] =
+    [MemoryAddressWidth::Bit32, MemoryAddressWidth::Bit64];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryFieldId {
     Source(StructFieldId),
@@ -97,9 +120,9 @@ impl MemoryTypeLayout<'_> {
 #[derive(Debug, Clone, Default)]
 pub struct MemoryLayouts {
     standard_library: StandardLibrary,
-    structs: HashMap<TypeId, Result<StructMemoryLayout, String>>,
+    structs: HashMap<(TypeId, MemoryAddressWidth), Result<StructMemoryLayout, String>>,
     enums: HashMap<TypeId, Result<EnumMemoryLayout, String>>,
-    arrays: HashMap<TypeId, Result<FixedArrayMemoryLayout, String>>,
+    arrays: HashMap<(TypeId, MemoryAddressWidth), Result<FixedArrayMemoryLayout, String>>,
     source_structs: HashMap<StructId, TypeId>,
     source_enums: HashMap<EnumId, TypeId>,
 }
@@ -134,8 +157,10 @@ impl MemoryLayouts {
         for structure in structs {
             let ty = semantics.types().id_for_struct(structure.id);
             layouts.source_structs.insert(structure.id, ty);
-            let mut visiting = HashSet::new();
-            let _ = layouts.build_struct(ty, structs, enums, semantics, &mut visiting);
+            for width in ADDRESS_WIDTHS {
+                let mut visiting = HashSet::new();
+                let _ = layouts.build_struct(ty, structs, enums, semantics, width, &mut visiting);
+            }
         }
         let library = layouts.standard_library.clone();
         for standard in library.all_types().iter().filter(|standard| {
@@ -145,14 +170,17 @@ impl MemoryLayouts {
                     RuntimeRepresentation::GcStruct { .. }
                 )
         }) {
-            let mut visiting = HashSet::new();
-            let _ = layouts.build_struct(
-                semantics.types().id_for_standard(standard.id),
-                structs,
-                enums,
-                semantics,
-                &mut visiting,
-            );
+            for width in ADDRESS_WIDTHS {
+                let mut visiting = HashSet::new();
+                let _ = layouts.build_struct(
+                    semantics.types().id_for_standard(standard.id),
+                    structs,
+                    enums,
+                    semantics,
+                    width,
+                    &mut visiting,
+                );
+            }
         }
         let fixed_arrays = semantics
             .types()
@@ -169,8 +197,10 @@ impl MemoryLayouts {
             })
             .collect::<Vec<_>>();
         for ty in fixed_arrays {
-            let mut visiting = HashSet::new();
-            let _ = layouts.build_array(ty, structs, enums, semantics, &mut visiting);
+            for width in ADDRESS_WIDTHS {
+                let mut visiting = HashSet::new();
+                let _ = layouts.build_array(ty, structs, enums, semantics, width, &mut visiting);
+            }
         }
         layouts
     }
@@ -179,14 +209,17 @@ impl MemoryLayouts {
         &'a self,
         ty: TypeId,
         semantics: &SemanticModel,
+        address_width: MemoryAddressWidth,
     ) -> Result<MemoryTypeLayout<'a>, String> {
         match semantics.types().kind(ty) {
-            TypeKind::Builtin(builtin) => scalar_layout(&self.standard_library, *builtin)
-                .map(|(size, alignment)| MemoryTypeLayout::Scalar { size, alignment })
-                .ok_or_else(|| format!("type `{builtin}` is not MemoryReadable")),
+            TypeKind::Builtin(builtin) => {
+                scalar_layout(&self.standard_library, *builtin, address_width)
+                    .map(|(size, alignment)| MemoryTypeLayout::Scalar { size, alignment })
+                    .ok_or_else(|| format!("type `{builtin}` is not MemoryReadable"))
+            }
             TypeKind::Struct(structure) => self
                 .structs
-                .get(&semantics.types().id_for_struct(*structure))
+                .get(&(semantics.types().id_for_struct(*structure), address_width))
                 .expect("every declared struct has a memory-layout result")
                 .as_ref()
                 .map(MemoryTypeLayout::Struct)
@@ -208,16 +241,14 @@ impl MemoryLayouts {
                     RuntimeRepresentation::Scalar { storage } => library
                         .core_type(storage)
                         .memory_layout
-                        .map(|layout| MemoryTypeLayout::Scalar {
-                            size: layout.size,
-                            alignment: layout.alignment,
-                        })
+                        .and_then(|_| scalar_layout(library, storage, address_width))
+                        .map(|(size, alignment)| MemoryTypeLayout::Scalar { size, alignment })
                         .ok_or_else(|| {
                             format!("type `{}` is not MemoryReadable", declaration.name)
                         }),
                     RuntimeRepresentation::GcStruct { .. } => self
                         .structs
-                        .get(&ty)
+                        .get(&(ty, address_width))
                         .expect("every readable standard struct has a memory-layout result")
                         .as_ref()
                         .map(MemoryTypeLayout::Struct)
@@ -231,7 +262,7 @@ impl MemoryLayouts {
                 length: Some(_), ..
             } => self
                 .arrays
-                .get(&ty)
+                .get(&(ty, address_width))
                 .expect("every fixed array has a memory-layout result")
                 .as_ref()
                 .map(MemoryTypeLayout::FixedArray)
@@ -244,13 +275,27 @@ impl MemoryLayouts {
         }
     }
 
-    pub fn structure(&self, structure: StructId) -> Result<&StructMemoryLayout, &str> {
+    /// Validates the portable `MemoryReadable` contract for both supported
+    /// native pointer widths. A reader selects one of these already-checked
+    /// layouts at the memory boundary.
+    pub fn require_layout(&self, ty: TypeId, semantics: &SemanticModel) -> Result<(), String> {
+        for width in ADDRESS_WIDTHS {
+            self.layout(ty, semantics, width)?;
+        }
+        Ok(())
+    }
+
+    pub fn structure(
+        &self,
+        structure: StructId,
+        address_width: MemoryAddressWidth,
+    ) -> Result<&StructMemoryLayout, &str> {
         let ty = self
             .source_structs
             .get(&structure)
             .expect("every declared struct has a semantic type");
         self.structs
-            .get(ty)
+            .get(&(*ty, address_width))
             .expect("every declared struct has a memory-layout result")
             .as_ref()
             .map_err(String::as_str)
@@ -285,6 +330,82 @@ impl MemoryLayouts {
             .max()
             .unwrap_or(0)
             .max(8)
+    }
+
+    /// Whether decoding this type needs the reader's pointer width even when
+    /// the aggregate's total byte size happens to be equal in both layouts.
+    pub fn depends_on_address_width(&self, ty: TypeId, semantics: &SemanticModel) -> bool {
+        self.depends_on_address_width_inner(ty, semantics, &mut HashSet::new())
+    }
+
+    /// Whether a decoded value contains a represented enum whose raw
+    /// discriminant must be validated before materialization.
+    pub fn requires_validation(&self, ty: TypeId, semantics: &SemanticModel) -> bool {
+        self.requires_validation_inner(ty, semantics, &mut HashSet::new())
+    }
+
+    fn requires_validation_inner(
+        &self,
+        ty: TypeId,
+        semantics: &SemanticModel,
+        visiting: &mut HashSet<TypeId>,
+    ) -> bool {
+        if !visiting.insert(ty) {
+            return false;
+        }
+        let result = match semantics.types().kind(ty) {
+            TypeKind::Enum(_) => true,
+            TypeKind::Struct(_) | TypeKind::Standard(_) => {
+                self.structs
+                    .get(&(ty, MemoryAddressWidth::Bit64))
+                    .and_then(|layout| layout.as_ref().ok())
+                    .is_some_and(|layout| {
+                        layout.fields.iter().any(|field| {
+                            self.requires_validation_inner(field.ty, semantics, visiting)
+                        })
+                    })
+            }
+            TypeKind::Array {
+                element,
+                length: Some(_),
+                ..
+            } => self.requires_validation_inner(*element, semantics, visiting),
+            _ => false,
+        };
+        visiting.remove(&ty);
+        result
+    }
+
+    fn depends_on_address_width_inner(
+        &self,
+        ty: TypeId,
+        semantics: &SemanticModel,
+        visiting: &mut HashSet<TypeId>,
+    ) -> bool {
+        if !visiting.insert(ty) {
+            return false;
+        }
+        let result = match semantics.types().kind(ty) {
+            TypeKind::Builtin(BuiltinType::Address) => true,
+            TypeKind::Builtin(_) | TypeKind::Enum(_) => false,
+            TypeKind::Struct(_) | TypeKind::Standard(_) => self
+                .structs
+                .get(&(ty, MemoryAddressWidth::Bit64))
+                .and_then(|layout| layout.as_ref().ok())
+                .is_some_and(|layout| {
+                    layout.fields.iter().any(|field| {
+                        self.depends_on_address_width_inner(field.ty, semantics, visiting)
+                    })
+                }),
+            TypeKind::Array {
+                element,
+                length: Some(_),
+                ..
+            } => self.depends_on_address_width_inner(*element, semantics, visiting),
+            _ => false,
+        };
+        visiting.remove(&ty);
+        result
     }
 
     fn build_enum(
@@ -379,9 +500,10 @@ impl MemoryLayouts {
         structs: &[StructDecl],
         enums: &[EnumDecl],
         semantics: &SemanticModel,
+        address_width: MemoryAddressWidth,
         visiting: &mut HashSet<TypeId>,
     ) -> Result<FixedArrayMemoryLayout, String> {
-        if let Some(layout) = self.arrays.get(&ty) {
+        if let Some(layout) = self.arrays.get(&(ty, address_width)) {
             return layout.clone();
         }
         if !visiting.insert(ty) {
@@ -407,7 +529,7 @@ impl MemoryLayouts {
                 ));
             }
             let (element_size, alignment) =
-                self.fixed_layout(*element, structs, enums, semantics, visiting)?;
+                self.fixed_layout(*element, structs, enums, semantics, address_width, visiting)?;
             let stride = align_up(element_size, alignment);
             let size = stride
                 .checked_mul(*length)
@@ -427,7 +549,7 @@ impl MemoryLayouts {
             })
         })();
         visiting.remove(&ty);
-        self.arrays.insert(ty, result.clone());
+        self.arrays.insert((ty, address_width), result.clone());
         result
     }
 
@@ -437,9 +559,10 @@ impl MemoryLayouts {
         structs: &[StructDecl],
         enums: &[EnumDecl],
         semantics: &SemanticModel,
+        address_width: MemoryAddressWidth,
         visiting: &mut HashSet<TypeId>,
     ) -> Result<StructMemoryLayout, String> {
-        if let Some(layout) = self.structs.get(&ty) {
+        if let Some(layout) = self.structs.get(&(ty, address_width)) {
             return layout.clone();
         }
         if !visiting.insert(ty) {
@@ -508,7 +631,7 @@ impl MemoryLayouts {
             let mut fields = Vec::with_capacity(declared_fields.len());
             for (field, field_name, field_ty) in declared_fields {
                 let (field_size, field_alignment) = self
-                    .fixed_layout(field_ty, structs, enums, semantics, visiting)
+                    .fixed_layout(field_ty, structs, enums, semantics, address_width, visiting)
                     .map_err(|error| {
                         format!("struct `{name}.{field_name}` is not MemoryReadable: {error}")
                     })?;
@@ -531,7 +654,7 @@ impl MemoryLayouts {
             })
         })();
         visiting.remove(&ty);
-        self.structs.insert(ty, result.clone());
+        self.structs.insert((ty, address_width), result.clone());
         result
     }
 
@@ -541,13 +664,16 @@ impl MemoryLayouts {
         structs: &[StructDecl],
         enums: &[EnumDecl],
         semantics: &SemanticModel,
+        address_width: MemoryAddressWidth,
         visiting: &mut HashSet<TypeId>,
     ) -> Result<(u32, u32), String> {
         match semantics.types().kind(ty) {
-            TypeKind::Builtin(builtin) => scalar_layout(&self.standard_library, *builtin)
-                .ok_or_else(|| format!("`{builtin}` has no fixed process-memory layout")),
+            TypeKind::Builtin(builtin) => {
+                scalar_layout(&self.standard_library, *builtin, address_width)
+                    .ok_or_else(|| format!("`{builtin}` has no fixed process-memory layout"))
+            }
             TypeKind::Struct(_) => self
-                .build_struct(ty, structs, enums, semantics, visiting)
+                .build_struct(ty, structs, enums, semantics, address_width, visiting)
                 .map(|layout| (layout.size, layout.alignment)),
             TypeKind::Enum(enumeration) => {
                 if !self.enums.contains_key(&ty) {
@@ -578,12 +704,12 @@ impl MemoryLayouts {
                     RuntimeRepresentation::Scalar { storage } => library
                         .core_type(storage)
                         .memory_layout
-                        .map(|layout| (layout.size, layout.alignment))
+                        .and_then(|_| scalar_layout(library, storage, address_width))
                         .ok_or_else(|| {
                             format!("`{}` has no fixed process-memory layout", declaration.name)
                         }),
                     RuntimeRepresentation::GcStruct { .. } => self
-                        .build_struct(ty, structs, enums, semantics, visiting)
+                        .build_struct(ty, structs, enums, semantics, address_width, visiting)
                         .map(|layout| (layout.size, layout.alignment)),
                     RuntimeRepresentation::GcArray { .. } | RuntimeRepresentation::Enum { .. } => {
                         Err(format!(
@@ -596,7 +722,7 @@ impl MemoryLayouts {
             TypeKind::Array {
                 length: Some(_), ..
             } => self
-                .build_array(ty, structs, enums, semantics, visiting)
+                .build_array(ty, structs, enums, semantics, address_width, visiting)
                 .map(|layout| (layout.size, layout.alignment)),
             TypeKind::Array { length: None, .. } => Err(
                 "an unsized `[T]` array has no fixed process-memory layout; use `[T; N]`"
@@ -607,7 +733,15 @@ impl MemoryLayouts {
     }
 }
 
-fn scalar_layout(library: &StandardLibrary, ty: BuiltinType) -> Option<(u32, u32)> {
+fn scalar_layout(
+    library: &StandardLibrary,
+    ty: BuiltinType,
+    address_width: MemoryAddressWidth,
+) -> Option<(u32, u32)> {
+    if ty == BuiltinType::Address {
+        let bytes = address_width.bytes();
+        return Some((bytes, bytes));
+    }
     library
         .core_type(ty)
         .memory_layout

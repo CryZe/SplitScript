@@ -36,6 +36,7 @@ pub(super) struct UpdateContext<'a> {
     pub abi: &'a Abi,
     pub gc: &'a GcLayout,
     pub failure_payloads: &'a super::failure_payload::FailurePayloadDemand,
+    pub runtime_helpers: &'a super::RuntimeHelperPlan,
     pub runtime_globals: RuntimeGlobals,
     pub provider_values: &'a HashMap<StdlibStateProviderId, u32>,
     pub semantics: &'a crate::semantic::SemanticModel,
@@ -470,6 +471,7 @@ pub(super) fn compile_update(
             strings,
             abi: lowering.abi,
             process_global: lowering.runtime_globals.process,
+            process_pointer_size: lowering.runtime_globals.process_pointer_size,
             abi_read: lowering.scratch.abi_read,
         },
         lowering,
@@ -506,7 +508,8 @@ pub(super) fn compile_update(
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::Return)
-        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+    function
         .instruction(&Instruction::LocalGet(newly_attached))
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::F64Const(program.attached_tick_rate().into()))
@@ -535,6 +538,11 @@ pub(super) fn compile_update(
         .instruction(&Instruction::GlobalSet(globals.state_ready))
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::GlobalSet(globals.attach_ready));
+    if let Some(pointer_size) = globals.process_pointer_size {
+        function
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::GlobalSet(pointer_size));
+    }
     if let Some(provider_global) = globals.provider_value {
         let provider_type = semantics
             .state_provider()
@@ -620,6 +628,8 @@ pub(super) fn compile_update(
     function
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
+
+    emit_native_pointer_size_detection(&mut function, strings, lowering);
 
     if !lowering.provider_alternatives.is_empty() {
         let selected = globals
@@ -1157,6 +1167,49 @@ pub(super) fn compile_update(
 
     function.instruction(&Instruction::End);
     function
+}
+
+fn emit_native_pointer_size_detection(
+    function: &mut Function,
+    strings: &StringPool,
+    lowering: &UpdateContext<'_>,
+) {
+    let Some(pointer_size) = lowering.runtime_globals.process_pointer_size else {
+        return;
+    };
+    function
+        .instruction(&Instruction::GlobalGet(pointer_size))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    for (index, name) in lowering.process_names.iter().enumerate() {
+        let (name_ptr, name_len) = strings.get(name);
+        function
+            .instruction(&Instruction::GlobalGet(
+                lowering.runtime_globals.process_name,
+            ))
+            .instruction(&Instruction::I32Const(index as i32))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
+            .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
+            .instruction(&Instruction::I32Const(name_ptr as i32))
+            .instruction(&Instruction::I32Const(name_len as i32))
+            .instruction(&Instruction::Call(
+                lowering.abi.function(AbiImportId::ProcessGetModuleAddress),
+            ))
+            .instruction(&Instruction::Call(lowering.runtime_helpers.function(
+                crate::intrinsic_registry::RuntimeHelperId::DetectProcessPointerSize,
+            )))
+            .instruction(&Instruction::GlobalSet(pointer_size))
+            .instruction(&Instruction::End);
+    }
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::GlobalGet(pointer_size))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
 }
 
 fn emit_return_if_attachment_rejected(function: &mut Function, globals: RuntimeGlobals) {

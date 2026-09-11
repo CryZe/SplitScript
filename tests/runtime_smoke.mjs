@@ -12,6 +12,7 @@ const messages = [];
 const variables = [];
 const tickRates = [];
 let modulePolls = 0;
+let gameAssemblyPolls = 0;
 let moduleSizePolls = 0;
 const moduleAddressNames = [];
 const moduleSizeNames = [];
@@ -114,10 +115,13 @@ const env = {
         return 1;
     },
     process_get_module_address(_process, pointer, length) {
-        moduleAddressNames.push(decoder.decode(
+        const name = decoder.decode(
             new Uint8Array(instance.exports.memory.buffer, pointer, length),
-        ));
-        return ++modulePolls < 3 ? 0n : 0x1000n;
+        );
+        moduleAddressNames.push(name);
+        modulePolls += 1;
+        if (name === "GameAssembly.dll" && ++gameAssemblyPolls < 3) return 0n;
+        return 0x1000n;
     },
     process_get_module_size(_process, pointer, length) {
         moduleSizeNames.push(decoder.decode(
@@ -157,8 +161,8 @@ for (let tick = 0; tick < 40 && !messages.includes("Hello, world from SplitScrip
 
 const expected = "Hello, world from SplitScript!";
 
-if (modulePolls !== 4) {
-    throw new Error(`expected 4 module polls, got ${modulePolls}`);
+if (modulePolls !== 5) {
+    throw new Error(`expected 5 module polls, got ${modulePolls}`);
 }
 
 if (moduleSizePolls !== 2) {
@@ -166,6 +170,7 @@ if (moduleSizePolls !== 2) {
 }
 
 if (moduleAddressNames.join(",") !== [
+    "Lunistice-Demo.exe",
     "GameAssembly.dll",
     "GameAssembly.dll",
     "GameAssembly.dll",
@@ -178,8 +183,8 @@ if (moduleSizeNames.join(",") !== "GameAssembly.dll,Lunistice-Demo.exe") {
     throw new Error(`unexpected module-size names: ${JSON.stringify(moduleSizeNames)}`);
 }
 
-if (scanReads !== 16) {
-    throw new Error(`expected sixteen bulk/scan reads, got ${scanReads}`);
+if (scanReads !== 18) {
+    throw new Error(`expected eighteen bulk/scan reads, got ${scanReads}`);
 }
 
 if (scalarReads !== 38) {

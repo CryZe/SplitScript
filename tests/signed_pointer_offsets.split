@@ -6,7 +6,7 @@ state "game.exe" {
 
 whileAttached {
     let followed = process.follow(0x3000, [-0x20, 0x10]) else 0 as address
-    let reusable = 0x4000.memoryPath([-0x20], -0x10, PointerSize.Bit64)
+    let reusable = 0x4000.memoryPath([-0x20], -0x10)
     let resolved = reusable.resolve() else 0 as address
     setVariable(
         "Signed Pointer Offsets",

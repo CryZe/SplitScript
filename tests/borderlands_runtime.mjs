@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { portableExecutableImage } from "./support/splitscript_host.mjs";
 
 const wasmPath = process.argv[2];
 const mode = process.argv[3] ?? "v100";
@@ -13,6 +14,7 @@ const versions = {
 };
 const version = versions[mode] ?? versions.v100;
 const moduleBase = 0x10000000n;
+const executableHeader = portableExecutableImage(4);
 const firstPointer = 0x30000000n;
 const secondPointer = 0x31000000n;
 const decoder = new TextDecoder();
@@ -33,7 +35,10 @@ function writePeValue(address, destination, size) {
     const view = new DataView(instance.exports.memory.buffer);
     const bytes = new Uint8Array(instance.exports.memory.buffer, destination, size);
     bytes.fill(0);
-    if (address === moduleBase && size === 2) {
+    const headerOffset = Number(address - moduleBase);
+    if ((headerOffset === 0 && size === 64) || (headerOffset === 0x80 && size === 26)) {
+        bytes.set(executableHeader.subarray(headerOffset, headerOffset + size));
+    } else if (address === moduleBase && size === 2) {
         view.setUint16(destination, 0x5a4d, true);
     } else if (address === moduleBase + 0x3cn && size === 4) {
         view.setUint32(destination, 0x80, true);

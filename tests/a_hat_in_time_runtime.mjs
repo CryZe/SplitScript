@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { portableExecutableImage } from "./support/splitscript_host.mjs";
 
 const wasmPath = process.argv[2];
 if (!wasmPath) {
@@ -116,6 +117,7 @@ const timerBase = 0x1100n;
 const saveSignature = 0x1200n;
 const actorsSignature = 0x1300n;
 const coordinatesSignature = 0x1400n;
+const executableBase = 0x8000n;
 const saveRoot = 0x3000n;
 const actorsRoot = 0x3100n;
 
@@ -155,6 +157,8 @@ const writeF64 = (address, value) => writeNumber(
 const writeRelative32 = (instructionAddress, target) => {
     writeI32(instructionAddress, Number(target - instructionAddress - 4n));
 };
+
+writeBytes(executableBase, portableExecutableImage(8));
 
 writeBytes(timerBase, [0x54, 0x49, 0x4d, 0x52]);
 writeI32(timerBase + 0x04n, 1);
@@ -236,12 +240,17 @@ const env = {
     },
     process_detach() {},
     process_is_open: () => 1,
+    process_get_module_address(_process, pointer, length) {
+        return text(pointer, length) === "HatinTimeGame" ? executableBase : 0n;
+    },
     process_get_memory_range_count: () => 1n,
     process_get_memory_range_address: () => 0x1000n,
     process_get_memory_range_size: () => 0x1000n,
     process_get_memory_range_flags: () => 2n,
     process_read(_process, address, destination, size) {
-        reads.push([address, size]);
+        const executableHeaderRead = (address === executableBase && size === 64)
+            || (address === executableBase + 0x80n && size === 26);
+        if (!executableHeaderRead) reads.push([address, size]);
         const output = new Uint8Array(instance.exports.memory.buffer, destination, size);
         for (let index = 0; index < size; index += 1) {
             output[index] = bytes.get(address + BigInt(index)) ?? 0;

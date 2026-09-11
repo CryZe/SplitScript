@@ -384,10 +384,11 @@ pub(super) fn compile_follow_address(
     let process = 0;
     let base = 1;
     let offsets = 2;
-    let index = 3;
-    let len = 4;
-    let current = 5;
-    let offsets_backing = 6;
+    let pointer_size = 3;
+    let index = 4;
+    let len = 5;
+    let current = 6;
+    let offsets_backing = 7;
 
     function
         .instruction(&Instruction::LocalGet(base))
@@ -418,15 +419,24 @@ pub(super) fn compile_follow_address(
         .instruction(&Instruction::ArrayGet(offsets_storage))
         .instruction(&Instruction::I64Add)
         .instruction(&Instruction::I32Const(abi_read.destination(8)))
-        .instruction(&Instruction::I32Const(8))
+        .instruction(&Instruction::LocalGet(pointer_size))
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(pointer_size))
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::I32Const(abi_read.start()))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::Else)
         .instruction(&Instruction::I32Const(abi_read.start()))
         .instruction(&Instruction::I64Load(memarg()))
+        .instruction(&Instruction::End)
         .instruction(&Instruction::LocalTee(current))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
@@ -441,6 +451,132 @@ pub(super) fn compile_follow_address(
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(current))
+        .instruction(&Instruction::End);
+    function
+}
+
+/// Detects the pointer width from the mapped main-module header. Zero means
+/// the PE, ELF, or Mach-O header is not readable or recognized yet.
+pub(super) fn compile_detect_process_pointer_size(abi: &Abi, abi_read: AbiReadScratch) -> Function {
+    let mut function = Function::new([(1, ValType::I64)]);
+    let process = 0;
+    let module = 1;
+    let pe_offset = 2;
+    let scratch = abi_read.start();
+
+    function
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(module))
+        .instruction(&Instruction::I32Const(abi_read.destination(64)))
+        .instruction(&Instruction::I32Const(64))
+        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        // ELF identification and EI_CLASS.
+        .instruction(&Instruction::I32Const(scratch))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::I32Const(0x464c_457f))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(scratch + 4))
+        .instruction(&Instruction::I32Load8U(memarg()))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(scratch + 4))
+        .instruction(&Instruction::I32Load8U(memarg()))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(8))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        // Mach-O magic in either byte order.
+        .instruction(&Instruction::I32Const(scratch))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::I32Const(0xfeed_face_u32 as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::I32Const(scratch))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::I32Const(0xcefa_edfe_u32 as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(scratch))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::I32Const(0xfeed_facf_u32 as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::I32Const(scratch))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::I32Const(0xcffa_edfe_u32 as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(8))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        // PE DOS header and optional-header magic.
+        .instruction(&Instruction::I32Const(scratch))
+        .instruction(&Instruction::I32Load16U(memarg()))
+        .instruction(&Instruction::I32Const(0x5a4d))
+        .instruction(&Instruction::I32Ne)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(scratch + 0x3c))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::LocalSet(pe_offset))
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(module))
+        .instruction(&Instruction::LocalGet(pe_offset))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::I32Const(abi_read.destination(26)))
+        .instruction(&Instruction::I32Const(26))
+        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(scratch))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::I32Const(0x0000_4550))
+        .instruction(&Instruction::I32Ne)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(scratch + 24))
+        .instruction(&Instruction::I32Load16U(memarg()))
+        .instruction(&Instruction::I32Const(0x10b))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(scratch + 24))
+        .instruction(&Instruction::I32Load16U(memarg()))
+        .instruction(&Instruction::I32Const(0x20b))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(8))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::End)
         .instruction(&Instruction::End);
     function
 }

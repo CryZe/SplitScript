@@ -52,6 +52,9 @@ pub(super) struct RuntimeGlobals {
     /// Index of the source-declared process name that successfully attached.
     /// `-1` means no process is attached.
     pub process_name: u32,
+    /// Physical native pointer width in bytes, detected once per attachment.
+    /// Storage is omitted when no reachable operation depends on it.
+    pub process_pointer_size: Option<u32>,
     pub provider_value: Option<u32>,
     /// Pending source-defined state-provider attachment future.
     pub provider_attachment_frame: Option<u32>,
@@ -97,6 +100,7 @@ pub(super) struct Inputs<'a> {
     pub provider_attachment: Option<&'a FunctionInstance>,
     pub provider_alternatives: &'a [(EnumVariantId, StdlibStateProviderId, FunctionInstance)],
     pub provider_preparation: Option<&'a FunctionInstance>,
+    pub needs_native_pointer_size: bool,
 }
 
 pub(super) fn encode(inputs: Inputs<'_>) -> GlobalPlan {
@@ -109,6 +113,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> GlobalPlan {
         provider_attachment,
         provider_alternatives,
         provider_preparation,
+        needs_native_pointer_size,
     } = inputs;
     let mut section = GlobalSection::new();
     let process = section.len();
@@ -129,6 +134,18 @@ pub(super) fn encode(inputs: Inputs<'_>) -> GlobalPlan {
         },
         &ConstExpr::i32_const(-1),
     );
+    let process_pointer_size = needs_native_pointer_size.then(|| {
+        let index = section.len();
+        section.global(
+            GlobalType {
+                val_type: ValType::I32,
+                mutable: true,
+                shared: false,
+            },
+            &ConstExpr::i32_const(0),
+        );
+        index
+    });
     let provider_value = semantics.state_provider().and_then(|provider| {
         let ty = wasm_ir
             .standard_library()
@@ -502,6 +519,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> GlobalPlan {
         runtime: RuntimeGlobals {
             process,
             process_name,
+            process_pointer_size,
             provider_value,
             provider_attachment_frame,
             provider_preparation_value,

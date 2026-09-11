@@ -282,7 +282,6 @@ fn readCheckpoint(index: i32) -> String! {
     let lengthPath = gameRoot.memoryPath(
         [0xe0, 0x48, 0x4, indexOffset, 0xc],
         0x4,
-        PointerSize.Bit32,
     )
     let length = process.read<i32>(lengthPath.resolve()?)?
     if length < 0 {
@@ -291,7 +290,6 @@ fn readCheckpoint(index: i32) -> String! {
     let textPath = gameRoot.memoryPath(
         [0xe0, 0x48, 0x4, indexOffset, 0xc],
         0x8,
-        PointerSize.Bit32,
     )
     return process.readUtf16Le(textPath.resolve()?, length as u32)
 }
@@ -302,7 +300,6 @@ fn readItem(index: i32) -> String! {
     let lengthPath = gameRoot.memoryPath(
         [0xe0, 0x30, 0x4, indexOffset, 0x4],
         0x4,
-        PointerSize.Bit32,
     )
     let length = process.read<i32>(lengthPath.resolve()?)?
     if length < 0 {
@@ -311,7 +308,6 @@ fn readItem(index: i32) -> String! {
     let textPath = gameRoot.memoryPath(
         [0xe0, 0x30, 0x4, indexOffset, 0x4],
         0x8,
-        PointerSize.Bit32,
     )
     return process.readUtf16Le(textPath.resolve()?, length as u32)
 }
@@ -322,7 +318,6 @@ fn readKeyPoint(index: i32) -> String! {
     let lengthPath = gameRoot.memoryPath(
         [0xe0, 0x34, 0x4, indexOffset],
         0x4,
-        PointerSize.Bit32,
     )
     let length = process.read<i32>(lengthPath.resolve()?)?
     if length < 4 || length > 50 {
@@ -331,7 +326,6 @@ fn readKeyPoint(index: i32) -> String! {
     let textPath = gameRoot.memoryPath(
         [0xe0, 0x34, 0x4, indexOffset],
         0x8,
-        PointerSize.Bit32,
     )
     return process.readUtf16Le(textPath.resolve()?, length as u32)
 }
@@ -369,11 +363,11 @@ onAttach {
     }
     gameRoot = axiomClass.offset(platformOffset)
     layout = AxiomVergeLayout {
-        maxHealth: gameRoot.memoryPath([0xe0], 0xb4, PointerSize.Bit32),
-        ticks: gameRoot.memoryPath([0xe0], 0xc, PointerSize.Bit32),
-        checkpointCount: gameRoot.memoryPath([0xe0, 0x48], 0xc, PointerSize.Bit32),
-        itemCount: gameRoot.memoryPath([0xe0, 0x30], 0xc, PointerSize.Bit32),
-        keyPointCount: gameRoot.memoryPath([0xe0, 0x34], 0xc, PointerSize.Bit32),
+        maxHealth: gameRoot.memoryPath([0xe0], 0xb4),
+        ticks: gameRoot.memoryPath([0xe0], 0xc),
+        checkpointCount: gameRoot.memoryPath([0xe0, 0x48], 0xc),
+        itemCount: gameRoot.memoryPath([0xe0, 0x30], 0xc),
+        keyPointCount: gameRoot.memoryPath([0xe0, 0x34], 0xc),
     }
 }
 

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { portableExecutableImage } from "./support/splitscript_host.mjs";
 
 const wasmPath = process.argv[2];
 if (!wasmPath) {
@@ -8,6 +9,8 @@ if (!wasmPath) {
 const bytes = fs.readFileSync(wasmPath);
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
+const executableBase = 0xa000n;
+const executableHeader = portableExecutableImage(8);
 let instance;
 let phase = 0;
 const snapshots = [];
@@ -34,6 +37,13 @@ const env = {
     process_detach() {},
     process_is_open: () => 1,
     process_read(_process, address, destination, size) {
+        const headerOffset = Number(address - executableBase);
+        if ((headerOffset === 0 && size === 64) || (headerOffset === 0x80 && size === 26)) {
+            new Uint8Array(instance.exports.memory.buffer, destination, size).set(
+                executableHeader.subarray(headerOffset, headerOffset + size),
+            );
+            return 1;
+        }
         const numericAddress = Number(address);
         if (numericAddress === 0x3000
             || (phase === 2 && numericAddress === 0x10007000)
@@ -78,7 +88,9 @@ const env = {
         return 1;
     },
     process_get_module_address(_process, namePointer, nameLength) {
-        if (text(namePointer, nameLength) !== "optional.dll") {
+        const name = text(namePointer, nameLength);
+        if (name === "game.exe") return executableBase;
+        if (name !== "optional.dll") {
             throw new Error("queried an unexpected module");
         }
         return phase === 0 ? 0n : 0x10000000n;

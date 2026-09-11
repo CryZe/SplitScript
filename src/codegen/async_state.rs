@@ -26,9 +26,10 @@ use super::{
     call_target,
     context::AttachContext,
     data_plan::StringPool,
-    emit_array_get, emit_default, emit_frame_typed_struct_get, emit_memory_value,
-    emit_memory_value_is_valid, emit_monotonic_nanoseconds, emit_result_error, emit_result_success,
-    emit_string_literal, emit_typed_struct_get,
+    emit_array_get, emit_default, emit_frame_typed_struct_get, emit_monotonic_nanoseconds,
+    emit_native_memory_read_destination_and_size, emit_native_memory_value,
+    emit_native_memory_value_is_valid, emit_result_error, emit_result_success, emit_string_literal,
+    emit_typed_struct_get,
     expression::{
         BareReturn, ExprContext, IntrinsicCapture, LocalStorage, LoopControl, MatchLayout,
         compile_assignment, compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
@@ -2044,22 +2045,21 @@ fn compile_suspension_poll(
                 _ => unreachable!("process.read must resolve to its standard-library item"),
             };
             let read_type = semantic_type(read_type_id, context.semantics);
-            let read_size = context
-                .memory
-                .layout(read_type_id, context.semantics)
-                .expect("checked process reads are MemoryReadable")
-                .size();
             if let Some((_, stored_type)) = layout.field(destination) {
                 context.locals.frame().emit(function);
                 debug_assert_eq!(stored_type, read_type);
             }
             compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
+            emit_native_memory_read_destination_and_size(
+                function,
+                read_type_id,
+                context.abi_read,
+                context.memory,
+                context.semantics,
+                context.runtime_globals.process_pointer_size,
+            );
             function
-                .instruction(&Instruction::I32Const(
-                    context.abi_read.destination(read_size),
-                ))
-                .instruction(&Instruction::I32Const(read_size as i32))
                 .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
                 .instruction(&Instruction::I32Eqz)
                 .instruction(&Instruction::If(BlockType::Empty))
@@ -2067,22 +2067,32 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if read_type == Type::Address {
+                emit_native_memory_value(
+                    function,
+                    read_type_id,
+                    context.abi_read,
+                    0,
+                    context.memory,
+                    context.semantics,
+                    context.gc,
+                    context.runtime_globals.process_pointer_size,
+                    MemoryByteOrder::Little,
+                );
                 function
-                    .instruction(&Instruction::I32Const(context.abi_read.start()))
-                    .instruction(&Instruction::I64Load(memarg()))
                     .instruction(&Instruction::I64Eqz)
                     .instruction(&Instruction::If(BlockType::Empty))
                     .instruction(&Instruction::I32Const(0))
                     .instruction(&Instruction::Return)
                     .instruction(&Instruction::End);
             }
-            if emit_memory_value_is_valid(
+            if emit_native_memory_value_is_valid(
                 function,
                 read_type_id,
                 context.abi_read,
                 0,
                 context.memory,
                 context.semantics,
+                context.runtime_globals.process_pointer_size,
                 MemoryByteOrder::Little,
             ) {
                 function
@@ -2093,7 +2103,7 @@ fn compile_suspension_poll(
                     .instruction(&Instruction::End);
             }
             if let Some((field, _)) = layout.field(destination) {
-                emit_memory_value(
+                emit_native_memory_value(
                     function,
                     read_type_id,
                     context.abi_read,
@@ -2101,6 +2111,7 @@ fn compile_suspension_poll(
                     context.memory,
                     context.semantics,
                     context.gc,
+                    context.runtime_globals.process_pointer_size,
                     MemoryByteOrder::Little,
                 );
                 function.instruction(&Instruction::StructSet {
@@ -2113,6 +2124,12 @@ fn compile_suspension_poll(
             compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
             compile_expr(function, args[1], context);
+            function.instruction(&Instruction::GlobalGet(
+                context
+                    .runtime_globals
+                    .process_pointer_size
+                    .expect("process.follow plans pointer-width storage"),
+            ));
             function
                 .instruction(&Instruction::Call(
                     context

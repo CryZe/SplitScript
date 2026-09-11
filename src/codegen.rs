@@ -13,7 +13,7 @@ use crate::ast::{
     StructFieldId, ValueId,
 };
 use crate::equality::EqualityCapabilities;
-use crate::memory::{MemoryLayouts, MemoryTypeLayout};
+use crate::memory::{MemoryAddressWidth, MemoryLayouts, MemoryTypeLayout};
 use crate::semantic::{FunctionInstance, ResolvedReceiver, SemanticModel};
 use crate::stdlib::{
     Implementation, IntrinsicId, StandardLibrary, StateProviderAttachment, StateProviderProcesses,
@@ -526,6 +526,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         provider_attachment: provider_attachment.as_ref(),
         provider_alternatives: &provider_alternatives,
         provider_preparation: provider_preparation.as_ref(),
+        needs_native_pointer_size: dependencies.needs_native_pointer_size(),
     });
 
     let function_plan::FunctionPlan {
@@ -719,6 +720,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         abi: &abi,
         gc: &gc,
         failure_payloads: &failure_payloads,
+        runtime_helpers: &runtime_helpers,
         runtime_globals,
         provider_values: &provider_values,
         semantics,
@@ -1231,10 +1233,11 @@ fn emit_memory_value(
     memory: &MemoryLayouts,
     semantics: &SemanticModel,
     gc: &GcLayout,
+    address_width: MemoryAddressWidth,
     byte_order: MemoryByteOrder,
 ) {
     match memory
-        .layout(ty, semantics)
+        .layout(ty, semantics, address_width)
         .expect("checked memory values are MemoryReadable")
     {
         MemoryTypeLayout::Scalar { .. } => {
@@ -1242,6 +1245,7 @@ fn emit_memory_value(
                 function,
                 semantic_type(ty, semantics),
                 scratch.at(offset),
+                address_width,
                 byte_order,
             );
         }
@@ -1260,6 +1264,7 @@ fn emit_memory_value(
                     function,
                     Type::from_core(layout.representation),
                     scratch.at(offset),
+                    address_width,
                     byte_order,
                 );
                 emit_enum_discriminant(function, layout.representation, variant.value);
@@ -1290,6 +1295,7 @@ fn emit_memory_value(
                     memory,
                     semantics,
                     gc,
+                    address_width,
                     byte_order,
                 );
             }
@@ -1307,6 +1313,7 @@ fn emit_memory_value(
                     memory,
                     semantics,
                     gc,
+                    address_width,
                     byte_order,
                 );
             }
@@ -1321,6 +1328,7 @@ fn emit_memory_value(
 /// Emits a boolean only when `ty` contains a represented enum whose raw
 /// discriminant needs validation. The caller can therefore avoid generating
 /// a branch for ordinary scalar/aggregate reads.
+#[allow(clippy::too_many_arguments)]
 fn emit_memory_value_is_valid(
     function: &mut Function,
     ty: TypeId,
@@ -1328,10 +1336,11 @@ fn emit_memory_value_is_valid(
     offset: u32,
     memory: &MemoryLayouts,
     semantics: &SemanticModel,
+    address_width: MemoryAddressWidth,
     byte_order: MemoryByteOrder,
 ) -> bool {
     match memory
-        .layout(ty, semantics)
+        .layout(ty, semantics, address_width)
         .expect("checked memory values are MemoryReadable")
     {
         MemoryTypeLayout::Scalar { .. } => false,
@@ -1345,6 +1354,7 @@ fn emit_memory_value_is_valid(
                     function,
                     Type::from_core(layout.representation),
                     scratch.at(offset),
+                    address_width,
                     byte_order,
                 );
                 emit_enum_discriminant(function, layout.representation, variant.value);
@@ -1365,6 +1375,7 @@ fn emit_memory_value_is_valid(
                     offset + field.offset,
                     memory,
                     semantics,
+                    address_width,
                     byte_order,
                 ) {
                     if emitted {
@@ -1385,6 +1396,7 @@ fn emit_memory_value_is_valid(
                     offset + index * layout.stride,
                     memory,
                     semantics,
+                    address_width,
                     byte_order,
                 ) {
                     if emitted {
@@ -1410,14 +1422,32 @@ fn emit_memory_value_result(
     semantics: &SemanticModel,
     gc: &GcLayout,
     failure_payloads: &failure_payload::FailurePayloadDemand,
+    address_width: MemoryAddressWidth,
     byte_order: MemoryByteOrder,
 ) {
-    if emit_memory_value_is_valid(function, ty, scratch, offset, memory, semantics, byte_order) {
+    if emit_memory_value_is_valid(
+        function,
+        ty,
+        scratch,
+        offset,
+        memory,
+        semantics,
+        address_width,
+        byte_order,
+    ) {
         function.instruction(&Instruction::If(BlockType::Result(
             gc.val_type(Type::Result(result)),
         )));
         emit_memory_value(
-            function, ty, scratch, offset, memory, semantics, gc, byte_order,
+            function,
+            ty,
+            scratch,
+            offset,
+            memory,
+            semantics,
+            gc,
+            address_width,
+            byte_order,
         );
         emit_result_success(function, result, gc);
         function.instruction(&Instruction::Else);
@@ -1432,9 +1462,237 @@ fn emit_memory_value_result(
         function.instruction(&Instruction::End);
     } else {
         emit_memory_value(
-            function, ty, scratch, offset, memory, semantics, gc, byte_order,
+            function,
+            ty,
+            scratch,
+            offset,
+            memory,
+            semantics,
+            gc,
+            address_width,
+            byte_order,
         );
         emit_result_success(function, result, gc);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_native_memory_value(
+    function: &mut Function,
+    ty: TypeId,
+    scratch: memory_plan::AbiReadScratch,
+    offset: u32,
+    memory: &MemoryLayouts,
+    semantics: &SemanticModel,
+    gc: &GcLayout,
+    pointer_size: Option<u32>,
+    byte_order: MemoryByteOrder,
+) {
+    if !memory.depends_on_address_width(ty, semantics) {
+        emit_memory_value(
+            function,
+            ty,
+            scratch,
+            offset,
+            memory,
+            semantics,
+            gc,
+            MemoryAddressWidth::Bit64,
+            byte_order,
+        );
+        return;
+    }
+    let pointer_size = pointer_size.expect("pointer-dependent reads plan native-width storage");
+    function
+        .instruction(&Instruction::GlobalGet(pointer_size))
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(
+            gc.val_type(semantic_type(ty, semantics)),
+        )));
+    emit_memory_value(
+        function,
+        ty,
+        scratch,
+        offset,
+        memory,
+        semantics,
+        gc,
+        MemoryAddressWidth::Bit32,
+        byte_order,
+    );
+    function.instruction(&Instruction::Else);
+    emit_memory_value(
+        function,
+        ty,
+        scratch,
+        offset,
+        memory,
+        semantics,
+        gc,
+        MemoryAddressWidth::Bit64,
+        byte_order,
+    );
+    function.instruction(&Instruction::End);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_native_memory_value_is_valid(
+    function: &mut Function,
+    ty: TypeId,
+    scratch: memory_plan::AbiReadScratch,
+    offset: u32,
+    memory: &MemoryLayouts,
+    semantics: &SemanticModel,
+    pointer_size: Option<u32>,
+    byte_order: MemoryByteOrder,
+) -> bool {
+    if !memory.depends_on_address_width(ty, semantics) {
+        return emit_memory_value_is_valid(
+            function,
+            ty,
+            scratch,
+            offset,
+            memory,
+            semantics,
+            MemoryAddressWidth::Bit64,
+            byte_order,
+        );
+    }
+    // Whether validation is required depends on represented enums, not on
+    // pointer width, so both runtime branches have the same stack shape.
+    if !memory.requires_validation(ty, semantics) {
+        return false;
+    }
+    let pointer_size = pointer_size.expect("pointer-dependent reads plan native-width storage");
+    function
+        .instruction(&Instruction::GlobalGet(pointer_size))
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+    emit_memory_value_is_valid(
+        function,
+        ty,
+        scratch,
+        offset,
+        memory,
+        semantics,
+        MemoryAddressWidth::Bit32,
+        byte_order,
+    );
+    function.instruction(&Instruction::Else);
+    emit_memory_value_is_valid(
+        function,
+        ty,
+        scratch,
+        offset,
+        memory,
+        semantics,
+        MemoryAddressWidth::Bit64,
+        byte_order,
+    );
+    function.instruction(&Instruction::End);
+    true
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_native_memory_value_result(
+    function: &mut Function,
+    ty: TypeId,
+    result: ResultTypeId,
+    error: &str,
+    scratch: memory_plan::AbiReadScratch,
+    offset: u32,
+    memory: &MemoryLayouts,
+    semantics: &SemanticModel,
+    gc: &GcLayout,
+    failure_payloads: &failure_payload::FailurePayloadDemand,
+    pointer_size: Option<u32>,
+    byte_order: MemoryByteOrder,
+) {
+    if emit_native_memory_value_is_valid(
+        function,
+        ty,
+        scratch,
+        offset,
+        memory,
+        semantics,
+        pointer_size,
+        byte_order,
+    ) {
+        function.instruction(&Instruction::If(BlockType::Result(
+            gc.val_type(Type::Result(result)),
+        )));
+        emit_native_memory_value(
+            function,
+            ty,
+            scratch,
+            offset,
+            memory,
+            semantics,
+            gc,
+            pointer_size,
+            byte_order,
+        );
+        emit_result_success(function, result, gc);
+        function.instruction(&Instruction::Else);
+        emit_result_error(
+            function,
+            result,
+            semantic_type(ty, semantics),
+            error,
+            gc,
+            failure_payloads,
+        );
+        function.instruction(&Instruction::End);
+    } else {
+        emit_native_memory_value(
+            function,
+            ty,
+            scratch,
+            offset,
+            memory,
+            semantics,
+            gc,
+            pointer_size,
+            byte_order,
+        );
+        emit_result_success(function, result, gc);
+    }
+}
+
+fn emit_native_memory_read_destination_and_size(
+    function: &mut Function,
+    ty: TypeId,
+    scratch: memory_plan::AbiReadScratch,
+    memory: &MemoryLayouts,
+    semantics: &SemanticModel,
+    pointer_size: Option<u32>,
+) {
+    let bit32 = memory
+        .layout(ty, semantics, MemoryAddressWidth::Bit32)
+        .expect("checked native reads have a 32-bit layout")
+        .size();
+    let bit64 = memory
+        .layout(ty, semantics, MemoryAddressWidth::Bit64)
+        .expect("checked native reads have a 64-bit layout")
+        .size();
+    function.instruction(&Instruction::I32Const(
+        scratch.destination(bit32.max(bit64)),
+    ));
+    if memory.depends_on_address_width(ty, semantics) {
+        let pointer_size = pointer_size.expect("pointer-dependent reads plan native-width storage");
+        function
+            .instruction(&Instruction::GlobalGet(pointer_size))
+            .instruction(&Instruction::I32Const(4))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+            .instruction(&Instruction::I32Const(bit32 as i32))
+            .instruction(&Instruction::Else)
+            .instruction(&Instruction::I32Const(bit64 as i32))
+            .instruction(&Instruction::End);
+    } else {
+        function.instruction(&Instruction::I32Const(bit64 as i32));
     }
 }
 
@@ -1464,9 +1722,15 @@ fn enum_discriminant_equality(representation: crate::types::BuiltinType) -> Inst
     }
 }
 
-fn emit_memory_load(function: &mut Function, ty: Type, address: i32, byte_order: MemoryByteOrder) {
+fn emit_memory_load(
+    function: &mut Function,
+    ty: Type,
+    address: i32,
+    address_width: MemoryAddressWidth,
+    byte_order: MemoryByteOrder,
+) {
     if byte_order == MemoryByteOrder::Big && !matches!(ty, Type::Bool | Type::U8 | Type::I8) {
-        emit_big_endian_memory_load(function, ty, address);
+        emit_big_endian_memory_load(function, ty, address, address_width);
         return;
     }
     function.instruction(&Instruction::I32Const(address));
@@ -1476,6 +1740,12 @@ fn emit_memory_load(function: &mut Function, ty: Type, address: i32, byte_order:
         Type::U16 => Instruction::I32Load16U(memarg()),
         Type::I16 => Instruction::I32Load16S(memarg()),
         Type::I32 | Type::U32 => Instruction::I32Load(memarg()),
+        Type::Address if address_width == MemoryAddressWidth::Bit32 => {
+            function
+                .instruction(&Instruction::I32Load(memarg()))
+                .instruction(&Instruction::I64ExtendI32U);
+            return;
+        }
         Type::I64 | Type::U64 | Type::Address => Instruction::I64Load(memarg()),
         Type::F32 => Instruction::F32Load(memarg()),
         Type::F64 => Instruction::F64Load(memarg()),
@@ -1483,11 +1753,17 @@ fn emit_memory_load(function: &mut Function, ty: Type, address: i32, byte_order:
     });
 }
 
-fn emit_big_endian_memory_load(function: &mut Function, ty: Type, address: i32) {
+fn emit_big_endian_memory_load(
+    function: &mut Function,
+    ty: Type,
+    address: i32,
+    address_width: MemoryAddressWidth,
+) {
     let (bytes, wide) = match ty {
         Type::U16 | Type::I16 => (2, false),
         Type::I32 | Type::U32 | Type::F32 => (4, false),
-        Type::I64 | Type::U64 | Type::Address | Type::F64 => (8, true),
+        Type::Address => (address_width.bytes(), true),
+        Type::I64 | Type::U64 | Type::F64 => (8, true),
         _ => unreachable!("non-scalar or byte-sized values do not need big-endian assembly"),
     };
 
@@ -1495,7 +1771,7 @@ fn emit_big_endian_memory_load(function: &mut Function, ty: Type, address: i32) 
         function
             .instruction(&Instruction::I32Const(address))
             .instruction(&Instruction::I32Load8U(MemArg {
-                offset: byte,
+                offset: u64::from(byte),
                 align: 0,
                 memory_index: 0,
             }));
@@ -1901,7 +2177,13 @@ mod architecture_tests {
         let mut code = CodeSection::new();
         for (ty, address) in [(Type::U32, 0), (Type::F32, 4), (Type::I16, 8)] {
             let mut function = Function::new([]);
-            emit_memory_load(&mut function, ty, address, MemoryByteOrder::Big);
+            emit_memory_load(
+                &mut function,
+                ty,
+                address,
+                MemoryAddressWidth::Bit64,
+                MemoryByteOrder::Big,
+            );
             function.instruction(&Instruction::End);
             code.function(&function);
         }

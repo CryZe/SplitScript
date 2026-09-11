@@ -17,6 +17,7 @@ pub(super) struct BackendDependencies {
     stdlib_items: BTreeSet<StdlibItemId>,
     helpers: BTreeSet<RuntimeHelperId>,
     host_imports: BTreeSet<AbiImportId>,
+    needs_native_pointer_size: bool,
 }
 
 impl BackendDependencies {
@@ -57,7 +58,12 @@ impl BackendDependencies {
                 .managed_class(class)
                 .expect("reachable managed classes belong to the program");
             for field in declaration.all_fields().filter(|field| !field.is_static) {
-                dependencies.require_managed_field_reader(field.id, program, semantics);
+                dependencies.require_managed_field_reader(
+                    field.id,
+                    program,
+                    semantics,
+                    capabilities,
+                );
             }
         }
 
@@ -93,6 +99,39 @@ impl BackendDependencies {
                     }
                     if matches!(path.base, crate::ast::PointerPathBase::Module { .. }) {
                         dependencies.require_import(AbiImportId::ProcessGetModuleAddress);
+                    }
+                    let native = semantics
+                        .state_field_provider(field.id)
+                        .is_some_and(|provider| {
+                            matches!(
+                                wasm_ir
+                                    .standard_library()
+                                    .item(
+                                        wasm_ir
+                                            .standard_library()
+                                            .state_provider(provider)
+                                            .direct_read
+                                    )
+                                    .implementation,
+                                Implementation::Intrinsic(IntrinsicId::ProcessRead)
+                            )
+                        });
+                    let value =
+                        semantics
+                            .value_type(field.id)
+                            .map(|ty| match semantics.types().kind(ty) {
+                                TypeKind::Option { value, .. } => *value,
+                                _ => ty,
+                            });
+                    if native
+                        && (!path.offsets.is_empty()
+                            || value.is_some_and(|ty| {
+                                capabilities
+                                    .memory()
+                                    .depends_on_address_width(ty, semantics)
+                            }))
+                    {
+                        dependencies.needs_native_pointer_size = true;
                     }
                 }
             }
@@ -144,18 +183,33 @@ impl BackendDependencies {
             match &expression.kind {
                 wasm_ir::ExpressionKind::Path { root, members } => {
                     if let Some(ResolvedValue::ManagedStatic { field, .. }) = root {
-                        dependencies.require_managed_field_reader(*field, program, semantics);
+                        dependencies.require_managed_field_reader(
+                            *field,
+                            program,
+                            semantics,
+                            capabilities,
+                        );
                     }
                     for member in members {
                         if let ResolvedMember::ManagedField(field) = member {
-                            dependencies.require_managed_field_reader(*field, program, semantics);
+                            dependencies.require_managed_field_reader(
+                                *field,
+                                program,
+                                semantics,
+                                capabilities,
+                            );
                         }
                     }
                 }
                 wasm_ir::ExpressionKind::Member { members, .. } => {
                     for member in members {
                         if let ResolvedMember::ManagedField(field) = member {
-                            dependencies.require_managed_field_reader(*field, program, semantics);
+                            dependencies.require_managed_field_reader(
+                                *field,
+                                program,
+                                semantics,
+                                capabilities,
+                            );
                         }
                     }
                 }
@@ -203,6 +257,7 @@ impl BackendDependencies {
                         item,
                         intrinsic,
                         receiver_type,
+                        type_arguments,
                         ..
                     } = reachability.resolved_call_target(owner.as_ref(), expression.id, target)
                     else {
@@ -210,6 +265,16 @@ impl BackendDependencies {
                     };
                     dependencies.stdlib_items.insert(*item);
                     dependencies.require_intrinsic(*intrinsic);
+                    if *intrinsic == IntrinsicId::ProcessFollow
+                        || (*intrinsic == IntrinsicId::ProcessRead
+                            && type_arguments.first().is_some_and(|ty| {
+                                capabilities
+                                    .memory()
+                                    .depends_on_address_width(specialize(*ty), semantics)
+                            }))
+                    {
+                        dependencies.needs_native_pointer_size = true;
+                    }
                     if matches!(
                         intrinsic,
                         IntrinsicId::MemoryReaderReadUtf8 | IntrinsicId::MemoryReaderReadUtf16Le
@@ -221,30 +286,23 @@ impl BackendDependencies {
                         else {
                             unreachable!("concrete MemoryReader receivers are standard types")
                         };
+                        let reads_utf8 = *intrinsic == IntrinsicId::MemoryReaderReadUtf8;
                         match intrinsic_registry::memory_reader_backend(*reader)
                             .expect("catalog MemoryReader implementations have a backend")
                         {
                             intrinsic_registry::MemoryReaderBackend::Process => {
-                                dependencies.require(match intrinsic {
-                                    IntrinsicId::MemoryReaderReadUtf8 => {
-                                        RuntimeHelperId::ReadUtf8String
-                                    }
-                                    IntrinsicId::MemoryReaderReadUtf16Le => {
-                                        RuntimeHelperId::ReadUtf16LeString
-                                    }
-                                    _ => unreachable!(),
+                                dependencies.require(if reads_utf8 {
+                                    RuntimeHelperId::ReadUtf8String
+                                } else {
+                                    RuntimeHelperId::ReadUtf16LeString
                                 });
                             }
                             intrinsic_registry::MemoryReaderBackend::Provider(contract) => {
                                 dependencies.require(contract.reader);
-                                dependencies.require(match intrinsic {
-                                    IntrinsicId::MemoryReaderReadUtf8 => {
-                                        RuntimeHelperId::Utf8StringFromMemory
-                                    }
-                                    IntrinsicId::MemoryReaderReadUtf16Le => {
-                                        RuntimeHelperId::Utf16LeStringFromMemory
-                                    }
-                                    _ => unreachable!(),
+                                dependencies.require(if reads_utf8 {
+                                    RuntimeHelperId::Utf8StringFromMemory
+                                } else {
+                                    RuntimeHelperId::Utf16LeStringFromMemory
                                 });
                             }
                         }
@@ -396,6 +454,10 @@ impl BackendDependencies {
             }
         }
 
+        if dependencies.needs_native_pointer_size {
+            dependencies.require(RuntimeHelperId::DetectProcessPointerSize);
+            dependencies.require_import(AbiImportId::ProcessGetModuleAddress);
+        }
         dependencies
     }
 
@@ -404,6 +466,7 @@ impl BackendDependencies {
         field: ManagedFieldId,
         program: &Program,
         semantics: &SemanticModel,
+        capabilities: &crate::capabilities::CapabilityAnalysis,
     ) {
         let declaration = program
             .managed_class_declarations()
@@ -411,12 +474,18 @@ impl BackendDependencies {
             .flat_map(|class| class.all_fields())
             .find(|candidate| candidate.id == field)
             .expect("resolved managed fields belong to the program");
-        if declaration.max_length.is_none() {
-            return;
-        }
         let value = semantics
             .managed_field_value_type(field)
             .expect("checked managed fields have semantic value types");
+        if capabilities
+            .memory()
+            .depends_on_address_width(value, semantics)
+        {
+            self.needs_native_pointer_size = true;
+        }
+        if declaration.max_length.is_none() {
+            return;
+        }
         self.require(
             if matches!(semantics.types().kind(value), TypeKind::Option { .. }) {
                 RuntimeHelperId::ReadOptionalManagedStringField
@@ -443,6 +512,10 @@ impl BackendDependencies {
 
     pub fn host_imports(&self) -> impl Iterator<Item = AbiImportId> + '_ {
         self.host_imports.iter().copied()
+    }
+
+    pub fn needs_native_pointer_size(&self) -> bool {
+        self.needs_native_pointer_size
     }
 
     fn require_intrinsic(&mut self, intrinsic: IntrinsicId) {

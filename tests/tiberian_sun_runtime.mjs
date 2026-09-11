@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { portableExecutableImage } from "./support/splitscript_host.mjs";
 
 const wasmPath = process.argv[2];
 if (!wasmPath) {
@@ -6,6 +7,7 @@ if (!wasmPath) {
 }
 
 const moduleBase = 0x10000000n;
+const executableHeader = portableExecutableImage(4);
 const splashPointer = 0x20000000n;
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -63,6 +65,13 @@ const env = {
         return name === "game.exe" ? moduleBase : 0n;
     },
     process_read(_process, address, destination, size) {
+        const headerOffset = Number(address - moduleBase);
+        if ((headerOffset === 0 && size === 64) || (headerOffset === 0x80 && size === 26)) {
+            new Uint8Array(instance.exports.memory.buffer, destination, size).set(
+                executableHeader.subarray(headerOffset, headerOffset + size),
+            );
+            return 1;
+        }
         const view = new DataView(instance.exports.memory.buffer);
         if (address === moduleBase + 0x3e48fcn && size === 1) {
             view.setUint8(destination, isPlaying);
@@ -70,8 +79,8 @@ const env = {
             view.setUint8(destination, mainMenuIndex);
         } else if (address === moduleBase + 0x3e224cn && size === 1) {
             view.setUint8(destination, gameState);
-        } else if (address === moduleBase + 0x34c5f4n && size === 8) {
-            view.setBigUint64(destination, splashPointer, true);
+        } else if (address === moduleBase + 0x34c5f4n && size === 4) {
+            view.setUint32(destination, Number(splashPointer), true);
         } else if (address === splashPointer + 0x14n && size === 1) {
             view.setUint8(destination, splashVisible);
         } else if (address === splashPointer + 0x14n && size === 20) {

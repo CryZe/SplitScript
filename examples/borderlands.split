@@ -13,11 +13,11 @@ state "Borderlands.exe" {
     } else {
         /// Patched 1.5 loading flag one.
         isLoading1: bool = process.read<bool>(
-            executableBase.memoryPath([0x00480af0], 0, PointerSize.Bit32).resolve()?
+            executableBase.memoryPath([0x00480af0], 0).resolve()?
         )?;
         /// Patched 1.5 loading flag two.
         isLoading2: bool = process.read<bool>(
-            executableBase.memoryPath([0x001e1f1c], 0, PointerSize.Bit32).resolve()?
+            executableBase.memoryPath([0x001e1f1c], 0).resolve()?
         )?;
     }
 }

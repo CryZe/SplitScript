@@ -178,6 +178,7 @@ fn never_can_appear_as_an_uninhabited_aggregate_payload() {
 #[derive(Default)]
 struct AsyncTestHost {
     process_open: bool,
+    process_pointer_size: u8,
     timer_state: i32,
     monotonic_nanoseconds: i64,
     messages: Vec<String>,
@@ -440,20 +441,67 @@ fn execute_with_mock_host_with_profile(
                                 .expect("clock output should belong to guest memory");
                         }
                         "process_get_module_address" => {
-                            caller.data_mut().module_lookups += 1;
+                            let pointer = parameters[1].unwrap_i32() as usize;
+                            let length = parameters[2].unwrap_i32() as usize;
+                            let memory = caller
+                                .get_export("memory")
+                                .and_then(wasmtime::Extern::into_memory)
+                                .expect("generated modules export memory");
+                            let mut bytes = vec![0; length];
+                            memory
+                                .read(&caller, pointer, &mut bytes)
+                                .expect("module name should belong to guest memory");
+                            let name =
+                                String::from_utf8(bytes).expect("module names should be UTF-8");
+                            if !name.ends_with(".exe") {
+                                caller.data_mut().module_lookups += 1;
+                            }
                             results[0] = Val::I64(0x1000);
                         }
                         "process_get_module_size" => results[0] = Val::I64(0x200),
                         "process_read" => {
                             let address = parameters[1].unwrap_i64();
+                            let pointer = parameters[2].unwrap_i32() as usize;
+                            let length = parameters[3].unwrap_i32() as usize;
+                            if address == 0x1000 && length == 64 {
+                                let mut header = [0; 64];
+                                header[..2].copy_from_slice(b"MZ");
+                                header[0x3c..].copy_from_slice(&0x80u32.to_le_bytes());
+                                let memory = caller
+                                    .get_export("memory")
+                                    .and_then(wasmtime::Extern::into_memory)
+                                    .expect("generated modules export memory");
+                                memory
+                                    .write(&mut caller, pointer, &header)
+                                    .expect("PE header output should belong to guest memory");
+                                results[0] = Val::I32(1);
+                                return Ok(());
+                            }
+                            if address == 0x1080 && length == 26 {
+                                let mut header = [0; 26];
+                                header[..4].copy_from_slice(b"PE\0\0");
+                                let magic = if caller.data().process_pointer_size == 4 {
+                                    0x10bu16
+                                } else {
+                                    0x20bu16
+                                };
+                                header[24..].copy_from_slice(&magic.to_le_bytes());
+                                let memory = caller
+                                    .get_export("memory")
+                                    .and_then(wasmtime::Extern::into_memory)
+                                    .expect("generated modules export memory");
+                                memory.write(&mut caller, pointer, &header).expect(
+                                    "PE optional header output should belong to guest memory",
+                                );
+                                results[0] = Val::I32(1);
+                                return Ok(());
+                            }
                             caller.data_mut().process_reads.push(address as u64);
                             if address == 0x7fff_0000 && caller.data().fail_scene_read
                                 || address == 0x7fff_0004 && caller.data().fail_entities_read
                             {
                                 return Ok(());
                             }
-                            let pointer = parameters[2].unwrap_i32() as usize;
-                            let length = parameters[3].unwrap_i32() as usize;
                             let value = match address {
                                 0x7fff_0000 => Some(caller.data().raw_scene),
                                 0x7fff_0004 => Some(caller.data().raw_entities),
@@ -520,6 +568,7 @@ fn execute_with_mock_host_with_profile(
         &engine,
         AsyncTestHost {
             process_open: true,
+            process_pointer_size: 8,
             timer_state: 0,
             monotonic_nanoseconds: 0,
             messages: Vec::new(),
@@ -4491,11 +4540,12 @@ fn inferred_generic_process_helpers_preserve_constraints_and_effects() {
 
 #[test]
 fn memory_readable_structs_have_shared_layouts_and_single_read_lowering() {
-    use splitscript::compiler::memory::MemoryTypeLayout;
+    use splitscript::compiler::memory::{MemoryAddressWidth, MemoryTypeLayout};
 
     let source = r#"
         struct Header {
             tag: u8,
+            next: address,
             count: u32,
             flags: u16
         }
@@ -4507,7 +4557,8 @@ fn memory_readable_structs_have_shared_layouts_and_single_read_lowering() {
 
         state "game.exe" {
             packet: Packet = process.read(0x1000);
-            packetFromPath: Packet at 0x3000
+            packetFromPath: Packet at 0x3000;
+            headers: [Header; 2] at 0x4000
         }
 
         onAttach {
@@ -4523,27 +4574,59 @@ fn memory_readable_structs_have_shared_layouts_and_single_read_lowering() {
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
     let header = checked.syntax().structs[0].id;
     let packet = checked.syntax().structs[1].id;
-    let header_layout = checked.memory_layouts().structure(header).unwrap();
-    assert_eq!(header_layout.size, 12);
-    assert_eq!(header_layout.alignment, 4);
+    let header32 = checked
+        .memory_layouts()
+        .structure(header, MemoryAddressWidth::Bit32)
+        .unwrap();
+    assert_eq!(header32.size, 16);
+    assert_eq!(header32.alignment, 4);
     assert_eq!(
-        header_layout
+        header32
             .fields
             .iter()
             .map(|field| field.offset)
             .collect::<Vec<_>>(),
-        [0, 4, 8]
+        [0, 4, 8, 12]
     );
-    let packet_layout = checked.memory_layouts().structure(packet).unwrap();
-    assert_eq!(packet_layout.size, 16);
-    assert_eq!(packet_layout.alignment, 4);
+    let header64 = checked
+        .memory_layouts()
+        .structure(header, MemoryAddressWidth::Bit64)
+        .unwrap();
+    assert_eq!(header64.size, 24);
+    assert_eq!(header64.alignment, 8);
     assert_eq!(
-        packet_layout
+        header64
+            .fields
+            .iter()
+            .map(|field| field.offset)
+            .collect::<Vec<_>>(),
+        [0, 8, 16, 20]
+    );
+    let packet32 = checked
+        .memory_layouts()
+        .structure(packet, MemoryAddressWidth::Bit32)
+        .unwrap();
+    assert_eq!((packet32.size, packet32.alignment), (20, 4));
+    assert_eq!(
+        packet32
             .fields
             .iter()
             .map(|field| field.offset)
             .collect::<Vec<_>>(),
         [0, 4]
+    );
+    let packet64 = checked
+        .memory_layouts()
+        .structure(packet, MemoryAddressWidth::Bit64)
+        .unwrap();
+    assert_eq!((packet64.size, packet64.alignment), (32, 8));
+    assert_eq!(
+        packet64
+            .fields
+            .iter()
+            .map(|field| field.offset)
+            .collect::<Vec<_>>(),
+        [0, 8]
     );
     assert!(matches!(
         checked.memory_layouts().layout(
@@ -4551,9 +4634,30 @@ fn memory_readable_structs_have_shared_layouts_and_single_read_lowering() {
                 .semantics()
                 .value_type(checked.syntax().state.as_ref().unwrap().fields[0].id)
                 .unwrap(),
-            checked.semantics()
+            checked.semantics(),
+            MemoryAddressWidth::Bit64,
         ),
         Ok(MemoryTypeLayout::Struct(_))
+    ));
+    let headers = checked
+        .semantics()
+        .value_type(checked.syntax().state.as_ref().unwrap().fields[2].id)
+        .unwrap();
+    assert!(matches!(
+        checked.memory_layouts().layout(
+            headers,
+            checked.semantics(),
+            MemoryAddressWidth::Bit32,
+        ),
+        Ok(MemoryTypeLayout::FixedArray(layout)) if layout.stride == 16 && layout.size == 32
+    ));
+    assert!(matches!(
+        checked.memory_layouts().layout(
+            headers,
+            checked.semantics(),
+            MemoryAddressWidth::Bit64,
+        ),
+        Ok(MemoryTypeLayout::FixedArray(layout)) if layout.stride == 24 && layout.size == 48
     ));
 
     Validator::new_with_features(WasmFeatures::all())
@@ -4577,8 +4681,76 @@ fn memory_readable_structs_have_shared_layouts_and_single_read_lowering() {
 }
 
 #[test]
+fn native_struct_and_array_reads_follow_the_attached_executables_pointer_width() {
+    let source = r#"
+        struct Header {
+            tag: u8,
+            next: address,
+            value: u16
+        }
+
+        state "game.exe" {
+            header: Header at 0x5000;
+            headers: [Header; 2] at 0x6000
+        }
+
+        whileAttached {
+            let second = current.headers[1]
+            print(
+                `{current.header.tag}:{current.header.next == 0x12345678}:{current.header.value}:{second.tag}:{second.next == 0xabcdef}:{second.value}`,
+            )
+        }
+    "#;
+
+    for (pointer_size, stride) in [(4u8, 12usize), (8u8, 24usize)] {
+        let encode = |tag: u8, next: u64, value: u16| {
+            let mut bytes = vec![0; stride];
+            bytes[0] = tag;
+            let pointer_offset = usize::from(pointer_size);
+            if pointer_size == 4 {
+                bytes[pointer_offset..pointer_offset + 4]
+                    .copy_from_slice(&(next as u32).to_le_bytes());
+            } else {
+                bytes[pointer_offset..pointer_offset + 8].copy_from_slice(&next.to_le_bytes());
+            }
+            let value_offset = pointer_offset + usize::from(pointer_size);
+            bytes[value_offset..value_offset + 2].copy_from_slice(&value.to_le_bytes());
+            bytes
+        };
+        let header = encode(1, 0x1234_5678, 0x3456);
+        let first = encode(0, 0, 0);
+        let second = encode(2, 0x00ab_cdef, 0x5678);
+        let mut headers = first;
+        headers.extend(second);
+
+        let (mut store, instance) = execute_with_mock_host(source);
+        store.data_mut().process_pointer_size = pointer_size;
+        store.data_mut().memory_regions = vec![(0x5000, header), (0x6000, headers)];
+        let update = instance
+            .get_typed_func::<(), ()>(&mut store, "update")
+            .unwrap();
+        update.call(&mut store, ()).unwrap();
+        update.call(&mut store, ()).unwrap();
+
+        assert!(!store.data().messages.is_empty());
+        assert!(
+            store
+                .data()
+                .messages
+                .iter()
+                .all(|message| message == "1:true:13398:2:true:22136"),
+            "unexpected {pointer_size}-byte pointer output: {:?}",
+            store.data().messages,
+        );
+    }
+}
+
+#[test]
 fn fixed_arrays_have_exact_memory_layouts_and_use_ordinary_array_methods() {
-    use splitscript::compiler::{memory::MemoryTypeLayout, types::TypeKind};
+    use splitscript::compiler::{
+        memory::{MemoryAddressWidth, MemoryTypeLayout},
+        types::TypeKind,
+    };
 
     let source = r#"
         struct Entry {
@@ -4613,11 +4785,19 @@ fn fixed_arrays_have_exact_memory_layouts_and_use_ordinary_array_methods() {
         }
     ));
     assert!(matches!(
-        checked.memory_layouts().layout(bytes, checked.semantics()),
+        checked.memory_layouts().layout(
+            bytes,
+            checked.semantics(),
+            MemoryAddressWidth::Bit64,
+        ),
         Ok(MemoryTypeLayout::FixedArray(layout)) if layout.size == 6 && layout.stride == 1
     ));
     assert!(matches!(
-        checked.memory_layouts().layout(entries, checked.semantics()),
+        checked.memory_layouts().layout(
+            entries,
+            checked.semantics(),
+            MemoryAddressWidth::Bit64,
+        ),
         Ok(MemoryTypeLayout::FixedArray(layout)) if layout.size == 8 && layout.stride == 4
     ));
     Validator::new_with_features(WasmFeatures::all())

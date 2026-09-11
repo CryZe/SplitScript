@@ -993,19 +993,28 @@ fn struct_field_memory_layout(
     structure: &crate::ast::StructDecl,
     field: crate::ast::StructFieldId,
     context: &SemanticContext,
-) -> Option<(u32, u32)> {
+) -> Option<((u32, u32), (u32, u32))> {
     let checked = context.snapshot.checked()?;
-    let struct_layout = checked.memory_layouts().structure(structure.id).ok()?;
-    let field_layout = struct_layout
-        .fields
-        .iter()
-        .find(|layout| layout.field == crate::memory::MemoryFieldId::Source(field))?;
-    let size = checked
-        .memory_layouts()
-        .layout(field_layout.ty, checked.semantics())
-        .ok()?
-        .size();
-    Some((field_layout.offset, size))
+    let one = |width| {
+        let struct_layout = checked
+            .memory_layouts()
+            .structure(structure.id, width)
+            .ok()?;
+        let field_layout = struct_layout
+            .fields
+            .iter()
+            .find(|layout| layout.field == crate::memory::MemoryFieldId::Source(field))?;
+        let size = checked
+            .memory_layouts()
+            .layout(field_layout.ty, checked.semantics(), width)
+            .ok()?
+            .size();
+        Some((field_layout.offset, size))
+    };
+    Some((
+        one(crate::memory::MemoryAddressWidth::Bit32)?,
+        one(crate::memory::MemoryAddressWidth::Bit64)?,
+    ))
 }
 
 fn append_source_capabilities(description: &mut String, ty: TypeId, context: &SemanticContext) {
@@ -1213,12 +1222,20 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 .find(|candidate| candidate.id == field)?;
             let mut description =
                 documented_description("Struct field", field.documentation.as_deref());
-            if let Some((offset, size)) = struct_field_memory_layout(structure, field.id, context) {
-                let unit = if size == 1 { "byte" } else { "bytes" };
-                description.push_str(&format!(
-                    "\n\n**Process-memory layout:** byte offset `0x{offset:x}` from the start of `{}`; size `{size}` {unit}.",
-                    structure.name
-                ));
+            if let Some((bit32, bit64)) = struct_field_memory_layout(structure, field.id, context) {
+                if bit32 == bit64 {
+                    let (offset, size) = bit32;
+                    let unit = if size == 1 { "byte" } else { "bytes" };
+                    description.push_str(&format!(
+                        "\n\n**Process-memory layout:** byte offset `0x{offset:x}` from the start of `{}`; size `{size}` {unit}.",
+                        structure.name
+                    ));
+                } else {
+                    description.push_str(&format!(
+                        "\n\n**Process-memory layout:** 32-bit targets read byte offset `0x{:x}` with size `{}`; 64-bit targets read byte offset `0x{:x}` with size `{}`.",
+                        bit32.0, bit32.1, bit64.0, bit64.1
+                    ));
+                }
             }
             Some(source_markdown(
                 &format!("{}.{}: {ty}", structure.name, definition.name),
@@ -3029,6 +3046,11 @@ struct Packet {
 struct Metadata {
     label: String,
 }
+struct PointerHeader {
+    tag: u8,
+    next: address,
+    value: u16,
+}
 state "game.exe" {}
 "#;
         let mut database = CompilerDatabase::new(source);
@@ -3056,6 +3078,18 @@ state "game.exe" {}
             .expect("Metadata.label hover");
         assert!(label.markdown.contains("Metadata.label: String"));
         assert!(!label.markdown.contains("Process-memory layout"));
+
+        let value = database
+            .hover(source.find("value:").unwrap() + 1)
+            .unwrap()
+            .expect("PointerHeader.value hover");
+        assert!(
+            value.markdown.contains(
+                "32-bit targets read byte offset `0x8` with size `2`; 64-bit targets read byte offset `0x10` with size `2`"
+            ),
+            "{}",
+            value.markdown,
+        );
     }
 
     #[test]

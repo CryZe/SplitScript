@@ -260,6 +260,7 @@ pub(super) struct PrefixEmissionContext<'a> {
     pub strings: &'a StringPool,
     pub abi: &'a super::imports::Abi,
     pub process_global: u32,
+    pub process_pointer_size: Option<u32>,
     pub abi_read: AbiReadScratch,
 }
 
@@ -334,6 +335,9 @@ impl PrefixLocals {
                     .instruction(&Instruction::End);
             }
             PrefixOperation::Dereference { parent } => {
+                let pointer_size = context
+                    .process_pointer_size
+                    .expect("native pointer prefixes plan pointer-width storage");
                 if let Some(parent_prefix) = parent_prefix {
                     function
                         .instruction(&Instruction::LocalGet(self.storage[&parent_prefix].status))
@@ -352,13 +356,22 @@ impl PrefixLocals {
                 self.emit_address(function, *parent, context.plan);
                 function
                     .instruction(&Instruction::I32Const(context.abi_read.destination(8)))
-                    .instruction(&Instruction::I32Const(8))
+                    .instruction(&Instruction::GlobalGet(pointer_size))
                     .instruction(&Instruction::Call(
                         context.abi.function(AbiImportId::ProcessRead),
                     ))
                     .instruction(&Instruction::If(BlockType::Empty))
+                    .instruction(&Instruction::GlobalGet(pointer_size))
+                    .instruction(&Instruction::I32Const(4))
+                    .instruction(&Instruction::I32Eq)
+                    .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+                    .instruction(&Instruction::I32Const(context.abi_read.start()))
+                    .instruction(&Instruction::I32Load(memarg()))
+                    .instruction(&Instruction::I64ExtendI32U)
+                    .instruction(&Instruction::Else)
                     .instruction(&Instruction::I32Const(context.abi_read.start()))
                     .instruction(&Instruction::I64Load(memarg()))
+                    .instruction(&Instruction::End)
                     .instruction(&Instruction::LocalSet(storage.address))
                     .instruction(&Instruction::Else)
                     .instruction(&Instruction::I32Const(PREFIX_READ_FAILED))

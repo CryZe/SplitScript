@@ -2,6 +2,24 @@ import fs from "node:fs";
 
 const asBigInt = (value) => typeof value === "bigint" ? value : BigInt(value);
 
+export const portableExecutableImage = (pointerSize) => {
+    const image = new Uint8Array(0x9a);
+    const view = new DataView(image.buffer);
+    view.setUint16(0, 0x5a4d, true);
+    view.setUint32(0x3c, 0x80, true);
+    view.setUint32(0x80, 0x00004550, true);
+    view.setUint16(0x98, pointerSize === 4 ? 0x10b : 0x20b, true);
+    return image;
+};
+
+const executableImage = (pointerSize) => {
+    const image = portableExecutableImage(pointerSize);
+    return [
+        { offset: 0n, bytes: image.subarray(0, 64) },
+        { offset: 0x80n, bytes: image.subarray(0x80) },
+    ];
+};
+
 export class SplitScriptHost {
     constructor({
         settings = {},
@@ -75,6 +93,7 @@ export class SplitScriptHost {
         modules = {},
         ranges = [],
         read = undefined,
+        pointerSize = this.architecture.includes("64") ? 8 : 4,
     } = {}) {
         const normalizedModules = new Map(
             Object.entries(modules).map(([moduleName, module]) => [
@@ -100,6 +119,10 @@ export class SplitScriptHost {
             modules: normalizedModules,
             ranges: normalizedRanges,
             read,
+            executable: {
+                address: 0x70000000n,
+                chunks: executableImage(pointerSize),
+            },
         };
         this.processes.set(name, process);
         return process;
@@ -209,6 +232,14 @@ export class SplitScriptHost {
             process_read: (handle, address, outputPointer, length) => {
                 const process = this.attachedProcess(handle);
                 const target = asBigInt(address);
+                const executableChunk = process.executable.chunks.find((chunk) => {
+                    const start = process.executable.address + chunk.offset;
+                    return target === start && length === chunk.bytes.length;
+                });
+                if (executableChunk) {
+                    this.bytes(outputPointer, length).set(executableChunk.bytes);
+                    return 1;
+                }
                 if (process.read) {
                     return process.read({
                         address: target,
@@ -435,7 +466,15 @@ export class SplitScriptHost {
     }
 
     module(handle, name) {
-        return this.attachedProcess(handle).modules.get(name);
+        const process = this.attachedProcess(handle);
+        if (name === process.name) {
+            return process.modules.get(name) ?? {
+                address: process.executable.address,
+                size: 0n,
+                path: process.path,
+            };
+        }
+        return process.modules.get(name);
     }
 
     memoryRange(handle, index) {

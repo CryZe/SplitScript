@@ -1315,6 +1315,59 @@ fn legacy_list_types_point_to_variable_length_arrays() {
 }
 
 #[test]
+fn familiar_unique_and_key_value_collection_types_have_canonical_fixes() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        state "game.exe" {}
+
+        fn inspect(
+            seen: HashSet<String>,
+            routes: Dictionary<String, u32>,
+            interface: IDictionary<String, u32>,
+            rustRoutes: HashMap<String, u32>,
+        ) {
+            print(seen)
+            print(routes)
+            print(interface)
+            print(rustRoutes)
+        }
+
+        whileAttached {
+            let seen = HashSet.new<String>()
+            let routes = Dictionary.new<String, u32>()
+            inspect(seen, routes, routes, routes)
+        }
+    "#;
+    let recovered = splitscript::parse_recovering(source).unwrap();
+
+    assert_eq!(recovered.diagnostics().len(), 6);
+    for diagnostic in recovered.diagnostics() {
+        let spelling = &source[diagnostic.span.start..diagnostic.span.end];
+        let replacement = match spelling {
+            "HashSet" => "Set",
+            "Dictionary" | "IDictionary" | "HashMap" => "Map",
+            _ => panic!("unexpected foreign collection spelling `{spelling}`"),
+        };
+        let [fix] = diagnostic.fixes.as_slice() else {
+            panic!("foreign collection spelling should have one fix: {diagnostic:#?}");
+        };
+        assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+        assert_eq!(fix.edits.len(), 1);
+        assert_eq!(fix.edits[0].span, diagnostic.span);
+        assert_eq!(fix.edits[0].replacement, replacement);
+    }
+
+    let fixed = source
+        .replace("IDictionary", "Map")
+        .replace("Dictionary", "Map")
+        .replace("HashMap", "Map")
+        .replace("HashSet", "Set");
+    splitscript::compile(&fixed)
+        .expect("applying the canonical collection type replacements should compile");
+}
+
+#[test]
 fn a_source_type_named_list_is_not_mistaken_for_the_legacy_collection() {
     let source = r#"
         struct List {
@@ -2755,20 +2808,28 @@ fn user_defined_timer_phase_paths_keep_their_meaning() {
 }
 
 #[test]
-fn legacy_wall_clock_delay_paths_point_to_monotonic_instants() {
+fn legacy_elapsed_time_paths_and_stopwatches_point_to_monotonic_instants() {
     let source = r#"
         state "game.exe" {}
+
+        fn showStopwatch(value: Stopwatch) {
+            print(value)
+        }
 
         whileAttached {
             let direct = DateTime.Now
             let timeOfDay = System.DateTime.Now.TimeOfDay
+            let tickCount = Environment.TickCount
+            let tickCount64 = System.Environment.TickCount64
             print(direct)
             print(timeOfDay)
+            print(tickCount)
+            print(tickCount64)
         }
     "#;
     let errors = splitscript::compile(source)
-        .expect_err("legacy wall-clock delay paths should need a monotonic rewrite");
-    assert_eq!(errors.len(), 2);
+        .expect_err("legacy elapsed-time paths and Stopwatch should need a monotonic rewrite");
+    assert_eq!(errors.len(), 5);
     for diagnostic in &errors {
         assert_eq!(
             diagnostic.message,
@@ -2782,13 +2843,20 @@ fn legacy_wall_clock_delay_paths_point_to_monotonic_instants() {
                 .any(|note| note.contains("hasElapsed"))
         );
     }
+    let mut diagnosed = errors
+        .iter()
+        .map(|error| &source[error.span.start..error.span.end])
+        .collect::<Vec<_>>();
+    diagnosed.sort_unstable();
     assert_eq!(
-        &source[errors[0].span.start..errors[0].span.end],
-        "DateTime.Now"
-    );
-    assert_eq!(
-        &source[errors[1].span.start..errors[1].span.end],
-        "System.DateTime.Now.TimeOfDay"
+        diagnosed,
+        [
+            "DateTime.Now",
+            "Environment.TickCount",
+            "Stopwatch",
+            "System.DateTime.Now.TimeOfDay",
+            "System.Environment.TickCount64",
+        ]
     );
 
     let migrated = r#"

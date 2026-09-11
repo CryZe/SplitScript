@@ -68,10 +68,11 @@ running timer decisions against stale snapshots. Continue with the remaining
 P0 porting gaps below. Do not begin managed collection support itself until ASR
 has a tested representation, and bring every language, standard-library,
 provider, or host-surface decision below back to the user. Large foreign-input
-recovery is now bounded and prompt. Continue with the corpus-proven exact
-migration-search gaps: lead authors from unambiguous ASL/C#/Rust spellings to
-the existing canonical SplitScript facilities without adding compatibility
-aliases.
+recovery is now bounded and prompt, and the current corpus-proven exact
+migration searches lead to canonical facilities or honest pending-design
+pages. The next product sequence coordinates the remaining timer metadata and
+control, writable-file and file-metadata, JSON, and module-enumeration needs
+with their host-runtime contracts before adding public APIs.
 
 ## Unity schema foundation and deferred follow-ups
 
@@ -371,9 +372,10 @@ map, and reinforce the existing timer, writable-file, dynamic-settings, module
 enumeration, managed-collection, and process-write host gaps. Rechecking the
 current compiler also confirms that a 166 KiB unmodified legacy ASL still takes
 more than 60 seconds without producing diagnostics. Conversely, `Module.md5`,
-named layouts, finite scans, growable arrays and sets, `Instant`, and static
-settings families already cover several reported omissions; those findings are
-documentation or migration-search work, not reasons to add duplicate APIs.
+named layouts, finite scans, growable arrays, sets and maps, `Instant`, and
+static settings families already cover several reported omissions; those
+findings are documentation or migration-search work, not reasons to add
+duplicate APIs.
 
 ### Turn every reported blocker into an actionable product outcome
 
@@ -907,19 +909,19 @@ concepts rather than maintaining a parallel inventory.
   name traversal ports establish the required surface.
 ## P1 — expand migration guidance and automated fixes
 
-- [ ] Expand the structured foreign-spelling entries beyond the existing
+- [x] Expand the structured foreign-spelling entries beyond the existing
   declarations, option value, strings, durations, and numeric types. Add new
   entries only for corpus-proven, unambiguous spellings that are not already
-  handled by the type-aware callable suggestion machinery. The current proven
-  holes are `HashSet` -> `Set`, tuple collections -> a named struct in `[T]`,
-  `Environment.TickCount` / elapsed `Stopwatch` use -> `Instant`, and duplicate
-  native ASL state blocks -> one state with ordinary shape globals and
-  conditional fields.
-  Searches for `Dictionary`, `File.GetLastWriteTime`, and JSON should identify
-  their explicit pending designs rather than returning a misleading nearby
-  symbol; `Thread.Sleep` should explain cooperative state-machine timing and
-  why blocking is unavailable. Keep canonical syntax unique and do not add
-  compatibility aliases.
+  handled by the type-aware callable suggestion machinery. Exact `HashSet`,
+  `Dictionary`, `IDictionary`, and `HashMap` type spellings now recover to the
+  canonical `Set` and `Map` names with machine-applicable fixes. Tuple
+  collections lead to named structs, `Environment.TickCount` and `Stopwatch`
+  lead to event-anchored `Instant` use, and duplicate native state searches lead
+  to one state with shape globals and conditional fields. Exact searches for
+  `File.GetLastWriteTime`, JSON, and `Thread.Sleep` now identify their pending
+  host/data design or cooperative alternative rather than returning a
+  misleading nearby symbol. Canonical syntax remains unique; no compatibility
+  aliases were added.
 - [ ] Include the canonical compiler identity already exposed by the compiler
   service and generated-module metadata in machine-readable port reports so
   future evidence remains reproducible.
@@ -1607,17 +1609,14 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Close the exact migration-search holes exposed by the latest porting pass. A
-   compiler-clean port is not a success when inactive state fields prevent
-   attachment or existing canonical APIs remain undiscoverable.
-2. Coordinate the read-only timer metadata/time surface, imperative timer
+1. Coordinate the read-only timer metadata/time surface, imperative timer
    control, writable files, read-only file metadata, JSON, and safe module
    enumeration with their host-runtime contracts. Abe's Oddysee, Outer Wilds,
    Ato, Spider-Man, and the SEGA Master Splitter are the acceptance evidence;
    deterministic executable identity already exists through `Module.md5()`.
-3. Resume measured compiler/editor performance, release hardening, hosted IDE,
+2. Resume measured compiler/editor performance, release hardening, hosted IDE,
    and debugging work after the correctness and product-design sequence above.
-4. Keep only the portions of shared readable-memory helpers that need a new
+3. Keep only the portions of shared readable-memory helpers that need a new
    host primitive, the PS2 low-memory domain, `unity.time`, Sega CD, SNES, and
    managed collections gated on tested ASR evidence. Keep writes/injection,
    physical `None` specialization, and other broad host powers deferred until

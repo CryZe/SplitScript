@@ -1070,6 +1070,14 @@ pub fn legacy_value_path_diagnostic(path: &str) -> Option<MigrationDiagnosticId>
         || path.starts_with("DateTime.Now.")
         || path == "System.DateTime.Now"
         || path.starts_with("System.DateTime.Now.")
+        || path == "Environment.TickCount"
+        || path.starts_with("Environment.TickCount.")
+        || path == "Environment.TickCount64"
+        || path.starts_with("Environment.TickCount64.")
+        || path == "System.Environment.TickCount"
+        || path.starts_with("System.Environment.TickCount.")
+        || path == "System.Environment.TickCount64"
+        || path.starts_with("System.Environment.TickCount64.")
     {
         return Some(ASL_MONOTONIC_TIME_DIAGNOSTIC);
     }
@@ -1101,6 +1109,7 @@ pub fn legacy_type_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
         "List" => Some(ASL_LIST_TYPE_DIAGNOSTIC),
         "MemoryWatcherList" => Some(ASL_MEMORY_WATCHER_LIST_DIAGNOSTIC),
         "TimerPhase" => Some(ASL_TIMER_PHASE_DIAGNOSTIC),
+        "Stopwatch" => Some(ASL_MONOTONIC_TIME_DIAGNOSTIC),
         "UnityModule" | "UnityImage" | "UnityClass" | "UnityField" | "MonoModule" | "MonoImage"
         | "MonoClass" => Some(ASL_UNITY_SCHEMA_DIAGNOSTIC),
         _ => None,
@@ -1244,6 +1253,60 @@ const ARRAY_EXTEND_SPELLINGS: &[ForeignSpelling] = &[type_spelling!(
     "SplitScript uses `extend` to append one typed array to another",
     "replace this C# collection method name"
 )];
+
+const SET_SPELLINGS: &[ForeignSpelling] = &[
+    type_spelling!(
+        SourceLanguage::CSharp,
+        ForeignSpellingContext::Type,
+        "HashSet",
+        "Set",
+        "SplitScript uses `Set<T>` instead of `HashSet<T>` for unique collections",
+        "replace this C# collection type name"
+    ),
+    type_spelling!(
+        SourceLanguage::CSharp,
+        ForeignSpellingContext::StaticTypeReceiver,
+        "HashSet",
+        "Set",
+        "SplitScript uses `Set` instead of `HashSet` for unique collections",
+        "replace this C# collection type name"
+    ),
+];
+
+const MAP_SPELLINGS: &[ForeignSpelling] = &[
+    type_spelling!(
+        SourceLanguage::CSharp,
+        ForeignSpellingContext::Type,
+        "Dictionary",
+        "Map",
+        "SplitScript uses `Map<K, V>` instead of `Dictionary<K, V>` for key-value collections",
+        "replace this C# collection type name"
+    ),
+    type_spelling!(
+        SourceLanguage::CSharp,
+        ForeignSpellingContext::StaticTypeReceiver,
+        "Dictionary",
+        "Map",
+        "SplitScript uses `Map` instead of `Dictionary` for key-value collections",
+        "replace this C# collection type name"
+    ),
+    type_spelling!(
+        SourceLanguage::CSharp,
+        ForeignSpellingContext::Type,
+        "IDictionary",
+        "Map",
+        "SplitScript uses `Map<K, V>` instead of `IDictionary<K, V>` for key-value collections",
+        "replace this C# collection type name"
+    ),
+    type_spelling!(
+        SourceLanguage::Rust,
+        ForeignSpellingContext::Type,
+        "HashMap",
+        "Map",
+        "SplitScript uses `Map<K, V>` instead of Rust's `HashMap<K, V>` for key-value collections",
+        "replace this Rust collection type name"
+    ),
+];
 
 const INTEGER_SWAP_BYTES_SPELLINGS: &[ForeignSpelling] = &[
     type_spelling!(
@@ -1653,6 +1716,36 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         spellings: ARRAY_EXTEND_SPELLINGS,
     },
     MigrationConcept {
+        id: MigrationConceptId::new("collection.set"),
+        name: "Unique-value collections",
+        sources: CSHARP,
+        support: MigrationSupport::Direct,
+        summary: "Use [`Set<T>`] for growable unique values. Replace `HashSet<T>` with [`Set<T>`], then review source operations whose names or return values differ.",
+        targets: &[MigrationTarget::StandardLibraryItem("Set.new")],
+        cookbook_anchor: Some("collection-search-and-run-scoped-sets"),
+        spellings: SET_SPELLINGS,
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("collection.map"),
+        name: "Key-value collections",
+        sources: &[SourceLanguage::CSharp, SourceLanguage::Rust],
+        support: MigrationSupport::TypedPattern,
+        summary: "Use [`Map<K, V>`] for growable key-value collections. Indexing returns a [`MapEntry<K, V>`] so an absent key remains distinguishable even when `V` is optional; use [`Map.containsKey`] when only membership matters.",
+        targets: &[MigrationTarget::StandardLibraryItem("Map.new")],
+        cookbook_anchor: Some("collection-search-and-run-scoped-sets"),
+        spellings: MAP_SPELLINGS,
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.collection.tuple-entry"),
+        name: "Tuple-shaped collection entries",
+        sources: ASL_CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "SplitScript does not use anonymous tuple element types. Give the entry shape a small named [`struct`], store it in `[Entry]`, and destructure its fields in loops and patterns.",
+        targets: &[MigrationTarget::Language("struct")],
+        cookbook_anchor: Some("collection-search-and-run-scoped-sets"),
+        spellings: &[],
+    },
+    MigrationConcept {
         id: MigrationConceptId::new("collection.count"),
         name: "Collection count",
         sources: CSHARP,
@@ -1881,6 +1974,40 @@ pub const CONCEPTS: &[MigrationConcept] = &[
             MigrationTarget::StandardLibraryType("Duration"),
         ],
         cookbook_anchor: Some("monotonic-delays-and-debouncing"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.async.blocking-sleep"),
+        name: "Blocking sleeps",
+        sources: ASL_CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "`Thread.Sleep` cannot block SplitScript's cooperative update loop. Model delayed work as state across ticks with [`Instant`] and [`Duration`], or apply [`future.timeout`] when the source is bounding an existing asynchronous operation.",
+        targets: &[
+            MigrationTarget::StandardLibraryType("Instant"),
+            MigrationTarget::StandardLibraryType("Duration"),
+            MigrationTarget::StandardLibraryItem("future.timeout"),
+        ],
+        cookbook_anchor: Some("monotonic-delays-and-debouncing"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.file.last-write-time"),
+        name: "File modification metadata",
+        sources: ASL_CSHARP,
+        support: MigrationSupport::Planned,
+        summary: "`File.GetLastWriteTime` and `File.GetLastWriteTimeUtc` need a read-only metadata API and a host-defined timestamp contract. The current handle-free [`File`] surface reads complete bytes or UTF-8 text but does not expose metadata.",
+        targets: &[],
+        cookbook_anchor: None,
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.data.json"),
+        name: "JSON data",
+        sources: ASL_CSHARP,
+        support: MigrationSupport::Planned,
+        summary: "JSON parsing and serialization need a typed SplitScript data model; do not substitute ad-hoc string operations for `JsonConvert`, `JObject`, or `System.Text.Json` calls.",
+        targets: &[],
+        cookbook_anchor: None,
         spellings: &[],
     },
     MigrationConcept {
@@ -2439,27 +2566,74 @@ pub const CONCEPTS: &[MigrationConcept] = &[
 
 /// Exact documentation queries that are useful discovery phrases but are not
 /// literal foreign syntax. These aliases are shared by CLI and editor search.
-pub const QUERY_ALIASES: &[MigrationQueryAliases] = &[MigrationQueryAliases {
-    concept: MigrationConceptId::new("asl.memory.primitive-types"),
-    queries: &[
-        "ASL primitive types",
-        "ASL state types",
-        "ASL numeric types",
-        "ASL bool byte int",
-        "ASL bool",
-        "ASL byte",
-        "ASL sbyte",
-        "ASL short",
-        "ASL ushort",
-        "ASL int",
-        "ASL uint",
-        "ASL long",
-        "ASL ulong",
-        "ASL float",
-        "ASL double",
-        "ASL byteN",
-    ],
-}];
+pub const QUERY_ALIASES: &[MigrationQueryAliases] = &[
+    MigrationQueryAliases {
+        concept: MigrationConceptId::new("asl.memory.primitive-types"),
+        queries: &[
+            "ASL primitive types",
+            "ASL state types",
+            "ASL numeric types",
+            "ASL bool byte int",
+            "ASL bool",
+            "ASL byte",
+            "ASL sbyte",
+            "ASL short",
+            "ASL ushort",
+            "ASL int",
+            "ASL uint",
+            "ASL long",
+            "ASL ulong",
+            "ASL float",
+            "ASL double",
+            "ASL byteN",
+        ],
+    },
+    MigrationQueryAliases {
+        concept: MigrationConceptId::new("asl.collection.tuple-entry"),
+        queries: &[
+            "tuple collection",
+            "tuple array",
+            "List<Tuple>",
+            "List<(key, value)>",
+        ],
+    },
+    MigrationQueryAliases {
+        concept: MigrationConceptId::new("asl.time.monotonic-delay"),
+        queries: &[
+            "Environment.TickCount",
+            "Environment.TickCount64",
+            "System.Environment.TickCount",
+            "System.Environment.TickCount64",
+            "Stopwatch",
+            "DateTime.Now",
+        ],
+    },
+    MigrationQueryAliases {
+        concept: MigrationConceptId::new("asl.state.version-label"),
+        queries: &[
+            "duplicate ASL state blocks",
+            "version labelled states",
+            "version labeled states",
+        ],
+    },
+    MigrationQueryAliases {
+        concept: MigrationConceptId::new("asl.async.blocking-sleep"),
+        queries: &["Thread.Sleep", "System.Threading.Thread.Sleep"],
+    },
+    MigrationQueryAliases {
+        concept: MigrationConceptId::new("asl.file.last-write-time"),
+        queries: &["File.GetLastWriteTime", "File.GetLastWriteTimeUtc"],
+    },
+    MigrationQueryAliases {
+        concept: MigrationConceptId::new("asl.data.json"),
+        queries: &[
+            "JSON",
+            "JsonConvert.DeserializeObject",
+            "JObject",
+            "System.Text.Json",
+        ],
+    },
+];
 
 pub fn concept(id: MigrationConceptId) -> Option<&'static MigrationConcept> {
     CONCEPTS.iter().find(|concept| concept.id == id)

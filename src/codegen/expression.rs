@@ -1760,9 +1760,10 @@ fn resolved_receiver<'a>(
             receiver_type: Some(receiver_type),
             ..
         } => (receiver, *receiver_type),
-        wasm_ir::CallTarget::DefaultDisplay {
+        wasm_ir::CallTarget::DefaultFormatting {
             receiver,
             receiver_type,
+            ..
         } => (receiver, *receiver_type),
         wasm_ir::CallTarget::ManagedSnapshot {
             receiver,
@@ -4048,12 +4049,17 @@ fn compile_expr_unconverted(
                 .expect("library overload calls resolve a hidden function");
                 function.instruction(&Instruction::Call(context.functions[&target].call));
             }
-            wasm_ir::CallTarget::DefaultDisplay { receiver_type, .. } => {
+            wasm_ir::CallTarget::DefaultFormatting {
+                mode,
+                receiver_type,
+                ..
+            } => {
                 compile_receiver(function, target, context);
-                emit_display_value(
+                emit_formatted_value(
                     function,
                     context.ty(*receiver_type),
                     context.type_id(*receiver_type),
+                    *mode,
                     context,
                 );
             }
@@ -5904,10 +5910,11 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
         if source == target {
             return;
         }
-        emit_display_value(
+        emit_formatted_value(
             function,
             source,
             context.expression_type_id(expression),
+            wasm_ir::FormattingMode::Display,
             context,
         );
         return;
@@ -5979,14 +5986,26 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
     }
 }
 
-/// Converts an already-emitted value through the same lazy Display plan used
-/// by casts, interpolation, host output, and explicit `.toString()` calls.
-fn emit_display_value(
+/// Converts an already-emitted value through the same lazy formatting plan
+/// used by casts, interpolation, host output, and explicit capability calls.
+fn emit_formatted_value(
     function: &mut Function,
     source: Type,
     source_type: TypeId,
+    mode: wasm_ir::FormattingMode,
     context: &ExprContext<'_>,
 ) {
+    let debug = mode == wasm_ir::FormattingMode::Debug;
+    if debug && source == Type::Standard(StdlibTypeId::String) {
+        function
+            .instruction(&Instruction::I32Const(b'"' as i32))
+            .instruction(&Instruction::Call(
+                context
+                    .runtime_helpers
+                    .function(RuntimeHelperId::QuoteDebugString),
+            ));
+        return;
+    }
     if source == Type::None {
         emit_string_literal(function, "None", context.gc);
         return;
@@ -6007,9 +6026,18 @@ fn emit_display_value(
                 .runtime_helpers
                 .function(RuntimeHelperId::FormatChar),
         ));
+        if debug {
+            function
+                .instruction(&Instruction::I32Const(b'\'' as i32))
+                .instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::QuoteDebugString),
+                ));
+        }
         return;
     }
-    if let Some(display) = context.display_functions.custom.get(&source_type) {
+    if !debug && let Some(display) = context.display_functions.custom.get(&source_type) {
         let display = context.called_instance(display);
         function.instruction(&Instruction::Call(context.functions[&display].call));
         return;
@@ -6020,7 +6048,12 @@ fn emit_display_value(
         return;
     }
     if let Some(display) = context.display_functions.derived.get(&source_type) {
-        function.instruction(&Instruction::Call(*display));
+        function.instruction(&Instruction::Call(display.function));
+        return;
+    }
+    if debug && let Some(display) = context.display_functions.custom.get(&source_type) {
+        let display = context.called_instance(display);
+        function.instruction(&Instruction::Call(context.functions[&display].call));
         return;
     }
     if source == Type::F32 {

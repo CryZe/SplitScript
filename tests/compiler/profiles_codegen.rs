@@ -582,6 +582,53 @@ fn structural_display_helpers_are_materialized_only_when_reachable() {
 }
 
 #[test]
+fn opaque_debug_helpers_are_materialized_only_when_reachable() {
+    use splitscript::{BuildProfile, CompilerOptions};
+
+    let compile_debug = |display: bool| {
+        let display = if display { "print(transform)" } else { "" };
+        splitscript::compile_with_options(
+            &format!(
+                r#"
+                    state "game.exe" {{}}
+
+                    setup {{
+                        let transform: (u32) -> u32 = value => value + 1
+                        {display}
+                    }}
+                "#,
+            ),
+            CompilerOptions {
+                profile: BuildProfile::Debug,
+                ..CompilerOptions::default()
+            },
+        )
+        .expect("the opaque Debug reachability probe should compile")
+    };
+
+    let unused = compile_debug(false);
+    let (_, unused_names) = debug_function_names(&unused).expect("debug names should exist");
+    assert!(
+        unused_names
+            .iter()
+            .all(|(_, name)| !name.starts_with("__splitscript::debug::type#")),
+        "merely constructing a closure must not generate its opaque formatter"
+    );
+
+    let displayed = compile_debug(true);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&displayed)
+        .expect("the lazily generated opaque formatter should be valid WebAssembly GC");
+    let (_, displayed_names) = debug_function_names(&displayed).expect("debug names should exist");
+    assert!(
+        displayed_names
+            .iter()
+            .any(|(_, name)| name.starts_with("__splitscript::debug::type#")),
+        "displaying a closure should materialize its opaque formatter"
+    );
+}
+
+#[test]
 fn array_equality_helpers_are_materialized_only_when_compared() {
     use splitscript::{BuildProfile, CompilerOptions};
 

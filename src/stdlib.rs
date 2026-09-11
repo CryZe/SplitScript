@@ -278,6 +278,13 @@ impl StandardLibrary {
         capability == required || self.graph.implied_capabilities[&capability].contains(&required)
     }
 
+    /// Whether every concrete runtime value satisfies `required` through the
+    /// compiler-provided opaque `Debug` representation (and its super
+    /// capabilities).
+    pub fn has_universal_debug_fallback(&self, required: StdlibCapabilityId) -> bool {
+        self.capability_implies(StdlibCapabilityId::Debug, required)
+    }
+
     /// Whether any directly provided capability transitively provides the
     /// requested capability.
     pub fn capabilities_satisfy(

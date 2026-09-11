@@ -436,31 +436,31 @@ fn inferred_identity_iterators_compose_map_and_filter_with_reference_items() {
 }
 
 #[test]
-fn inferred_function_capabilities_are_checked_for_each_concrete_specialization() {
-    let diagnostics = splitscript::compile(
-        r#"
-            state "game.exe" {}
+fn closures_satisfy_inferred_display_through_opaque_debug() {
+    for use_closure in ["inspect(closure)", "inspect([closure])"] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
 
-            fn inspect(values) {
-                print(values)
-            }
+                fn inspect(values) {{
+                    print(values)
+                }}
 
-            setup {
-                let closure: (u32) -> u32 = x => x
-                inspect([closure])
-            }
-        "#,
-    )
-    .expect_err("a concrete specialization must satisfy inferred capabilities before codegen");
-    assert!(
-        diagnostics.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("`inspect` requires capability `Display`")
-                && diagnostic.message.contains("this specialization")
-        }),
-        "unexpected diagnostics: {diagnostics:#?}"
-    );
+                setup {{
+                    let closure: (u32) -> u32 = x => x
+                    print(closure.debugString())
+                    print(closure.toString())
+                    {use_closure}
+                }}
+            "#,
+        );
+        let checked = splitscript::check(splitscript::parse(&source).unwrap()).expect(
+            "closures and containers containing closures should inherit Display from opaque Debug",
+        );
+        Validator::new_with_features(WasmFeatures::all())
+            .validate_all(&splitscript::codegen(&checked))
+            .expect("opaque closure Debug implementations should produce valid Wasm GC");
+    }
 }
 
 #[test]

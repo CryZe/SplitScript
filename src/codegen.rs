@@ -564,6 +564,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             results: result_types,
             sets: set_types,
             equality,
+            capabilities,
             structural: capabilities.structural_types(),
             dependencies: &dependencies,
             reachability: &reachability,
@@ -968,7 +969,7 @@ fn resolved_intrinsic(target: &wasm_ir::CallTarget) -> Option<IntrinsicId> {
         | wasm_ir::CallTarget::UserMethod { .. }
         | wasm_ir::CallTarget::LibraryOverload { .. }
         | wasm_ir::CallTarget::CapabilityRequirement { .. }
-        | wasm_ir::CallTarget::DefaultDisplay { .. }
+        | wasm_ir::CallTarget::DefaultFormatting { .. }
         | wasm_ir::CallTarget::ManagedSnapshot { .. }
         | wasm_ir::CallTarget::ManagedComponent { .. }
         | wasm_ir::CallTarget::ManagedInstances { .. }

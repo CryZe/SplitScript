@@ -346,7 +346,7 @@ impl Reachability {
                     }
                     wasm_ir::CallTarget::Intrinsic { .. }
                     | wasm_ir::CallTarget::CapabilityRequirement { .. }
-                    | wasm_ir::CallTarget::DefaultDisplay { .. }
+                    | wasm_ir::CallTarget::DefaultFormatting { .. }
                     | wasm_ir::CallTarget::ManagedSnapshot { .. }
                     | wasm_ir::CallTarget::ManagedInstances { .. }
                     | wasm_ir::CallTarget::ResultError { .. }
@@ -383,20 +383,24 @@ impl Reachability {
                         TypeKind::Standard(StdlibTypeId::String)
                     ) =>
                 {
-                    display_sources.push(
+                    display_sources.push((
                         wasm_ir
                             .expression(*value)
                             .expect("cast operands belong to Wasm IR")
                             .ty,
-                    );
+                        wasm_ir::FormattingMode::Display,
+                    ));
                 }
                 wasm_ir::ExpressionKind::InterpolatedString(parts) => {
-                    display_sources.extend(parts.iter().filter_map(|part| match part {
-                        wasm_ir::InterpolatedPart::Expression {
-                            string_conversion_source,
-                            ..
-                        } => *string_conversion_source,
-                        wasm_ir::InterpolatedPart::Text(_) => None,
+                    display_sources.extend(parts.iter().filter_map(|part| {
+                        match part {
+                            wasm_ir::InterpolatedPart::Expression {
+                                string_conversion_source,
+                                ..
+                            } => string_conversion_source
+                                .map(|source| (source, wasm_ir::FormattingMode::Display)),
+                            wasm_ir::InterpolatedPart::Text(_) => None,
+                        }
                     }));
                 }
                 wasm_ir::ExpressionKind::Call { target, arguments } => {
@@ -412,29 +416,46 @@ impl Reachability {
                         } => arguments.get(1),
                         _ => None,
                     };
-                    if let wasm_ir::CallTarget::DefaultDisplay { receiver_type, .. } = target {
-                        display_sources.push(*receiver_type);
+                    if let wasm_ir::CallTarget::DefaultFormatting {
+                        mode,
+                        receiver_type,
+                        ..
+                    } = target
+                    {
+                        display_sources.push((*receiver_type, *mode));
                     }
                     if let Some(argument) = converted {
-                        display_sources.push(
+                        display_sources.push((
                             wasm_ir
                                 .expression(*argument)
                                 .expect("call arguments belong to Wasm IR")
                                 .ty,
-                        );
+                            wasm_ir::FormattingMode::Display,
+                        ));
                     }
                 }
                 _ => {}
             }
-            for source in display_sources.into_iter().map(specialize) {
-                reachable.require_display(
-                    source,
-                    program,
-                    semantics,
-                    standard_library,
-                    capabilities,
-                    &mut pending_functions,
-                );
+            for (source, mode) in display_sources {
+                let source = specialize(source);
+                match mode {
+                    wasm_ir::FormattingMode::Display => reachable.require_display(
+                        source,
+                        program,
+                        semantics,
+                        standard_library,
+                        capabilities,
+                        &mut pending_functions,
+                    ),
+                    wasm_ir::FormattingMode::Debug => reachable.require_debug(
+                        source,
+                        program,
+                        semantics,
+                        standard_library,
+                        capabilities,
+                        &mut pending_functions,
+                    ),
+                }
             }
         }
 
@@ -580,7 +601,7 @@ impl Reachability {
                             type_roots.push(specialize(*dispatch_type));
                             type_roots.extend(receiver_type.map(specialize));
                         }
-                        wasm_ir::CallTarget::DefaultDisplay { receiver_type, .. } => {
+                        wasm_ir::CallTarget::DefaultFormatting { receiver_type, .. } => {
                             type_roots.push(specialize(*receiver_type));
                         }
                         wasm_ir::CallTarget::ManagedSnapshot { receiver_type, .. } => {
@@ -1138,7 +1159,7 @@ fn constant_roots(
             | wasm_ir::CallTarget::ManagedSnapshot { receiver, .. }
             | wasm_ir::CallTarget::ManagedComponent { receiver, .. }
             | wasm_ir::CallTarget::CapabilityRequirement { receiver, .. }
-            | wasm_ir::CallTarget::DefaultDisplay { receiver, .. } => Some(receiver),
+            | wasm_ir::CallTarget::DefaultFormatting { receiver, .. } => Some(receiver),
             wasm_ir::CallTarget::Intrinsic { receiver, .. }
             | wasm_ir::CallTarget::LibraryOverload { receiver, .. } => receiver.as_ref(),
             wasm_ir::CallTarget::UserFunction { .. }

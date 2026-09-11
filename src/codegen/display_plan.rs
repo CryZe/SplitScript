@@ -1,8 +1,14 @@
-//! Lazily planned `Display` overrides and structural `Debug` implementations.
+//! Lazily planned `Display` overrides and compiler-provided `Debug` implementations.
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::{semantic::FunctionInstance, types::TypeId};
+use crate::{capabilities::DerivedDebugKind, semantic::FunctionInstance, types::TypeId};
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct DerivedDebugFunction {
+    pub function: u32,
+    pub kind: DerivedDebugKind,
+}
 
 #[derive(Debug, Default)]
 pub(super) struct DisplayFunctions {
@@ -11,8 +17,9 @@ pub(super) struct DisplayFunctions {
     pub custom: HashMap<TypeId, FunctionInstance>,
     /// Source-defined structural `Debug.debugString` overrides.
     pub custom_debug: HashMap<TypeId, FunctionInstance>,
-    /// Compiler-derived `Debug` formatters for reachable concrete types.
+    /// Compiler-derived structural or opaque `Debug` formatters for reachable
+    /// concrete types.
     /// Kept in declaration/body emission order so function indices and bodies
     /// cannot diverge through randomized `HashMap` iteration.
-    pub derived: BTreeMap<TypeId, u32>,
+    pub derived: BTreeMap<TypeId, DerivedDebugFunction>,
 }

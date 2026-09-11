@@ -2621,6 +2621,23 @@ pub(crate) fn type_may_have_capability(
     ty: Type,
     capability: StdlibCapabilityId,
 ) -> bool {
+    if library.has_universal_debug_fallback(capability) {
+        return match ty {
+            Type::Known(id) => !matches!(
+                types.kind(id),
+                TypeKind::Builtin(BuiltinType::Never) | TypeKind::GenericParameter { .. }
+            ),
+            Type::Variable(_) => false,
+            Type::Option(_)
+            | Type::Result(_)
+            | Type::Async(_)
+            | Type::Callable(_)
+            | Type::Range(_)
+            | Type::Array(_)
+            | Type::Set(_)
+            | Type::Application(_) => true,
+        };
+    }
     let behavior = library.capability(capability).behavior;
     match ty {
         Type::Known(id) => match types.kind(id) {

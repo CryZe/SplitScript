@@ -4,6 +4,7 @@ use wasm_encoder::{FunctionSection, HeapType, RefType, TypeSection, ValType};
 
 use crate::{
     ast::{ActionKind, EnumDecl, ManagedClassId, ManagedFieldId, Program},
+    capabilities::CapabilityAnalysis,
     equality::EqualityCapabilities,
     semantic::{ClosureInstance, FunctionInstance, FunctionValueInstance, SemanticModel},
     stdlib::{IntrinsicId, RuntimeRepresentation, StandardLibrary},
@@ -16,6 +17,7 @@ use super::{
     Type, action_result_val_type,
     async_frame::LeafFutureInstance,
     dependencies::BackendDependencies,
+    display_plan::DerivedDebugFunction,
     function_types::FunctionTypes,
     reachability, runtime_helper_registry, semantic_type, set_element_type,
     set_functions::{SetFunctionPlan, SetFunctions},
@@ -108,6 +110,7 @@ pub(super) struct Inputs<'a> {
     pub results: &'a [ResolvedResultType],
     pub sets: &'a [ResolvedSetType],
     pub equality: &'a EqualityCapabilities,
+    pub capabilities: &'a CapabilityAnalysis,
     pub structural: &'a StructuralTypes,
     pub dependencies: &'a BackendDependencies,
     pub reachability: &'a reachability::Reachability,
@@ -134,6 +137,7 @@ pub(super) fn encode<'a>(
         results,
         sets,
         equality: equality_capabilities,
+        capabilities,
         structural,
         dependencies,
         reachability,
@@ -262,16 +266,21 @@ pub(super) fn encode<'a>(
         let source_type = super::semantic_type(ty, semantics);
         displays.derived.insert(
             ty,
-            declarations.declare(
-                || {
-                    let name = structural
-                        .get(ty)
-                        .map_or_else(|| format!("type#{}", ty.index()), |ty| ty.name.clone());
-                    format!("__splitscript::debug::{name}")
-                },
-                vec![gc.val_type(source_type)],
-                vec![gc.val_type(Type::Standard(crate::stdlib::StdlibTypeId::String))],
-            ),
+            DerivedDebugFunction {
+                function: declarations.declare(
+                    || {
+                        let name = structural
+                            .get(ty)
+                            .map_or_else(|| format!("type#{}", ty.index()), |ty| ty.name.clone());
+                        format!("__splitscript::debug::{name}")
+                    },
+                    vec![gc.val_type(source_type)],
+                    vec![gc.val_type(Type::Standard(crate::stdlib::StdlibTypeId::String))],
+                ),
+                kind: capabilities
+                    .derived_debug_kind(ty, semantics)
+                    .expect("reachable derived Debug types have a formatting policy"),
+            },
         );
     }
 

@@ -241,7 +241,7 @@ fn called_function(
                     wasm_ir::resolve_library_overload(&target, None, semantics, library)
                 }
                 wasm_ir::CallTarget::Intrinsic { .. }
-                | wasm_ir::CallTarget::DefaultDisplay { .. }
+                | wasm_ir::CallTarget::DefaultFormatting { .. }
                 | wasm_ir::CallTarget::ManagedSnapshot { .. }
                 | wasm_ir::CallTarget::ManagedComponent { .. }
                 | wasm_ir::CallTarget::ManagedInstances { .. }
@@ -255,7 +255,7 @@ fn called_function(
             }
         }
         wasm_ir::CallTarget::Intrinsic { .. }
-        | wasm_ir::CallTarget::DefaultDisplay { .. }
+        | wasm_ir::CallTarget::DefaultFormatting { .. }
         | wasm_ir::CallTarget::ManagedSnapshot { .. }
         | wasm_ir::CallTarget::ManagedComponent { .. }
         | wasm_ir::CallTarget::ManagedInstances { .. }
@@ -322,7 +322,7 @@ fn materialize_expression_types(
                     materialize_type(semantics, instance, ty, ids, constructed);
                 }
             }
-            wasm_ir::CallTarget::DefaultDisplay { receiver_type, .. } => {
+            wasm_ir::CallTarget::DefaultFormatting { receiver_type, .. } => {
                 materialize_type(semantics, instance, *receiver_type, ids, constructed);
             }
             wasm_ir::CallTarget::ManagedSnapshot { receiver_type, .. } => {

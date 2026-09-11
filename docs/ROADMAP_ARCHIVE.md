@@ -1,5 +1,23 @@
 # SplitScript roadmap
 
+## 2026-09-11: every runtime value has lazy Debug formatting
+
+- Made `Debug` a total capability for concrete runtime values and preserved
+  `Display` as its user-facing fallback. Source structs, enums, and opted-in
+  containers keep recursive structural output, while closures, futures, and
+  representation-only standard-library types receive stable opaque output.
+- Centralized the universal fallback and structural-versus-opaque decision in
+  capability analysis. Removed repeated iterator `Debug` declarations, kept
+  private cursor and captured closure state hidden, and retained custom
+  standard-library formatting such as `FileVersion`.
+- Kept both formatter kinds demand-driven through the existing reachability
+  plan. A formatter and its structural helper graph are emitted only when a
+  concrete value is displayed; a standalone opaque formatter does not pull in
+  multiline structural-formatting helpers.
+- Added specialization, nested-container, valid-Wasm, and debug-name
+  reachability coverage for closures while preserving the existing exact
+  runtime-output coverage for all standard iterator kinds.
+
 ## 2026-09-11: readable address spaces share one capability
 
 - Added source-defined `MemoryReader<T>` with an associated `Address` type and

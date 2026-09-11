@@ -231,16 +231,29 @@ impl BackendDependencies {
                 wasm_ir::ExpressionKind::Call { target, .. }
                     if matches!(
                         reachability.resolved_call_target(owner.as_ref(), expression.id, target),
-                        wasm_ir::CallTarget::DefaultDisplay { .. }
+                        wasm_ir::CallTarget::DefaultFormatting { .. }
                     ) =>
                 {
-                    let wasm_ir::CallTarget::DefaultDisplay { receiver_type, .. } =
-                        reachability.resolved_call_target(owner.as_ref(), expression.id, target)
+                    let wasm_ir::CallTarget::DefaultFormatting {
+                        mode,
+                        receiver_type,
+                        ..
+                    } = reachability.resolved_call_target(owner.as_ref(), expression.id, target)
                     else {
                         unreachable!()
                     };
+                    let receiver_type = specialize(*receiver_type);
+                    if *mode == wasm_ir::FormattingMode::Debug
+                        && matches!(
+                            semantics.types().kind(receiver_type),
+                            TypeKind::Standard(StdlibTypeId::String)
+                                | TypeKind::Builtin(CoreTypeId::Char)
+                        )
+                    {
+                        dependencies.require(RuntimeHelperId::QuoteDebugString);
+                    }
                     dependencies.require_display_helpers(
-                        specialize(*receiver_type),
+                        receiver_type,
                         semantics,
                         reachability,
                         capabilities,
@@ -374,15 +387,18 @@ impl BackendDependencies {
             dependencies.require(RuntimeHelperId::StringEquality);
         }
 
-        if reachability.derived_debugs().next().is_some() {
+        if reachability.derived_debugs().any(|ty| {
+            capabilities.derived_debug_kind(ty, semantics)
+                == Some(crate::capabilities::DerivedDebugKind::Structural)
+        }) {
             dependencies.require(RuntimeHelperId::JoinStrings);
             dependencies.require(RuntimeHelperId::IndentDisplay);
             dependencies.require(RuntimeHelperId::WrapDebugEntry);
             dependencies.require(RuntimeHelperId::WrapDebugVariant);
             dependencies.require(RuntimeHelperId::QuoteDebugString);
-            for ty in reachability.derived_debugs() {
-                dependencies.require_display_helpers(ty, semantics, reachability, capabilities);
-            }
+        }
+        for ty in reachability.derived_debugs() {
+            dependencies.require_display_helpers(ty, semantics, reachability, capabilities);
         }
 
         if !program.settings.is_empty() {

@@ -285,9 +285,10 @@ pub enum CallTarget {
         receiver: ResolvedReceiver,
         receiver_type: TypeId,
     },
-    /// The compiler-provided fallback for `Display.toString`, selected after
-    /// generic capability dispatch reaches a concrete primitive or aggregate.
-    DefaultDisplay {
+    /// A compiler-provided `Display.toString` or `Debug.debugString` fallback,
+    /// selected after generic capability dispatch reaches a concrete value.
+    DefaultFormatting {
+        mode: FormattingMode,
         receiver: ResolvedReceiver,
         receiver_type: TypeId,
     },
@@ -320,6 +321,12 @@ pub enum CallTarget {
     ResultSuccess {
         result: ResultTypeId,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormattingMode {
+    Display,
+    Debug,
 }
 
 #[derive(Debug, Clone)]
@@ -1953,7 +1960,15 @@ pub(crate) fn resolve_capability_requirement(
             }
         }
         crate::capabilities::CapabilityMethodImplementation::DefaultDisplay => {
-            Some(CallTarget::DefaultDisplay {
+            Some(CallTarget::DefaultFormatting {
+                mode: FormattingMode::Display,
+                receiver: receiver.clone(),
+                receiver_type,
+            })
+        }
+        crate::capabilities::CapabilityMethodImplementation::DefaultDebug => {
+            Some(CallTarget::DefaultFormatting {
+                mode: FormattingMode::Debug,
                 receiver: receiver.clone(),
                 receiver_type,
             })
@@ -1999,7 +2014,7 @@ fn replace_call_receiver(call: &mut CallTarget, receiver: ResolvedReceiver) {
             receiver: call_receiver,
             ..
         }
-        | CallTarget::DefaultDisplay {
+        | CallTarget::DefaultFormatting {
             receiver: call_receiver,
             ..
         } => *call_receiver = receiver,
@@ -5533,7 +5548,8 @@ impl Visitor for LocalPlanner<'_> {
                 }
                 Some(
                     crate::capabilities::CapabilityMethodImplementation::Source(_)
-                    | crate::capabilities::CapabilityMethodImplementation::DefaultDisplay,
+                    | crate::capabilities::CapabilityMethodImplementation::DefaultDisplay
+                    | crate::capabilities::CapabilityMethodImplementation::DefaultDebug,
                 )
                 | None => None,
             },

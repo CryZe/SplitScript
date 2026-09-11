@@ -283,7 +283,7 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
                         },
                     ..
                 }
-                | super::CallTarget::DefaultDisplay {
+                | super::CallTarget::DefaultFormatting {
                     receiver:
                         crate::semantic::ResolvedReceiver::Expression {
                             expression: receiver,

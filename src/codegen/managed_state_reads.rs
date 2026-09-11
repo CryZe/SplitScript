@@ -155,7 +155,7 @@ impl wasm_ir::Visitor for ManagedStaticCollector {
                 | wasm_ir::CallTarget::ManagedSnapshot { receiver, .. }
                 | wasm_ir::CallTarget::ManagedComponent { receiver, .. }
                 | wasm_ir::CallTarget::CapabilityRequirement { receiver, .. }
-                | wasm_ir::CallTarget::DefaultDisplay { receiver, .. } => Some(receiver),
+                | wasm_ir::CallTarget::DefaultFormatting { receiver, .. } => Some(receiver),
                 wasm_ir::CallTarget::Intrinsic { receiver, .. }
                 | wasm_ir::CallTarget::LibraryOverload { receiver, .. } => receiver.as_ref(),
                 wasm_ir::CallTarget::UserFunction { .. }

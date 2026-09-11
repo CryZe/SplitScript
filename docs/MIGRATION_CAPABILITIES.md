@@ -29,6 +29,8 @@ Start with the [complete ASL porting guide](ASL_PORTING.md) for lifecycle and se
 
 ### Process and memory
 
+- **Blocking sleeps** (*Use a typed pattern*): `Thread.Sleep` cannot block SplitScript's cooperative update loop. Model delayed work as state across ticks with `Instant` and `Duration`, or apply `future.timeout` when the source is bounding an existing asynchronous operation. Canonical: `Instant`, `Duration`, `future.timeout`. [Porting recipe](ASL_PORTING.md#monotonic-delays-and-debouncing).
+
 - **ASL primitive state types** (*Use a typed pattern*): Preserve the bytes read by the ASL state declaration: `bool` is one byte; signed and unsigned integers and floating-point values map to the corresponding explicit-width SplitScript type. Treat `stringN`, `byteN`, pointers, enums, and values created in C# action code according to their actual representation rather than their nearest-looking name. Canonical: `bool`, `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `f32`, `f64`. [Porting recipe](ASL_PORTING.md#asl-primitive-state-types).
 
 - **DeepPointer and native state roots** (*Supported directly*): A bare numeric root in an ASL native state field or `DeepPointer` is normally main-module-relative. Preserve it as `at "game.exe", offset`; SplitScript's `at offset` form is an absolute virtual address. Use typed state paths for polled fields or `process.follow` for dynamically discovered paths. Canonical: `state`, `Process.follow`. [Porting recipe](ASL_PORTING.md#asl-numeric-roots-are-module-relative).
@@ -79,6 +81,8 @@ Start with the [complete ASL porting guide](ASL_PORTING.md) for lifecycle and se
 
 - **Bounded integer ranges** (*Supported directly*): Use `..<` for an exclusive upper endpoint or `..=` for an inclusive one; SplitScript rejects bare `..` so the endpoint policy is explicit. Canonical: `range`. [Porting recipe](ASL_PORTING.md#bounded-integer-iteration).
 
+- **Tuple-shaped collection entries** (*Use a typed pattern*): SplitScript does not use anonymous tuple element types. Give the entry shape a small named `struct`, store it in `[Entry]`, and destructure its fields in loops and patterns. Canonical: `struct`. [Porting recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets).
+
 - **List<T> collections** (*Use a typed pattern*): Use `[T]` for C# ordered list semantics; size-changing operations belong on variable-length arrays, while `[T; N]` remains fixed and no separate List type is planned. Canonical: `[T].length`, `[T].contains`, `[T].indexOf`, `[T].set`, `[T].push`, `[T].extend`, `[T].remove`, `[T].removeAt`, `[T].pop`, `[T].clear`. [Porting recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets).
 
 ### Unity and emulators
@@ -100,6 +104,10 @@ Start with the [complete ASL porting guide](ASL_PORTING.md) for lifecycle and se
 - **UnityASL, mono.Make, and managed metadata** (*Supported directly*): Use the `Unity` state provider with top-level `image`, `namespace`, and `class` schemas instead of manually discovering Mono or IL2CPP metadata with `UnityASL`, `mono.Make<T>`, or `mono.MakeString`. Canonical: `Unity`, `image`, `namespace`, `class`, `static`, `from`. [Porting recipe](ASL_PORTING.md#unityasl-and-managed-metadata).
 
 ### Unsupported host behavior
+
+- **File modification metadata** (*Planned*): `File.GetLastWriteTime` and `File.GetLastWriteTimeUtc` need a read-only metadata API and a host-defined timestamp contract. The current handle-free `File` surface reads complete bytes or UTF-8 text but does not expose metadata.
+
+- **JSON data** (*Planned*): JSON parsing and serialization need a typed SplitScript data model; do not substitute ad-hoc string operations for `JsonConvert`, `JObject`, or `System.Text.Json` calls.
 
 - **shutdown lifecycle block** (*Planned*): Exact script teardown needs the planned host shutdown notification; `onDetach` is not equivalent. [Porting recipe](ASL_PORTING.md#legacy-asl-lifecycle-blocks).
 
@@ -150,6 +158,10 @@ Start with the [complete ASL porting guide](ASL_PORTING.md) for lifecycle and se
 - **Array length** (*Supported directly*): Call `values.length()` for the `u32` element count of dynamic and fixed arrays. Canonical: `[T].length`. [Porting recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets).
 
 - **Bulk array extension** (*Supported directly*): Call `values.extend(moreValues)` to append a typed array in order; extending an array with itself duplicates its original contents once. Canonical: `[T].extend`. [Porting recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets).
+
+- **Unique-value collections** (*Supported directly*): Use `Set<T>` for growable unique values. Replace `HashSet<T>` with `Set<T>`, then review source operations whose names or return values differ. Canonical: `Set.new`. [Porting recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets).
+
+- **Key-value collections** (*Use a typed pattern*): Use `Map<K, V>` for growable key-value collections. Indexing returns a `MapEntry<K, V>` so an absent key remains distinguishable even when `V` is optional; use `Map.containsKey` when only membership matters. Canonical: `Map.new`. [Porting recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets).
 
 - **Collection count** (*Supported directly*): After choosing an array or set from the source's ordering and uniqueness requirements, call `values.length()` for its `u32` count. Canonical: `[T].length`, `Set.length`. [Porting recipe](ASL_PORTING.md#collection-search-and-run-scoped-sets).
 

@@ -134,7 +134,7 @@ impl Visitor for Collector<'_> {
                 let receiver = match target {
                     CallTarget::UserMethod { receiver, .. }
                     | CallTarget::CapabilityRequirement { receiver, .. }
-                    | CallTarget::DefaultDisplay { receiver, .. }
+                    | CallTarget::DefaultFormatting { receiver, .. }
                     | CallTarget::ManagedSnapshot { receiver, .. }
                     | CallTarget::ManagedComponent { receiver, .. } => Some(receiver),
                     CallTarget::Intrinsic { receiver, .. }

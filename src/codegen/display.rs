@@ -1,4 +1,4 @@
-//! Lazy structural `Debug` body generation used by `Display` fallback.
+//! Lazy structural and opaque `Debug` body generation used by `Display` fallback.
 
 use std::collections::HashMap;
 
@@ -6,6 +6,7 @@ use wasm_encoder::{BlockType, Function, HeapType, Instruction, ValType};
 
 use crate::{
     ast::RangeKind,
+    capabilities::DerivedDebugKind,
     intrinsic_registry::RuntimeHelperId,
     semantic::{FunctionInstance, SemanticModel},
     stdlib::{StdlibTypeConstructorId, StdlibTypeId},
@@ -34,9 +35,11 @@ pub(super) fn compile(inputs: &DisplayInputs<'_>) -> Vec<Function> {
     inputs
         .displays
         .derived
-        .keys()
-        .copied()
-        .map(|ty| {
+        .iter()
+        .map(|(&ty, derived)| {
+            if derived.kind == DerivedDebugKind::Opaque {
+                return compile_opaque(ty, inputs);
+            }
             if let Some(structural) = inputs.structural.get(ty) {
                 return match structural.id {
                     StructuralTypeId::Struct(_) => compile_struct(structural, inputs),
@@ -84,6 +87,50 @@ pub(super) fn compile(inputs: &DisplayInputs<'_>) -> Vec<Function> {
             }
         })
         .collect()
+}
+
+fn compile_opaque(ty: TypeId, inputs: &DisplayInputs<'_>) -> Function {
+    let mut function = Function::new([]);
+    let backend = semantic_type(ty, inputs.semantics);
+    debug_assert!(backend.has_runtime_value());
+    function
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::Drop);
+    let text = match inputs.semantics.types().kind(ty) {
+        TypeKind::Standard(standard) => format!(
+            "{} {{ .. }}",
+            inputs.gc.standard_library.type_decl(*standard).name
+        ),
+        TypeKind::StateSnapshot => "StateSnapshot { .. }".to_owned(),
+        TypeKind::SettingsView => "SettingsView { .. }".to_owned(),
+        TypeKind::ManagedClass(_) => "<managed class snapshot>".to_owned(),
+        TypeKind::ManagedReference(_) => "<managed class reference>".to_owned(),
+        TypeKind::Array { .. } => "array { .. }".to_owned(),
+        TypeKind::Option { .. } => "optional value { .. }".to_owned(),
+        TypeKind::Result { .. } => "fallible value { .. }".to_owned(),
+        TypeKind::Async { .. } => "<future>".to_owned(),
+        TypeKind::Callable { .. } => "<closure>".to_owned(),
+        TypeKind::Range { .. } => "range { .. }".to_owned(),
+        TypeKind::Set { .. } => "Set { .. }".to_owned(),
+        TypeKind::Application { constructor, .. } => {
+            format!(
+                "{} {{ .. }}",
+                inputs
+                    .gc
+                    .standard_library
+                    .type_constructor(*constructor)
+                    .name
+            )
+        }
+        TypeKind::Error
+        | TypeKind::Builtin(_)
+        | TypeKind::GenericParameter { .. }
+        | TypeKind::Struct(_)
+        | TypeKind::Enum(_) => unreachable!("opaque Debug received a non-opaque type"),
+    };
+    emit_string_literal(&mut function, &text, inputs.gc);
+    function.instruction(&Instruction::End);
+    function
 }
 
 fn catalog_type_variables(
@@ -846,7 +893,7 @@ fn emit_value(function: &mut Function, ty: TypeId, backend: Type, inputs: &Displ
         return;
     }
     if let Some(display) = inputs.displays.derived.get(&ty) {
-        function.instruction(&Instruction::Call(*display));
+        function.instruction(&Instruction::Call(display.function));
         return;
     }
     if backend == Type::F32 {

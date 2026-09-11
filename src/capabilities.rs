@@ -42,6 +42,23 @@ pub(crate) enum CapabilityMethodImplementation {
     /// The compiler-provided fallback used when a value satisfies `Display`
     /// through its primitive or structurally derived representation.
     DefaultDisplay,
+    /// The compiler-provided structural or opaque `Debug.debugString`
+    /// implementation selected for a concrete value.
+    DefaultDebug,
+}
+
+/// Compiler-provided `Debug` representation for a concrete runtime type.
+///
+/// Source aggregates and standard-library containers that explicitly opt into
+/// `Debug` expose their value shape recursively. All other concrete runtime
+/// representations receive a stable opaque spelling. Keeping this decision in
+/// capability analysis makes semantic checking, reachability, and codegen use
+/// one policy instead of teaching each consumer about individual library
+/// types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DerivedDebugKind {
+    Structural,
+    Opaque,
 }
 
 /// Source declarations and aggregate layouts reached by formatting a value.
@@ -206,7 +223,7 @@ impl CapabilityAnalysis {
                     .any(|requirement| self.method_candidate(ty, *requirement).is_some());
                 let derives_debug = capability == StdlibCapabilityId::Debug
                     && !has_candidate
-                    && self.debug_derivation_is_enabled(ty, semantics);
+                    && self.derived_debug_kind(ty, semantics).is_some();
                 if derives_debug {
                     self.require_derived_debug(ty, semantics, &mut HashSet::new())?;
                 } else if capability == StdlibCapabilityId::Display && !has_candidate {
@@ -386,6 +403,19 @@ impl CapabilityAnalysis {
             return Some(CapabilityMethodImplementation::Source(function));
         }
 
+        let fallback = || match requirement.id {
+            StdlibItemId::DisplayToString if self.has_derived_display(ty, semantics) => {
+                Some(CapabilityMethodImplementation::DefaultDisplay)
+            }
+            StdlibItemId::DebugDebugString
+                if self
+                    .require(ty, StdlibCapabilityId::Debug, semantics)
+                    .is_ok() =>
+            {
+                Some(CapabilityMethodImplementation::DefaultDebug)
+            }
+            _ => None,
+        };
         let owner = match semantics.types().kind(ty) {
             TypeKind::Builtin(core) => StdlibOwner::Core(*core),
             TypeKind::Standard(standard) => StdlibOwner::Type(*standard),
@@ -411,7 +441,7 @@ impl CapabilityAnalysis {
             | TypeKind::ManagedReference(_)
             | TypeKind::GenericParameter { .. }
             | TypeKind::Async { .. }
-            | TypeKind::Callable { .. } => return None,
+            | TypeKind::Callable { .. } => return fallback(),
         };
         let standard = self
             .standard_library
@@ -429,8 +459,7 @@ impl CapabilityAnalysis {
         if standard.is_some() {
             return standard;
         }
-        (requirement.id == StdlibItemId::DisplayToString && self.has_derived_display(ty, semantics))
-            .then_some(CapabilityMethodImplementation::DefaultDisplay)
+        fallback()
     }
 
     pub fn structural_method_requirements(
@@ -476,14 +505,88 @@ impl CapabilityAnalysis {
     pub fn has_derived_debug(&self, ty: TypeId, semantics: &SemanticModel) -> bool {
         self.method_candidate(ty, StdlibItemId::DebugDebugString)
             .is_none()
-            && self.debug_derivation_is_enabled(ty, semantics)
+            && self.derived_debug_kind(ty, semantics).is_some()
             && self
                 .require_derived_debug(ty, semantics, &mut HashSet::new())
                 .is_ok()
     }
 
+    pub(crate) fn derived_debug_kind(
+        &self,
+        ty: TypeId,
+        semantics: &SemanticModel,
+    ) -> Option<DerivedDebugKind> {
+        if self.structural.get(ty).is_some() {
+            return Some(DerivedDebugKind::Structural);
+        }
+        let structural = match semantics.types().kind(ty) {
+            TypeKind::Array { .. } => self.standard_library.type_constructor_has_capability(
+                StdlibTypeConstructorId::Array,
+                StdlibCapabilityId::Debug,
+            ),
+            TypeKind::Set { .. } => self.standard_library.type_constructor_has_capability(
+                StdlibTypeConstructorId::Set,
+                StdlibCapabilityId::Debug,
+            ),
+            TypeKind::Option { .. } => self.standard_library.type_constructor_has_capability(
+                StdlibTypeConstructorId::Option,
+                StdlibCapabilityId::Debug,
+            ),
+            TypeKind::Result { .. } => self.standard_library.type_constructor_has_capability(
+                StdlibTypeConstructorId::Result,
+                StdlibCapabilityId::Debug,
+            ),
+            TypeKind::Range { kind, .. } => self.standard_library.type_constructor_has_capability(
+                match kind {
+                    crate::ast::RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
+                    crate::ast::RangeKind::Inclusive => StdlibTypeConstructorId::InclusiveRange,
+                },
+                StdlibCapabilityId::Debug,
+            ),
+            TypeKind::Application { constructor, .. } => self
+                .standard_library
+                .type_constructor_has_capability(*constructor, StdlibCapabilityId::Debug),
+            _ => false,
+        };
+        if structural {
+            return Some(DerivedDebugKind::Structural);
+        }
+        match semantics.types().kind(ty) {
+            // Primitive values already have precise built-in formatting. An
+            // unresolved generic parameter still needs an inferred capability
+            // constraint; it is not itself a concrete runtime value.
+            TypeKind::Error | TypeKind::Builtin(_) | TypeKind::GenericParameter { .. } => None,
+            TypeKind::Standard(standard)
+                if self
+                    .standard_library
+                    .type_has_capability(*standard, StdlibCapabilityId::Debug) =>
+            {
+                None
+            }
+            TypeKind::Standard(_)
+            | TypeKind::StateSnapshot
+            | TypeKind::SettingsView
+            | TypeKind::ManagedClass(_)
+            | TypeKind::ManagedReference(_)
+            | TypeKind::Array { .. }
+            | TypeKind::Option { .. }
+            | TypeKind::Result { .. }
+            | TypeKind::Async { .. }
+            | TypeKind::Callable { .. }
+            | TypeKind::Range { .. }
+            | TypeKind::Set { .. }
+            | TypeKind::Application { .. } => Some(DerivedDebugKind::Opaque),
+            TypeKind::Struct(_) | TypeKind::Enum(_) => {
+                unreachable!("source aggregates were classified above")
+            }
+        }
+    }
+
     /// Values recursively formatted by a compiler-derived `Debug` body.
     pub fn debug_dependency_types(&self, ty: TypeId, semantics: &SemanticModel) -> Vec<TypeId> {
+        if self.derived_debug_kind(ty, semantics) != Some(DerivedDebugKind::Structural) {
+            return Vec::new();
+        }
         if let Some(aggregate) = self.structural.get(ty) {
             return aggregate
                 .members
@@ -551,7 +654,8 @@ impl CapabilityAnalysis {
                         Some(CapabilityMethodImplementation::Source(function)) => vec![function],
                         Some(
                             CapabilityMethodImplementation::Standard(_)
-                            | CapabilityMethodImplementation::DefaultDisplay,
+                            | CapabilityMethodImplementation::DefaultDisplay
+                            | CapabilityMethodImplementation::DefaultDebug,
                         )
                         | None => Vec::new(),
                     };
@@ -627,45 +731,6 @@ impl CapabilityAnalysis {
         self.display_dependencies(root, semantics).source_functions
     }
 
-    fn debug_derivation_is_enabled(&self, ty: TypeId, semantics: &SemanticModel) -> bool {
-        self.structural.get(ty).is_some()
-            || match semantics.types().kind(ty) {
-                TypeKind::Array { .. } => self.standard_library.type_constructor_has_capability(
-                    StdlibTypeConstructorId::Array,
-                    StdlibCapabilityId::Debug,
-                ),
-                TypeKind::Set { .. } => self.standard_library.type_constructor_has_capability(
-                    StdlibTypeConstructorId::Set,
-                    StdlibCapabilityId::Debug,
-                ),
-                TypeKind::Option { .. } => self.standard_library.type_constructor_has_capability(
-                    StdlibTypeConstructorId::Option,
-                    StdlibCapabilityId::Debug,
-                ),
-                TypeKind::Result { .. } => self.standard_library.type_constructor_has_capability(
-                    StdlibTypeConstructorId::Result,
-                    StdlibCapabilityId::Debug,
-                ),
-                TypeKind::Range { kind, .. } => {
-                    self.standard_library.type_constructor_has_capability(
-                        match kind {
-                            crate::ast::RangeKind::Exclusive => {
-                                StdlibTypeConstructorId::ExclusiveRange
-                            }
-                            crate::ast::RangeKind::Inclusive => {
-                                StdlibTypeConstructorId::InclusiveRange
-                            }
-                        },
-                        StdlibCapabilityId::Debug,
-                    )
-                }
-                TypeKind::Application { constructor, .. } => self
-                    .standard_library
-                    .type_constructor_has_capability(*constructor, StdlibCapabilityId::Debug),
-                _ => false,
-            }
-    }
-
     fn require_derived_debug(
         &self,
         ty: TypeId,
@@ -684,7 +749,7 @@ impl CapabilityAnalysis {
                 .is_some()
             {
                 self.require(dependency, StdlibCapabilityId::Debug, semantics)
-            } else if self.debug_derivation_is_enabled(dependency, semantics) {
+            } else if self.derived_debug_kind(dependency, semantics).is_some() {
                 self.require_derived_debug(dependency, semantics, visiting)
             } else {
                 self.require(dependency, StdlibCapabilityId::Debug, semantics)

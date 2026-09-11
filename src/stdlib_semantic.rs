@@ -174,6 +174,14 @@ fn semantic_type_may_have_capability(
     ty: &TypeKind,
     capability: StdlibCapabilityId,
 ) -> bool {
+    if library.has_universal_debug_fallback(capability) {
+        return !matches!(
+            ty,
+            TypeKind::Error
+                | TypeKind::Builtin(crate::stdlib::CoreTypeId::Never)
+                | TypeKind::GenericParameter { .. }
+        );
+    }
     let behavior = library.capability(capability).behavior;
     match ty {
         TypeKind::Error => false,

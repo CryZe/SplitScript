@@ -163,6 +163,7 @@ fn emit_runtime_global_initializers(
         arrays: lowering.arrays,
         memory: lowering.memory,
         abi_read: lowering.abi_read,
+        runtime_scratch: lowering.runtime_scratch,
         signatures: lowering.signatures,
         matches,
         semantics: lowering.semantics,

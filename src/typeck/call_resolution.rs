@@ -1475,6 +1475,11 @@ impl Checker {
             return None;
         }
         let mut variables = HashMap::new();
+        let inherited_type_parameters = item
+            .signature
+            .type_parameters
+            .len()
+            .saturating_sub(item.signature.explicit_type_parameters);
         for (index, parameter) in item.signature.type_parameters.iter().enumerate() {
             let requirements = parameter
                 .constraints
@@ -1482,11 +1487,12 @@ impl Checker {
                 .fold(Requirements::none(), |requirements, constraint| {
                     requirements | Requirements::capability(*constraint)
                 });
-            let explicitly_selected = index < item.signature.explicit_type_parameters
-                && explicit_type_arguments.get(index).is_some();
-            let ty = (index < item.signature.explicit_type_parameters)
-                .then(|| explicit_type_arguments.get(index))
-                .flatten()
+            let explicit_index = index.checked_sub(inherited_type_parameters);
+            let explicitly_selected = explicit_index
+                .and_then(|index| explicit_type_arguments.get(index))
+                .is_some();
+            let ty = explicit_index
+                .and_then(|index| explicit_type_arguments.get(index))
                 .map(|ty| self.syntax_type(*ty))
                 .unwrap_or_else(|| self.fresh_inference(requirements.clone(), None));
             if !requirements.is_empty() {
@@ -1823,7 +1829,7 @@ impl Checker {
         let matches = |candidate: &&CallCandidate| {
             candidate.item.signature.parameters.len() == arguments
                 && (explicit_type_arguments == 0
-                    || candidate.item.signature.type_parameters.len() == explicit_type_arguments)
+                    || candidate.item.signature.explicit_type_parameters == explicit_type_arguments)
         };
         if candidates.iter().filter(matches).count() > 0 {
             candidates.retain(|candidate| matches(&candidate));

@@ -135,6 +135,7 @@ pub(super) struct ExprContext<'a> {
     pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,
     pub abi_read: AbiReadScratch,
+    pub runtime_scratch: super::memory_plan::RuntimeScratch,
     pub signatures: &'a super::data_plan::SignaturePool,
     pub matches: &'a MatchLayout,
     pub semantics: &'a SemanticModel,
@@ -223,6 +224,7 @@ impl<'a> ExprContext<'a> {
             arrays: lowering.arrays,
             memory: lowering.memory,
             abi_read: lowering.abi_read,
+            runtime_scratch: lowering.runtime_scratch,
             signatures: lowering.signatures,
             matches,
             semantics: lowering.semantics,
@@ -4775,39 +4777,23 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
-            IntrinsicId::ProcessReadUtf8 => {
-                compile_receiver(function, target, context);
-                compile_expr(function, args[0], context);
-                compile_expr(function, args[1], context);
-                function.instruction(&Instruction::Call(
-                    context
-                        .runtime_helpers
-                        .function(RuntimeHelperId::ReadUtf8String),
-                ));
-                emit_sentinel_result(
+            IntrinsicId::MemoryReaderReadUtf8 => {
+                compile_memory_reader_string(
                     function,
                     expression,
-                    Type::Standard(StdlibTypeId::String),
-                    Instruction::RefIsNull,
-                    "UTF-8 string could not be read",
+                    target,
+                    args,
+                    MemoryStringEncoding::Utf8,
                     context,
                 );
             }
-            IntrinsicId::ProcessReadUtf16Le => {
-                compile_receiver(function, target, context);
-                compile_expr(function, args[0], context);
-                compile_expr(function, args[1], context);
-                function.instruction(&Instruction::Call(
-                    context
-                        .runtime_helpers
-                        .function(RuntimeHelperId::ReadUtf16LeString),
-                ));
-                emit_sentinel_result(
+            IntrinsicId::MemoryReaderReadUtf16Le => {
+                compile_memory_reader_string(
                     function,
                     expression,
-                    Type::Standard(StdlibTypeId::String),
-                    Instruction::RefIsNull,
-                    "UTF-16LE string could not be read",
+                    target,
+                    args,
+                    MemoryStringEncoding::Utf16Le,
                     context,
                 );
             }
@@ -6202,6 +6188,115 @@ fn emit_binary(
     compile_expr(function, right, context);
     emit_binary_instruction(function, op, operand_type);
     emit_narrow_integer_result(function, operand_type);
+}
+
+#[derive(Clone, Copy)]
+enum MemoryStringEncoding {
+    Utf8,
+    Utf16Le,
+}
+
+fn compile_memory_reader_string(
+    function: &mut Function,
+    expression: ExprId,
+    target: &wasm_ir::CallTarget,
+    args: &[ExprId],
+    encoding: MemoryStringEncoding,
+    context: &ExprContext<'_>,
+) {
+    let (_, reader_type) = resolved_receiver(target, context);
+    let Type::Standard(reader) = reader_type else {
+        unreachable!("concrete MemoryReader receivers are standard types")
+    };
+    let error = match encoding {
+        MemoryStringEncoding::Utf8 => "UTF-8 string could not be read",
+        MemoryStringEncoding::Utf16Le => "UTF-16LE string could not be read",
+    };
+    match crate::intrinsic_registry::memory_reader_backend(reader)
+        .expect("catalog MemoryReader implementations have a backend")
+    {
+        crate::intrinsic_registry::MemoryReaderBackend::Process => {
+            compile_receiver(function, target, context);
+            compile_expr(function, args[0], context);
+            compile_expr(function, args[1], context);
+            function.instruction(&Instruction::Call(context.runtime_helpers.function(
+                match encoding {
+                    MemoryStringEncoding::Utf8 => RuntimeHelperId::ReadUtf8String,
+                    MemoryStringEncoding::Utf16Le => RuntimeHelperId::ReadUtf16LeString,
+                },
+            )));
+        }
+        crate::intrinsic_registry::MemoryReaderBackend::Provider(contract) => {
+            let max = context.matches.intrinsic_temps[&expression][1];
+            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+            compile_receiver(function, target, context);
+            compile_expr(function, args[0], context);
+            function.instruction(&Instruction::I32Const(match encoding {
+                MemoryStringEncoding::Utf8 => context
+                    .runtime_scratch
+                    .native_utf8
+                    .destination(crate::intrinsic_registry::MAX_NATIVE_STRING_BYTES),
+                MemoryStringEncoding::Utf16Le => context
+                    .runtime_scratch
+                    .utf16_input
+                    .destination(crate::intrinsic_registry::MAX_NATIVE_STRING_BYTES),
+            }));
+            compile_expr(function, args[1], context);
+            function
+                .instruction(&Instruction::LocalTee(max))
+                .instruction(&Instruction::I32Eqz)
+                .instruction(&Instruction::LocalGet(max))
+                .instruction(&Instruction::I32Const(match encoding {
+                    MemoryStringEncoding::Utf8 => {
+                        crate::intrinsic_registry::MAX_NATIVE_STRING_BYTES as i32
+                    }
+                    MemoryStringEncoding::Utf16Le => {
+                        crate::intrinsic_registry::MAX_NATIVE_UTF16_UNITS as i32
+                    }
+                }))
+                .instruction(&Instruction::I32GtU)
+                .instruction(&Instruction::I32Or)
+                .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::Else)
+                .instruction(&Instruction::LocalGet(max));
+            if matches!(encoding, MemoryStringEncoding::Utf16Le) {
+                function
+                    .instruction(&Instruction::I32Const(1))
+                    .instruction(&Instruction::I32Shl);
+            }
+            function
+                .instruction(&Instruction::End)
+                .instruction(&Instruction::Call(
+                    context.runtime_helpers.function(contract.reader),
+                ))
+                .instruction(&Instruction::I64Const(1))
+                .instruction(&Instruction::I64Eq)
+                .instruction(&Instruction::If(BlockType::Result(
+                    context.gc.val_type(Type::Standard(StdlibTypeId::String)),
+                )))
+                .instruction(&Instruction::LocalGet(max))
+                .instruction(&Instruction::Call(context.runtime_helpers.function(
+                    match encoding {
+                        MemoryStringEncoding::Utf8 => RuntimeHelperId::Utf8StringFromMemory,
+                        MemoryStringEncoding::Utf16Le => RuntimeHelperId::Utf16LeStringFromMemory,
+                    },
+                )))
+                .instruction(&Instruction::Else)
+                .instruction(&Instruction::RefNull(HeapType::Concrete(
+                    context.gc.standard_index(StdlibTypeId::String),
+                )))
+                .instruction(&Instruction::End);
+        }
+    }
+    emit_sentinel_result(
+        function,
+        expression,
+        Type::Standard(StdlibTypeId::String),
+        Instruction::RefIsNull,
+        error,
+        context,
+    );
 }
 
 fn compile_provider_read(

@@ -277,6 +277,14 @@ pub(super) fn build_read_relative32(inputs: &RuntimeHelperInputs<'_>) -> Functio
 pub(super) fn build_read_utf8_string(inputs: &RuntimeHelperInputs<'_>) -> Function {
     process::compile_read_utf8_string(
         inputs.abi,
+        inputs.plan.function(RuntimeHelperId::Utf8StringFromMemory),
+        inputs.gc,
+        inputs.memory.scratch().native_utf8,
+    )
+}
+
+pub(super) fn build_utf8_string_from_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    process::compile_utf8_string_from_memory(
         inputs.plan.function(RuntimeHelperId::StringFromMemory),
         inputs.gc,
         inputs.memory.scratch().native_utf8,
@@ -288,10 +296,20 @@ pub(super) fn build_utf16_string_from_memory(inputs: &RuntimeHelperInputs<'_>) -
     process::compile_utf16_string_from_memory(inputs.gc, scratch.utf16_input, scratch.utf16_output)
 }
 
+pub(super) fn build_utf16_le_string_from_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    process::compile_utf16_le_string_from_memory(
+        inputs.plan.function(RuntimeHelperId::Utf16StringFromMemory),
+        inputs.gc,
+        inputs.memory.scratch().utf16_input,
+    )
+}
+
 pub(super) fn build_read_utf16_le_string(inputs: &RuntimeHelperInputs<'_>) -> Function {
     process::compile_read_utf16_le_string(
         inputs.abi,
-        inputs.plan.function(RuntimeHelperId::Utf16StringFromMemory),
+        inputs
+            .plan
+            .function(RuntimeHelperId::Utf16LeStringFromMemory),
         inputs.gc,
         inputs.memory.scratch().utf16_input,
     )

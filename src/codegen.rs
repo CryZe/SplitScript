@@ -613,6 +613,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         arrays: array_types,
         memory: memory_layouts,
         abi_read: static_data.layout().scratch().abi_read,
+        runtime_scratch: static_data.layout().scratch(),
         signatures,
         semantics,
         wasm_ir,

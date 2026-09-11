@@ -102,6 +102,8 @@ pub struct StructDeclaration {
     pub private: bool,
     pub documentation: Documentation,
     pub attributes: Vec<Attribute>,
+    /// Concrete associated-type definitions used to satisfy capabilities.
+    pub associated_types: Vec<AssociatedTypeDeclaration>,
     pub fields: Vec<FieldDeclaration>,
     pub functions: Vec<FunctionDeclaration>,
 }

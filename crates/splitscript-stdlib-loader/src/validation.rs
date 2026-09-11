@@ -331,17 +331,17 @@ impl<'a> Validator<'a> {
         self.validate_representation(&value.name, &value.attributes, "");
         self.validate_value_usage(&value.name, &value.attributes);
         self.validate_capabilities(&value.name, &value.attributes);
-        self.validate_fields(&value.name, &value.fields, &[], public);
         let owner = CallableOwnerDeclaration {
             name: value.name.clone(),
             type_constructor_syntax: None,
             type_parameters: Vec::new(),
             documentation: value.documentation.clone(),
             attributes: value.attributes.clone(),
-            fields: Vec::new(),
-            associated_types: Vec::new(),
+            fields: value.fields.clone(),
+            associated_types: value.associated_types.clone(),
             functions: value.functions.clone(),
         };
+        self.validate_owner_members(&owner, &[], public);
         if owner
             .functions
             .iter()
@@ -354,7 +354,9 @@ impl<'a> Validator<'a> {
                 owner.name
             ));
         }
-        self.validate_functions(&owner.name, &owner.functions, &[]);
+        // The shared owner-member validation keeps fields, associated types,
+        // and functions in one type scope so members can refer to the concrete
+        // associated definitions.
     }
 
     fn validate_owner(
@@ -365,6 +367,15 @@ impl<'a> Validator<'a> {
     ) {
         self.validate_documentation(&owner.name, &owner.documentation, false, public);
         self.validate_type_parameters(&owner.name, &owner.type_parameters);
+        self.validate_owner_members(owner, inherited, public);
+    }
+
+    fn validate_owner_members(
+        &mut self,
+        owner: &CallableOwnerDeclaration,
+        inherited: &[TypeParameter],
+        public: bool,
+    ) {
         let mut available_types = inherited.to_vec();
         let mut names = owner
             .type_parameters

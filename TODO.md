@@ -21,7 +21,7 @@ General rules:
 - Prefer one reusable typed abstraction over compatibility aliases or
   game-specific compiler branches.
 - Bring language syntax, semantics, and public standard-library API choices to
-  the user before implementation. Porting evidence should frame the decision
+the user before implementation. Porting evidence should frame the decision
   and possible designs, not silently choose one.
 - Keep ordinary library behavior in `stdlib/standard.split`; reserve Rust for
   representations, validated intrinsics, runtime helpers, and ABI boundaries.
@@ -69,10 +69,12 @@ P0 porting gaps below. Do not begin managed
 collection support itself until ASR has a tested
 representation, and bring every language, standard-library, provider, or
 host-surface decision below back to the user. The next compiler-side product
-decision is the shared readable-address-space capability for native processes
-and emulator providers. Bring its names, membership, failure behavior, and
-source-defined helper boundary back for approval rather than duplicating
-process helpers across providers.
+decision is target-contextual physical memory layout. In particular, a native
+`address` read must use the attached process's pointer width recursively inside
+structs and arrays, because its width and alignment can move later fields and
+change aggregate stride. Bring the inferred native-path API and explicit
+mixed-width override spelling back for approval before changing that public
+surface.
 
 ## Unity schema foundation and deferred follow-ups
 
@@ -867,22 +869,16 @@ concepts rather than maintaining a parallel inventory.
 
 ### Engine and emulator providers
 
-- [ ] Unify readable address spaces through one source-defined capability
-  hierarchy instead of copying helpers onto `Process`, every emulator root,
-  modules, and future memory views. Start from the common primitive needed by
-  `read<T>` and determine which higher-level operations—bounded UTF-8/UTF-16
-  decoding, fixed byte reads, and pointer following—can be authored once in
-  the standard library. Keep host-process-only behavior such as module
-  discovery, mapped-range enumeration, and process-wide scanning off emulator
-  values; likewise, do not assume every guest address space has native pointer
-  width or module semantics. Use MGS's PS1 strings and Code: Veronica X's PS2
-  product code as acceptance cases, integrate with the existing capability and
-  associated-type architecture, and generate only reachable helpers. First
-  determine whether current provider translation plus the existing read ABI is
-  sufficient; if a new runtime primitive is required and ASR has no tested
-  contract, retain the task as ASR-gated. Bring the capability names,
-  membership, failure semantics, bounds, encoding policy, and source syntax
-  back for approval before implementation.
+- [ ] Make physical `MemoryReadable` layout depend on the concrete reader
+  context. Native `address` fields use the attached process's detected pointer
+  width and alignment; nested structs, fixed arrays, field offsets, aggregate
+  sizes, and array strides derive recursively from that context. Emulator
+  readers retain their catalog-owned guest width and byte order. Cache layouts
+  by type and context, reserve bounded scratch for the largest supported
+  layout, and show both offsets in hover when a native struct differs between
+  32-bit and 64-bit targets. Ordinary native pointer paths should infer the
+  process width; retain a clearly named explicit override for genuinely
+  mixed-width data after its public spelling is approved.
 - [ ] Decide the source-defined provider refresh lifecycle before claiming
   parity for emulator cores that unload without their host process exiting.
   `state PS2` validates RetroArch's core mapping on every read and fails safely
@@ -1613,10 +1609,10 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Design the shared readable-address-space capability for `Process`, emulator
-   providers, and future memory views. Reuse source-defined helpers where the
-   current translated-read ABI is sufficient; do not invent a new host
-   primitive without a tested ASR contract.
+1. Make `MemoryReadable` layouts reader-contextual so native `address` values,
+   including nested struct and array members, follow the target process's
+   pointer width. Finalize the ordinary inferred `MemoryPath` API and the
+   explicit mixed-width escape hatch with the user first.
 2. Bound recovery on large foreign inputs and close the exact migration-search
    holes exposed by the latest porting pass. A compiler-clean port is not a
    success when inactive state fields prevent attachment or existing canonical

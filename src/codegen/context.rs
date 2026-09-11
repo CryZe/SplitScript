@@ -20,7 +20,7 @@ use super::{
     global_plan::RuntimeGlobals,
     imports::Abi,
     managed_state_reads::ManagedStateReadCache,
-    memory_plan::AbiReadScratch,
+    memory_plan::{AbiReadScratch, RuntimeScratch},
 };
 
 /// Shared immutable inputs needed while emitting script-owned bodies.
@@ -61,6 +61,7 @@ pub(super) struct EmissionContext<'a> {
     pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,
     pub abi_read: AbiReadScratch,
+    pub runtime_scratch: RuntimeScratch,
     pub signatures: &'a SignaturePool,
     pub semantics: &'a SemanticModel,
     pub wasm_ir: &'a wasm_ir::Program,

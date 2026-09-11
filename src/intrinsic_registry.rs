@@ -78,6 +78,8 @@ pub(crate) enum RuntimeHelperId {
     FormatF32,
     FormatF64,
     Utf16StringFromMemory,
+    Utf16LeStringFromMemory,
+    Utf8StringFromMemory,
     ReadUtf8String,
     ReadUtf16LeString,
     ReadManagedString,
@@ -130,6 +132,30 @@ pub(crate) struct ProviderReadContract {
     pub byte_order: ProviderByteOrder,
     pub invalid_address: &'static str,
     pub read_failure: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MemoryReaderBackend {
+    Process,
+    Provider(ProviderReadContract),
+}
+
+pub(crate) const fn memory_reader_backend(ty: StdlibTypeId) -> Option<MemoryReaderBackend> {
+    let intrinsic = match ty {
+        StdlibTypeId::Process => return Some(MemoryReaderBackend::Process),
+        StdlibTypeId::GBAEmulator => IntrinsicId::GBAEmulatorRead,
+        StdlibTypeId::PS2Emulator => IntrinsicId::Ps2EmulatorRead,
+        StdlibTypeId::PS1Emulator => IntrinsicId::Ps1EmulatorRead,
+        StdlibTypeId::SMSEmulator => IntrinsicId::SmsEmulatorRead,
+        StdlibTypeId::GenesisEmulator => IntrinsicId::GenesisEmulatorRead,
+        StdlibTypeId::GCNEmulator => IntrinsicId::GCNEmulatorRead,
+        StdlibTypeId::WiiEmulator => IntrinsicId::WiiEmulatorRead,
+        _ => return None,
+    };
+    match provider_read_contract(intrinsic) {
+        Some(contract) => Some(MemoryReaderBackend::Provider(contract)),
+        None => None,
+    }
 }
 
 /// The byte order of scalar values exposed by an emulator provider.
@@ -209,6 +235,8 @@ pub(crate) enum DependencyRoot {
     /// `Display` implementation. Backend planning uses the concrete call-site
     /// type to retain only the scalar formatters reachable through that value.
     DisplayArgument(u8),
+    /// A process-memory backend selected from the concrete method receiver.
+    MemoryReader,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,6 +254,7 @@ pub(crate) enum ContractTypeRef {
     Core(CoreTypeId),
     Standard(StdlibTypeId),
     Parameter(u8),
+    Associated(&'static str),
     Async(&'static ContractTypeRef),
     Application {
         constructor: StdlibTypeConstructorId,
@@ -301,6 +330,9 @@ fn matches_type(required: ContractTypeRef, declared: TypeRef, parameters: &[&str
         (ContractTypeRef::Parameter(required), TypeRef::Parameter(declared)) => parameters
             .get(required as usize)
             .is_some_and(|name| *name == declared),
+        (ContractTypeRef::Associated(required), TypeRef::Associated(declared)) => {
+            required == declared
+        }
         (ContractTypeRef::Async(required), TypeRef::Async(declared)) => {
             matches_type(*required, *declared, parameters)
         }
@@ -343,7 +375,7 @@ pub(crate) struct IntrinsicContract {
     pub(crate) async_scratch: &'static [ScratchPolicy],
     /// Values retained inside a compiler-generated future between polls.
     pub(crate) async_state: &'static [ScratchPolicy],
-    pub(crate) synchronous_scratch: Option<ScratchPolicy>,
+    pub(crate) synchronous_scratch: &'static [ScratchPolicy],
     /// How an intrinsic composes its declared error result with an operand's
     /// existing ordinary failure channel.
     pub(crate) failure_channel: FailureChannelPolicy,
@@ -398,8 +430,13 @@ const fn failure_channel(id: IntrinsicId) -> FailureChannelPolicy {
     }
 }
 
-const fn scratch(ty: ScratchType, slots: u8) -> Option<ScratchPolicy> {
-    Some(ScratchPolicy { ty, slots })
+macro_rules! scratch {
+    ($ty:expr, $slots:expr) => {
+        &[ScratchPolicy {
+            ty: $ty,
+            slots: $slots,
+        }]
+    };
 }
 
 const fn async_scratch(id: IntrinsicId) -> &'static [ScratchPolicy] {
@@ -536,7 +573,7 @@ const fn async_state(id: IntrinsicId) -> &'static [ScratchPolicy] {
     }
 }
 
-const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
+const fn synchronous_scratch(id: IntrinsicId) -> &'static [ScratchPolicy] {
     match id {
         IntrinsicId::ArrayIterator
         | IntrinsicId::ArrayIteratorNext
@@ -545,23 +582,33 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::ExclusiveRangeIterator
         | IntrinsicId::ExclusiveRangeIteratorNext
         | IntrinsicId::InclusiveRangeIterator
-        | IntrinsicId::InclusiveRangeIteratorNext => scratch(ScratchType::Receiver, 1),
-        IntrinsicId::NumericSwapBytes => scratch(ScratchType::Expression, 1),
-        IntrinsicId::ProcessLoadedModule => scratch(ScratchType::Standard(StdlibTypeId::Module), 1),
-        IntrinsicId::ProcessMemoryRanges => scratch(ScratchType::Expression, 1),
-        IntrinsicId::NumericMin | IntrinsicId::NumericMax => scratch(ScratchType::Expression, 2),
-        IntrinsicId::TimerState => scratch(ScratchType::Core(CoreTypeId::U32), 1),
-        IntrinsicId::TimerCurrentSplitIndex => scratch(ScratchType::Core(CoreTypeId::I64), 1),
-        IntrinsicId::TimerSegmentWasSplit => scratch(ScratchType::Core(CoreTypeId::I32), 1),
-        IntrinsicId::StringIndexOf | IntrinsicId::StringLastIndexOf => {
-            scratch(ScratchType::Core(CoreTypeId::I32), 1)
+        | IntrinsicId::InclusiveRangeIteratorNext => scratch!(ScratchType::Receiver, 1),
+        IntrinsicId::NumericSwapBytes => scratch!(ScratchType::Expression, 1),
+        IntrinsicId::ProcessLoadedModule => {
+            scratch!(ScratchType::Standard(StdlibTypeId::Module), 1)
         }
+        IntrinsicId::ProcessMemoryRanges => scratch!(ScratchType::Expression, 1),
+        IntrinsicId::NumericMin | IntrinsicId::NumericMax => scratch!(ScratchType::Expression, 2),
+        IntrinsicId::TimerState => scratch!(ScratchType::Core(CoreTypeId::U32), 1),
+        IntrinsicId::TimerCurrentSplitIndex => scratch!(ScratchType::Core(CoreTypeId::I64), 1),
+        IntrinsicId::TimerSegmentWasSplit => scratch!(ScratchType::Core(CoreTypeId::I32), 1),
+        IntrinsicId::StringIndexOf | IntrinsicId::StringLastIndexOf => {
+            scratch!(ScratchType::Core(CoreTypeId::I32), 1)
+        }
+        IntrinsicId::MemoryReaderReadUtf8 | IntrinsicId::MemoryReaderReadUtf16Le => &[
+            ScratchPolicy {
+                ty: ScratchType::ResultValue,
+                slots: 1,
+            },
+            ScratchPolicy {
+                ty: ScratchType::Core(CoreTypeId::U32),
+                slots: 1,
+            },
+        ],
         IntrinsicId::ProcessFollow
         | IntrinsicId::FileReadAllBytes
         | IntrinsicId::FileReadAllText
         | IntrinsicId::ProcessReadRelative32
-        | IntrinsicId::ProcessReadUtf8
-        | IntrinsicId::ProcessReadUtf16Le
         | IntrinsicId::ModulePath
         | IntrinsicId::ProcessPath
         | IntrinsicId::RuntimeOperatingSystem
@@ -572,21 +619,21 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::IntegerToStringRadix
         | IntrinsicId::StringByteAt
         | IntrinsicId::StringCharAt
-        | IntrinsicId::StringSlice => scratch(ScratchType::ResultValue, 1),
+        | IntrinsicId::StringSlice => scratch!(ScratchType::ResultValue, 1),
         IntrinsicId::GBAEmulatorRead
         | IntrinsicId::GCNEmulatorRead
         | IntrinsicId::WiiEmulatorRead
         | IntrinsicId::Ps2EmulatorRead
         | IntrinsicId::Ps1EmulatorRead
         | IntrinsicId::SmsEmulatorRead
-        | IntrinsicId::GenesisEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
-        _ => None,
+        | IntrinsicId::GenesisEmulatorRead => scratch!(ScratchType::Core(CoreTypeId::Address), 1),
+        _ => &[],
     }
 }
 
 const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
     use AbiImportId as Host;
-    use DependencyRoot::{DisplayArgument, Helper, HostImport};
+    use DependencyRoot::{DisplayArgument, Helper, HostImport, MemoryReader};
     use RuntimeHelperId as Runtime;
 
     match id {
@@ -634,8 +681,9 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
             HostImport(Host::ProcessGetMemoryRangeFlags),
         ],
         IntrinsicId::ProcessReadRelative32 => &[Helper(Runtime::ReadRelative32)],
-        IntrinsicId::ProcessReadUtf8 => &[Helper(Runtime::ReadUtf8String)],
-        IntrinsicId::ProcessReadUtf16Le => &[Helper(Runtime::ReadUtf16LeString)],
+        // The dependency walker selects a concrete reader backend from the
+        // receiver type. Static roots here would retain every emulator.
+        IntrinsicId::MemoryReaderReadUtf8 | IntrinsicId::MemoryReaderReadUtf16Le => &[MemoryReader],
         IntrinsicId::ModulePath => &[Helper(Runtime::ModulePath)],
         IntrinsicId::ModuleMd5 => &[Helper(Runtime::ModulePath), Helper(Runtime::ModuleMd5Poll)],
         IntrinsicId::ProcessPath => &[Helper(Runtime::ProcessPath)],
@@ -805,6 +853,7 @@ const PS1_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS
 const SMS_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::SMSEmulator);
 const GENESIS_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GenesisEmulator);
 const T: ContractTypeRef = ContractTypeRef::Parameter(0);
+const ASSOCIATED_ADDRESS: ContractTypeRef = ContractTypeRef::Associated("Address");
 const T_ASYNC: ContractTypeRef = ContractTypeRef::Async(&T);
 const T_ASYNC_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
@@ -915,6 +964,7 @@ const SIGNED_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Signe
 const FLOAT_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Float]);
 const EQUATABLE_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Equatable]);
 const MEMORY_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::MemoryReadable]);
+const MEMORY_READER_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::MemoryReader]);
 const DISPLAY_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Display]);
 
 const fn value(ty: ContractTypeRef) -> ContractParameter {
@@ -1718,29 +1768,29 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Everywhere,
             Retryable
         ),
-        IntrinsicId::ProcessReadUtf8 => contract!(
-            ProcessReadUtf8,
+        IntrinsicId::MemoryReaderReadUtf8 => contract!(
+            MemoryReaderReadUtf8,
             Method,
             signature(
-                NO_TYPE_PARAMETERS,
-                Some(PROCESS_TYPE),
-                params![value(ADDRESS), value(U32)],
+                MEMORY_READER_T,
+                Some(T),
+                params![value(ASSOCIATED_ADDRESS), value(U32)],
                 STRING_RESULT,
             ),
-            PROCESS,
+            PROCESS.with(Effect::Allocates),
             Everywhere,
             Retryable
         ),
-        IntrinsicId::ProcessReadUtf16Le => contract!(
-            ProcessReadUtf16Le,
+        IntrinsicId::MemoryReaderReadUtf16Le => contract!(
+            MemoryReaderReadUtf16Le,
             Method,
             signature(
-                NO_TYPE_PARAMETERS,
-                Some(PROCESS_TYPE),
-                params![value(ADDRESS), value(U32)],
+                MEMORY_READER_T,
+                Some(T),
+                params![value(ASSOCIATED_ADDRESS), value(U32)],
                 STRING_RESULT,
             ),
-            PROCESS,
+            PROCESS.with(Effect::Allocates),
             Everywhere,
             Retryable
         ),

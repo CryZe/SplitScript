@@ -74,6 +74,7 @@ pub(super) fn compile_read(
             arrays: lowering.arrays,
             memory: lowering.memory,
             abi_read: lowering.abi_read,
+            runtime_scratch: lowering.runtime_scratch,
             signatures: lowering.signatures,
             matches: &matches,
             semantics: lowering.semantics,
@@ -440,6 +441,7 @@ pub(super) fn compile_state_transform(
         arrays: lowering.arrays,
         memory: lowering.memory,
         abi_read: lowering.abi_read,
+        runtime_scratch: lowering.runtime_scratch,
         signatures: lowering.signatures,
         matches: &matches,
         semantics: lowering.semantics,
@@ -900,6 +902,7 @@ pub(super) fn compile_user_function(
         arrays: lowering.arrays,
         memory: lowering.memory,
         abi_read: lowering.abi_read,
+        runtime_scratch: lowering.runtime_scratch,
         signatures: lowering.signatures,
         matches: &matches,
         semantics: lowering.semantics,
@@ -1081,6 +1084,7 @@ pub(super) fn compile_closure(
         arrays: lowering.arrays,
         memory: lowering.memory,
         abi_read: lowering.abi_read,
+        runtime_scratch: lowering.runtime_scratch,
         signatures: lowering.signatures,
         matches: &matches,
         semantics: lowering.semantics,
@@ -1309,6 +1313,7 @@ pub(super) fn compile_action(
         arrays: lowering.arrays,
         memory: lowering.memory,
         abi_read: lowering.abi_read,
+        runtime_scratch: lowering.runtime_scratch,
         signatures: lowering.signatures,
         matches: &matches,
         semantics: lowering.semantics,
@@ -1412,42 +1417,45 @@ pub(super) fn plan_wasm_locals(
             else {
                 continue;
             };
-            let Some(policy) = crate::intrinsic_registry::contract(*intrinsic).synchronous_scratch
-            else {
-                continue;
-            };
             let expression_ty = options
                 .semantics
                 .specialize_type(instance, expression_ir.ty);
             let receiver_ty =
                 receiver_type.map(|receiver| options.semantics.specialize_type(instance, receiver));
-            let scratch_ty = match policy.ty {
-                ScratchType::Core(core) => options.semantics.types().id_for_core(core),
-                ScratchType::Standard(standard) => {
-                    options.semantics.types().id_for_standard(standard)
-                }
-                ScratchType::Expression => expression_ty,
-                ScratchType::ResultValue => {
-                    let crate::types::TypeKind::Result { value, .. } =
-                        options.semantics.types().kind(expression_ty)
-                    else {
-                        unreachable!("result-value scratch requires a Result expression")
-                    };
-                    *value
-                }
-                ScratchType::AsyncArgumentValue(_) => {
-                    unreachable!("synchronous scratch cannot depend on an async argument value")
-                }
-                ScratchType::Receiver => {
-                    receiver_ty.expect("receiver scratch requires a method-shaped intrinsic")
-                }
-            };
-            specialized_scratch.extend((0..policy.slots).map(|slot| {
-                (
-                    scratch_ty,
-                    LocalPurpose::IntrinsicScratch { expression, slot },
-                )
-            }));
+            let mut slot_base = 0;
+            for policy in crate::intrinsic_registry::contract(*intrinsic).synchronous_scratch {
+                let scratch_ty = match policy.ty {
+                    ScratchType::Core(core) => options.semantics.types().id_for_core(core),
+                    ScratchType::Standard(standard) => {
+                        options.semantics.types().id_for_standard(standard)
+                    }
+                    ScratchType::Expression => expression_ty,
+                    ScratchType::ResultValue => {
+                        let crate::types::TypeKind::Result { value, .. } =
+                            options.semantics.types().kind(expression_ty)
+                        else {
+                            unreachable!("result-value scratch requires a Result expression")
+                        };
+                        *value
+                    }
+                    ScratchType::AsyncArgumentValue(_) => {
+                        unreachable!("synchronous scratch cannot depend on an async argument value")
+                    }
+                    ScratchType::Receiver => {
+                        receiver_ty.expect("receiver scratch requires a method-shaped intrinsic")
+                    }
+                };
+                specialized_scratch.extend((0..policy.slots).map(|slot| {
+                    (
+                        scratch_ty,
+                        LocalPurpose::IntrinsicScratch {
+                            expression,
+                            slot: slot_base + slot,
+                        },
+                    )
+                }));
+                slot_base += policy.slots;
+            }
         }
     }
 

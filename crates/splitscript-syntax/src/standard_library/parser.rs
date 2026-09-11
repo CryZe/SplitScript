@@ -497,6 +497,7 @@ impl Parser<'_> {
         let name = self.ident("expected a struct name")?;
         self.expect(TokenKind::LBrace, "expected `{` after the struct name")?;
         let mut fields = Vec::new();
+        let mut associated_types = Vec::new();
         let mut functions = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
@@ -506,7 +507,28 @@ impl Parser<'_> {
             let member_attributes = self.attributes()?;
             let private = self.eat_ident("private");
             let is_static = self.eat_ident("static");
-            if self.eat_ident("fn") {
+            if self.eat_ident("type") {
+                if private || is_static {
+                    return Err(self.error("an associated type cannot be `private` or `static`"));
+                }
+                let name = self.ident("expected an associated type name")?;
+                if !self.eat(&TokenKind::Assign) {
+                    return Err(self.error(
+                        "a standard-library type associated type must define a value after `=`",
+                    ));
+                }
+                let value = self.ty()?;
+                self.expect(
+                    TokenKind::Semicolon,
+                    "expected `;` after the associated type",
+                )?;
+                associated_types.push(AssociatedTypeDeclaration {
+                    name,
+                    constraints: Vec::new(),
+                    value: Some(value),
+                    documentation: member_documentation,
+                });
+            } else if self.eat_ident("fn") {
                 functions.push(self.function_declaration(
                     member_documentation,
                     member_attributes,
@@ -537,6 +559,7 @@ impl Parser<'_> {
             private,
             documentation,
             attributes,
+            associated_types,
             fields,
             functions,
         })

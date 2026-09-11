@@ -278,6 +278,9 @@ pub enum CallTarget {
     /// on the surrounding generic function instance.
     CapabilityRequirement {
         item: crate::stdlib::StdlibItemId,
+        /// Explicit callable type arguments, distinct from any type arguments
+        /// carried by the eventual concrete receiver implementation.
+        type_arguments: Vec<TypeId>,
         signature: Vec<TypeId>,
         receiver: ResolvedReceiver,
         receiver_type: TypeId,
@@ -1695,14 +1698,23 @@ fn lower_call_target(
             receiver,
             receiver_type,
         } => match typed_hir.standard_library().item(*item).implementation {
-            Implementation::CapabilityRequirement => CallTarget::CapabilityRequirement {
-                item: *item,
-                signature: signature.clone(),
-                receiver: receiver
-                    .clone()
-                    .expect("capability requirements are receiver methods"),
-                receiver_type: receiver_type.expect("capability requirements have receiver types"),
-            },
+            Implementation::CapabilityRequirement => {
+                let explicit = typed_hir
+                    .standard_library()
+                    .item(*item)
+                    .signature
+                    .explicit_type_parameters;
+                CallTarget::CapabilityRequirement {
+                    item: *item,
+                    type_arguments: type_arguments[type_arguments.len() - explicit..].to_vec(),
+                    signature: signature.clone(),
+                    receiver: receiver
+                        .clone()
+                        .expect("capability requirements are receiver methods"),
+                    receiver_type: receiver_type
+                        .expect("capability requirements have receiver types"),
+                }
+            }
             Implementation::Intrinsic(intrinsic) => CallTarget::Intrinsic {
                 item: *item,
                 intrinsic,
@@ -1847,6 +1859,7 @@ pub(crate) fn resolve_capability_requirement(
 ) -> Option<CallTarget> {
     let CallTarget::CapabilityRequirement {
         item,
+        type_arguments,
         signature,
         receiver,
         receiver_type,
@@ -1857,6 +1870,11 @@ pub(crate) fn resolve_capability_requirement(
     let specialize = |ty| owner.map_or(ty, |owner| semantics.specialize_type(owner, ty));
     let receiver_type = specialize(*receiver_type);
     let signature = signature
+        .iter()
+        .copied()
+        .map(specialize)
+        .collect::<Vec<_>>();
+    let explicit_type_arguments = type_arguments
         .iter()
         .copied()
         .map(specialize)
@@ -1873,7 +1891,7 @@ pub(crate) fn resolve_capability_requirement(
         }
         crate::capabilities::CapabilityMethodImplementation::Standard(item) => {
             let declaration = library.item(item);
-            let type_arguments = match semantics.types().kind(receiver_type) {
+            let mut type_arguments = match semantics.types().kind(receiver_type) {
                 TypeKind::Array { element, .. } => vec![*element],
                 TypeKind::Option { value, .. } | TypeKind::Result { value, .. } => vec![*value],
                 TypeKind::Set { element, .. } => vec![*element],
@@ -1884,6 +1902,7 @@ pub(crate) fn resolve_capability_requirement(
                     "capability dispatch selected a standard implementation for `{kind:?}`"
                 ),
             };
+            type_arguments.extend(explicit_type_arguments);
             match declaration.implementation {
                 Implementation::Intrinsic(intrinsic) => Some(CallTarget::Intrinsic {
                     item,
@@ -2023,6 +2042,7 @@ fn generated_iterator_step_call(
         ExpressionKind::Call {
             target: CallTarget::CapabilityRequirement {
                 item: crate::stdlib::StdlibItemId::IteratorNext,
+                type_arguments: Vec::new(),
                 signature: vec![receiver_type, step_type],
                 receiver: ResolvedReceiver::Path {
                     root: crate::semantic::ResolvedValue::Variable(iterable_value),
@@ -2075,6 +2095,7 @@ fn generated_iterable_iterator_call(
         ExpressionKind::Call {
             target: CallTarget::CapabilityRequirement {
                 item: crate::stdlib::StdlibItemId::IterableIterator,
+                type_arguments: Vec::new(),
                 signature: vec![source_type, storage_type],
                 receiver: ResolvedReceiver::Expression {
                     expression: iterable,
@@ -5088,6 +5109,7 @@ struct LocalPlanner<'a> {
     locals: Vec<Local>,
 }
 
+#[derive(Clone, Copy)]
 struct IntrinsicScratchSource<'a> {
     expression: ExprId,
     expression_ty: TypeId,
@@ -5517,23 +5539,22 @@ impl Visitor for LocalPlanner<'_> {
             },
             _ => None,
         };
-        if let Some((intrinsic, receiver_ty)) = intrinsic
-            && let Some(policy) = intrinsic_registry::contract(intrinsic).synchronous_scratch
-        {
+        if let Some((intrinsic, receiver_ty)) = intrinsic {
             let ExpressionKind::Call { arguments, .. } = &expression.kind else {
                 unreachable!("intrinsic expressions are calls")
             };
-            self.push_intrinsic_scratch(
-                IntrinsicScratchSource {
-                    expression: expression.id,
-                    expression_ty: expression.ty,
-                    receiver_ty,
-                    arguments,
-                    program,
-                },
-                0,
-                policy,
-            );
+            let source = IntrinsicScratchSource {
+                expression: expression.id,
+                expression_ty: expression.ty,
+                receiver_ty,
+                arguments,
+                program,
+            };
+            let mut slot_base = 0;
+            for policy in intrinsic_registry::contract(intrinsic).synchronous_scratch {
+                self.push_intrinsic_scratch(source, slot_base, *policy);
+                slot_base += policy.slots;
+            }
         }
     }
 }

@@ -707,6 +707,23 @@ impl InferenceContext {
         capability: StdlibCapabilityId,
         name: &'static str,
     ) -> Option<Type> {
+        let receiver = self.shallow(receiver);
+        if let Some(standard) = self.standard_type(receiver) {
+            if !self
+                .standard_library
+                .type_has_capability(standard, capability)
+            {
+                return None;
+            }
+            let value = self
+                .standard_library
+                .type_decl(standard)
+                .associated_types
+                .iter()
+                .find(|associated| associated.name == name)?
+                .value;
+            return Some(self.catalog_type(value, &HashMap::new()));
+        }
         let (constructor, arguments) = self.type_constructor_arguments(receiver)?;
         if !self
             .standard_library

@@ -349,8 +349,9 @@ impl<'a> CatalogGenerator<'a> {
             output.push_str("#[cfg(test)] ");
         }
         output.push_str(&format!(
-            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, visibility: TypeVisibility::{}, kind: StdlibTypeKind::{kind}, capabilities: {}, display: {display}, representation: {}, value_usage: {}, documentation: {} }},\n",
+            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, visibility: TypeVisibility::{}, kind: StdlibTypeKind::{kind}, capabilities: {}, associated_types: {}, display: {display}, representation: {}, value_usage: {}, documentation: {} }},\n",
             quote(&declaration.name), if declaration.private { "LibraryPrivate" } else { "Public" }, self.capabilities(&declaration.attributes),
+            self.associated_type_definitions_for_type(declaration),
             self.representation(&declaration.attributes), self.value_usage(&declaration.attributes),
             self.documentation(&declaration.documentation)
         ));
@@ -359,7 +360,7 @@ impl<'a> CatalogGenerator<'a> {
     fn emit_enum_type(&self, output: &mut String, declaration: &crate::EnumDeclaration) {
         let id = ident(&declaration.name);
         output.push_str(&format!(
-            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, visibility: TypeVisibility::{}, kind: StdlibTypeKind::Enum, capabilities: {}, display: None, representation: {}, value_usage: {}, documentation: {} }},\n",
+            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, visibility: TypeVisibility::{}, kind: StdlibTypeKind::Enum, capabilities: {}, associated_types: &[], display: None, representation: {}, value_usage: {}, documentation: {} }},\n",
             quote(&declaration.name), if declaration.private { "LibraryPrivate" } else { "Public" }, self.capabilities(&declaration.attributes),
             self.representation(&declaration.attributes), self.value_usage(&declaration.attributes),
             self.documentation(&declaration.documentation)
@@ -470,7 +471,7 @@ impl<'a> CatalogGenerator<'a> {
                         documentation: declaration.documentation.clone(),
                         attributes: declaration.attributes.clone(),
                         fields: Vec::new(),
-                        associated_types: Vec::new(),
+                        associated_types: declaration.associated_types.clone(),
                         functions,
                     };
                     self.emit_functions(
@@ -793,8 +794,19 @@ impl<'a> CatalogGenerator<'a> {
     }
 
     fn associated_type_definitions(&self, owner: &CallableOwnerDeclaration) -> String {
-        let values = owner
-            .associated_types
+        self.associated_type_definitions_from(&owner.type_parameters, &owner.associated_types)
+    }
+
+    fn associated_type_definitions_for_type(&self, owner: &StructDeclaration) -> String {
+        self.associated_type_definitions_from(&[], &owner.associated_types)
+    }
+
+    fn associated_type_definitions_from(
+        &self,
+        parameters: &[TypeParameter],
+        associated_types: &[crate::AssociatedTypeDeclaration],
+    ) -> String {
+        let values = associated_types
             .iter()
             .map(|associated| {
                 let value = associated
@@ -804,7 +816,7 @@ impl<'a> CatalogGenerator<'a> {
                 format!(
                     "StdlibAssociatedTypeDefinition {{ name: {}, value: {}, documentation: {} }}",
                     quote(&associated.name),
-                    self.type_ref(value, &owner.type_parameters, &owner.associated_types),
+                    self.type_ref(value, parameters, associated_types),
                     self.documentation(&associated.documentation),
                 )
             })

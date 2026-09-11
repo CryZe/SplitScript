@@ -470,42 +470,27 @@ pub(super) fn compile_read_relative32(abi: &Abi, abi_read: AbiReadScratch) -> Fu
     function
 }
 
-pub(super) fn compile_read_utf8_string(
-    abi: &Abi,
+pub(super) fn compile_utf8_string_from_memory(
     string_from_memory: u32,
     gc: &GcLayout,
     native_utf8: ScratchRegion,
 ) -> Function {
     let native_utf8_start = native_utf8.destination(MAX_NATIVE_STRING_BYTES);
     let mut function = Function::new([(5, ValType::I32)]);
-    let process = 0;
-    let address = 1;
-    let max_bytes = 2;
-    let byte_len = 3;
-    let index = 4;
-    let byte = 5;
-    let width = 6;
-    let next = 7;
+    let max_bytes = 0;
+    let byte_len = 1;
+    let index = 2;
+    let byte = 3;
+    let width = 4;
+    let next = 5;
 
     function
-        .instruction(&Instruction::LocalGet(address))
-        .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::LocalGet(max_bytes))
         .instruction(&Instruction::I32Eqz)
-        .instruction(&Instruction::I32Or)
         .instruction(&Instruction::LocalGet(max_bytes))
         .instruction(&Instruction::I32Const(MAX_NATIVE_STRING_BYTES as i32))
         .instruction(&Instruction::I32GtU)
         .instruction(&Instruction::I32Or);
-    emit_null_string_if(&mut function, gc);
-
-    function
-        .instruction(&Instruction::LocalGet(process))
-        .instruction(&Instruction::LocalGet(address))
-        .instruction(&Instruction::I32Const(native_utf8_start))
-        .instruction(&Instruction::LocalGet(max_bytes))
-        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
-        .instruction(&Instruction::I32Eqz);
     emit_null_string_if(&mut function, gc);
 
     // Find the first NUL byte. If none occurs within the bound, the complete
@@ -670,9 +655,49 @@ pub(super) fn compile_read_utf8_string(
     function
 }
 
+pub(super) fn compile_read_utf8_string(
+    abi: &Abi,
+    utf8_from_memory: u32,
+    gc: &GcLayout,
+    native_utf8: ScratchRegion,
+) -> Function {
+    let native_utf8_start = native_utf8.destination(MAX_NATIVE_STRING_BYTES);
+    let mut function = Function::new([]);
+    let process = 0;
+    let address = 1;
+    let max_bytes = 2;
+
+    function
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::LocalGet(max_bytes))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::LocalGet(max_bytes))
+        .instruction(&Instruction::I32Const(MAX_NATIVE_STRING_BYTES as i32))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or);
+    emit_null_string_if(&mut function, gc);
+
+    function
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::I32Const(native_utf8_start))
+        .instruction(&Instruction::LocalGet(max_bytes))
+        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
+        .instruction(&Instruction::I32Eqz);
+    emit_null_string_if(&mut function, gc);
+
+    function
+        .instruction(&Instruction::LocalGet(max_bytes))
+        .instruction(&Instruction::Call(utf8_from_memory))
+        .instruction(&Instruction::End);
+    function
+}
+
 pub(super) fn compile_read_utf16_le_string(
     abi: &Abi,
-    utf16_from_memory: u32,
+    utf16_le_from_memory: u32,
     gc: &GcLayout,
     utf16: ScratchRegion,
 ) -> Function {
@@ -681,12 +706,10 @@ pub(super) fn compile_read_utf16_le_string(
             .checked_mul(2)
             .expect("bounded UTF-16 input must fit wasm32"),
     );
-    let mut function = Function::new([(2, ValType::I32)]);
+    let mut function = Function::new([]);
     let process = 0;
     let address = 1;
     let max_units = 2;
-    let units = 3;
-    let index = 4;
 
     function
         .instruction(&Instruction::LocalGet(address))
@@ -713,8 +736,41 @@ pub(super) fn compile_read_utf16_le_string(
         .instruction(&Instruction::I32Eqz);
     emit_null_string_if(&mut function, gc);
 
-    // Native strings terminate at the first complete NUL code unit. If the
-    // bounded region has no terminator, decode the full region.
+    function
+        .instruction(&Instruction::LocalGet(max_units))
+        .instruction(&Instruction::Call(utf16_le_from_memory))
+        .instruction(&Instruction::End);
+    function
+}
+
+/// Finds the first complete NUL code unit in the shared UTF-16LE input region
+/// and decodes the bounded prefix. A missing terminator decodes the full bound.
+pub(super) fn compile_utf16_le_string_from_memory(
+    utf16_from_memory: u32,
+    gc: &GcLayout,
+    utf16: ScratchRegion,
+) -> Function {
+    let utf16_start = utf16.destination(
+        crate::intrinsic_registry::MAX_NATIVE_UTF16_UNITS
+            .checked_mul(2)
+            .expect("bounded UTF-16 input must fit wasm32"),
+    );
+    let mut function = Function::new([(2, ValType::I32)]);
+    let max_units = 0;
+    let units = 1;
+    let index = 2;
+
+    function
+        .instruction(&Instruction::LocalGet(max_units))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::LocalGet(max_units))
+        .instruction(&Instruction::I32Const(
+            crate::intrinsic_registry::MAX_NATIVE_UTF16_UNITS as i32,
+        ))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or);
+    emit_null_string_if(&mut function, gc);
+
     function
         .instruction(&Instruction::Block(BlockType::Empty))
         .instruction(&Instruction::Loop(BlockType::Empty))

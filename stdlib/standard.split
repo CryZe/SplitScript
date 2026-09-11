@@ -679,7 +679,11 @@ intrinsic type SettingsView {
 /// ```
 @representation(scalar, i64)
 @valueUsage(localVariable, globalVariable)
+@capabilities(MemoryReader)
 intrinsic type Process {
+    /// Native addresses are represented by the language's wide address value.
+    type Address = address;
+
     /// Returns the configured process name that matched during attachment.
     ///
     /// This is the exact candidate written in the state declaration, not a
@@ -1080,64 +1084,6 @@ intrinsic type Process {
         /// The address of a signed relative displacement.
         address: address,
     ) -> address!;
-    /// Reads a bounded NUL-terminated UTF-8 string.
-    ///
-    /// At most `maxBytes` are read in one host operation. Decoding stops at
-    /// the first NUL byte. Failed memory access, an excessive bound, or invalid
-    /// UTF-8 returns an error. After decoding, the result is an ordinary
-    /// garbage-collected [`String`]; the bound belongs to this read operation and
-    /// is not part of the result's type.
-    ///
-    /// # Example
-    ///
-    /// Read a native map name
-    ///
-    /// ```splitscript
-    /// # state "game.exe" {}
-    /// # onAttach {
-    /// # let mapAddress: address = 0x1000
-    /// let map = process.readUtf8(mapAddress, 32) else "Unknown"
-    /// # print(map)
-    /// # }
-    /// ```
-    @requires(attachedProcess)
-    @intrinsic(ProcessReadUtf8)
-    fn readUtf8(
-        /// The address of the first UTF-8 byte.
-        address: address,
-        /// The maximum number of bytes to read, up to 4096.
-        maxBytes: u32,
-    ) -> String!;
-
-    /// Reads a bounded NUL-terminated UTF-16LE string.
-    ///
-    /// At most `maxUtf16Units` little-endian UTF-16 code units are read in one
-    /// host operation. Decoding stops at the first NUL code unit. Memory-access
-    /// failure, a zero or excessive bound returns an error. Unpaired surrogate
-    /// code units decode as the Unicode replacement character. The result is an
-    /// ordinary immutable SplitScript [`String`].
-    ///
-    /// # Example
-    ///
-    /// Read a native Windows string
-    ///
-    /// ```splitscript
-    /// # state "game.exe" {}
-    /// # onAttach {
-    /// # let chapterAddress: address = 0x1000
-    /// let chapter = process.readUtf16Le(chapterAddress, 64) else "Unknown"
-    /// # print(chapter)
-    /// # }
-    /// ```
-    @requires(attachedProcess)
-    @intrinsic(ProcessReadUtf16Le)
-    fn readUtf16Le(
-        /// The address of the first little-endian UTF-16 code unit.
-        address: address,
-        /// The maximum number of UTF-16 code units to read, up to 2048.
-        maxUtf16Units: u32,
-    ) -> String!;
-
 }
 
 /// Reads information from the timer.
@@ -3236,6 +3182,109 @@ typeConstructor InclusiveRangeIterator<T: Integer> {
 /// ```
 @behavior(structuralMemoryLayout)
 capability MemoryReadable<T> {}
+
+/// Reads typed values and bounded strings from an address space.
+///
+/// `MemoryReader` is the source-side counterpart to [`MemoryReadable`]. The
+/// reader chooses the address domain, byte order, address validation, and
+/// physical read implementation; the requested value chooses the decoded
+/// memory layout. Native [`Process`] values use [`address`], while emulator
+/// providers use original guest addresses represented as [`u32`].
+///
+/// Process-only facilities such as modules, mapped-range enumeration, and
+/// scanning are deliberately not part of this capability.
+///
+/// # Example
+///
+/// Read text through a generic memory provider
+///
+/// ```splitscript
+/// # state "game.exe" {}
+/// fn readName(reader, address) {
+///     return reader.readUtf8(address, 32)
+/// }
+/// ```
+@behavior(structuralMethods)
+capability MemoryReader<T> {
+    /// The address value accepted by this reader.
+    type Address;
+
+    /// Reads one fixed-layout value from this address space.
+    ///
+    /// The expected [`MemoryReadable`] type determines the requested layout.
+    /// Invalid addresses, inaccessible memory, and invalid enum discriminants
+    /// return an error.
+    ///
+    /// # Example
+    ///
+    /// Read a native integer
+    ///
+    /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// let score = process.read<u32>(0x1000) else 0
+    /// # print(score)
+    /// # }
+    /// ```
+    fn read<U: MemoryReadable>(
+        /// Address in this reader's native domain.
+        address: Address,
+    ) -> U!;
+
+    /// Reads a bounded NUL-terminated UTF-8 string.
+    ///
+    /// At most `maxBytes` are read in one operation. Decoding stops at the
+    /// first NUL byte. Failed memory access, a zero or excessive bound, or
+    /// invalid UTF-8 returns an error. The result is an ordinary immutable
+    /// [`String`].
+    ///
+    /// # Example
+    ///
+    /// Read a map name from native process memory
+    ///
+    /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// let map = process.readUtf8(0x1000, 32) else "Unknown"
+    /// # print(map)
+    /// # }
+    /// ```
+    @requires(attachedProcess)
+    @intrinsic(MemoryReaderReadUtf8)
+    fn readUtf8(
+        /// Address of the first UTF-8 byte.
+        address: Address,
+        /// Maximum number of bytes to read, from 1 through 4096.
+        maxBytes: u32,
+    ) -> String!;
+
+    /// Reads a bounded NUL-terminated little-endian UTF-16 string.
+    ///
+    /// At most `maxUtf16Units` code units are read in one operation. Decoding
+    /// stops at the first NUL code unit. Failed memory access, a zero or
+    /// excessive bound returns an error. Unpaired surrogate code units become
+    /// the Unicode replacement character.
+    ///
+    /// # Example
+    ///
+    /// Read a native Windows string
+    ///
+    /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// let chapter = process.readUtf16Le(0x1000, 64) else "Unknown"
+    /// # print(chapter)
+    /// # }
+    /// ```
+    @requires(attachedProcess)
+    @intrinsic(MemoryReaderReadUtf16Le)
+    fn readUtf16Le(
+        /// Address of the first little-endian UTF-16 code unit.
+        address: Address,
+        /// Maximum number of code units to read, from 1 through 2048.
+        maxUtf16Units: u32,
+    ) -> String!;
+}
 
 /// Stores an indexed sequence of values.
 ///
@@ -8297,7 +8346,11 @@ private struct MonoClass {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(structField, enumPayload, stateField, localVariable)
+@capabilities(MemoryReader)
 struct GBAEmulator {
+    /// Original GBA hardware addresses are 32-bit guest values.
+    type Address = u32;
+
     /// Identifies the emulator-specific memory layout.
     private backend: u32,
 
@@ -8580,7 +8633,11 @@ struct GBAEmulator {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(structField, enumPayload, stateField, localVariable)
+@capabilities(MemoryReader)
 struct PS2Emulator {
+    /// Original PlayStation 2 addresses are 32-bit guest values.
+    type Address = u32;
+
     /// Identifies how the current emulator exposes its RAM base.
     private backend: u32,
 
@@ -8678,7 +8735,11 @@ struct PS2Emulator {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(structField, enumPayload, stateField, localVariable)
+@capabilities(MemoryReader)
 struct PS1Emulator {
+    /// Original PlayStation addresses are 32-bit guest values.
+    type Address = u32;
+
     /// Identifies how the selected emulator exposes its RAM base.
     private backend: u32,
 
@@ -8908,7 +8969,11 @@ struct PS1Emulator {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(structField, enumPayload, stateField, localVariable)
+@capabilities(MemoryReader)
 struct SMSEmulator {
+    /// Original Master System addresses are represented as 32-bit guest values.
+    type Address = u32;
+
     /// Identifies how the selected emulator exposes work RAM.
     private backend: u32,
 
@@ -9069,7 +9134,11 @@ struct SMSEmulator {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(structField, enumPayload, stateField, localVariable)
+@capabilities(MemoryReader)
 struct GenesisEmulator {
+    /// Original Genesis work-RAM offsets are represented as 32-bit guest values.
+    type Address = u32;
+
     /// Identifies a stable, moving-pointer, or libretro mapping.
     private backend: u32,
 
@@ -9230,7 +9299,11 @@ struct GenesisEmulator {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(structField, enumPayload, stateField, localVariable)
+@capabilities(MemoryReader)
 struct GCNEmulator {
+    /// Original GameCube addresses are 32-bit guest values.
+    type Address = u32;
+
     /// Identifies whether the mapping belongs to a standalone or libretro host.
     private backend: u32,
 
@@ -9298,7 +9371,11 @@ struct GCNEmulator {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(structField, enumPayload, stateField, localVariable)
+@capabilities(MemoryReader)
 struct WiiEmulator {
+    /// Original Wii addresses are 32-bit guest values.
+    type Address = u32;
+
     /// Identifies whether the mapping belongs to a standalone or libretro host.
     private backend: u32,
 

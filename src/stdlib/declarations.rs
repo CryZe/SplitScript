@@ -299,6 +299,8 @@ pub struct StdlibType {
     pub visibility: TypeVisibility,
     pub kind: StdlibTypeKind,
     pub capabilities: &'static [StdlibCapabilityId],
+    /// Concrete associated-type definitions used by declared capabilities.
+    pub associated_types: &'static [StdlibAssociatedTypeDefinition],
     /// Catalog method used for user-facing string conversion, when this type
     /// supplies a source- or intrinsic-defined `Display` implementation.
     pub display: Option<super::StdlibItemId>,

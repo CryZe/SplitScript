@@ -135,8 +135,10 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(FormatF32, (F32) -> (StringValue), deps [ZmijDecimalF32, StringFromMemory], imports [], build_format_f32),
     helper!(FormatF64, (F64) -> (StringValue), deps [ZmijDecimalF64, StringFromMemory], imports [], build_format_f64),
     helper!(Utf16StringFromMemory, (I32) -> (StringValue), deps [], imports [], build_utf16_string_from_memory),
-    helper!(ReadUtf8String, (I64, I64, I32) -> (StringValue), deps [StringFromMemory], imports [ProcessRead], build_read_utf8_string),
-    helper!(ReadUtf16LeString, (I64, I64, I32) -> (StringValue), deps [Utf16StringFromMemory], imports [ProcessRead], build_read_utf16_le_string),
+    helper!(Utf16LeStringFromMemory, (I32) -> (StringValue), deps [Utf16StringFromMemory], imports [], build_utf16_le_string_from_memory),
+    helper!(Utf8StringFromMemory, (I32) -> (StringValue), deps [StringFromMemory], imports [], build_utf8_string_from_memory),
+    helper!(ReadUtf8String, (I64, I64, I32) -> (StringValue), deps [Utf8StringFromMemory], imports [ProcessRead], build_read_utf8_string),
+    helper!(ReadUtf16LeString, (I64, I64, I32) -> (StringValue), deps [Utf16LeStringFromMemory], imports [ProcessRead], build_read_utf16_le_string),
     helper!(ReadManagedString, (I64, I64, I32) -> (I32, StringValue), deps [], imports [ProcessRead], build_read_managed_string),
     helper!(ReadManagedStringField, (I64, I64, I32, I32) -> (StringResult), deps [ReadManagedString], imports [ProcessRead], build_read_managed_string_field),
     helper!(ReadOptionalManagedStringField, (I64, I64, I32, I32) -> (OptionalStringResult), deps [ReadManagedString], imports [ProcessRead], build_read_optional_managed_string_field),
@@ -241,6 +243,9 @@ fn collect_root_effects(
         }
         DependencyRoot::HostImport(import) => collect_abi_effects(import, effects, errors),
         DependencyRoot::DisplayArgument(_) => {}
+        DependencyRoot::MemoryReader => {
+            *effects = effects.with(Effect::ReadsProcess);
+        }
     }
 }
 

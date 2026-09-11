@@ -1494,9 +1494,23 @@ fn ps1_provider_covers_asr_backends_and_guest_pointer_paths() {
             pointer: u32 at 0x80000100, 0x20, -0x8;
         }
 
+        fn readName(reader, address) -> String! {
+            return reader.readUtf8(address, 32)
+        }
+
+        fn readValue(reader, address) -> u32! {
+            return reader.read<u32>(address)
+        }
+
         whileAttached {
             let value: u32 = ps1.read(0x80000200) else 0
+            let genericValue = readValue(ps1, 0x80000200) else 0
+            let name = readName(ps1, 0x80000300) else "Unknown"
+            let wide = ps1.readUtf16Le(0x80000400, 32) else "Unknown"
             print(value)
+            print(genericValue)
+            print(name)
+            print(wide)
         }
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap())
@@ -1517,6 +1531,19 @@ fn ps1_provider_covers_asr_backends_and_guest_pointer_paths() {
         .expect("the PS1 provider should expose catalog documentation");
     assert!(hover.markdown.contains("state PS1 { ... }"));
     assert!(hover.markdown.contains("ps1: PS1Emulator"));
+
+    let completion_source = "state PS1 {}\nwhileAttached { ps1. }";
+    let mut database = splitscript::tooling::database::CompilerDatabase::new(completion_source);
+    let completion = database
+        .completions(completion_source.find("ps1.").unwrap() + "ps1.".len())
+        .unwrap();
+    for method in ["read", "readUtf8", "readUtf16Le"] {
+        assert!(
+            completion.items.iter().any(|item| item.label == method),
+            "PS1 MemoryReader completion is missing `{method}`: {:#?}",
+            completion.items
+        );
+    }
 }
 
 #[test]

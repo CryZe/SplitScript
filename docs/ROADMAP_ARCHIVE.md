@@ -1,5 +1,23 @@
 # SplitScript roadmap
 
+## 2026-09-11: readable address spaces share one capability
+
+- Added source-defined `MemoryReader<T>` with an associated `Address` type and
+  one generic `read<U: MemoryReadable>` contract. Native `Process` readers use
+  `address`; GBA, PS1, PS2, Master System, Genesis, GameCube, and Wii providers
+  use their original `u32` guest-address domains.
+- Moved bounded UTF-8 and UTF-16LE methods onto the shared capability while
+  keeping module discovery, mapped ranges, and scanning process-only. Emulator
+  reads reuse their existing address translation and byte-order backends, then
+  feed common strict UTF-8 and replacement-decoding UTF-16 helpers.
+- Extended the generated standard-library catalog so nominal types can define
+  associated types, and carried generic capability method type arguments
+  cleanly through inference, specialization, scratch planning, dependency
+  pruning, and Wasm lowering. Only the concrete reader backend and requested
+  decoder are retained.
+- Added editor, generic-call, native-runtime, emulator-provider, catalog, and
+  valid-Wasm coverage without introducing a new host-runtime primitive.
+
 ## 2026-09-02: one script can select among typed state providers
 
 - Added named `provider Name: Provider { ... }` alternatives inside `state`,

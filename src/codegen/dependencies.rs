@@ -82,12 +82,12 @@ impl BackendDependencies {
                 if let StateSource::Pointer(path) = &field.source {
                     dependencies.require_import(AbiImportId::ProcessRead);
                     if let Some(decoder) = path.decoder {
-                        dependencies.require_intrinsic(match decoder {
+                        dependencies.require(match decoder {
                             crate::ast::StateMemoryDecoder::Utf8 { .. } => {
-                                IntrinsicId::ProcessReadUtf8
+                                RuntimeHelperId::ReadUtf8String
                             }
                             crate::ast::StateMemoryDecoder::Utf16Le { .. } => {
-                                IntrinsicId::ProcessReadUtf16Le
+                                RuntimeHelperId::ReadUtf16LeString
                             }
                         });
                     }
@@ -200,13 +200,55 @@ impl BackendDependencies {
                 ) =>
                 {
                     let wasm_ir::CallTarget::Intrinsic {
-                        item, intrinsic, ..
+                        item,
+                        intrinsic,
+                        receiver_type,
+                        ..
                     } = reachability.resolved_call_target(owner.as_ref(), expression.id, target)
                     else {
                         unreachable!()
                     };
                     dependencies.stdlib_items.insert(*item);
                     dependencies.require_intrinsic(*intrinsic);
+                    if matches!(
+                        intrinsic,
+                        IntrinsicId::MemoryReaderReadUtf8 | IntrinsicId::MemoryReaderReadUtf16Le
+                    ) {
+                        let receiver_type = specialize(
+                            receiver_type.expect("MemoryReader intrinsics always have a receiver"),
+                        );
+                        let TypeKind::Standard(reader) = semantics.types().kind(receiver_type)
+                        else {
+                            unreachable!("concrete MemoryReader receivers are standard types")
+                        };
+                        match intrinsic_registry::memory_reader_backend(*reader)
+                            .expect("catalog MemoryReader implementations have a backend")
+                        {
+                            intrinsic_registry::MemoryReaderBackend::Process => {
+                                dependencies.require(match intrinsic {
+                                    IntrinsicId::MemoryReaderReadUtf8 => {
+                                        RuntimeHelperId::ReadUtf8String
+                                    }
+                                    IntrinsicId::MemoryReaderReadUtf16Le => {
+                                        RuntimeHelperId::ReadUtf16LeString
+                                    }
+                                    _ => unreachable!(),
+                                });
+                            }
+                            intrinsic_registry::MemoryReaderBackend::Provider(contract) => {
+                                dependencies.require(contract.reader);
+                                dependencies.require(match intrinsic {
+                                    IntrinsicId::MemoryReaderReadUtf8 => {
+                                        RuntimeHelperId::Utf8StringFromMemory
+                                    }
+                                    IntrinsicId::MemoryReaderReadUtf16Le => {
+                                        RuntimeHelperId::Utf16LeStringFromMemory
+                                    }
+                                    _ => unreachable!(),
+                                });
+                            }
+                        }
+                    }
                     for displayed in intrinsic_registry::contract(*intrinsic)
                         .dependency_roots
                         .iter()
@@ -214,7 +256,9 @@ impl BackendDependencies {
                             DependencyRoot::DisplayArgument(index) => {
                                 arguments.get(usize::from(*index))
                             }
-                            DependencyRoot::Helper(_) | DependencyRoot::HostImport(_) => None,
+                            DependencyRoot::Helper(_)
+                            | DependencyRoot::HostImport(_)
+                            | DependencyRoot::MemoryReader => None,
                         })
                     {
                         let ty = wasm_ir
@@ -407,6 +451,7 @@ impl BackendDependencies {
                 DependencyRoot::Helper(helper) => self.require(*helper),
                 DependencyRoot::HostImport(import) => self.require_import(*import),
                 DependencyRoot::DisplayArgument(_) => {}
+                DependencyRoot::MemoryReader => {}
             }
         }
     }

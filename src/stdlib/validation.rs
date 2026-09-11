@@ -10,9 +10,9 @@ use crate::catalog::Documentation;
 
 use super::{
     declarations::{
-        CORE_TYPES, CoreTypeId, FieldVisibility, RuntimeRepresentation, StdlibCapability,
-        StdlibField, StdlibNamespace, StdlibOwner, StdlibType, StdlibTypeConstructor,
-        StdlibTypeKind, StdlibVariant,
+        CORE_TYPES, CoreTypeId, FieldVisibility, RuntimeRepresentation,
+        StdlibAssociatedTypeDefinition, StdlibCapability, StdlibField, StdlibNamespace,
+        StdlibOwner, StdlibType, StdlibTypeConstructor, StdlibTypeKind, StdlibVariant,
     },
     ids::{StdlibCapabilityId, StdlibTypeConstructorId, StdlibTypeId},
     schema::{TypeParameter, TypeRef},
@@ -139,6 +139,14 @@ pub(super) fn validate(
                 ));
             }
         }
+        validate_associated_type_definitions(
+            "standard type",
+            ty.name,
+            ty.capabilities,
+            ty.associated_types,
+            capabilities,
+            &mut errors,
+        );
         validate_documentation(&mut errors, "type", ty.name, &ty.documentation, true);
         let has_fields = fields
             .iter()
@@ -169,6 +177,17 @@ pub(super) fn validate(
                 ty.name, core
             ));
         }
+    }
+
+    for constructor in constructors {
+        validate_associated_type_definitions(
+            "type constructor",
+            constructor.name,
+            constructor.capabilities,
+            constructor.associated_types,
+            capabilities,
+            &mut errors,
+        );
     }
 
     let mut field_ids = HashSet::new();
@@ -279,6 +298,49 @@ pub(super) fn validate(
     }
 
     errors
+}
+
+fn validate_associated_type_definitions(
+    kind: &str,
+    owner: &str,
+    declared_capabilities: &[StdlibCapabilityId],
+    definitions: &[StdlibAssociatedTypeDefinition],
+    capabilities: &[StdlibCapability],
+    errors: &mut Vec<String>,
+) {
+    let mut required = HashSet::new();
+    let mut pending = declared_capabilities.to_vec();
+    let mut visited = HashSet::new();
+    while let Some(capability) = pending.pop() {
+        if !visited.insert(capability) {
+            continue;
+        }
+        let Some(declaration) = capabilities
+            .iter()
+            .find(|candidate| candidate.id == capability)
+        else {
+            continue;
+        };
+        required.extend(declaration.associated_types.iter().map(|value| value.name));
+        pending.extend_from_slice(declaration.super_capabilities);
+    }
+
+    let mut defined = HashSet::new();
+    for definition in definitions {
+        if !defined.insert(definition.name) {
+            errors.push(format!(
+                "{kind} `{owner}` repeats associated type `{}`",
+                definition.name
+            ));
+        }
+    }
+    for required in required {
+        if !defined.contains(required) {
+            errors.push(format!(
+                "{kind} `{owner}` is missing associated type `{required}`"
+            ));
+        }
+    }
 }
 
 fn validate_standard_memory_layout(

@@ -1307,12 +1307,6 @@ impl StandardLibrary {
                             item.qualified_name
                         ));
                     }
-                    if item.signature.explicit_type_parameters != 0 {
-                        errors.push(format!(
-                            "`{}` capability requirement declares callable-specific type parameters",
-                            item.qualified_name
-                        ));
-                    }
                 }
                 Implementation::Intrinsic(intrinsic) => {
                     if !intrinsics.insert(intrinsic) {

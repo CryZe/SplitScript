@@ -446,6 +446,35 @@ fn compiler_database_caches_formatting_without_type_checking() {
 }
 
 #[test]
+fn compiler_database_recovers_after_an_unterminated_template_interpolation_edit() {
+    use splitscript::tooling::database::CompilerDatabase;
+
+    let valid = r#"
+        state "game.exe" {}
+        let once = false
+        whileAttached {
+            if !once {
+                print(`GameManager {once}`)
+                once = true
+            }
+        }
+        fn after() { return 7 }
+    "#;
+    let malformed = valid.replace("{once}`", "{once)");
+    let mut database = CompilerDatabase::new(valid);
+
+    assert!(database.set_source(malformed));
+    assert!(
+        !database.diagnostics().is_empty(),
+        "the incomplete interpolation should remain diagnosable"
+    );
+    assert!(database.set_source(valid));
+    database
+        .check()
+        .expect("a later valid edit must recover the complete editor pipeline");
+}
+
+#[test]
 fn declaration_resolution_errors_do_not_poison_syntax_queries() {
     use splitscript::{DiagnosticCode, tooling::database::CompilerDatabase};
 

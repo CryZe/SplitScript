@@ -129,6 +129,7 @@ pub fn lex_lossless(source: &str, syntax_mode: SyntaxMode) -> Result<Lexed, Erro
         pos: 0,
         modes: vec![LexMode::Code],
         syntax_mode,
+        recovery: LexRecovery::RepairSpan,
     }
     .run()
 }
@@ -155,6 +156,7 @@ pub fn lex_lossless_recovering(source: &str, syntax_mode: SyntaxMode) -> (Lexed,
             pos,
             modes,
             syntax_mode,
+            recovery: LexRecovery::RepairSpan,
         };
         match lexer.run_from(lexemes) {
             Ok(lexed) => return (lexed, diagnostics),
@@ -164,6 +166,21 @@ pub fn lex_lossless_recovering(source: &str, syntax_mode: SyntaxMode) -> (Lexed,
                     previous.span != diagnostic_span || previous.message != failure.error.message
                 }) {
                     diagnostics.push(Error::lexical(failure.error.message, diagnostic_span));
+                }
+                if failure.recovery == LexRecovery::CloseTemplate {
+                    // The failing template scanner may have searched far past
+                    // its checkpoint before discovering an unmatched closing
+                    // brace or EOF. Blanking the error and retrying from that
+                    // unchanged checkpoint can consume ordinary code as more
+                    // template text and, once every byte is blank, repeat
+                    // forever. Instead, recover as if the missing delimiters
+                    // were inserted at the checkpoint and resume the untouched
+                    // suffix as ordinary code.
+                    lexemes = failure.lexemes;
+                    close_malformed_template(&mut lexemes, &failure.modes, failure.pos);
+                    pos = failure.pos;
+                    modes = vec![LexMode::Code];
+                    continue;
                 }
                 let changed = blank_recovery_span(&mut probe, source, diagnostic_span);
                 if !changed {
@@ -185,6 +202,21 @@ pub fn lex_lossless_recovering(source: &str, syntax_mode: SyntaxMode) -> (Lexed,
                 modes = failure.modes;
             }
         }
+    }
+}
+
+fn close_malformed_template(lexemes: &mut Vec<Lexeme>, modes: &[LexMode], position: usize) {
+    let span = Span {
+        start: position,
+        end: position,
+    };
+    for mode in modes.iter().skip(1).rev() {
+        let kind = match mode {
+            LexMode::Code => continue,
+            LexMode::Template { .. } => TokenKind::TemplateEnd,
+            LexMode::Interpolation { .. } => TokenKind::TemplateExprEnd,
+        };
+        lexemes.push(Lexeme::Token(Token { kind, span }));
     }
 }
 
@@ -230,6 +262,7 @@ struct Lexer<'a> {
     pos: usize,
     modes: Vec<LexMode>,
     syntax_mode: SyntaxMode,
+    recovery: LexRecovery,
 }
 
 struct LexFailure {
@@ -237,6 +270,13 @@ struct LexFailure {
     lexemes: Vec<Lexeme>,
     pos: usize,
     modes: Vec<LexMode>,
+    recovery: LexRecovery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LexRecovery {
+    RepairSpan,
+    CloseTemplate,
 }
 
 impl Lexer<'_> {
@@ -249,6 +289,7 @@ impl Lexer<'_> {
             let checkpoint_pos = self.pos;
             let checkpoint_modes = self.modes.clone();
             let checkpoint_lexemes = lexemes.len();
+            self.recovery = LexRecovery::RepairSpan;
             let token = match self.next_token(&mut lexemes) {
                 Ok(token) => token,
                 Err(error) => {
@@ -258,6 +299,7 @@ impl Lexer<'_> {
                         lexemes,
                         pos: checkpoint_pos,
                         modes: checkpoint_modes,
+                        recovery: self.recovery,
                     });
                 }
             };
@@ -285,6 +327,7 @@ impl Lexer<'_> {
                     LexMode::Template { start } | LexMode::Interpolation { start, .. } => *start,
                     LexMode::Code => unreachable!(),
                 };
+                self.recovery = LexRecovery::CloseTemplate;
                 return Err(Error::lexical(
                     "unterminated template literal",
                     Span {
@@ -445,6 +488,7 @@ impl Lexer<'_> {
                 });
             }
             if byte == b'}' {
+                self.recovery = LexRecovery::CloseTemplate;
                 return Err(Error::lexical(
                     "unmatched `}` in template literal; write `\\}` for a literal brace",
                     Span {
@@ -489,6 +533,7 @@ impl Lexer<'_> {
                 self.pos += ch.len_utf8();
             }
         }
+        self.recovery = LexRecovery::CloseTemplate;
         Err(Error::lexical(
             "unterminated template literal",
             Span {
@@ -984,6 +1029,34 @@ mod tests {
             lexed
                 .tokens()
                 .any(|token| matches!(&token.kind, TokenKind::Ident(name) if name == "after"))
+        );
+    }
+
+    #[test]
+    fn recovering_lexing_closes_unterminated_interpolations_without_losing_the_suffix() {
+        let source = r#"
+            whileAttached {
+                if !once {
+                    print(`GameManager  {current.gameManager)
+                    once = true
+                }
+            }
+
+            fn after() {}
+        "#;
+        let (lexed, errors) = lex_lossless_recovering(source, SyntaxMode::Program);
+
+        assert!(!errors.is_empty());
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.message.contains("template"))
+        );
+        assert!(
+            lexed
+                .tokens()
+                .any(|token| matches!(&token.kind, TokenKind::Ident(name) if name == "after")),
+            "recovery must resume in code mode after the malformed template"
         );
     }
 

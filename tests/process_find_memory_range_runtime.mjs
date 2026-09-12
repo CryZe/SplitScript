@@ -6,10 +6,11 @@ if (!wasmPath) {
 }
 
 const decoder = new TextDecoder();
-const ranges = [
-    { address: 0x1000n, size: 0x100n, flags: 6n },
-    { address: 0x2000n, size: 0x300n, flags: 2n },
-];
+const ranges = Array.from({ length: 300 }, (_, index) => ({
+    address: BigInt(0x1000 + index * 0x1000),
+    size: 0x100n,
+    flags: 6n,
+}));
 const queried = [];
 const queriesPerPoll = [];
 const messages = [];
@@ -54,8 +55,8 @@ for (let poll = 0; poll < 6; poll += 1) {
     currentPollQueries = [];
     instance.exports.update();
     queriesPerPoll.push(currentPollQueries);
-    if (currentPollQueries.length > 1) {
-        throw new Error(`memory-range poll inspected multiple entries: ${JSON.stringify(queriesPerPoll)}`);
+    if (currentPollQueries.length > 128) {
+        throw new Error(`memory-range poll exceeded its metadata budget: ${JSON.stringify(queriesPerPoll)}`);
     }
     if (poll === 2) {
         ranges.push({ address: 0x3000n, size: 0x300n, flags: 6n });
@@ -63,7 +64,11 @@ for (let poll = 0; poll < 6; poll += 1) {
 }
 
 if (JSON.stringify(messages) !== JSON.stringify(["12288|768|true|true|false"]) 
-    || JSON.stringify(queried) !== JSON.stringify([1, 0, 2])
+    || JSON.stringify(queriesPerPoll.map((queries) => queries.length))
+        !== JSON.stringify([128, 128, 44, 1, 0, 0])
+    || queried[0] !== 299
+    || queried[299] !== 0
+    || queried[300] !== 300
     || countQueries !== 2) {
     throw new Error(`unexpected cooperative discovery: ${JSON.stringify({
         messages,

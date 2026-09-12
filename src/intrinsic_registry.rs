@@ -475,7 +475,7 @@ const fn async_scratch(id: IntrinsicId) -> &'static [ScratchPolicy] {
         }],
         IntrinsicId::ProcessFindMemoryRange => &[ScratchPolicy {
             ty: ScratchType::Core(CoreTypeId::U64),
-            slots: 5,
+            slots: 8,
         }],
         IntrinsicId::ProcessScan | IntrinsicId::ProcessScanOnce => &[ScratchPolicy {
             ty: ScratchType::Core(CoreTypeId::U64),

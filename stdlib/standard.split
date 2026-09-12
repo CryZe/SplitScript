@@ -825,10 +825,11 @@ intrinsic type Process {
 
     /// Searches mapped memory ranges cooperatively.
     ///
-    /// At most one host memory-range entry is inspected per update. When one
-    /// complete snapshot contains no match, the operation refreshes the mapped
-    /// ranges and keeps waiting. It completes only after finding the requested
-    /// size and permissions; closing the attached process cancels it.
+    /// A bounded batch of host memory-range metadata is inspected per update.
+    /// This does not read the contents of those ranges. When one complete
+    /// snapshot contains no match, the operation refreshes the mapped ranges
+    /// and keeps waiting. It completes only after finding the requested size
+    /// and permissions; closing the attached process cancels it.
     ///
     /// # Example
     ///

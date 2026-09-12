@@ -48,6 +48,14 @@ use super::{
 /// monopolize the autosplitter runtime.
 const SIGNATURE_SCAN_CANDIDATES_PER_POLL: i64 = 512 * 1024;
 
+/// Mapped-range metadata entries inspected by one `findMemoryRange` future
+/// poll. Enumerating an entry performs only three scalar host queries and does
+/// not read process memory, so its cooperative budget can be substantially
+/// larger than one without risking the stalls that bound signature scanning.
+/// At the default attached rate, 128 entries per poll traverses roughly one
+/// thousand mappings in under one tenth of a second.
+const MEMORY_RANGE_ENTRIES_PER_POLL: i64 = 128;
+
 pub(super) fn compile_async_action(
     action: &Action,
     function_index: u32,
@@ -1217,10 +1225,11 @@ fn emit_cooperative_module_scan_any(
     }
 }
 
-/// Traverses at most one mapped range per poll. A complete miss refreshes the
-/// host's range list on the next poll, so the future remains pending until a
-/// matching mapping appears or process-close cancellation discards it. Status
-/// values are zero (refresh the snapshot), one (found), and three (scanning).
+/// Traverses one bounded batch of mapped-range metadata per poll. A complete
+/// miss refreshes the host's range list on the next poll, so the future remains
+/// pending until a matching mapping appears or process-close cancellation
+/// discards it. Status values are zero (refresh the snapshot), one (found), and
+/// three (scanning).
 #[allow(clippy::too_many_arguments)]
 fn emit_process_find_memory_range(
     function: &mut Function,
@@ -1237,6 +1246,9 @@ fn emit_process_find_memory_range(
     let address = scratch[2];
     let size = scratch[3];
     let flags = scratch[4];
+    let budget = scratch[5];
+    let wanted_size = scratch[6];
+    let wanted_flags = scratch[7];
 
     emit_intrinsic_state_get(function, context, 0);
     function
@@ -1289,6 +1301,38 @@ fn emit_process_find_memory_range(
     emit_intrinsic_state_set_local(function, context, 0, status);
     function.instruction(&Instruction::End);
 
+    compile_expr(function, args[0], context);
+    function.instruction(&Instruction::LocalSet(wanted_size));
+    compile_expr(function, args[1], context);
+    function
+        .instruction(&Instruction::StructGet {
+            struct_type_index: context.gc.standard_index(StdlibTypeId::MemoryRangeAccess),
+            field_index: 0,
+        })
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::I64Const(2))
+        .instruction(&Instruction::Else);
+    compile_expr(function, args[1], context);
+    function
+        .instruction(&Instruction::StructGet {
+            struct_type_index: context.gc.standard_index(StdlibTypeId::MemoryRangeAccess),
+            field_index: 0,
+        })
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::I64Const(6))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I64Const(10))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalSet(wanted_flags))
+        .instruction(&Instruction::I64Const(MEMORY_RANGE_ENTRIES_PER_POLL))
+        .instruction(&Instruction::LocalSet(budget))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty));
+
     emit_intrinsic_state_get(function, context, 1);
     function
         .instruction(&Instruction::LocalTee(cursor))
@@ -1334,38 +1378,14 @@ fn emit_process_find_memory_range(
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::LocalGet(size));
-    compile_expr(function, args[0], context);
     function
+        .instruction(&Instruction::LocalGet(wanted_size))
         .instruction(&Instruction::I64Eq)
         .instruction(&Instruction::I32And)
-        .instruction(&Instruction::LocalGet(flags));
-    compile_expr(function, args[1], context);
-    function
-        .instruction(&Instruction::StructGet {
-            struct_type_index: context.gc.standard_index(StdlibTypeId::MemoryRangeAccess),
-            field_index: 0,
-        })
-        .instruction(&Instruction::I32Eqz)
-        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
-        .instruction(&Instruction::I64Const(2))
-        .instruction(&Instruction::Else);
-    compile_expr(function, args[1], context);
-    function
-        .instruction(&Instruction::StructGet {
-            struct_type_index: context.gc.standard_index(StdlibTypeId::MemoryRangeAccess),
-            field_index: 0,
-        })
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::I32Eq)
-        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
-        .instruction(&Instruction::I64Const(6))
-        .instruction(&Instruction::Else)
-        .instruction(&Instruction::I64Const(10))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::LocalTee(status))
+        .instruction(&Instruction::LocalGet(flags))
+        .instruction(&Instruction::LocalGet(wanted_flags))
         .instruction(&Instruction::I64And)
-        .instruction(&Instruction::LocalGet(status))
+        .instruction(&Instruction::LocalGet(wanted_flags))
         .instruction(&Instruction::I64Eq)
         .instruction(&Instruction::I32And)
         .instruction(&Instruction::If(BlockType::Empty));
@@ -1377,6 +1397,22 @@ fn emit_process_find_memory_range(
         .instruction(&Instruction::LocalSet(status));
     emit_intrinsic_state_set_local(function, context, 0, status);
     function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(status))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(budget))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalTee(budget))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
         .instruction(&Instruction::End)
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::Return)

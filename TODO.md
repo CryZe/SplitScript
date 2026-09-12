@@ -607,9 +607,7 @@ concepts rather than maintaining a parallel inventory.
   compiler-owned intra-doc links, semantic code highlighting, hierarchy, and
   search work outside the editor. Generate it in CI rather than committing the
   roughly half-megabyte reference tree, validate pages, links, anchors, visible
-  examples, and hidden-line removal, and deploy it to GitHub Pages. Future
-  machine-readable output should reuse the same hierarchy rather than invent
-  another catalog.
+  examples, and hidden-line removal, and deploy it to GitHub Pages.
 - [x] Improve generated reference presentation where catalog facts are
   mechanically correct but user-hostile. Attachment requirements now render as
   one actionable availability rule instead of overlapping facts; structural
@@ -1385,22 +1383,20 @@ remaining work is product hardening and distribution.
   raw. Catalog-wide terminal and HTML tests round-trip every current and future
   type constructor through root indexes, declaration headings, breadcrumbs,
   and search results, preventing the same class of drift from recurring.
-- [ ] Make exact documentation queries for concrete generic members resolve to
+- [x] Make exact documentation queries for concrete generic members resolve to
   their canonical operation instead of only returning a ranked type list. For
   example, `splitc docs SetIterator.next` should show the specialized signature,
   explain `IteratorStep`, and include the relevant example. Drive array, set,
   range, future map/filter, and `Map` iterator pages through the same catalog
-  operation so this improves lookup without duplicating documentation.
+  operation so this improves lookup without duplicating documentation. Concise
+  generic owner/member aliases are now derived from catalog identities and only
+  resolve directly when they identify one canonical page.
 - [ ] Improve navigation for very long terminal guide results without changing
   their content model. Put stable exact subsection identities near the top of
   monolithic guides and make focused `splitc docs` queries obvious before a
   terminal or calling tool truncates later sections. Treat this as mitigated and
   lower priority because exact-topic searches already work; do not split the
   canonical guide into duplicated prose.
-- [ ] After renderer-produced static Markdown proves the published-output
-  pipeline, add machine-readable export and rustdoc-like standalone HTML as
-  additional renderers. Publishing HTML must not introduce a second hierarchy,
-  link scheme, example store, or documentation source.
 - [x] Add document highlights for every source-owned occurrence of the symbol
   under the cursor, with read/write classification, and type-definition
   navigation for inferred source and catalog types.

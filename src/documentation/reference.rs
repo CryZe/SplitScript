@@ -449,11 +449,68 @@ impl DocumentationReference {
             return self.page(&entry.uri);
         }
 
+        let generic_aliases = self.exact_generic_symbol_aliases(topic);
+        if let [uri] = generic_aliases.as_slice() {
+            return self.page(uri);
+        }
+
         let aliases = self.exact_migration_aliases(topic);
         if let [uri] = aliases.as_slice() {
             return self.page(uri);
         }
         None
+    }
+
+    /// Resolves the concise spelling people can write without inventing names
+    /// for a generic owner's type parameters. Display labels retain the full
+    /// `MapIterator<K, V>.next` form, while exact lookup also accepts the
+    /// catalog-owned `MapIterator.next` path. Construct aliases from semantic
+    /// ownership rather than stripping angle brackets from rendered Markdown;
+    /// this keeps operators and future type-form syntax unambiguous.
+    fn exact_generic_symbol_aliases(&self, query: &str) -> Vec<String> {
+        let query = query.trim();
+        let member_query = query.rsplit_once('.');
+        let mut uris = self
+            .library
+            .type_constructors()
+            .iter()
+            .filter(|constructor| constructor.name.eq_ignore_ascii_case(query))
+            .map(|constructor| {
+                symbol_uri(
+                    StdlibSymbolId::TypeConstructor(constructor.id),
+                    &self.library,
+                )
+            })
+            .chain(self.library.fields().iter().filter_map(|field| {
+                let StdlibOwner::TypeConstructor(owner) = field.owner else {
+                    return None;
+                };
+                let (owner_query, field_query) = member_query?;
+                (self
+                    .library
+                    .type_constructor(owner)
+                    .name
+                    .eq_ignore_ascii_case(owner_query)
+                    && field.name.eq_ignore_ascii_case(field_query))
+                .then(|| symbol_uri(StdlibSymbolId::Field(field.id), &self.library))
+            }))
+            .chain(self.library.items().filter_map(|item| {
+                let StdlibOwner::TypeConstructor(owner) = item.owner else {
+                    return None;
+                };
+                let (owner_query, item_query) = member_query?;
+                (self
+                    .library
+                    .type_constructor(owner)
+                    .name
+                    .eq_ignore_ascii_case(owner_query)
+                    && item.name.eq_ignore_ascii_case(item_query))
+                .then(|| symbol_uri(StdlibSymbolId::Item(item.id), &self.library))
+            }))
+            .collect::<Vec<_>>();
+        uris.sort();
+        uris.dedup();
+        uris
     }
 
     fn exact_migration_aliases(&self, query: &str) -> Vec<String> {
@@ -2698,6 +2755,30 @@ mod tests {
             "/guides/asl-porting.md"
         );
         assert!(reference.topic("read").is_none());
+    }
+
+    #[test]
+    fn concise_generic_topics_resolve_to_canonical_symbol_pages() {
+        let reference = DocumentationReference::default();
+
+        for (query, expected_uri) in [
+            ("Set", "/stdlib/type-forms/Set/index.md"),
+            (
+                "SetIterator.next",
+                "/stdlib/type-forms/SetIterator/methods/next.md",
+            ),
+            (
+                "MapIterator.next",
+                "/stdlib/type-forms/MapIterator/methods/next.md",
+            ),
+            ("MapEntry.key", "/stdlib/type-forms/MapEntry/fields/key.md"),
+        ] {
+            assert_eq!(
+                reference.topic(query).map(|page| page.uri),
+                Some(expected_uri.to_owned()),
+                "concise generic topic `{query}`",
+            );
+        }
     }
 
     #[test]

@@ -163,6 +163,7 @@ stateProvider Unity as process {
 /// ```
 @processType(GBAEmulator)
 @attachment(GBAEmulatorDiscover)
+@refresh(GBAEmulatorMappingIsAvailable)
 @directRead(GBAEmulatorRead)
 stateProvider GBA as gba {
     "visualboyadvance-m.exe",
@@ -194,6 +195,7 @@ stateProvider GBA as gba {
 /// ```
 @processType(PS2Emulator)
 @attachment(PS2EmulatorDiscover)
+@refresh(PS2EmulatorMappingIsAvailable)
 @directRead(PS2EmulatorRead)
 @readableRange(0x00100000, 0x02000000)
 stateProvider PS2 as ps2 {
@@ -224,6 +226,7 @@ stateProvider PS2 as ps2 {
 /// ```
 @processType(PS1Emulator)
 @attachment(PS1EmulatorDiscover)
+@refresh(PS1EmulatorMappingIsAvailable)
 @directRead(PS1EmulatorRead)
 stateProvider PS1 as ps1 {
     "ePSXe.exe",
@@ -255,6 +258,7 @@ stateProvider PS1 as ps1 {
 /// ```
 @processType(SMSEmulator)
 @attachment(SMSEmulatorDiscover)
+@refresh(SMSEmulatorMappingIsAvailable)
 @directRead(SMSEmulatorRead)
 stateProvider SMS as sms {
     "retroarch.exe",
@@ -285,6 +289,7 @@ stateProvider SMS as sms {
 /// ```
 @processType(GenesisEmulator)
 @attachment(GenesisEmulatorDiscover)
+@refresh(GenesisEmulatorMappingIsAvailable)
 @directRead(GenesisEmulatorRead)
 stateProvider Genesis as genesis {
     "retroarch.exe",
@@ -316,6 +321,7 @@ stateProvider Genesis as genesis {
 /// ```
 @processType(GCNEmulator)
 @attachment(GCNEmulatorDiscover)
+@refresh(GCNEmulatorMappingIsAvailable)
 @directRead(GCNEmulatorRead)
 stateProvider GCN as gcn {
     "Dolphin.exe",
@@ -343,6 +349,7 @@ stateProvider GCN as gcn {
 /// ```
 @processType(WiiEmulator)
 @attachment(WiiEmulatorDiscover)
+@refresh(WiiEmulatorMappingIsAvailable)
 @directRead(WiiEmulatorRead)
 stateProvider Wii as wii {
     "Dolphin.exe",
@@ -8580,6 +8587,14 @@ struct GBAEmulator {
         }
     }
 
+    // A provider mapping is usable only while its complete guest-address
+    // translation still reaches readable process memory. The generated
+    // provider lifecycle reruns discovery when this probe fails.
+    private fn mappingIsAvailable() -> bool {
+        let _value = self.read<u8>(0x02000000) else return false
+        return true
+    }
+
     /// Reads a typed value from emulated GBA memory.
     ///
     /// The expected MemoryReadable type determines the byte layout. Valid reads lie entirely within EWRAM (0x02000000..0x02040000) or IWRAM (0x03000000..0x03008000).
@@ -8679,6 +8694,11 @@ struct PS2Emulator {
             base: basePointer,
             auxiliary: 0,
         }
+    }
+
+    private fn mappingIsAvailable() -> bool {
+        let _value = self.read<u8>(0x00100000) else return false
+        return true
     }
 
     /// Reads a typed value from emulated PlayStation 2 memory.
@@ -8916,6 +8936,11 @@ struct PS1Emulator {
         await process.closed()
     }
 
+    private fn mappingIsAvailable() -> bool {
+        let _value = self.read<u8>(0x80000000) else return false
+        return true
+    }
+
     /// Reads a typed value from emulated PlayStation memory.
     ///
     /// Valid reads lie entirely within `0x80000000..=0x817fffff`. The expected
@@ -9078,6 +9103,11 @@ struct SMSEmulator {
         }
 
         await process.closed()
+    }
+
+    private fn mappingIsAvailable() -> bool {
+        let _value = self.read<u8>(0xc000) else return false
+        return true
     }
 
     /// Reads a typed value from emulated Master System work RAM.
@@ -9244,6 +9274,11 @@ struct GenesisEmulator {
         await process.closed()
     }
 
+    private fn mappingIsAvailable() -> bool {
+        let _value = self.read<u8>(0) else return false
+        return true
+    }
+
     /// Reads a typed value from emulated Genesis work RAM.
     ///
     /// Valid reads lie entirely within `0x0000..=0xffff`. Unaligned reads work
@@ -9314,6 +9349,11 @@ struct GCNEmulator {
             base: mapping.address,
             auxiliary: coreBase,
         }
+    }
+
+    private fn mappingIsAvailable() -> bool {
+        let _value = self.read<u8>(0x80000000) else return false
+        return true
     }
 
     /// Reads a typed value from emulated GameCube MEM1.
@@ -9401,6 +9441,11 @@ struct WiiEmulator {
             mem2: mem2.address,
             auxiliary: coreBase,
         }
+    }
+
+    private fn mappingIsAvailable() -> bool {
+        let _value = self.read<u8>(0x80000000) else return false
+        return true
     }
 
     /// Reads a typed value from emulated Wii memory.

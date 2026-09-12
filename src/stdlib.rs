@@ -26,11 +26,12 @@ pub use schema::{
 
 pub use declarations::{
     CapabilityBehavior, CoreType, CoreTypeId, DeclaredTypeRef, FieldVisibility,
-    ManagedRuntimeBackend, RuntimeRepresentation, ScalarMemoryLayout, StateProviderAttachment,
-    StateProviderContext, StateProviderMemoryRange, StateProviderProcesses, StdlibAssociatedType,
-    StdlibAssociatedTypeDefinition, StdlibCapability, StdlibField, StdlibNamespace, StdlibOwner,
-    StdlibStateProvider, StdlibSymbolId, StdlibType, StdlibTypeConstructor, StdlibTypeKind,
-    StdlibVariant, TypeConstructorSyntax, TypeVisibility, ValueUsage,
+    ManagedRuntimeBackend, RuntimeRepresentation, STATE_PROVIDER_REFRESH_NOTE, ScalarMemoryLayout,
+    StateProviderAttachment, StateProviderContext, StateProviderMemoryRange,
+    StateProviderProcesses, StdlibAssociatedType, StdlibAssociatedTypeDefinition, StdlibCapability,
+    StdlibField, StdlibNamespace, StdlibOwner, StdlibStateProvider, StdlibSymbolId, StdlibType,
+    StdlibTypeConstructor, StdlibTypeKind, StdlibVariant, TypeConstructorSyntax, TypeVisibility,
+    ValueUsage,
 };
 
 use catalog::{
@@ -1188,6 +1189,12 @@ impl StandardLibrary {
                             provider.name
                         ));
                     }
+                    if provider.refresh.is_some() {
+                        errors.push(format!(
+                            "identity state provider `{}` cannot declare refresh validation",
+                            provider.name
+                        ));
+                    }
                 }
                 StateProviderAttachment::Callable(attachment_id) => {
                     let attachment = self.item(attachment_id);
@@ -1217,6 +1224,48 @@ impl StandardLibrary {
                                 provider.name, attachment.qualified_name
                             ));
                         }
+                    }
+                }
+            }
+
+            if let Some(refresh_id) = provider.refresh {
+                let refresh = self.item(refresh_id);
+                if refresh.owner != StdlibOwner::Type(provider.process_type)
+                    || !matches!(
+                        refresh.kind,
+                        ItemKind::Method {
+                            receiver: TypeRef::Standard(receiver)
+                        } if receiver == provider.process_type
+                    )
+                    || !refresh.signature.type_parameters.is_empty()
+                    || !refresh.signature.parameters.is_empty()
+                    || refresh.signature.result_is_async
+                    || refresh.signature.result != TypeRef::Core(CoreTypeId::Bool)
+                    || !matches!(refresh.implementation, Implementation::LibraryBody { .. })
+                {
+                    errors.push(format!(
+                        "state provider `{}` has incompatible refresh validation `{:?}`",
+                        provider.name, refresh_id
+                    ));
+                }
+                if !matches!(
+                    self.type_decl(provider.process_type).representation,
+                    RuntimeRepresentation::GcStruct { .. }
+                ) {
+                    errors.push(format!(
+                        "refreshable state provider `{}` must expose a stable struct value",
+                        provider.name
+                    ));
+                }
+                if self.source_body_operations_are_initialized() {
+                    let operation = self.operation_metadata(refresh_id);
+                    if operation.effects.contains(&Effect::Suspends)
+                        || !operation.effects.contains(&Effect::RequiresAttachedProcess)
+                    {
+                        errors.push(format!(
+                            "state provider `{}` refresh validation `{}` must be synchronous and require an attached process",
+                            provider.name, refresh.qualified_name
+                        ));
                     }
                 }
             }

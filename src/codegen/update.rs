@@ -27,7 +27,7 @@ use super::{
     pointer_prefixes::{
         PointerPrefixPlan, PrefixEmissionContext, PrefixEmissionState, PrefixLocals,
     },
-    semantic_type, state_storage_index, struct_field_type, value_type,
+    semantic_type, standard_field_type, state_storage_index, struct_field_type, value_type,
 };
 
 /// Per-tick runtime view of the completed backend plans.
@@ -70,6 +70,10 @@ pub(super) struct ProviderAttach {
     pub frame_global: u32,
     pub frame_type: u32,
     pub completion_field: u32,
+    /// Synchronous provider-owned mapping validation. When it returns false,
+    /// the attachment future is reused to rediscover this provider without
+    /// detaching the still-open host process.
+    pub validation: Option<u32>,
 }
 
 #[derive(Clone, Copy)]
@@ -723,6 +727,36 @@ pub(super) fn compile_update(
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End);
+
+        // Provider alternatives retain their selected semantic variant while
+        // its private mapping is rediscovered. This avoids switching the
+        // source-visible state shape merely because a libretro core was
+        // temporarily unloaded.
+        for (variant_index, alternative) in lowering.provider_alternatives.iter().enumerate() {
+            let Some(attachment) = alternative.attachment else {
+                continue;
+            };
+            if attachment.validation.is_none() {
+                continue;
+            }
+            function
+                .instruction(&Instruction::GlobalGet(selected))
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: lowering.gc.index(Type::Enum(enumeration.id)),
+                    field_index: 0,
+                })
+                .instruction(&Instruction::I32Const(variant_index as i32))
+                .instruction(&Instruction::I32Eq)
+                .instruction(&Instruction::If(BlockType::Empty));
+            emit_provider_refresh(
+                &mut function,
+                attachment,
+                lowering.provider_values[&alternative.provider],
+                alternative.declaration.process_type,
+                lowering,
+            );
+            function.instruction(&Instruction::End);
+        }
     }
 
     if let (Some(provider_global), Some(provider_attach)) =
@@ -745,6 +779,7 @@ pub(super) fn compile_update(
             frame_global,
             frame_type,
             completion_field,
+            ..
         } = provider_attach;
         function
             .instruction(&Instruction::GlobalGet(frame_global))
@@ -774,6 +809,13 @@ pub(super) fn compile_update(
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End);
+        emit_provider_refresh(
+            &mut function,
+            provider_attach,
+            provider_global,
+            provider_type,
+            lowering,
+        );
     }
 
     if let Some(preparation) = lowering.provider_preparation {
@@ -2040,6 +2082,85 @@ fn emit_poll_value(
         0,
         field_type,
     );
+}
+
+/// Keeps the source-visible provider value at one stable GC identity while
+/// replacing its private mapping after an emulator core unloads. Validation
+/// is deliberately provider-owned; the generated lifecycle only coordinates
+/// the existing cancellable attachment future and state-snapshot boundary.
+fn emit_provider_refresh(
+    function: &mut Function,
+    attachment: ProviderAttach,
+    provider_global: u32,
+    provider_type: StdlibTypeId,
+    lowering: &UpdateContext<'_>,
+) {
+    let Some(validation) = attachment.validation else {
+        return;
+    };
+
+    // A non-null attachment frame means rediscovery is already pending. Only
+    // start one after the last accepted mapping fails its cheap validation.
+    function
+        .instruction(&Instruction::GlobalGet(attachment.frame_global))
+        .instruction(&Instruction::RefIsNull)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::GlobalGet(provider_global))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::Call(validation))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::Call(attachment.init))
+        .instruction(&Instruction::GlobalSet(attachment.frame_global))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::GlobalGet(attachment.frame_global))
+        .instruction(&Instruction::RefIsNull)
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::GlobalGet(attachment.frame_global))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::Call(attachment.poll))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+
+    let provider_struct = lowering.gc.standard_index(provider_type);
+    for field in lowering.standard_library.fields_of(provider_type) {
+        function
+            .instruction(&Instruction::GlobalGet(provider_global))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::GlobalGet(attachment.frame_global))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::StructGet {
+                struct_type_index: attachment.frame_type,
+                field_index: attachment.completion_field,
+            })
+            .instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(
+            function,
+            provider_struct,
+            lowering.gc.standard_field_index(field.id),
+            standard_field_type(field.id, lowering.semantics),
+        );
+        function.instruction(&Instruction::StructSet {
+            struct_type_index: provider_struct,
+            field_index: lowering.gc.standard_field_index(field.id),
+        });
+    }
+    function
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            attachment.frame_type,
+        )))
+        .instruction(&Instruction::GlobalSet(attachment.frame_global))
+        // The first complete snapshot from the replacement mapping becomes a
+        // fresh old/current baseline and cannot manufacture a timer decision.
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::GlobalSet(
+            lowering.runtime_globals.state_ready,
+        ))
+        .instruction(&Instruction::End);
 }
 
 fn emit_provider_default(function: &mut Function, ty: StdlibTypeId, context: &UpdateContext<'_>) {

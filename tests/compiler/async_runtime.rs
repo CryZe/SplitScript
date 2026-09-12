@@ -178,6 +178,7 @@ fn never_can_appear_as_an_uninhabited_aggregate_payload() {
 #[derive(Default)]
 struct AsyncTestHost {
     process_open: bool,
+    accepted_process_name: Option<String>,
     process_pointer_size: u8,
     timer_state: i32,
     monotonic_nanoseconds: i64,
@@ -420,7 +421,26 @@ fn execute_with_mock_host_with_profile(
                         };
                     }
                     match host_name.as_str() {
-                        "process_attach" => results[0] = Val::I64(1),
+                        "process_attach" => {
+                            let accepted = if let Some(expected) =
+                                caller.data().accepted_process_name.clone()
+                            {
+                                let pointer = parameters[0].unwrap_i32() as usize;
+                                let length = parameters[1].unwrap_i32() as usize;
+                                let memory = caller
+                                    .get_export("memory")
+                                    .and_then(wasmtime::Extern::into_memory)
+                                    .expect("generated modules export memory");
+                                let mut bytes = vec![0; length];
+                                memory
+                                    .read(&caller, pointer, &mut bytes)
+                                    .expect("process name should belong to guest memory");
+                                bytes == expected.as_bytes()
+                            } else {
+                                true
+                            };
+                            results[0] = Val::I64(i64::from(accepted));
+                        }
                         "process_is_open" => {
                             results[0] = Val::I32(i32::from(caller.data().process_open));
                         }
@@ -459,6 +479,38 @@ fn execute_with_mock_host_with_profile(
                             results[0] = Val::I64(0x1000);
                         }
                         "process_get_module_size" => results[0] = Val::I64(0x200),
+                        "process_get_memory_range_count" => {
+                            results[0] = Val::I64(caller.data().memory_regions.len() as i64);
+                        }
+                        "process_get_memory_range_address" => {
+                            let index = parameters[1].unwrap_i64() as usize;
+                            results[0] = Val::I64(
+                                caller
+                                    .data()
+                                    .memory_regions
+                                    .get(index)
+                                    .map_or(0, |(address, _)| *address as i64),
+                            );
+                        }
+                        "process_get_memory_range_size" => {
+                            let index = parameters[1].unwrap_i64() as usize;
+                            results[0] = Val::I64(
+                                caller
+                                    .data()
+                                    .memory_regions
+                                    .get(index)
+                                    .map_or(0, |(_, bytes)| bytes.len() as i64),
+                            );
+                        }
+                        "process_get_memory_range_flags" => {
+                            let index = parameters[1].unwrap_i64() as usize;
+                            results[0] =
+                                Val::I64(if caller.data().memory_regions.get(index).is_some() {
+                                    6
+                                } else {
+                                    0
+                                });
+                        }
                         "process_read" => {
                             let address = parameters[1].unwrap_i64();
                             let pointer = parameters[2].unwrap_i32() as usize;
@@ -568,6 +620,7 @@ fn execute_with_mock_host_with_profile(
         &engine,
         AsyncTestHost {
             process_open: true,
+            accepted_process_name: None,
             process_pointer_size: 8,
             timer_state: 0,
             monotonic_nanoseconds: 0,
@@ -653,6 +706,61 @@ fn multi_provider_state_selects_the_applicable_provider_before_lifecycle_code() 
     update.call(&mut store, ()).unwrap();
 
     assert_eq!(store.data().messages, ["windows"]);
+}
+
+#[test]
+fn emulator_provider_refreshes_a_replaced_mapping_without_process_detach() {
+    let source = r#"
+        state GBA {
+            value: u8 at 0x02000000;
+        }
+
+        whileAttached {
+            let retained = gba
+            await nextTick()
+            let value = retained.read<u8>(0x02000000) else return false
+            print(value)
+            return true
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    store.data_mut().accepted_process_name = Some("mGBA.exe".to_owned());
+    let mut first_mapping = vec![0; 0x48000];
+    first_mapping[0] = 1;
+    store.data_mut().memory_regions = vec![(0x4000, first_mapping)];
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    for _ in 0..20 {
+        update.call(&mut store, ()).unwrap();
+        if store.data().messages == ["1"] {
+            break;
+        }
+    }
+    assert_eq!(store.data().messages, ["1"]);
+
+    // The host process remains open while its emulated RAM disappears. The
+    // pending whileAttached invocation retains the original provider object,
+    // but neither it nor timer decisions may run against this stale mapping.
+    store.data_mut().memory_regions.clear();
+    for _ in 0..3 {
+        update.call(&mut store, ()).unwrap();
+    }
+    assert_eq!(store.data().messages, ["1"]);
+    assert!(store.data().process_open);
+
+    let mut replacement_mapping = vec![0; 0x48000];
+    replacement_mapping[0] = 2;
+    store.data_mut().memory_regions = vec![(0x8000, replacement_mapping)];
+    for _ in 0..20 {
+        update.call(&mut store, ()).unwrap();
+        if store.data().messages == ["1", "2"] {
+            break;
+        }
+    }
+    assert_eq!(store.data().messages, ["1", "2"]);
 }
 
 #[test]

@@ -827,6 +827,14 @@ impl DocumentationReference {
                             )],
                         );
                         self.append_state_provider_ranges(&mut page.markdown, value);
+                        if value.refresh.is_some() {
+                            page.markdown.push_str("\n\n## Mapping refresh\n\n");
+                            page.markdown.push_str(&intra_doc::render_links(
+                                crate::stdlib::STATE_PROVIDER_REFRESH_NOTE,
+                                &page.uri,
+                                &self.library,
+                            ));
+                        }
                         self.append_state_provider_contexts(&mut page.markdown, &page.uri, value);
                         page
                     })
@@ -2882,6 +2890,17 @@ mod tests {
             assert!(page.markdown.contains("`0x00100000..<0x02000000`"), "{uri}");
             assert!(page.markdown.contains("computed addresses remain fallible"));
         }
+
+        let ps2 = reference
+            .page("/stdlib/state-providers/PS2.md")
+            .expect("PS2 provider page should exist");
+        assert!(ps2.markdown.contains("## Mapping refresh"));
+        assert!(ps2.markdown.contains("do not run again"));
+
+        let native = reference
+            .page("/stdlib/state-providers/Native.md")
+            .expect("Native provider page should exist");
+        assert!(!native.markdown.contains("## Mapping refresh"));
     }
 
     #[test]

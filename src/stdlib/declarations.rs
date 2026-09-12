@@ -15,6 +15,10 @@ use super::ids::{
 };
 use super::schema::{TypeParameter, TypeRef};
 
+/// Canonical user-facing lifecycle note for providers whose private memory
+/// mapping can disappear while their host process remains open.
+pub const STATE_PROVIDER_REFRESH_NOTE: &str = "The provider validates its private memory mapping before each state poll. If that mapping disappears while the host process remains open, state polling and timer decisions pause while discovery runs cooperatively again. [`onDetach`] and [`onAttach`] do not run again. The first complete snapshot from the replacement mapping establishes a fresh [`old`] / [`current`] baseline.";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StdlibOwner {
     Root,
@@ -48,6 +52,10 @@ pub struct StdlibStateProvider {
     pub default: bool,
     pub process_type: StdlibTypeId,
     pub attachment: StateProviderAttachment,
+    /// Optional synchronous provider-owned validation performed before each
+    /// state poll. A failed validation pauses polling and reruns `attachment`
+    /// against the same still-open process.
+    pub refresh: Option<StdlibItemId>,
     /// Optional asynchronous work performed after the provider value becomes
     /// available and before the user's `onAttach` action runs.
     pub preparation: Option<StdlibItemId>,

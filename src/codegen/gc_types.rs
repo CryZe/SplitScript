@@ -104,6 +104,15 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         },
     }];
     for declaration in standard_library.all_types() {
+        // Source semantics keep standard-library structs immutable. A
+        // refreshable state-provider value is nevertheless a stable runtime
+        // service object whose private mapping is replaced in place when an
+        // emulator core reloads, so only those backend fields need mutable
+        // Wasm storage.
+        let refreshable_provider = standard_library
+            .state_providers()
+            .iter()
+            .any(|provider| provider.process_type == declaration.id && provider.refresh.is_some());
         let inner = match declaration.representation {
             RuntimeRepresentation::Scalar { .. } => continue,
             RuntimeRepresentation::GcArray {
@@ -118,7 +127,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                     .fields_of(declaration.id)
                     .map(|field| FieldType {
                         element_type: layout.storage_type(standard_field_type(field.id, semantics)),
-                        mutable: false,
+                        mutable: refreshable_provider,
                     })
                     .collect(),
             }),

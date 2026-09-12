@@ -877,12 +877,16 @@ concepts rather than maintaining a parallel inventory.
   32-bit and 64-bit targets. Ordinary native pointer paths should infer the
   process width. Explicit mixed-width reads remain deliberately unimplemented
   until a real target proves the need and their public spelling is approved.
-- [ ] Decide the source-defined provider refresh lifecycle before claiming
+- [x] Decide and implement the source-defined provider refresh lifecycle before claiming
   parity for emulator cores that unload without their host process exiting.
-  `state PS2` validates RetroArch's core mapping on every read and fails safely
-  after unload, but attachment discovery currently reruns only after process
-  detach. Compare a general provider refresh hook with lifecycle-level
-  reattachment; discuss the public model before adding either one.
+  Every emulator provider now owns a private synchronous mapping-validation
+  operation in the catalog. A failed validation pauses snapshots and timer
+  decisions while the existing cancellable attachment future rediscovers the
+  mapping against the same process. The compiler updates the stable provider
+  object in place so suspended code retains a live alias, seeds the recovered
+  snapshot as a fresh `old` / `current` baseline, and does not synthesize
+  `onDetach` or `onAttach`. Native and Unity providers opt out; the contract is
+  general without adding public syntax.
 - [ ] Finish the schema-first Unity value surface rather than adding another
   public Mono path API. Bounded managed strings, scalar values, singleton and
   static roots, and nested references should all be expressible in `image` /

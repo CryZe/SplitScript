@@ -1776,6 +1776,14 @@ fn render_stdlib_symbol_hover_with_form(
         "```splitscript\n{form}\n```\n\n{}",
         crate::documentation::strip_intra_doc_links(&prose)
     );
+    if let StdlibSymbolId::StateProvider(id) = symbol
+        && library.state_provider(id).refresh.is_some()
+    {
+        markdown.push_str("\n\n");
+        markdown.push_str(&crate::documentation::strip_intra_doc_links(
+            crate::stdlib::STATE_PROVIDER_REFRESH_NOTE,
+        ));
+    }
     append_examples(&mut markdown, documentation.examples);
     markdown
 }

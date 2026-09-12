@@ -923,10 +923,6 @@ concepts rather than maintaining a parallel inventory.
   host/data design or cooperative alternative rather than returning a
   misleading nearby symbol. Canonical syntax remains unique; no compatibility
   aliases were added.
-- [ ] Include the canonical compiler identity already exposed by the compiler
-  service and generated-module metadata in machine-readable port reports so
-  future evidence remains reproducible.
-
 ## P1 — measure and improve interactive compiler queries
 
 - [x] Build one request-scoped completion context from the existing recovered

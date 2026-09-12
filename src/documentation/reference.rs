@@ -827,10 +827,10 @@ impl DocumentationReference {
                             )],
                         );
                         self.append_state_provider_ranges(&mut page.markdown, value);
-                        if value.refresh.is_some() {
-                            page.markdown.push_str("\n\n## Mapping refresh\n\n");
+                        if value.validation.is_some() {
+                            page.markdown.push_str("\n\n## Mapping lifecycle\n\n");
                             page.markdown.push_str(&intra_doc::render_links(
-                                crate::stdlib::STATE_PROVIDER_REFRESH_NOTE,
+                                crate::stdlib::STATE_PROVIDER_MAPPING_LIFECYCLE_NOTE,
                                 &page.uri,
                                 &self.library,
                             ));
@@ -2894,13 +2894,13 @@ mod tests {
         let ps2 = reference
             .page("/stdlib/state-providers/PS2.md")
             .expect("PS2 provider page should exist");
-        assert!(ps2.markdown.contains("## Mapping refresh"));
-        assert!(ps2.markdown.contains("do not run again"));
+        assert!(ps2.markdown.contains("## Mapping lifecycle"));
+        assert!(ps2.markdown.contains("starts a new attachment"));
 
         let native = reference
             .page("/stdlib/state-providers/Native.md")
             .expect("Native provider page should exist");
-        assert!(!native.markdown.contains("## Mapping refresh"));
+        assert!(!native.markdown.contains("## Mapping lifecycle"));
     }
 
     #[test]

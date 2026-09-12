@@ -960,7 +960,7 @@ impl<'a> Validator<'a> {
                 "processType",
                 "processes",
                 "attachment",
-                "refresh",
+                "validate",
                 "prepare",
                 "directRead",
                 "readableRange",
@@ -1026,12 +1026,12 @@ impl<'a> Validator<'a> {
         self.require_name_attribute(&value.name, &value.attributes, "attachment", |attachment| {
             attachment == "identity" || generated_items.contains(attachment)
         });
-        if let Some(refresh) =
-            self.optional_name_attribute(&value.name, &value.attributes, "refresh")
-            && !generated_items.contains(refresh)
+        if let Some(validation) =
+            self.optional_name_attribute(&value.name, &value.attributes, "validate")
+            && !generated_items.contains(validation)
         {
             self.error(format!(
-                "`{}` has invalid `@refresh({refresh})`",
+                "`{}` has invalid `@validate({validation})`",
                 value.name
             ));
         }

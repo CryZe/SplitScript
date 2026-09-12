@@ -1549,7 +1549,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "tickRate { attached: 60, detached: 2 }",
         "Overrides the lifecycle-owned polling rates.",
-        "SplitScript defaults to 120 Hz while a process is attached and 1 Hz while detached. The attached rate is applied immediately after acquiring a process, before [`onAttach`] and its cooperative discovery run. The detached rate is applied during module startup and immediately when a process closes. Either field may be omitted to retain its default; [`setTickRate`] remains available for temporary dynamic changes until the next lifecycle transition.",
+        "SplitScript defaults to 1 Hz with no host process and 120 Hz while acquiring or polling a state provider. The active rate is applied before cooperative provider discovery begins, because range and signature scans make bounded progress per update, and remains in effect through [`onAttach`] and attached polling. Whenever the logical attachment ends, the detached rate is restored before [`onDetach`]. For native games this normally follows the process lifetime. Emulator mapping loss ends the logical attachment independently while the host remains open; rediscovery raises the rate again before it starts. Consequently an emulator awaiting a guest currently remains at the active rate when discovery itself is an indefinitely pending scan. Either field may be omitted to retain its default; [`setTickRate`] remains available for temporary dynamic changes until the next lifecycle transition.",
         &[Example::checked(
             "Override lifecycle polling rates",
             "tickRate {\n    attached: 60,\n    detached: 2,\n}",
@@ -1789,7 +1789,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "fn name() -> async T { ... }",
         "Marks an explicitly typed function result as asynchronous.",
-        "A function containing [`await`] or [`retry`] has an async result. Write [`async`] `T` when its result type is explicit; when the result type is omitted, both [`async`] and `T` are inferred. Calling a source-defined async function creates a process-lifetime future value without polling it. That [`async`] `T` value can be stored in locals and aggregates, passed to functions, and awaited later. Its typed continuation frame retains parameters, live locals, nested futures, and the completed `T`. Futures cannot escape into globals because process closure owns their cancellation.",
+        "A function containing [`await`] or [`retry`] has an async result. Write [`async`] `T` when its result type is explicit; when the result type is omitted, both [`async`] and `T` are inferred. Calling a source-defined async function creates an attachment-lifetime future value without polling it. That [`async`] `T` value can be stored in locals and aggregates, passed to functions, and awaited later. Its typed continuation frame retains parameters, live locals, nested futures, and the completed `T`. Futures cannot escape into globals because state-provider detachment owns their cancellation.",
         ASYNC_RESULT_EXAMPLE
     ),
     language_item!(
@@ -1798,7 +1798,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "let value = await operation",
         "Waits for an asynchronous value and yields its result.",
-        "[`await`] is an ordinary prefix expression available in [`onAttach`] and source-defined [`async`] helpers. It accepts any [`async`] `T` expression, yields `T`, and can be nested in calls, operators, member access, conditionals, matches, fallbacks, and loop conditions. Source future values may be stored and awaited repeatedly; an already completed future yields its retained result without rerunning its body. The process-lifetime continuation tree is cancelled when the attached process closes.",
+        "[`await`] is an ordinary prefix expression available in [`onAttach`] and source-defined [`async`] helpers. It accepts any [`async`] `T` expression, yields `T`, and can be nested in calls, operators, member access, conditionals, matches, fallbacks, and loop conditions. Source future values may be stored and awaited repeatedly; an already completed future yields its retained result without rerunning its body. The attachment-lifetime continuation tree is cancelled when the state provider detaches, including when an emulator mapping disappears without its host process closing.",
         AWAIT_EXAMPLE
     ),
     language_item!(
@@ -1942,7 +1942,7 @@ define_language_catalog! {
         Never,
         "Never",
         "Describes an expression that cannot produce a value.",
-        "The [`Never`] type is the bottom of SplitScript's type hierarchy and can flow into any expected value type. It is inferred for genuinely divergent control flow and is erased from WebAssembly. [`Process.closed`] returns [`async`] [`Never`] because process-lifetime cancellation prevents its await from resuming.",
+        "The [`Never`] type is the bottom of SplitScript's type hierarchy and can flow into any expected value type. It is inferred for genuinely divergent control flow and is erased from WebAssembly. [`Process.closed`] returns [`async`] [`Never`] because attachment-lifetime cancellation prevents its await from resuming.",
         "fn ignoreUnsupportedBuild() -> async Never {\n    await process.closed()\n}"
     ),
     builtin_type_item!(
@@ -2145,16 +2145,16 @@ define_language_catalog! {
         OnDetach,
         OnDetach,
         "onDetach",
-        "Handles closure of a successfully initialized process.",
-        "Runs synchronously once when a process whose [`onAttach`] completed closes, after its unusable handle, provider state, attachment-scoped globals, and pending continuations are cleared. It does not run when attachment initialization was still pending or rejected the process through postfix [`?`] or [`throw`], and it never runs for the initial detached state; use [`setup`] for one-time script initialization. Process and state snapshots are unavailable.",
+        "Handles the end of a successfully initialized state-provider attachment.",
+        "Runs synchronously once when a logical attachment whose [`onAttach`] completed ends, after its provider state, attachment-scoped globals, and pending continuations are cleared. Usually this happens when the host process closes; an emulator provider also detaches when its game mapping disappears, even if the emulator remains open. It does not run when attachment initialization was still pending or rejected through postfix [`?`] or [`throw`], and it never runs for the initial detached state; use [`setup`] for one-time script initialization. Process providers and state snapshots are unavailable.",
         "onDetach {\n    timer.pauseGameTime()\n}"
     ),
     action_item!(
         OnAttach,
         OnAttach,
         "onAttach",
-        "Initializes one attached process.",
-        "This action is implicitly suspending and owns process-lifetime cancellation for [`await`] and [`retry`] continuations. It is also an implicit error boundary: postfix [`?`] or [`throw`] rejects this process, keeps its handle inert until it closes, and never runs [`onDetach`] for the incomplete attachment. A bare global assigned on every successful path becomes attachment-scoped and may select conditional [`state`] and managed [`class`] fields. Attachment-scoped globals are frozen after this action completes.",
+        "Initializes one state-provider attachment.",
+        "This action is implicitly suspending and owns attachment-lifetime cancellation for [`await`] and [`retry`] continuations. It is also an implicit error boundary: postfix [`?`] or [`throw`] rejects this attachment, keeps its host process inert until it closes, and never runs [`onDetach`] for the incomplete attachment. A bare global assigned on every successful path becomes attachment-scoped and may select conditional [`state`] and managed [`class`] fields. Attachment-scoped globals are frozen after this action completes. Emulator providers run this action again when a newly discovered game mapping replaces one that disappeared without closing the emulator.",
         "onAttach {\n    let module = await process.module(\"GameAssembly.dll\")\n}",
         related: &[LanguageItemId::State, LanguageItemId::ConditionalStateFields, LanguageItemId::Await, LanguageItemId::Retry, LanguageItemId::Propagate, LanguageItemId::Throw, LanguageItemId::OnStateReady]
     ),
@@ -2464,7 +2464,7 @@ impl LanguageCatalog {
                 fallthrough: "false; do not split",
             },
             ActionKind::OnDetach => ActionReferenceFacts {
-                timing: "Once after a successfully initialized process closes and its context is cleared",
+                timing: "Once after a successfully initialized state-provider attachment ends and its context is cleared",
                 available_context: "settings, module globals, and live attempt globals",
                 suspension: "not allowed",
                 result: "None",

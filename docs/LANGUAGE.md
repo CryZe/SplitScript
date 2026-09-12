@@ -77,11 +77,17 @@ line.
 
 ## Polling-rate policy
 
-SplitScript owns the ordinary attachment polling policy. With no declaration,
-the generated module selects 1 Hz while detached and 120 Hz immediately after
-acquiring a process. The attached transition happens before provider discovery
-or `onAttach`, so cooperative scans do not accidentally inherit the slow
-detached cadence. Process closure restores 1 Hz before `onDetach` runs.
+SplitScript owns the ordinary state-provider polling policy. With no
+declaration, the generated module selects 1 Hz with no host process and 120 Hz
+while acquiring or polling a state provider. The active rate is applied before
+cooperative provider discovery begins because range enumeration and signature
+scans make bounded progress per update. It remains in effect through `onAttach`
+and attached polling. Ending the logical attachment restores 1 Hz before
+`onDetach` runs. For native games that boundary normally follows process
+closure. Emulator mapping loss ends the logical attachment independently while
+the host remains open; rediscovery raises the active rate again before it
+starts. An emulator waiting for a guest therefore currently stays at the active
+rate when its discovery operation is an indefinitely pending scan.
 
 Override either lifecycle rate declaratively when a game needs another cadence:
 
@@ -1051,7 +1057,7 @@ assigns their storage later.
 Functions are independent of a particular action snapshot. Values from
 `current` or `old` are passed explicitly, keeping helpers reusable and making
 their dependencies visible. Suspending functions return [`async`] values and
-may use [`await`] where their process-lifetime effect permits it.
+may use [`await`] where their attachment-lifetime effect permits it.
 
 ### Callable values and closures
 
@@ -1793,9 +1799,11 @@ predicate should identify the desired process from stable process evidence.
 Scripts without this block retain the host's direct name-attachment path and
 pay no PID-enumeration cost.
 
-`onDetach` runs exactly once when a successfully initialized process closes. It
-does not run during initial detached startup, repeat on detached ticks, or run
-for a process rejected before `onAttach` completed:
+`onDetach` runs exactly once when a successfully initialized state-provider
+attachment ends. This normally happens when its process closes, but an emulator
+provider also detaches when its game mapping disappears while the emulator
+remains open. It does not run during initial detached startup, repeat on
+detached ticks, or run for an attachment rejected before `onAttach` completed:
 
 ```text
 onDetach {
@@ -1803,10 +1811,10 @@ onDetach {
 }
 ```
 
-The closed handle, provider state, and pending continuations are cleared before
-the block runs. `process`, `gba`, `current`, and
-`old` are unavailable because closure may happen before initialization or the
-first snapshot completes.
+The ended attachment's provider state and pending continuations are cleared
+before the block runs; a closed process handle is cleared as well, while an
+emulator host handle may be retained privately for rediscovery. `process`,
+`gba`, `current`, and `old` are unavailable across this lifecycle boundary.
 
 `onStart` and `onReset` react to timer transitions independently of process
 attachment:
@@ -2036,9 +2044,10 @@ onAttach {
 
 Suspending operations are polled once per runtime tick until they complete.
 State reads and timer actions remain gated while initialization is pending. If
-the process closes at any suspension point, the generated process-lifetime
-scope cancels the initializer, resets it, and starts fresh with the next
-attached process. This is the language-level counterpart to ASR's
+the state provider detaches at any suspension point, the generated
+attachment-lifetime scope cancels the initializer, resets it, and starts fresh
+with the next attachment. This includes an emulator game mapping disappearing
+without its host process closing. This is the language-level counterpart to ASR's
 `until_closes`, without requiring scripts to manually write the outer
 attach/cancellation loops.
 
@@ -2131,7 +2140,7 @@ or stored before `await pending`. An `async T` value can be held in a local,
 struct, enum, option, result, or array and passed as a parameter. Once complete,
 the future retains `T`, so another await returns the same value without rerunning the
 operation. Merely creating a future is synchronous. Futures are owned by the
-attached-process lifetime and therefore cannot be stored in globals.
+state-provider attachment lifetime and therefore cannot be stored in globals.
 
 `await` is an ordinary prefix expression rather than a declaration form. It
 can appear inside member access, arguments, arithmetic, interpolation,
@@ -2474,11 +2483,15 @@ The generated loop follows this order:
 2. Attach to the configured process, first running `selectProcess` for each
    same-name candidate when declared; return and retry next tick if none is
    accepted.
-3. Detect a closed process, detach, run `onDetach` only if `onAttach` completed
-   successfully, and return.
-4. Commit the first complete state as equal `old` and `current` snapshots, run
+3. Detect a closed process or an invalidated provider mapping, end the logical
+   attachment, run `onDetach` only if `onAttach` completed successfully, and
+   return. Mapping invalidation retains the still-open host process so provider
+   discovery can run again.
+4. Apply the active tick rate before any cooperative provider discovery, then
+   discover and prepare the state provider and run `onAttach`.
+5. Commit the first complete state as equal `old` and `current` snapshots, run
    `onStateReady`, and return; or rotate and refresh an initialized snapshot.
-5. On initialized updates after that first snapshot, run `whileAttached`.
-6. If the timer has not started, evaluate `start`.
-7. If it is running or paused, apply `isLoading`, then `gameTime`, then `reset`;
+6. On initialized updates after that first snapshot, run `whileAttached`.
+7. If the timer has not started, evaluate `start`.
+8. If it is running or paused, apply `isLoading`, then `gameTime`, then `reset`;
    evaluate `split` only when reset did not trigger.

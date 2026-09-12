@@ -2,7 +2,7 @@
 //!
 //! The public operation is a stateful future. Each poll opens the module file,
 //! validates the same size and modification time, hashes at most one bounded
-//! window, and closes the descriptor before returning. A process-lifetime
+//! window, and closes the descriptor before returning. Attachment-lifetime
 //! cancellation therefore cannot strand a WASI descriptor. If the file
 //! changes between polls, hashing restarts from the initial MD5 state.
 

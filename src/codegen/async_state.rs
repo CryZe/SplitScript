@@ -86,7 +86,7 @@ pub(super) fn compile_async_action(
         wasm_body.async_state_count,
         wasm_body
             .cancellation_region
-            .expect("suspending lifecycle actions have a process-lifetime cancellation region"),
+            .expect("suspending lifecycle actions have an attachment-lifetime cancellation region"),
         layout,
         runtime,
         frame,
@@ -150,7 +150,7 @@ pub(super) fn compile_async_closure_poll(
         &closure.entry,
         &closure.locals,
         closure.async_state_count,
-        wasm_ir::CancellationRegion::ProcessLifetime,
+        wasm_ir::CancellationRegion::AttachmentLifetime,
         layout,
         runtime,
         frame,

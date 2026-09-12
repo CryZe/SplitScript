@@ -523,7 +523,7 @@ pub enum BodyAbi {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CancellationRegion {
-    ProcessLifetime,
+    AttachmentLifetime,
 }
 
 /// Where a completed suspension deposits its value.
@@ -2415,13 +2415,13 @@ fn lower_body(
         BodyOwner::Action(ActionKind::OnAttach | ActionKind::WhileAttached)
             if matches!(abi, BodyAbi::AsyncAction) =>
         {
-            Some(CancellationRegion::ProcessLifetime)
+            Some(CancellationRegion::AttachmentLifetime)
         }
         BodyOwner::Function(instance)
             if effects.function(instance.function).cancellation
                 == CancellationKind::ProcessClose =>
         {
-            Some(CancellationRegion::ProcessLifetime)
+            Some(CancellationRegion::AttachmentLifetime)
         }
         BodyOwner::Action(_) | BodyOwner::Function(_) => None,
     };
@@ -5094,7 +5094,7 @@ fn suspension_cancellation(
     typed_hir: &TypedProgram,
 ) -> Option<CancellationRegion> {
     if mode == SuspensionMode::Retry {
-        return Some(CancellationRegion::ProcessLifetime);
+        return Some(CancellationRegion::AttachmentLifetime);
     }
     let ResolvedCall::StandardLibrary { item, .. } = typed_hir.call(expression)? else {
         return None;
@@ -5104,7 +5104,7 @@ fn suspension_cancellation(
         .operation_semantics(*item)
         .cancellation
         == CancellationKind::ProcessClose)
-        .then_some(CancellationRegion::ProcessLifetime)
+        .then_some(CancellationRegion::AttachmentLifetime)
 }
 
 fn plan_block(
@@ -5640,7 +5640,7 @@ onAttach {
         ));
         assert_eq!(
             asynchronous.cancellation_region,
-            Some(CancellationRegion::ProcessLifetime)
+            Some(CancellationRegion::AttachmentLifetime)
         );
         assert!(asynchronous.async_state_count > 1);
         assert_eq!(PollStatus::Pending.wasm_value(), 0);

@@ -163,7 +163,7 @@ stateProvider Unity as process {
 /// ```
 @processType(GBAEmulator)
 @attachment(GBAEmulatorDiscover)
-@refresh(GBAEmulatorMappingIsAvailable)
+@validate(GBAEmulatorMappingIsAvailable)
 @directRead(GBAEmulatorRead)
 stateProvider GBA as gba {
     "visualboyadvance-m.exe",
@@ -195,7 +195,7 @@ stateProvider GBA as gba {
 /// ```
 @processType(PS2Emulator)
 @attachment(PS2EmulatorDiscover)
-@refresh(PS2EmulatorMappingIsAvailable)
+@validate(PS2EmulatorMappingIsAvailable)
 @directRead(PS2EmulatorRead)
 @readableRange(0x00100000, 0x02000000)
 stateProvider PS2 as ps2 {
@@ -226,7 +226,7 @@ stateProvider PS2 as ps2 {
 /// ```
 @processType(PS1Emulator)
 @attachment(PS1EmulatorDiscover)
-@refresh(PS1EmulatorMappingIsAvailable)
+@validate(PS1EmulatorMappingIsAvailable)
 @directRead(PS1EmulatorRead)
 stateProvider PS1 as ps1 {
     "ePSXe.exe",
@@ -258,7 +258,7 @@ stateProvider PS1 as ps1 {
 /// ```
 @processType(SMSEmulator)
 @attachment(SMSEmulatorDiscover)
-@refresh(SMSEmulatorMappingIsAvailable)
+@validate(SMSEmulatorMappingIsAvailable)
 @directRead(SMSEmulatorRead)
 stateProvider SMS as sms {
     "retroarch.exe",
@@ -289,7 +289,7 @@ stateProvider SMS as sms {
 /// ```
 @processType(GenesisEmulator)
 @attachment(GenesisEmulatorDiscover)
-@refresh(GenesisEmulatorMappingIsAvailable)
+@validate(GenesisEmulatorMappingIsAvailable)
 @directRead(GenesisEmulatorRead)
 stateProvider Genesis as genesis {
     "retroarch.exe",
@@ -321,7 +321,7 @@ stateProvider Genesis as genesis {
 /// ```
 @processType(GCNEmulator)
 @attachment(GCNEmulatorDiscover)
-@refresh(GCNEmulatorMappingIsAvailable)
+@validate(GCNEmulatorMappingIsAvailable)
 @directRead(GCNEmulatorRead)
 stateProvider GCN as gcn {
     "Dolphin.exe",
@@ -349,7 +349,7 @@ stateProvider GCN as gcn {
 /// ```
 @processType(WiiEmulator)
 @attachment(WiiEmulatorDiscover)
-@refresh(WiiEmulatorMappingIsAvailable)
+@validate(WiiEmulatorMappingIsAvailable)
 @directRead(WiiEmulatorRead)
 stateProvider Wii as wii {
     "Dolphin.exe",
@@ -457,7 +457,7 @@ root {
 /// Coordinates lazy asynchronous values without exposing threads or background tasks.
 ///
 /// Future combinators only make progress when their returned future is polled with
-/// [`await`]. They preserve the process-lifetime cancellation of their inputs.
+/// [`await`]. They preserve the attachment-lifetime cancellation of their inputs.
 ///
 /// # Example
 ///

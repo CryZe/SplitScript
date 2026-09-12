@@ -64,10 +64,11 @@ impl<'a> CatalogGenerator<'a> {
                 let process_type = attribute_name(&provider.attributes, "processType");
                 let attachment = attribute_name(&provider.attributes, "attachment");
                 let direct_read = attribute_name(&provider.attributes, "directRead");
-                let refresh = optional_attribute_name(&provider.attributes, "refresh").map_or_else(
-                    || "None".to_owned(),
-                    |item| format!("Some(StdlibItemId::{item})"),
-                );
+                let validation = optional_attribute_name(&provider.attributes, "validate")
+                    .map_or_else(
+                        || "None".to_owned(),
+                        |item| format!("Some(StdlibItemId::{item})"),
+                    );
                 let preparation = optional_attribute_name(&provider.attributes, "prepare")
                     .map_or_else(
                         || "None".to_owned(),
@@ -171,7 +172,7 @@ impl<'a> CatalogGenerator<'a> {
                     .collect::<Vec<_>>()
                     .join(",");
                 output.push_str(&format!(
-                    "StdlibStateProvider {{ id: StdlibStateProviderId::{}, name: {}, value_name: {}, processes: {}, default: {default}, process_type: StdlibTypeId::{}, attachment: {}, refresh: {refresh}, preparation: {preparation}, direct_read: StdlibItemId::{}, readable_ranges: &[{readable_ranges}], contexts: &[{contexts}], selectors: &[{selectors}], documentation: {} }},\n",
+                    "StdlibStateProvider {{ id: StdlibStateProviderId::{}, name: {}, value_name: {}, processes: {}, default: {default}, process_type: StdlibTypeId::{}, attachment: {}, validation: {validation}, preparation: {preparation}, direct_read: StdlibItemId::{}, readable_ranges: &[{readable_ranges}], contexts: &[{contexts}], selectors: &[{selectors}], documentation: {} }},\n",
                     ident(&provider.name),
                     quote(&provider.name),
                     quote(&provider.value_name),

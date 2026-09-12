@@ -182,6 +182,8 @@ struct AsyncTestHost {
     process_pointer_size: u8,
     timer_state: i32,
     monotonic_nanoseconds: i64,
+    tick_rates: Vec<f64>,
+    memory_range_scan_rates: Vec<f64>,
     messages: Vec<String>,
     memory_regions: Vec<(u64, Vec<u8>)>,
     module_lookups: usize,
@@ -449,6 +451,12 @@ fn execute_with_mock_host_with_profile(
                         }
                         "timer_start" => caller.data_mut().timer_state = 1,
                         "timer_reset" => caller.data_mut().timer_state = 0,
+                        "runtime_set_tick_rate" => {
+                            caller
+                                .data_mut()
+                                .tick_rates
+                                .push(parameters[0].unwrap_f64());
+                        }
                         "clock_time_get" => {
                             let pointer = parameters[2].unwrap_i32() as usize;
                             let timestamp = caller.data().monotonic_nanoseconds.to_le_bytes();
@@ -480,7 +488,14 @@ fn execute_with_mock_host_with_profile(
                         }
                         "process_get_module_size" => results[0] = Val::I64(0x200),
                         "process_get_memory_range_count" => {
-                            results[0] = Val::I64(caller.data().memory_regions.len() as i64);
+                            let data = caller.data_mut();
+                            let rate = data
+                                .tick_rates
+                                .last()
+                                .copied()
+                                .expect("module startup sets the detached tick rate");
+                            data.memory_range_scan_rates.push(rate);
+                            results[0] = Val::I64(data.memory_regions.len() as i64);
                         }
                         "process_get_memory_range_address" => {
                             let index = parameters[1].unwrap_i64() as usize;
@@ -624,6 +639,8 @@ fn execute_with_mock_host_with_profile(
             process_pointer_size: 8,
             timer_state: 0,
             monotonic_nanoseconds: 0,
+            tick_rates: Vec::new(),
+            memory_range_scan_rates: Vec::new(),
             messages: Vec::new(),
             memory_regions: Vec::new(),
             module_lookups: 0,
@@ -709,10 +726,18 @@ fn multi_provider_state_selects_the_applicable_provider_before_lifecycle_code() 
 }
 
 #[test]
-fn emulator_provider_refreshes_a_replaced_mapping_without_process_detach() {
+fn emulator_mapping_replacement_runs_a_fresh_attachment_lifecycle() {
     let source = r#"
         state GBA {
             value: u8 at 0x02000000;
+        }
+
+        onAttach {
+            print("attached")
+        }
+
+        onDetach {
+            print("detached")
         }
 
         whileAttached {
@@ -735,20 +760,20 @@ fn emulator_provider_refreshes_a_replaced_mapping_without_process_detach() {
 
     for _ in 0..20 {
         update.call(&mut store, ()).unwrap();
-        if store.data().messages == ["1"] {
+        if store.data().messages == ["attached", "1"] {
             break;
         }
     }
-    assert_eq!(store.data().messages, ["1"]);
+    assert_eq!(store.data().messages, ["attached", "1"]);
 
     // The host process remains open while its emulated RAM disappears. The
-    // pending whileAttached invocation retains the original provider object,
-    // but neither it nor timer decisions may run against this stale mapping.
+    // pending whileAttached invocation has captured the old provider object;
+    // logical detach must cancel it before any stale read can resume.
     store.data_mut().memory_regions.clear();
     for _ in 0..3 {
         update.call(&mut store, ()).unwrap();
     }
-    assert_eq!(store.data().messages, ["1"]);
+    assert_eq!(store.data().messages, ["attached", "1", "detached"]);
     assert!(store.data().process_open);
 
     let mut replacement_mapping = vec![0; 0x48000];
@@ -756,11 +781,26 @@ fn emulator_provider_refreshes_a_replaced_mapping_without_process_detach() {
     store.data_mut().memory_regions = vec![(0x8000, replacement_mapping)];
     for _ in 0..20 {
         update.call(&mut store, ()).unwrap();
-        if store.data().messages == ["1", "2"] {
+        if store.data().messages == ["attached", "1", "detached", "attached", "2"] {
             break;
         }
     }
-    assert_eq!(store.data().messages, ["1", "2"]);
+    assert_eq!(
+        store.data().messages,
+        ["attached", "1", "detached", "attached", "2"]
+    );
+    // Logical detach restores the idle cadence; the next bounded acquisition
+    // attempt raises it again before scanning resumes against the same host.
+    assert_eq!(store.data().tick_rates, [1.0, 120.0, 1.0, 120.0]);
+    assert!(
+        store
+            .data()
+            .memory_range_scan_rates
+            .iter()
+            .all(|rate| *rate == 120.0),
+        "cooperative discovery must not inherit the detached cadence: {:?}",
+        store.data().memory_range_scan_rates,
+    );
 }
 
 #[test]
@@ -2081,7 +2121,7 @@ fn on_attach_preserves_locals_across_awaits() {
         .expect("Wasm lowering should expose the onAttach body");
     assert_eq!(
         body.cancellation_region,
-        Some(splitscript::compiler::wasm_ir::CancellationRegion::ProcessLifetime)
+        Some(splitscript::compiler::wasm_ir::CancellationRegion::AttachmentLifetime)
     );
     let action = &checked.syntax().actions[0];
     let splitscript::compiler::ast::Stmt::Variable(before_only) = &action.body.statements[0] else {
@@ -2127,7 +2167,7 @@ fn on_attach_preserves_locals_across_awaits() {
     };
     assert_eq!(
         *cancellation,
-        Some(splitscript::compiler::wasm_ir::CancellationRegion::ProcessLifetime)
+        Some(splitscript::compiler::wasm_ir::CancellationRegion::AttachmentLifetime)
     );
     assert!(live_values.contains(&expected.id));
     assert!(continuation.statements.iter().any(|statement| matches!(
@@ -2144,7 +2184,7 @@ fn on_attach_preserves_locals_across_awaits() {
     };
     assert_eq!(
         *cancellation,
-        Some(splitscript::compiler::wasm_ir::CancellationRegion::ProcessLifetime)
+        Some(splitscript::compiler::wasm_ir::CancellationRegion::AttachmentLifetime)
     );
     assert!(!live_values.contains(&before_only.id));
     assert!(!live_values.contains(&expected.id));
@@ -4132,7 +4172,7 @@ fn async_methods_capture_their_receiver_once() {
 }
 
 #[test]
-fn process_lifetime_futures_cannot_escape_into_globals() {
+fn attachment_lifetime_futures_cannot_escape_into_globals() {
     let source = r#"
         state "game.exe" {}
         struct Holder { operation: async u32 }
@@ -4144,7 +4184,7 @@ fn process_lifetime_futures_cannot_escape_into_globals() {
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("cannot store a process-lifetime async value")
+            .contains("cannot store an attachment-lifetime async value")
     }));
 }
 

@@ -569,7 +569,7 @@ re-querying typed HIR.
 action and source-future state-machine emission. It discovers the already-numbered Wasm-IR poll and
 resume states, traverses nested continuation blocks, emits builtin suspension
 polls and arbitrary `retry T!` polling, stores live values in the GC frame, and
-applies the process-lifetime cancellation region. Only the completed async
+applies the attachment-lifetime cancellation region. Only the completed async
 action and future entry points are visible to the final orchestrator;
 ordinary values and receivers are delegated through the expression module.
 
@@ -805,14 +805,15 @@ locals. Await bindings are frame-backed only when a later segment reads them.
 Keeping the per-suspension sets in the IR also permits future physical slot
 coalescing without making the encoder reconstruct data flow.
 
-Suspending `onAttach` and `whileAttached` bodies own a `ProcessLifetime`
-cancellation region. Awaited
+Suspending `onAttach` and `whileAttached` bodies own an `AttachmentLifetime`
+cancellation region representing the logical state-provider attachment. Awaited
 catalog operations whose normalized `OperationSemantics` cancel on process
 close attach their `Suspend`
 terminator to that region. The generated runtime consumes the body-level region
-when the process closes: it detaches the host handle and atomically resets both
-attach readiness and the entire continuation frame. A later process therefore
-enters the first suspension segment with fresh values. This ownership is
+when the provider detaches: it atomically resets both attach readiness and the
+entire continuation frame. Process closure also releases the host handle;
+emulator mapping invalidation retains it for provider rediscovery. A later
+attachment therefore enters the first suspension segment with fresh values. This ownership is
 represented before encoding rather than being rediscovered separately by each
 process or Unity intrinsic.
 
@@ -859,7 +860,7 @@ reuse the ordinary suspension emitter for host polling; literal-only arguments
 remain static data. The original future can remain in a local or aggregate and
 be awaited again. Process closure drops the host-owned root frame and therefore
 its complete nested continuation tree. Semantic validation prevents
-process-lifetime future references, including references nested in aggregates,
+attachment-lifetime future references, including references nested in aggregates,
 from escaping into globals.
 
 `[T]` `for` loops lower through compiler-owned iterable, `u32` index, and
@@ -875,7 +876,7 @@ iteration.
 its poll state and returns pending immediately; dispatching that poll state on
 the next update selects the continuation without replaying the preceding
 segment. Its catalog cancellation behavior still attaches it to the same
-process-lifetime region as process-backed futures.
+attachment-lifetime region as process-backed futures.
 
 `retry expression` uses the same state machine but is not a catalog intrinsic.
 The checker requires the expression to have type `T!`, the Wasm IR records the

@@ -129,10 +129,12 @@ variants and selected paths become GC strings. The preceding tick remains
 available as `oldSettings`.
 
 When process liveness fails, `update` detaches and clears the process handle,
-provider-specific state, attachment-scoped globals, ready flags, and process-lifetime
-continuations. It then invokes `onDetach` exactly once and returns. The detach
-action is compiler-generated
-lifecycle behavior and requires no additional host callback or ABI import.
+provider-specific state, attachment-scoped globals, ready flags, and
+attachment-lifetime continuations. A source-defined emulator-provider probe can
+end the same logical attachment without releasing the still-open host process.
+Either path invokes `onDetach` exactly once after a completed attachment and
+returns. The detach action is compiler-generated lifecycle behavior and
+requires no additional host callback or ABI import.
 
 These explicit frees are an implementation detail of the current C-shaped
 `env` ABI, not a desired SplitScript ownership model. New host-owned collection
@@ -164,7 +166,7 @@ stored separately so readiness cannot be confused with its timer-decision gate.
 The continuation frame program counter selects generated entry, poll, and
 continuation states; successful polls redispatch within the same call.
 The exported `update` loop checks process liveness before every poll
-and consumes the lowered process-lifetime cancellation region on detach,
+and consumes the lowered attachment-lifetime cancellation region on logical detach,
 providing structured cancellation without exposing continuation management to
 the source language.
 

@@ -1777,11 +1777,11 @@ fn render_stdlib_symbol_hover_with_form(
         crate::documentation::strip_intra_doc_links(&prose)
     );
     if let StdlibSymbolId::StateProvider(id) = symbol
-        && library.state_provider(id).refresh.is_some()
+        && library.state_provider(id).validation.is_some()
     {
         markdown.push_str("\n\n");
         markdown.push_str(&crate::documentation::strip_intra_doc_links(
-            crate::stdlib::STATE_PROVIDER_REFRESH_NOTE,
+            crate::stdlib::STATE_PROVIDER_MAPPING_LIFECYCLE_NOTE,
         ));
     }
     append_examples(&mut markdown, documentation.examples);
@@ -2426,7 +2426,8 @@ setup {
                     .markdown
                     .contains("tickRate { attached: 60, detached: 2 }")
             );
-            assert!(hover.markdown.contains("defaults to 120 Hz"));
+            assert!(hover.markdown.contains("1 Hz with no host process"));
+            assert!(hover.markdown.contains("120 Hz while acquiring or polling"));
         }
     }
 
@@ -2747,7 +2748,7 @@ fn classify(value: [u8]) -> bool {
         for (needle, expected) in [
             ("\"Player\"", "Declares a free-form text-input setting"),
             ("choice", "Declares an enum-backed setting choice"),
-            ("onAttach", "Initializes one attached process"),
+            ("onAttach", "Initializes one state-provider attachment"),
         ] {
             let offset = source.find(needle).unwrap() + 1;
             let hover = database.hover(offset).unwrap().expect("language hover");
@@ -2774,8 +2775,13 @@ fn classify(value: [u8]) -> bool {
             .hover(source.find("onDetach").unwrap() + 1)
             .unwrap()
             .expect("onDetach hover");
-        assert!(hover.markdown.contains("once when a process whose"));
-        assert!(hover.markdown.contains("completed closes"));
+        assert!(
+            hover
+                .markdown
+                .contains("once when a logical attachment whose")
+        );
+        assert!(hover.markdown.contains("completed ends"));
+        assert!(hover.markdown.contains("emulator provider also detaches"));
         assert!(
             hover.markdown.contains(
                 "does not run when attachment initialization was still pending or rejected"

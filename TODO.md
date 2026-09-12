@@ -675,7 +675,7 @@ concepts rather than maintaining a parallel inventory.
   used by the Bloodstained, Ender Lilies, COTM, and COTM2 sources. The compiler
   reads at most 512 KiB per poll through the portable read-only WASI path,
   closes its descriptor before yielding, restarts when size or modification
-  time changes between polls, and is cancelled with the process lifetime. This
+  time changes between polls, and is cancelled with the attachment lifetime. This
   deliberately does not weaken an exact source hash to PE version metadata or
   mapped module size.
 - [x] Add compiler-owned same-name process selection without exposing PIDs or
@@ -877,16 +877,15 @@ concepts rather than maintaining a parallel inventory.
   32-bit and 64-bit targets. Ordinary native pointer paths should infer the
   process width. Explicit mixed-width reads remain deliberately unimplemented
   until a real target proves the need and their public spelling is approved.
-- [x] Decide and implement the source-defined provider refresh lifecycle before claiming
+- [x] Decide and implement the source-defined provider mapping lifecycle before claiming
   parity for emulator cores that unload without their host process exiting.
   Every emulator provider now owns a private synchronous mapping-validation
-  operation in the catalog. A failed validation pauses snapshots and timer
-  decisions while the existing cancellable attachment future rediscovers the
-  mapping against the same process. The compiler updates the stable provider
-  object in place so suspended code retains a live alias, seeds the recovered
-  snapshot as a fresh `old` / `current` baseline, and does not synthesize
-  `onDetach` or `onAttach`. Native and Unity providers opt out; the contract is
-  general without adding public syntax.
+  operation in the catalog. A failed validation ends the logical attachment
+  while retaining the still-open emulator process: attachment-scoped state and
+  continuations are cleared, `onDetach` runs for a completed attachment, and
+  ordinary cooperative discovery starts again. A replacement mapping runs
+  `onAttach` and seeds a fresh `old` / `current` baseline. Native and Unity
+  providers opt out; the contract is general without adding public syntax.
 - [ ] Finish the schema-first Unity value surface rather than adding another
   public Mono path API. Bounded managed strings, scalar values, singleton and
   static roots, and nested references should all be expressible in `image` /

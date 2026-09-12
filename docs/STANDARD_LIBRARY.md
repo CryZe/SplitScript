@@ -93,6 +93,13 @@ primitives: each poll inspects at most one range or one signature window before
 returning control to the host. Only hardware-address translation and the final
 host memory read remain compiler-provided representation primitives.
 
+Each emulator provider also owns a private synchronous mapping probe. If that
+probe fails before a state poll, the mapping—not merely the host process—is the
+logical attachment boundary: attachment-scoped state is cleared, `onDetach`
+runs for a completed attachment, and cooperative discovery resumes against the
+still-open emulator. A replacement mapping starts a fresh `onAttach` lifecycle
+and state baseline.
+
 The provider owns the emulator executable list and attachment lifecycle.
 Autosplitters do not call an attachment function or retain an optional handle.
 Only `gba` is available as the process-access root in a GBA script; ordinary
@@ -282,14 +289,14 @@ The reusable ASR surface is grouped by responsibility:
   text inputs with defaults, enum-backed choices, file selectors with
   glob/MIME filters, and typed current/previous tick snapshots.
 - Process attachment to an ordered list of executable names, GC `Module`
-  values containing base and size, and managed process-lifetime cancellation.
+  values containing base and size, and managed attachment-lifetime cancellation.
 - Compile-time parsed `sig"..."` literals and overlapping page-based module
   scanning, including full-byte and nibble wildcards.
 - Typed synchronous and retrying reads for fixed-width primitives and naturally
   laid-out readable structs, non-null address discovery, 64-bit pointer
   traversal, RIP-relative decoding, and arbitrary-range scans.
 - [`nextTick`] as a host-independent one-update suspension integrated with the
-  implicit async action state machine and process-lifetime cancellation. The
+  implicit async action state machine and attachment-lifetime cancellation. The
   language-level `retry expression` form polls arbitrary `T!` expressions;
   race combinators remain planned on the same foundation.
 - Unity IL2CPP module/image/class/field/static-instance discovery, versioned

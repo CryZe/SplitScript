@@ -1297,7 +1297,7 @@ fn validate_future_storage(
         .map(|global| {
             Diagnostic::semantic(
                 format!(
-                    "global `{}` cannot store a process-lifetime async value",
+                    "global `{}` cannot store an attachment-lifetime async value",
                     global.name
                 ),
                 global.name_span,

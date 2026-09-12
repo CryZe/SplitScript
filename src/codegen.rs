@@ -207,13 +207,13 @@ fn provider_attachment_function(
     Some(semantics.function_instance(function.id, signature))
 }
 
-fn provider_refresh_function(
+fn provider_validation_function(
     provider: &crate::stdlib::StdlibStateProvider,
     program: &Program,
     semantics: &SemanticModel,
     standard_library: &StandardLibrary,
 ) -> Option<FunctionInstance> {
-    let item = provider.refresh?;
+    let item = provider.validation?;
     let Implementation::LibraryBody { function_name, .. } =
         standard_library.item(item).implementation
     else {
@@ -223,7 +223,7 @@ fn provider_refresh_function(
         .functions
         .iter()
         .find(|function| function.name == function_name)
-        .expect("source-defined provider refresh validation is injected into the program");
+        .expect("source-defined provider mapping validation is injected into the program");
     let signature = semantics
         .function_parameter_types(function.id)
         .iter()
@@ -447,8 +447,8 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let provider_attachment = provider.and_then(|provider| {
         provider_attachment_function(provider, program, semantics, &standard_library)
     });
-    let provider_refresh = provider.and_then(|provider| {
-        provider_refresh_function(provider, program, semantics, &standard_library)
+    let provider_validation = provider.and_then(|provider| {
+        provider_validation_function(provider, program, semantics, &standard_library)
     });
     let provider_alternatives = provider_declarations
         .iter()
@@ -457,10 +457,10 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
                 .map(|function| (*variant, *provider, function))
         })
         .collect::<Vec<_>>();
-    let provider_alternative_refreshes = provider_declarations
+    let provider_alternative_validations = provider_declarations
         .iter()
         .filter_map(|(variant, provider, declaration, _)| {
-            provider_refresh_function(declaration, program, semantics, &standard_library)
+            provider_validation_function(declaration, program, semantics, &standard_library)
                 .map(|function| (*variant, *provider, function))
         })
         .collect::<Vec<_>>();
@@ -479,9 +479,9 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
                     .iter()
                     .map(|(_, _, function)| function.clone()),
             )
-            .chain(provider_refresh.clone())
+            .chain(provider_validation.clone())
             .chain(
-                provider_alternative_refreshes
+                provider_alternative_validations
                     .iter()
                     .map(|(_, _, function)| function.clone()),
             )
@@ -698,7 +698,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
                 .expect("source provider attachments have frame storage"),
             frame_type: gc.function_frame_index(instance),
             completion_field,
-            validation: provider_refresh
+            validation: provider_validation
                 .as_ref()
                 .map(|instance| user_functions[instance].call),
         }
@@ -724,7 +724,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
                         frame_global: provider_attachment_frames[variant],
                         frame_type: gc.function_frame_index(instance),
                         completion_field,
-                        validation: provider_alternative_refreshes
+                        validation: provider_alternative_validations
                             .iter()
                             .find(|(candidate, _, _)| candidate == variant)
                             .map(|(_, _, instance)| user_functions[instance].call),

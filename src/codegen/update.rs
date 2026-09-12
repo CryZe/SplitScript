@@ -27,7 +27,7 @@ use super::{
     pointer_prefixes::{
         PointerPrefixPlan, PrefixEmissionContext, PrefixEmissionState, PrefixLocals,
     },
-    semantic_type, standard_field_type, state_storage_index, struct_field_type, value_type,
+    semantic_type, state_storage_index, struct_field_type, value_type,
 };
 
 /// Per-tick runtime view of the completed backend plans.
@@ -71,9 +71,15 @@ pub(super) struct ProviderAttach {
     pub frame_type: u32,
     pub completion_field: u32,
     /// Synchronous provider-owned mapping validation. When it returns false,
-    /// the attachment future is reused to rediscover this provider without
-    /// detaching the still-open host process.
+    /// the logical attachment ends and ordinary discovery starts again while
+    /// retaining the still-open host process.
     pub validation: Option<u32>,
+}
+
+#[derive(Clone, Copy)]
+struct ProviderValidation {
+    function: u32,
+    provider_global: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -370,6 +376,140 @@ fn emit_reject_process_candidate(function: &mut Function, lowering: &UpdateConte
         .instruction(&Instruction::GlobalSet(globals.process_name));
 }
 
+fn emit_attached_tick_rate(
+    function: &mut Function,
+    program: &Program,
+    lowering: &UpdateContext<'_>,
+) {
+    function
+        .instruction(&Instruction::F64Const(program.attached_tick_rate().into()))
+        .instruction(&Instruction::Call(
+            lowering.abi.function(AbiImportId::RuntimeSetTickRate),
+        ));
+}
+
+/// Ends one source-visible state-provider attachment. Emulator providers can
+/// lose their guest-memory mapping while the host process remains open, so
+/// process-handle teardown is deliberately separate from attachment-owned
+/// state, continuations, lifecycle events, and polling policy.
+fn emit_attachment_teardown(
+    function: &mut Function,
+    program: &Program,
+    actions: &HashMap<ActionKind, u32>,
+    cancellation_region: Option<wasm_ir::CancellationRegion>,
+    attachment_transition: u32,
+    detach_process: bool,
+    lowering: &UpdateContext<'_>,
+) {
+    let globals = lowering.runtime_globals;
+    let state = program.state.as_ref().expect("update requires state");
+
+    if detach_process {
+        function
+            .instruction(&Instruction::GlobalGet(globals.process))
+            .instruction(&Instruction::Call(
+                lowering.abi.function(AbiImportId::ProcessDetach),
+            ))
+            .instruction(&Instruction::I64Const(0))
+            .instruction(&Instruction::GlobalSet(globals.process))
+            .instruction(&Instruction::I32Const(-1))
+            .instruction(&Instruction::GlobalSet(globals.process_name));
+        if let Some(pointer_size) = globals.process_pointer_size {
+            function
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::GlobalSet(pointer_size));
+        }
+    }
+
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::GlobalSet(globals.state_ready))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::GlobalSet(globals.attach_ready));
+    if let Some(provider_global) = globals.provider_value {
+        let provider_type = lowering
+            .semantics
+            .state_provider()
+            .map(|provider| {
+                lowering
+                    .standard_library
+                    .state_provider(provider)
+                    .process_type
+            })
+            .expect("provider storage requires a resolved provider");
+        emit_provider_default(function, provider_type, lowering);
+        function.instruction(&Instruction::GlobalSet(provider_global));
+    }
+    for alternative in lowering.provider_alternatives {
+        let Some(provider_global) = lowering.provider_values.get(&alternative.provider).copied()
+        else {
+            continue;
+        };
+        emit_provider_default(function, alternative.declaration.process_type, lowering);
+        function.instruction(&Instruction::GlobalSet(provider_global));
+    }
+    if let (Some(frame_global), Some(ProviderAttach { frame_type, .. })) =
+        (globals.provider_attachment_frame, lowering.provider_attach)
+    {
+        function
+            .instruction(&Instruction::RefNull(HeapType::Concrete(frame_type)))
+            .instruction(&Instruction::GlobalSet(frame_global));
+    }
+    for attachment in lowering
+        .provider_alternatives
+        .iter()
+        .filter_map(|alternative| alternative.attachment)
+    {
+        function
+            .instruction(&Instruction::RefNull(HeapType::Concrete(
+                attachment.frame_type,
+            )))
+            .instruction(&Instruction::GlobalSet(attachment.frame_global));
+    }
+    if let Some(preparation) = lowering.provider_preparation {
+        function
+            .instruction(&Instruction::RefNull(HeapType::Concrete(
+                preparation.frame_type,
+            )))
+            .instruction(&Instruction::GlobalSet(preparation.frame_global));
+        emit_storage_default(function, lowering.gc.val_type(preparation.value_type));
+        function
+            .instruction(&Instruction::GlobalSet(preparation.value_global))
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::GlobalSet(preparation.ready_global));
+    }
+    if let (Some(selected), Some(provider_value)) =
+        (globals.selected_provider, state.provider_value)
+    {
+        let provider_type = lowering.global_types[&provider_value];
+        emit_storage_default(function, lowering.gc.val_type(provider_type));
+        function.instruction(&Instruction::GlobalSet(selected));
+    }
+    for value in lowering.attachment_globals {
+        let ty = lowering.global_types[value];
+        if !ty.has_runtime_value() {
+            continue;
+        }
+        emit_storage_default(function, lowering.gc.val_type(ty));
+        function.instruction(&Instruction::GlobalSet(lowering.globals[value]));
+    }
+    if let Some(region) = cancellation_region {
+        emit_cancel_region(function, region, lowering.gc, globals);
+    }
+    function
+        .instruction(&Instruction::F64Const(program.detached_tick_rate().into()))
+        .instruction(&Instruction::Call(
+            lowering.abi.function(AbiImportId::RuntimeSetTickRate),
+        ));
+    if let Some(detach) = actions.get(&ActionKind::OnDetach) {
+        function
+            .instruction(&Instruction::LocalGet(attachment_transition))
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Call(*detach))
+            .instruction(&Instruction::End);
+    }
+}
+
 pub(super) fn compile_update(
     program: &Program,
     strings: &StringPool,
@@ -396,7 +536,7 @@ pub(super) fn compile_update(
     });
     let timer_state = 0;
     let nullable_bool = 1;
-    let newly_attached = 2;
+    let attachment_transition = 2;
     let duration_local = 3;
     let candidate_state = if has_game_time { 4 } else { 3 };
     let first_poll_result = candidate_state + 1;
@@ -504,7 +644,7 @@ pub(super) fn compile_update(
         strings,
         actions,
         selection_locals,
-        newly_attached,
+        attachment_transition,
         lowering,
     );
     function
@@ -513,14 +653,17 @@ pub(super) fn compile_update(
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
+    if lowering.provider_alternatives.is_empty() && lowering.provider_attach.is_none() {
+        function
+            .instruction(&Instruction::LocalGet(attachment_transition))
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::F64Const(program.attached_tick_rate().into()))
+            .instruction(&Instruction::Call(
+                abi.function(AbiImportId::RuntimeSetTickRate),
+            ))
+            .instruction(&Instruction::End);
+    }
     function
-        .instruction(&Instruction::LocalGet(newly_attached))
-        .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::F64Const(program.attached_tick_rate().into()))
-        .instruction(&Instruction::Call(
-            abi.function(AbiImportId::RuntimeSetTickRate),
-        ))
-        .instruction(&Instruction::End)
         .instruction(&Instruction::GlobalGet(globals.process))
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessIsOpen)))
         .instruction(&Instruction::I32Eqz)
@@ -531,104 +674,16 @@ pub(super) fn compile_update(
         .instruction(&Instruction::GlobalGet(globals.attach_ready))
         .instruction(&Instruction::I32Const(ATTACH_READY))
         .instruction(&Instruction::I32Eq)
-        .instruction(&Instruction::LocalSet(newly_attached))
-        .instruction(&Instruction::GlobalGet(globals.process))
-        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessDetach)))
-        .instruction(&Instruction::I64Const(0))
-        .instruction(&Instruction::GlobalSet(globals.process))
-        .instruction(&Instruction::I32Const(-1))
-        .instruction(&Instruction::GlobalSet(globals.process_name))
-        .instruction(&Instruction::I32Const(0))
-        .instruction(&Instruction::GlobalSet(globals.state_ready))
-        .instruction(&Instruction::I32Const(0))
-        .instruction(&Instruction::GlobalSet(globals.attach_ready));
-    if let Some(pointer_size) = globals.process_pointer_size {
-        function
-            .instruction(&Instruction::I32Const(0))
-            .instruction(&Instruction::GlobalSet(pointer_size));
-    }
-    if let Some(provider_global) = globals.provider_value {
-        let provider_type = semantics
-            .state_provider()
-            .map(|provider| {
-                lowering
-                    .standard_library
-                    .state_provider(provider)
-                    .process_type
-            })
-            .expect("provider storage requires a resolved provider");
-        emit_provider_default(&mut function, provider_type, lowering);
-        function.instruction(&Instruction::GlobalSet(provider_global));
-    }
-    for alternative in lowering.provider_alternatives {
-        let Some(provider_global) = lowering.provider_values.get(&alternative.provider).copied()
-        else {
-            continue;
-        };
-        let provider_type = alternative.declaration.process_type;
-        emit_provider_default(&mut function, provider_type, lowering);
-        function.instruction(&Instruction::GlobalSet(provider_global));
-    }
-    if let (Some(frame_global), Some(ProviderAttach { frame_type, .. })) =
-        (globals.provider_attachment_frame, lowering.provider_attach)
-    {
-        function
-            .instruction(&Instruction::RefNull(HeapType::Concrete(frame_type)))
-            .instruction(&Instruction::GlobalSet(frame_global));
-    }
-    for attachment in lowering
-        .provider_alternatives
-        .iter()
-        .filter_map(|alternative| alternative.attachment)
-    {
-        function
-            .instruction(&Instruction::RefNull(HeapType::Concrete(
-                attachment.frame_type,
-            )))
-            .instruction(&Instruction::GlobalSet(attachment.frame_global));
-    }
-    if let Some(preparation) = lowering.provider_preparation {
-        function
-            .instruction(&Instruction::RefNull(HeapType::Concrete(
-                preparation.frame_type,
-            )))
-            .instruction(&Instruction::GlobalSet(preparation.frame_global));
-        emit_storage_default(&mut function, lowering.gc.val_type(preparation.value_type));
-        function
-            .instruction(&Instruction::GlobalSet(preparation.value_global))
-            .instruction(&Instruction::I32Const(0))
-            .instruction(&Instruction::GlobalSet(preparation.ready_global));
-    }
-    if let (Some(selected), Some(provider_value)) =
-        (globals.selected_provider, state.provider_value)
-    {
-        let provider_type = lowering.global_types[&provider_value];
-        emit_storage_default(&mut function, lowering.gc.val_type(provider_type));
-        function.instruction(&Instruction::GlobalSet(selected));
-    }
-    for value in lowering.attachment_globals {
-        let ty = lowering.global_types[value];
-        if !ty.has_runtime_value() {
-            continue;
-        }
-        emit_storage_default(&mut function, lowering.gc.val_type(ty));
-        function.instruction(&Instruction::GlobalSet(lowering.globals[value]));
-    }
-    if let Some(region) = cancellation_region {
-        emit_cancel_region(&mut function, region, lowering.gc, globals);
-    }
-    function
-        .instruction(&Instruction::F64Const(program.detached_tick_rate().into()))
-        .instruction(&Instruction::Call(
-            abi.function(AbiImportId::RuntimeSetTickRate),
-        ));
-    if let Some(detach) = actions.get(&ActionKind::OnDetach) {
-        function
-            .instruction(&Instruction::LocalGet(newly_attached))
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::Call(*detach))
-            .instruction(&Instruction::End);
-    }
+        .instruction(&Instruction::LocalSet(attachment_transition));
+    emit_attachment_teardown(
+        &mut function,
+        program,
+        actions,
+        cancellation_region,
+        attachment_transition,
+        true,
+        lowering,
+    );
     function
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
@@ -676,7 +731,15 @@ pub(super) fn compile_update(
                 function
                     .instruction(&Instruction::GlobalGet(attachment.frame_global))
                     .instruction(&Instruction::RefIsNull)
-                    .instruction(&Instruction::If(BlockType::Empty))
+                    .instruction(&Instruction::If(BlockType::Empty));
+                // Callable providers discover their guest mapping cooperatively.
+                // Use the active cadence before the first poll: range discovery
+                // and signature scans intentionally perform bounded work per
+                // update and would otherwise take prohibitively long at the
+                // detached cadence. Mapping validation still owns the logical
+                // attachment boundary and restores the detached rate first.
+                emit_attached_tick_rate(&mut function, program, lowering);
+                function
                     .instruction(&Instruction::Call(attachment.init))
                     .instruction(&Instruction::GlobalSet(attachment.frame_global))
                     .instruction(&Instruction::End)
@@ -709,6 +772,7 @@ pub(super) fn compile_update(
                     alternative.declaration.attachment,
                     crate::stdlib::StateProviderAttachment::Identity
                 );
+                emit_attached_tick_rate(&mut function, program, lowering);
                 emit_provider_selection(
                     &mut function,
                     variant_index,
@@ -728,17 +792,16 @@ pub(super) fn compile_update(
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End);
 
-        // Provider alternatives retain their selected semantic variant while
-        // its private mapping is rediscovered. This avoids switching the
-        // source-visible state shape merely because a libretro core was
-        // temporarily unloaded.
+        // The selected alternative owns the logical attachment. Losing its
+        // private mapping ends that attachment even if the shared host process
+        // remains open; ordinary provider selection runs again next update.
         for (variant_index, alternative) in lowering.provider_alternatives.iter().enumerate() {
             let Some(attachment) = alternative.attachment else {
                 continue;
             };
-            if attachment.validation.is_none() {
+            let Some(validation) = attachment.validation else {
                 continue;
-            }
+            };
             function
                 .instruction(&Instruction::GlobalGet(selected))
                 .instruction(&Instruction::StructGet {
@@ -748,11 +811,16 @@ pub(super) fn compile_update(
                 .instruction(&Instruction::I32Const(variant_index as i32))
                 .instruction(&Instruction::I32Eq)
                 .instruction(&Instruction::If(BlockType::Empty));
-            emit_provider_refresh(
+            emit_provider_validation(
                 &mut function,
-                attachment,
-                lowering.provider_values[&alternative.provider],
-                alternative.declaration.process_type,
+                program,
+                actions,
+                cancellation_region,
+                ProviderValidation {
+                    function: validation,
+                    provider_global: lowering.provider_values[&alternative.provider],
+                },
+                attachment_transition,
                 lowering,
             );
             function.instruction(&Instruction::End);
@@ -784,7 +852,12 @@ pub(super) fn compile_update(
         function
             .instruction(&Instruction::GlobalGet(frame_global))
             .instruction(&Instruction::RefIsNull)
-            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::If(BlockType::Empty));
+        // Provider acquisition is cooperative and may scan only one bounded
+        // window or mapped range per host update. Raise the cadence before the
+        // future starts, both initially and after mapping invalidation.
+        emit_attached_tick_rate(&mut function, program, lowering);
+        function
             .instruction(&Instruction::Call(init))
             .instruction(&Instruction::GlobalSet(frame_global))
             .instruction(&Instruction::End)
@@ -809,13 +882,20 @@ pub(super) fn compile_update(
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End);
-        emit_provider_refresh(
-            &mut function,
-            provider_attach,
-            provider_global,
-            provider_type,
-            lowering,
-        );
+        if let Some(validation) = provider_attach.validation {
+            emit_provider_validation(
+                &mut function,
+                program,
+                actions,
+                cancellation_region,
+                ProviderValidation {
+                    function: validation,
+                    provider_global,
+                },
+                attachment_transition,
+                lowering,
+            );
+        }
     }
 
     if let Some(preparation) = lowering.provider_preparation {
@@ -2084,82 +2164,52 @@ fn emit_poll_value(
     );
 }
 
-/// Keeps the source-visible provider value at one stable GC identity while
-/// replacing its private mapping after an emulator core unloads. Validation
-/// is deliberately provider-owned; the generated lifecycle only coordinates
-/// the existing cancellable attachment future and state-snapshot boundary.
-fn emit_provider_refresh(
+/// Treats a provider-owned mapping as the source-visible attachment boundary.
+/// A failed probe tears down that logical attachment while deliberately
+/// retaining the still-open emulator process; normal discovery and lifecycle
+/// initialization start again on the following update.
+fn emit_provider_validation(
     function: &mut Function,
-    attachment: ProviderAttach,
-    provider_global: u32,
-    provider_type: StdlibTypeId,
+    program: &Program,
+    actions: &HashMap<ActionKind, u32>,
+    cancellation_region: Option<wasm_ir::CancellationRegion>,
+    validation: ProviderValidation,
+    attachment_transition: u32,
     lowering: &UpdateContext<'_>,
 ) {
-    let Some(validation) = attachment.validation else {
-        return;
-    };
-
-    // A non-null attachment frame means rediscovery is already pending. Only
-    // start one after the last accepted mapping fails its cheap validation.
+    // A rejected onAttach remains inert until the host process closes. Every
+    // other accepted or initializing provider is abandoned if its backing
+    // mapping disappears.
     function
-        .instruction(&Instruction::GlobalGet(attachment.frame_global))
-        .instruction(&Instruction::RefIsNull)
-        .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::GlobalGet(provider_global))
-        .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::Call(validation))
-        .instruction(&Instruction::I32Eqz)
-        .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::Call(attachment.init))
-        .instruction(&Instruction::GlobalSet(attachment.frame_global))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::GlobalGet(attachment.frame_global))
-        .instruction(&Instruction::RefIsNull)
-        .instruction(&Instruction::I32Eqz)
-        .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::GlobalGet(attachment.frame_global))
-        .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::Call(attachment.poll))
-        .instruction(&Instruction::I32Eqz)
-        .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::Return)
-        .instruction(&Instruction::End);
-
-    let provider_struct = lowering.gc.standard_index(provider_type);
-    for field in lowering.standard_library.fields_of(provider_type) {
-        function
-            .instruction(&Instruction::GlobalGet(provider_global))
-            .instruction(&Instruction::RefAsNonNull)
-            .instruction(&Instruction::GlobalGet(attachment.frame_global))
-            .instruction(&Instruction::RefAsNonNull)
-            .instruction(&Instruction::StructGet {
-                struct_type_index: attachment.frame_type,
-                field_index: attachment.completion_field,
-            })
-            .instruction(&Instruction::RefAsNonNull);
-        emit_typed_struct_get(
-            function,
-            provider_struct,
-            lowering.gc.standard_field_index(field.id),
-            standard_field_type(field.id, lowering.semantics),
-        );
-        function.instruction(&Instruction::StructSet {
-            struct_type_index: provider_struct,
-            field_index: lowering.gc.standard_field_index(field.id),
-        });
-    }
-    function
-        .instruction(&Instruction::RefNull(HeapType::Concrete(
-            attachment.frame_type,
-        )))
-        .instruction(&Instruction::GlobalSet(attachment.frame_global))
-        // The first complete snapshot from the replacement mapping becomes a
-        // fresh old/current baseline and cannot manufacture a timer decision.
-        .instruction(&Instruction::I32Const(0))
-        .instruction(&Instruction::GlobalSet(
-            lowering.runtime_globals.state_ready,
+        .instruction(&Instruction::GlobalGet(
+            lowering.runtime_globals.attach_ready,
         ))
+        .instruction(&Instruction::I32Const(ATTACH_REJECTED))
+        .instruction(&Instruction::I32Ne)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::GlobalGet(validation.provider_global))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::Call(validation.function))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::GlobalGet(
+            lowering.runtime_globals.attach_ready,
+        ))
+        .instruction(&Instruction::I32Const(ATTACH_READY))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalSet(attachment_transition));
+    emit_attachment_teardown(
+        function,
+        program,
+        actions,
+        cancellation_region,
+        attachment_transition,
+        false,
+        lowering,
+    );
+    function
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
         .instruction(&Instruction::End);
 }
 
@@ -2214,7 +2264,7 @@ fn emit_cancel_region(
     globals: RuntimeGlobals,
 ) {
     match region {
-        wasm_ir::CancellationRegion::ProcessLifetime => {
+        wasm_ir::CancellationRegion::AttachmentLifetime => {
             function
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::GlobalSet(globals.attach_ready))

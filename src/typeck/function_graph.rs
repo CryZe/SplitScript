@@ -178,7 +178,7 @@ mod tests {
 
     fn component_names(source: &str) -> Vec<Vec<String>> {
         let parsed = crate::parse(source).expect("function graph fixture should parse");
-        dependency_order(&parsed.syntax)
+        dependency_order(parsed.syntax())
             .into_iter()
             .map(|component| {
                 component
@@ -186,7 +186,7 @@ mod tests {
                     .into_iter()
                     .map(|function| {
                         parsed
-                            .syntax
+                            .syntax()
                             .functions
                             .iter()
                             .find(|declaration| declaration.id == function)

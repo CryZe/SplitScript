@@ -5,6 +5,7 @@
 //! type-directed resolutions without attaching them to syntax nodes.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::{
     ast::{
@@ -637,7 +638,7 @@ pub struct StateTransform {
 #[derive(Debug, Clone)]
 pub struct TypedProgram {
     standard_library: StandardLibrary,
-    declarations: DeclarationIndex,
+    declarations: Arc<DeclarationIndex>,
     expressions: Vec<TypedExpression>,
     assignments: Vec<ResolvedAssignment>,
     patterns: Vec<ResolvedPattern>,
@@ -677,7 +678,7 @@ pub(crate) fn visible_expression_count(program: &SyntaxProgram) -> usize {
 
 impl TypedProgram {
     pub(crate) fn build(
-        declarations: DeclarationIndex,
+        declarations: Arc<DeclarationIndex>,
         syntax: &SyntaxProgram,
         semantics: &SemanticModel,
         standard_library: StandardLibrary,
@@ -856,6 +857,10 @@ impl TypedProgram {
 
     pub fn declarations(&self) -> &DeclarationIndex {
         &self.declarations
+    }
+
+    pub(crate) fn declarations_arc(&self) -> Arc<DeclarationIndex> {
+        Arc::clone(&self.declarations)
     }
 
     pub fn standard_library(&self) -> &StandardLibrary {

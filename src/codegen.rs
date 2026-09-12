@@ -300,7 +300,7 @@ impl<'a> BackendProgram<'a> {
             capabilities: &checked.capabilities,
             scoped_globals: &checked.scoped_globals,
             source_name: checked.source_name(),
-            source: checked.document.source(),
+            source: checked.source_document().source(),
         }
     }
 

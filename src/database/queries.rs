@@ -153,9 +153,7 @@ impl CompilerDatabase {
                 {
                     Ok(Arc::new(ParsedProgram {
                         context: recovered.context(),
-                        source_name: recovered.source_name().to_owned(),
-                        document: recovered.source_document().clone(),
-                        syntax: recovered.syntax().clone(),
+                        source: Arc::clone(&recovered.source),
                         syntax_diagnostics: recovered.diagnostics().to_vec(),
                         resolution_diagnostics: recovered.resolution_diagnostics().to_vec(),
                     }))
@@ -236,8 +234,8 @@ impl CompilerDatabase {
                         // augmentation. Retain the recovered user tree for editor
                         // queries, without promoting it into the strict cache or
                         // retrying the same failed augmentation.
-                        let syntax = recovered.syntax().clone();
-                        let compilation_syntax = Arc::new(syntax.clone());
+                        let syntax = recovered.syntax();
+                        let compilation_syntax = Arc::clone(&recovered.source.syntax);
                         let mut resolution_diagnostics =
                             recovered.resolution_diagnostics().to_vec();
                         let mut resolutions = crate::resolution::ProgramResolutions::default();
@@ -248,12 +246,10 @@ impl CompilerDatabase {
                         ));
                         Ok(Arc::new(LoweredProgram {
                             context: recovered.context(),
-                            source_name: recovered.source_name().to_owned(),
-                            document: recovered.source_document().clone(),
-                            hir: crate::hir::DeclarationIndex::lower(&syntax),
+                            source: Arc::clone(&recovered.source),
+                            hir: Arc::new(crate::hir::DeclarationIndex::lower(syntax)),
                             compilation_syntax,
-                            syntax,
-                            resolutions,
+                            resolutions: Arc::new(resolutions),
                             syntax_diagnostics: recovered.diagnostics().to_vec(),
                             resolution_diagnostics,
                         }))

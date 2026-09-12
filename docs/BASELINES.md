@@ -1772,3 +1772,51 @@ sequence is 2.89 MiB for small, 5.67 MiB for Lunistice, and 12.62 MiB for
 generated large, versus 2.5 MiB, 4.8 MiB, and 10.7 MiB on 2026-08-31. The
 corresponding peak deltas are 9.56 MiB, 12.74 MiB, and 33.35 MiB, versus 8.0
 MiB, 11.0 MiB, and 27.9 MiB.
+
+### 2026-09-12 shared compiler-product follow-up
+
+The compiler database now shares one immutable source document and syntax tree
+across recovering parse, strict parse, lowering, checking, and recovery.
+Lowered declaration and resolution products are also shared with checking;
+typed HIR owns only its transformed body facts while retaining the same
+declaration index. This removes the former whole-program clones at database
+stage boundaries.
+
+Measurements used Rust 1.98.1, the release harness, 20 warmups, and 30 measured
+samples. Runs were sequential. The stage comparison used the same working-tree
+source before and after the change:
+
+| Fixture | Stage | Before median | After median |
+| --- | --- | ---: | ---: |
+| small | parse | 10.1 µs | 7.7 µs |
+| small | lower | 2,489.4 µs | 2,424.8 µs |
+| small | check | 14,985.1 µs | 14,556.3 µs |
+| generated large | parse | 1,759.5 µs | 1,249.9 µs |
+| generated large | lower | 5,507.5 µs | 4,485.4 µs |
+| generated large | check | 25,939.2 µs | 22,657.2 µs |
+
+For an exact immediate-parent comparison, commit `6add20a` and the changed
+compiler were built in turn into the same target directory. The maintained
+Lunistice file had unrelated working-tree changes and is therefore deliberately
+omitted from this table; the small and generated fixtures were byte-identical.
+
+| Fixture | Query | Parent p95 | Shared-products p95 |
+| --- | --- | ---: | ---: |
+| small | cold diagnostics | 15.73 ms | 15.58 ms |
+| small | edit → diagnostics | 15.10 ms | 15.38 ms |
+| small | edit → root completion | 14.67 ms | 14.39 ms |
+| small | edit → member completion | 14.59 ms | 14.43 ms |
+| small | edit → hover | 24.88 ms | 23.89 ms |
+| small | edit → semantic tokens | 26.36 ms | 24.34 ms |
+| generated large | cold diagnostics | 49.48 ms | 43.13 ms |
+| generated large | edit → diagnostics | 47.76 ms | 43.57 ms |
+| generated large | edit → root completion | 53.15 ms | 49.42 ms |
+| generated large | edit → member completion | 54.34 ms | 49.57 ms |
+| generated large | edit → hover | 55.71 ms | 53.37 ms |
+| generated large | edit → semantic tokens | 58.96 ms | 55.30 ms |
+
+The generated fixture's retained complete-query cache fell from 13.76 MiB to
+9.64 MiB. Its already-cached multi-query p95 varied from 11.49 ms to 12.91 ms;
+this change therefore claims improvement for revision-building editor queries
+and retained ownership, not for query work that executes after every requested
+product is already cached.

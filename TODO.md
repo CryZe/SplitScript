@@ -935,12 +935,18 @@ concepts rather than maintaining a parallel inventory.
   repair probe, return compact receiver facts rather than cloned programs, and
   use binary search/`partition_point` for ordered token and definition-reference
   cursor lookups with boundary/trivia regressions.
-- [ ] Replace deep per-stage ownership copies with shared immutable compiler
+- [x] Replace deep per-stage ownership copies with shared immutable compiler
   products. Share source documents, syntax, and stable resolution inputs through
   `Arc` or borrowing; let each later stage own only transformed facts. Measure
   parse, diagnostics, semantic tokens, hover, and completion on one database
   before and after, rather than hiding the issue behind additional `Clone`
-  implementations.
+  implementations. Parse, lower, check, and recovery now share one immutable
+  source product; lowered declarations and resolution inputs are shared through
+  strict and recovered checking. The exact-parent 30-sample runner improved
+  every cold generated-source editor query, including diagnostics, both
+  completion shapes, hover, and semantic tokens, while reducing the retained
+  complete-query cache from 13.8 MiB to 9.6 MiB. See `docs/BASELINES.md` for the
+  stage and query data.
 - [x] Bound recovery and diagnostic construction on large foreign inputs. The
   shared recovering lexer now resumes from the failed token boundary instead of
   re-lexing the complete prefix after every error, with an explicit no-progress

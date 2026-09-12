@@ -290,13 +290,21 @@ fn derive_standard_library_operation_metadata(
     Ok(operations)
 }
 
+/// Immutable source-owned products shared by every compiler stage for one
+/// revision. Later stages add transformed facts without copying the lossless
+/// document or syntax tree.
+#[derive(Debug)]
+struct ParsedSource {
+    source_name: String,
+    document: std::sync::Arc<syntax::SourceDocument>,
+    syntax: std::sync::Arc<ast::Program>,
+}
+
 /// A source file that has been parsed but not semantically checked.
 #[derive(Debug, Clone)]
 pub struct ParsedProgram {
     context: CompilerContext,
-    source_name: String,
-    document: syntax::SourceDocument,
-    syntax: ast::Program,
+    source: std::sync::Arc<ParsedSource>,
     syntax_diagnostics: Vec<Diagnostic>,
     resolution_diagnostics: Vec<Diagnostic>,
 }
@@ -307,9 +315,7 @@ pub struct ParsedProgram {
 #[derive(Debug, Clone)]
 pub struct RecoveredParse {
     context: CompilerContext,
-    source_name: String,
-    document: syntax::SourceDocument,
-    syntax: ast::Program,
+    source: std::sync::Arc<ParsedSource>,
     diagnostics: Vec<Diagnostic>,
     resolution_diagnostics: Vec<Diagnostic>,
     recovery_nodes: Vec<syntax::RecoveryNode>,
@@ -321,15 +327,15 @@ impl RecoveredParse {
     }
 
     pub fn source_document(&self) -> &syntax::SourceDocument {
-        &self.document
+        &self.source.document
     }
 
     pub fn source_name(&self) -> &str {
-        &self.source_name
+        &self.source.source_name
     }
 
     pub fn syntax(&self) -> &ast::Program {
-        &self.syntax
+        &self.source.syntax
     }
 
     pub fn diagnostics(&self) -> &[Diagnostic] {
@@ -352,14 +358,12 @@ impl RecoveredParse {
 #[derive(Debug, Clone)]
 pub struct LoweredProgram {
     context: CompilerContext,
-    source_name: String,
-    document: syntax::SourceDocument,
-    syntax: ast::Program,
+    source: std::sync::Arc<ParsedSource>,
     /// User syntax plus compiler-owned standard-library bodies. Kept private
     /// so editor and public compiler queries never expose injected symbols.
     compilation_syntax: std::sync::Arc<ast::Program>,
-    hir: hir::DeclarationIndex,
-    resolutions: resolution::ProgramResolutions,
+    hir: std::sync::Arc<hir::DeclarationIndex>,
+    resolutions: std::sync::Arc<resolution::ProgramResolutions>,
     /// Parser diagnostics retained only by editor-oriented recovered lowering.
     /// Strictly parsed programs always leave this empty.
     syntax_diagnostics: Vec<Diagnostic>,
@@ -372,15 +376,15 @@ impl LoweredProgram {
     }
 
     pub fn source_document(&self) -> &syntax::SourceDocument {
-        &self.document
+        &self.source.document
     }
 
     pub fn source_name(&self) -> &str {
-        &self.source_name
+        &self.source.source_name
     }
 
     pub fn syntax(&self) -> &ast::Program {
-        &self.syntax
+        &self.source.syntax
     }
 
     pub fn hir(&self) -> &hir::DeclarationIndex {
@@ -404,19 +408,21 @@ impl ParsedProgram {
     }
 
     pub fn source_document(&self) -> &syntax::SourceDocument {
-        &self.document
+        &self.source.document
     }
 
     pub fn source_name(&self) -> &str {
-        &self.source_name
+        &self.source.source_name
     }
 
     pub fn syntax(&self) -> &ast::Program {
-        &self.syntax
+        &self.source.syntax
     }
 
     pub fn into_syntax(self) -> ast::Program {
-        self.syntax
+        let syntax = std::sync::Arc::try_unwrap(self.source)
+            .map_or_else(|source| source.syntax.clone(), |source| source.syntax);
+        std::sync::Arc::try_unwrap(syntax).unwrap_or_else(|syntax| syntax.as_ref().clone())
     }
 }
 
@@ -425,9 +431,7 @@ impl ParsedProgram {
 #[derive(Debug, Clone)]
 pub struct CheckedProgram {
     context: CompilerContext,
-    source_name: String,
-    document: syntax::SourceDocument,
-    syntax: ast::Program,
+    source: std::sync::Arc<ParsedSource>,
     compilation_syntax: std::sync::Arc<ast::Program>,
     hir: hir::TypedProgram,
     diagnostics: Vec<Diagnostic>,
@@ -463,10 +467,8 @@ enum RecoveryData {
 #[derive(Debug)]
 struct PartialCheck {
     context: CompilerContext,
-    source_name: String,
-    document: syntax::SourceDocument,
-    syntax: ast::Program,
-    hir: hir::DeclarationIndex,
+    source: std::sync::Arc<ParsedSource>,
+    hir: std::sync::Arc<hir::DeclarationIndex>,
     semantics: semantic::SemanticModel,
     diagnostics: Vec<Diagnostic>,
     enum_types: Vec<ast::EnumDecl>,
@@ -497,21 +499,21 @@ impl RecoveredCheck {
     pub fn source_document(&self) -> &syntax::SourceDocument {
         match &self.data {
             RecoveryData::Checked(checked) => checked.source_document(),
-            RecoveryData::Partial(partial) => &partial.document,
+            RecoveryData::Partial(partial) => &partial.source.document,
         }
     }
 
     pub fn source_name(&self) -> &str {
         match &self.data {
             RecoveryData::Checked(checked) => checked.source_name(),
-            RecoveryData::Partial(partial) => &partial.source_name,
+            RecoveryData::Partial(partial) => &partial.source.source_name,
         }
     }
 
     pub fn syntax(&self) -> &ast::Program {
         match &self.data {
             RecoveryData::Checked(checked) => checked.syntax(),
-            RecoveryData::Partial(partial) => &partial.syntax,
+            RecoveryData::Partial(partial) => &partial.source.syntax,
         }
     }
 
@@ -559,15 +561,15 @@ impl CheckedProgram {
     }
 
     pub fn source_document(&self) -> &syntax::SourceDocument {
-        &self.document
+        &self.source.document
     }
 
     pub fn source_name(&self) -> &str {
-        &self.source_name
+        &self.source.source_name
     }
 
     pub fn syntax(&self) -> &ast::Program {
-        &self.syntax
+        &self.source.syntax
     }
 
     pub fn semantics(&self) -> &semantic::SemanticModel {
@@ -651,9 +653,7 @@ pub fn parse_named_with_context(
     }
     Ok(ParsedProgram {
         context,
-        source_name: recovered.source_name,
-        document: recovered.document,
-        syntax: recovered.syntax,
+        source: recovered.source,
         syntax_diagnostics: recovered.diagnostics,
         resolution_diagnostics: recovered.resolution_diagnostics,
     })
@@ -693,9 +693,11 @@ pub fn parse_recovering_named_with_context(
         resolution::validate_declarations(&output.program, &context.standard_library());
     Ok(RecoveredParse {
         context,
-        source_name: source_name.into(),
-        document: syntax::SourceDocument::from_lexed(source, lexed),
-        syntax: output.program,
+        source: std::sync::Arc::new(ParsedSource {
+            source_name: source_name.into(),
+            document: std::sync::Arc::new(syntax::SourceDocument::from_lexed(source, lexed)),
+            syntax: std::sync::Arc::new(output.program),
+        }),
         diagnostics,
         resolution_diagnostics,
         recovery_nodes: output.recovery_nodes,
@@ -719,13 +721,13 @@ pub fn lower(parsed: ParsedProgram) -> LoweredProgram {
 /// uses this boundary to fall back to recovered semantics rather than letting
 /// an internal augmentation failure terminate the language server.
 pub(crate) fn lower_for_tooling(parsed: ParsedProgram) -> Result<LoweredProgram, Vec<Diagnostic>> {
-    let syntax = parsed.syntax;
+    let syntax = &parsed.source.syntax;
     let syntax_diagnostics = parsed.syntax_diagnostics;
     let mut resolution_diagnostics = parsed.resolution_diagnostics;
     let augmented = if parsed.context.include_standard_library_bodies {
         stdlib::augment_program_with_library_bodies(
-            parsed.document.source(),
-            &syntax,
+            parsed.source.document.source(),
+            syntax,
             &parsed.context.standard_library(),
         )?
     } else {
@@ -733,22 +735,22 @@ pub(crate) fn lower_for_tooling(parsed: ParsedProgram) -> Result<LoweredProgram,
     };
     // Lowering and checking only read this tree. Database stage transitions
     // can share all injected library bodies instead of deep-cloning them.
-    let compilation_syntax = std::sync::Arc::new(augmented.unwrap_or_else(|| syntax.clone()));
+    let compilation_syntax = augmented
+        .map(std::sync::Arc::new)
+        .unwrap_or_else(|| std::sync::Arc::clone(&parsed.source.syntax));
     let mut resolutions = resolution::ProgramResolutions::default();
     resolution_diagnostics.extend(resolution::resolve_program(
         &compilation_syntax,
         &parsed.context.standard_library(),
         &mut resolutions,
     ));
-    let hir = hir::DeclarationIndex::lower(&syntax);
+    let hir = hir::DeclarationIndex::lower(syntax);
     Ok(LoweredProgram {
         context: parsed.context,
-        source_name: parsed.source_name,
-        document: parsed.document,
-        syntax,
+        source: parsed.source,
         compilation_syntax,
-        hir,
-        resolutions,
+        hir: std::sync::Arc::new(hir),
+        resolutions: std::sync::Arc::new(resolutions),
         syntax_diagnostics,
         resolution_diagnostics,
     })
@@ -778,9 +780,7 @@ fn check_impl(
 ) -> Result<CheckedProgram, Vec<Diagnostic>> {
     let LoweredProgram {
         context,
-        source_name,
-        document,
-        syntax,
+        source,
         compilation_syntax,
         hir,
         resolutions,
@@ -811,9 +811,7 @@ fn check_impl(
             diagnostics.extend(inference_diagnostics.iter().cloned());
             *recovery = Some(RecoveredCheck::partial(PartialCheck {
                 context,
-                source_name,
-                document,
-                syntax,
+                source,
                 hir,
                 semantics: output.semantics,
                 diagnostics,
@@ -832,8 +830,8 @@ fn check_impl(
         &output.semantics,
         context.standard_library(),
         context.include_standard_library_bodies,
-        hir::visible_expression_count(&syntax),
-        syntax.functions.len(),
+        hir::visible_expression_count(&source.syntax),
+        source.syntax.functions.len(),
     );
     output
         .semantics
@@ -859,10 +857,8 @@ fn check_impl(
             diagnostics.extend(validation.diagnostics.iter().cloned());
             *recovery = Some(RecoveredCheck::partial(PartialCheck {
                 context,
-                source_name,
-                document,
-                syntax,
-                hir: typed_hir.declarations().clone(),
+                source,
+                hir: typed_hir.declarations_arc(),
                 semantics: output.semantics,
                 diagnostics,
                 enum_types: output.enum_types,
@@ -877,9 +873,7 @@ fn check_impl(
     diagnostics.extend(validation.diagnostics);
     Ok(CheckedProgram {
         context,
-        source_name,
-        document,
-        syntax,
+        source,
         compilation_syntax,
         hir: typed_hir,
         diagnostics,
@@ -904,9 +898,7 @@ fn check_impl(
 pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
     let LoweredProgram {
         context,
-        source_name,
-        document,
-        syntax,
+        source,
         compilation_syntax,
         hir,
         resolutions,
@@ -930,8 +922,8 @@ pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
             &recovered.output.semantics,
             context.standard_library(),
             context.include_standard_library_bodies,
-            hir::visible_expression_count(&syntax),
-            syntax.functions.len(),
+            hir::visible_expression_count(&source.syntax),
+            source.syntax.functions.len(),
         );
         recovered
             .output
@@ -953,9 +945,7 @@ pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
     }
     RecoveredCheck::partial(PartialCheck {
         context,
-        source_name,
-        document,
-        syntax,
+        source,
         hir,
         semantics: recovered.output.semantics,
         diagnostics,

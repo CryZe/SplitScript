@@ -8,6 +8,24 @@ const SOURCE: &str = "// Unicode 🦊\nstate \"game.exe\" { level: u32 at 0x100 
     whileAttached { let f = value => value; print(identity(f(current.level))) }\n";
 
 #[test]
+fn compiler_stages_share_immutable_source_and_declaration_products() {
+    let mut database = CompilerDatabase::with_source_name("sharing.split", SOURCE);
+
+    let recovered = database.recovering_parse().unwrap();
+    let parsed = database.parse().unwrap();
+    let lowered = database.lower().unwrap();
+    let checked = database.check().unwrap();
+
+    assert!(Arc::ptr_eq(&recovered.source, &parsed.source));
+    assert!(Arc::ptr_eq(&parsed.source, &lowered.source));
+    assert!(Arc::ptr_eq(&lowered.source, &checked.source));
+    assert!(Arc::ptr_eq(
+        &lowered.hir,
+        &checked.typed_hir().declarations_arc()
+    ));
+}
+
+#[test]
 fn published_syntax_errors_have_a_deterministic_budget() {
     let source = format!("state \"game.exe\" {{}}\n{}", "$\n".repeat(250));
     let mut database = CompilerDatabase::new(source);

@@ -1279,25 +1279,17 @@ impl Checker {
 
     pub(super) fn function_name_suggestion(&self, callee: &[String]) -> Option<String> {
         let (name, prefix) = callee.split_last()?;
-        let standard_library = self.standard_library.clone();
-        let mut candidates = standard_library
-            .items()
-            .filter_map(|item| {
-                let path = standard_library.item_path(item)?;
-                (path.len() == callee.len()
-                    && path[..path.len() - 1]
-                        .iter()
-                        .copied()
-                        .eq(prefix.iter().map(String::as_str)))
-                .then_some(item.name)
-            })
-            .map(str::to_owned)
+        let prefix = prefix.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut candidates = self
+            .standard_library
+            .items_with_path_prefix(&prefix)
+            .map(|item| item.name)
             .collect::<Vec<_>>();
         if prefix.is_empty() {
-            candidates.extend(self.declarations.functions.keys().cloned());
-            candidates.extend(["Some".to_owned(), "Ok".to_owned(), "Err".to_owned()]);
+            candidates.extend(self.declarations.functions.keys().map(String::as_str));
+            candidates.extend(["Some", "Ok", "Err"]);
         }
-        closest_name(name, candidates.iter().map(String::as_str))
+        closest_name(name, candidates.into_iter())
     }
 
     pub(super) fn method_name_suggestion(

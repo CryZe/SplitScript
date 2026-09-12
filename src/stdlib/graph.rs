@@ -45,6 +45,7 @@ pub(super) struct StandardLibraryGraph {
     pub(super) items: HashMap<StdlibItemId, &'static StdlibItem>,
     pub(super) items_by_name: HashMap<&'static str, &'static StdlibItem>,
     pub(super) all_items_by_name: HashMap<&'static str, &'static StdlibItem>,
+    pub(super) items_by_path_prefix: HashMap<Vec<&'static str>, Vec<&'static StdlibItem>>,
     pub(super) source_body_items_by_function_name: HashMap<&'static str, &'static StdlibItem>,
     pub(super) methods: Vec<&'static StdlibItem>,
     pub(super) methods_by_name: HashMap<&'static str, Vec<&'static StdlibItem>>,
@@ -327,6 +328,7 @@ impl StandardLibraryGraph {
             items,
             items_by_name,
             all_items_by_name,
+            items_by_path_prefix: HashMap::new(),
             source_body_items_by_function_name,
             methods,
             methods_by_name,
@@ -345,6 +347,21 @@ impl StandardLibraryGraph {
         self.source_body_operations
             .get()
             .and_then(|operations| operations.get(&item).copied())
+    }
+
+    pub(super) fn item_path(&self, item: &StdlibItem) -> Option<Vec<&'static str>> {
+        let mut path = match item.owner {
+            StdlibOwner::Root => Vec::new(),
+            StdlibOwner::Namespace(namespace) => self.namespaces.get(&namespace)?.path.to_vec(),
+            StdlibOwner::Type(ty) => vec![self.types.get(&ty)?.name],
+            StdlibOwner::TypeConstructor(constructor) => {
+                vec![self.type_constructors.get(&constructor)?.name]
+            }
+            StdlibOwner::Core(core) => vec![self.core_types.get(&core)?.name],
+            StdlibOwner::Capability(_) => return None,
+        };
+        path.push(item.name);
+        Some(path)
     }
 
     pub(super) fn initialize_source_body_operations_with(
@@ -476,6 +493,15 @@ impl StandardLibraryGraph {
             }
             if item.visibility == ItemVisibility::Public {
                 self.push_child(item.owner, StdlibSymbolId::Item(item.id));
+                // Typo suggestions also run while resolving ordinary method
+                // calls. Index their exact source scope once, in catalog order.
+                if let Some(mut path) = self.item_path(item) {
+                    path.pop();
+                    self.items_by_path_prefix
+                        .entry(path)
+                        .or_default()
+                        .push(item);
+                }
             }
         }
     }

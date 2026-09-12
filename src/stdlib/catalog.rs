@@ -60,6 +60,59 @@ mod tests {
     use super::*;
 
     #[test]
+    fn source_path_scopes_preserve_public_candidates_and_catalog_order() {
+        let library = StandardLibrary::new();
+        let scopes: &[&[&str]] = &[
+            &[],
+            &["future"],
+            &["Duration"],
+            &["Set"],
+            &["u32"],
+            &["Unity"],
+        ];
+        for &scope in scopes {
+            let actual = library
+                .items_with_path_prefix(scope)
+                .map(|item| item.id)
+                .collect::<Vec<_>>();
+            let expected = library
+                .items()
+                .filter_map(|item| {
+                    let path = library.item_path(item)?;
+                    (path[..path.len() - 1] == *scope).then_some(item.id)
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected, "source scope {scope:?}");
+        }
+        assert_eq!(
+            library.item_path(library.item(StdlibItemId::DurationFromSeconds)),
+            Some(vec!["Duration", "fromSeconds"])
+        );
+        assert!(
+            library
+                .items_with_path_prefix(&["Duration"])
+                .any(|item| item.id == StdlibItemId::DurationFromSeconds)
+        );
+        assert!(
+            !library
+                .items_with_path_prefix(&[])
+                .any(|item| item.name == "dolphinCoreBase")
+        );
+        assert!(
+            !library
+                .items_with_path_prefix(&["Unity"])
+                .any(|item| item.name == "providerAuto")
+        );
+        for scope in [
+            &["value"][..],
+            &["Duration", "nested"][..],
+            &["Numeric"][..],
+        ] {
+            assert!(library.items_with_path_prefix(scope).next().is_none());
+        }
+    }
+
+    #[test]
     fn hierarchical_declarations_generate_the_complete_owner_graph() {
         let library = StandardLibrary::new();
 

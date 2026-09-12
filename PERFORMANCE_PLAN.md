@@ -622,6 +622,37 @@ introducing a worklist or dependency index; preserve delayed errors and generic
 signature instantiation. Keep the remaining output-size work separate from
 these inference changes.
 
+## Source-path suggestion indexing
+
+Revisited on 2026-09-12 against `d741ef4`, after the process-reader, pointer
+width, recovery, and Debug changes. The earlier optimizations remain present.
+The associated-type solver probe measured only about 0.35 ms and four retained
+projections on the minimal fixture, so a new solver is not the next priority.
+Expression self-timings instead put about 8.6 ms in calls, excluding the time
+spent checking their argument expressions.
+
+Ordinary path-based method calls ask for function-name suggestions before
+resolving their receiver. That query scanned every public catalog item and
+allocated each item's complete source path, even when the receiver's name had
+no matching library scope. The immutable library graph now indexes public
+items by their exact parent path. Suggestions borrow candidate names from
+that scope; root-level user functions and wrapper constructors are still added
+at query time. Visibility, catalog order, ambiguity handling, and lookup
+precedence are preserved. Source-path construction is shared with the existing
+public `item_path` API, and both script profiles use the same implementation.
+
+Full compilation medians fall by 27–40% across four fixtures, both Rust
+profiles, and both run orders. Analysis saves roughly 8–11 ms while lowering
+and encoding remain nearly unchanged. All nine release script outputs are
+byte-identical to the current baseline. Full `cargo xtask check` passed,
+including browser-host checks and all 96 runtime scenarios.
+Actual `max-opt` LSP edit-to-diagnostics medians improve by roughly 7–10 ms
+across small, Lunistice, and 500-function fixtures in both run orders.
+See [baselines](docs/BASELINES.md) for measurements and validation.
+Temporary profiling code has been removed. Further latency work should profile
+the remaining analysis and validation cost rather than assume associated-type
+solving dominates. Generated script size remains a separate work item.
+
 ## Evidence and scope
 
 There are three different performance concerns:

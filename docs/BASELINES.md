@@ -46,6 +46,90 @@ compiler regression. Generated Wasm byte counts are deterministic, but should
 also be reviewed rather than frozen into brittle assertions because valid
 backend changes can alter them intentionally.
 
+## 2026-09-12 source-path suggestion indexing
+
+Source baseline: `d741ef4`. Intervening work changed process readers, pointer
+width handling, Debug behavior, recovery, and examples. Both sides of this
+comparison were rebuilt from that baseline with identical current fixtures;
+older September 8 timings and byte counts are not used as the before case.
+
+Qualified method calls performed a full public-catalog scan for possible
+function-name typos, allocating every item's source path even for valid local
+receivers. The shared graph now indexes public candidates by their exact
+parent path, preserving catalog order and visibility. Candidate names are
+borrowed during lookup; source functions and `Some`/`Ok`/`Err` remain dynamic
+root-scope candidates. There is no script-profile branch or optimization pass.
+
+Windows x86-64, Rust 1.98.1, Node 24.14.0. Native measurements use 20 warmups,
+50 samples, ordinary priority, and affinity mask 1 (logical CPU 0), with
+sequential runs. The unchanged `examples/compiler_baseline.rs` runner was
+linked directly using `rustc -O` against each Cargo-built compiler library,
+avoiding an extra build of unused benchmark dev dependencies. The `max-opt`
+runner also uses fat LTO, one codegen unit, and panic abort. Compilation of
+the Rust executables is outside every timer.
+
+Ordinary-release medians (the second pair reverses the run order):
+
+| Fixture | Before → after | Reverse-order before → after |
+| --- | ---: | ---: |
+| minimal | 26.65 → 19.26 ms | 26.95 → 18.93 ms |
+| Lunistice | 29.27 → 21.43 ms | 29.67 → 20.87 ms |
+| cancellation | 26.47 → 18.05 ms | 25.61 → 17.82 ms |
+| settings | 29.03 → 18.25 ms | 29.13 → 17.53 ms |
+
+`max-opt` medians:
+
+| Fixture | Before → after | Reverse-order before → after |
+| --- | ---: | ---: |
+| minimal | 26.05 → 18.52 ms | 26.70 → 18.24 ms |
+| Lunistice | 27.93 → 20.12 ms | 28.55 → 20.26 ms |
+| cancellation | 25.20 → 16.86 ms | 25.03 → 16.63 ms |
+| settings | 26.58 → 16.93 ms | 24.18 → 17.48 ms |
+
+The ordinary-release stage runner attributes the gain to analysis:
+
+| Fixture | Analysis before → after | Wasm lowering before → after | Encoding before → after |
+| --- | ---: | ---: | ---: |
+| minimal | 22.13 → 14.31 ms | 2.76 → 2.76 ms | 2.01 → 2.06 ms |
+| Lunistice | 22.76 → 15.03 ms | 2.86 → 2.86 ms | 3.27 → 3.20 ms |
+| cancellation | 21.29 → 12.96 ms | 2.58 → 2.64 ms | 1.67 → 1.58 ms |
+| settings | 24.29 → 13.27 ms | 2.67 → 2.64 ms | 1.82 → 1.68 ms |
+
+The actual packaged `max-opt` language server was measured over stdio with
+the system allocator, waiting for versioned diagnostics after each full-text
+edit. It uses the same sample counts and CPU affinity, inherited from the
+Node harness, and excludes process startup. Both versions read identical
+current sources:
+
+| Fixture | Median before → after | Reverse-order before → after | First-run p95 before → after |
+| --- | ---: | ---: | ---: |
+| small | 22.46 → 14.65 ms | 23.36 → 15.10 ms | 25.03 → 17.17 ms |
+| Lunistice | 22.66 → 16.08 ms | 23.74 → 15.63 ms | 24.81 → 18.28 ms |
+| 500 functions | 45.87 → 38.73 ms | 48.29 → 38.49 ms | 69.85 → 43.49 ms |
+
+The large-fixture p95 was noisy, but medians improve in both run orders.
+This batch does not include a fresh embedded-compiler latency comparison;
+the embedded compiler and browser-host behavior were covered by verification.
+
+Nine release script outputs are byte-identical before and after: Lunistice
+31,816 bytes (including the current local example edits), Minish Cap 45,636,
+settings 8,772, cancellation 2,701, managed instances 15,414, Mono managed
+instances 22,824, debug-profile fixture 1,590, set runtime 3,569, and map
+runtime 4,976. No generated-script size reduction is claimed. Saved binaries,
+temporary profiling evidence, and raw logs are in ignored
+`target/performance-review`, under `suggestions`, `expression-probe`, and
+`projections` names. All production timing probes were removed.
+
+The packaged native CLI grows from 6,394,368 to 6,397,952 bytes, and the
+language server from 4,416,512 to 4,420,096 bytes (3.5 KiB each). These are
+compiler executable sizes, separate from the unchanged generated scripts.
+
+Full `cargo xtask check` passed: formatting, strict Clippy, 513 generated
+documentation pages, 104 syntax tests, 28 loader tests, 432 library tests
+(one ignored), 629 compiler integration tests, 18 CLI tests, the language-server
+unit test, 32 editor tests, browser-host and worker tests, Wasm validation,
+and 96 runtime scenarios across 68 unique verification modules.
+
 ## 2026-09-08 capability inheritance indexing
 
 Source baseline: `27549bf`. Capability implication queries now consult the

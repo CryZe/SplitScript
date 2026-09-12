@@ -710,18 +710,20 @@ impl StandardLibrary {
     }
 
     pub fn item_path(&self, item: &StdlibItem) -> Option<Vec<&'static str>> {
-        let mut path = match item.owner {
-            StdlibOwner::Root => Vec::new(),
-            StdlibOwner::Namespace(namespace) => self.namespace(namespace).path.to_vec(),
-            StdlibOwner::Type(ty) => vec![self.type_decl(ty).name],
-            StdlibOwner::TypeConstructor(constructor) => {
-                vec![self.type_constructor(constructor).name]
-            }
-            StdlibOwner::Core(core) => vec![self.core_type(core).name],
-            StdlibOwner::Capability(_) => return None,
-        };
-        path.push(item.name);
-        Some(path)
+        self.graph.item_path(item)
+    }
+
+    /// Public items whose complete source path has exactly this parent prefix.
+    /// Includes static functions, methods, and constants in catalog order.
+    pub(crate) fn items_with_path_prefix<'a>(
+        &'a self,
+        prefix: &[&'a str],
+    ) -> impl Iterator<Item = &'static StdlibItem> + 'a {
+        self.graph
+            .items_by_path_prefix
+            .get(prefix)
+            .into_iter()
+            .flat_map(|items| items.iter().copied())
     }
 
     pub fn render_signature(&self, id: StdlibItemId) -> String {

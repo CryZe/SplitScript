@@ -1036,6 +1036,24 @@ mod tests {
     }
 
     #[test]
+    fn preserves_yield_keyword_highlighting_in_terminal_documentation() {
+        let reference = splitscript::DocumentationReference::default();
+        let page = reference
+            .topic("yield")
+            .expect("yield has a documentation page");
+        let blocks = DocumentBuilder::parse(&page.markdown);
+
+        assert!(blocks.iter().any(|block| {
+            let Block::Code(fragments) = block else {
+                return false;
+            };
+            fragments.iter().any(|fragment| {
+                fragment.text == "yield" && fragment.kind == Some(SemanticTokenKind::Keyword)
+            })
+        }));
+    }
+
+    #[test]
     fn renders_module_scan_example_code() {
         let reference = splitscript::DocumentationReference::default();
         let page = reference

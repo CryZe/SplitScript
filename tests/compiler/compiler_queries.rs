@@ -218,10 +218,36 @@ fn vscode_manifest_tracks_the_lsp_semantic_token_legend() {
         ".split"
     );
     assert_eq!(grammar["scopeName"], "source.splitscript");
-    assert!(
-        grammar_source.contains("if|else|while|loop|for"),
-        "fallback grammar should recognize the unconditional loop keyword"
-    );
+    let fallback_keyword_patterns = grammar["repository"]["language"]["patterns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|pattern| {
+            pattern["name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("keyword."))
+                .then(|| pattern["match"].as_str().unwrap())
+        })
+        .collect::<Vec<_>>();
+    for keyword in splitscript::tooling::language::LanguageCatalog::new()
+        .items()
+        .filter_map(|item| match item.kind {
+            splitscript::tooling::language::LanguageItemKind::Keyword => Some(item.name),
+            _ => None,
+        })
+    {
+        assert!(
+            fallback_keyword_patterns
+                .iter()
+                .flat_map(|pattern| {
+                    pattern.split(|character: char| {
+                        !(character.is_ascii_alphanumeric() || character == '_')
+                    })
+                })
+                .any(|spelling| spelling == keyword),
+            "fallback grammar does not classify catalog keyword `{keyword}` as a keyword"
+        );
+    }
     assert!(
         grammar_source.contains("Some|None|Ok|Err"),
         "fallback grammar should recognize wrapper enum variants"

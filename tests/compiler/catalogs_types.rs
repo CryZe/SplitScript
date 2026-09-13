@@ -661,15 +661,15 @@ fn unary_syntax_resolves_through_catalog_declared_methods() {
     );
     assert_eq!(
         library.render_signature(StdlibItemId::SignedNegate),
-        "T.negate() -> T where T: Signed"
+        "Self.negate() -> Self where Self: Signed"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::IntegerBitNot),
-        "T.bitNot() -> T where T: Integer"
+        "Self.bitNot() -> Self where Self: Integer"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::NumericSwapBytes),
-        "T.swapBytes() -> T where T: Numeric"
+        "Self.swapBytes() -> Self where Self: Numeric"
     );
 
     let source = r#"
@@ -2140,7 +2140,7 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     );
     assert_eq!(
         library.render_signature(StdlibItemId::NumericClamp),
-        "T.clamp(minimum: T, maximum: T) -> T where T: Numeric"
+        "Self.clamp(minimum: Self, maximum: Self) -> Self where Self: Numeric"
     );
     assert_eq!(
         library.item_by_name("setVariable").map(|item| item.id),
@@ -2252,23 +2252,23 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     );
     assert_eq!(
         library.render_signature(StdlibItemId::SignedAbs),
-        "T.abs() -> T where T: Signed"
+        "Self.abs() -> Self where Self: Signed"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::NumericSquared),
-        "T.squared() -> T where T: Numeric"
+        "Self.squared() -> Self where Self: Numeric"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::IntegerToString),
-        "T.toString(radix: u32) -> String! where T: Integer"
+        "Self.toString(radix: u32) -> String! where Self: Integer"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::FloatSqrt),
-        "T.sqrt() -> T where T: Float"
+        "Self.sqrt() -> Self where Self: Float"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::FloatTruncate),
-        "T.truncate() -> T where T: Float"
+        "Self.truncate() -> Self where Self: Float"
     );
     assert!(matches!(
         library.item(StdlibItemId::FloatRound).implementation,
@@ -2276,11 +2276,11 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     ));
     assert_eq!(
         library.render_signature(StdlibItemId::FloatRoundTo),
-        "T.roundTo(decimalPlaces: u32) -> T where T: Float"
+        "Self.roundTo(decimalPlaces: u32) -> Self where Self: Float"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::FloatIsFinite),
-        "T.isFinite() -> bool where T: Float"
+        "Self.isFinite() -> bool where Self: Float"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::F32NaN),

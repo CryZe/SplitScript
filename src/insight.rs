@@ -2081,7 +2081,7 @@ whileAttached {
         let mut database = CompilerDatabase::new(source);
         let hover = database.hover(offset).unwrap().expect("catalog hover");
         assert!(hover.markdown.contains("i32.clamp"));
-        assert!(hover.markdown.contains("T = i32"));
+        assert!(hover.markdown.contains("Self = i32"));
         assert!(hover.markdown.contains("**Parameters**"));
         assert!(hover.markdown.contains("**Effects:** pure"));
         assert!(!hover.markdown.contains("**Effects:** pure."));

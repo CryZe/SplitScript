@@ -1384,11 +1384,6 @@ remaining work is product hardening and distribution.
   such as Rust compiler-builtins' MIT-licensed libm `pow`/`powf`, including its
   scaling helpers, rather than introducing an ad-hoc approximation or a host
   import. Keep `squared()` as the simple exact-intent API for exponent two.
-- [ ] Generalize first-class indexing beyond arrays only when another real type
-  needs it. Design an operator protocol with inferred index and output types
-  using the capability graph's associated-type projection machinery, then make
-  its declarations, documentation, completion, and lowering catalog driven
-  rather than disguising the operation as a callable method.
 - [ ] Add structural anonymous structs only after named structs prove materially
   noisy. Decide explicitly whether anonymous structs are memory-readable.
 

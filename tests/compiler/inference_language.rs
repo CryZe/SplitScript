@@ -1708,7 +1708,7 @@ fn genuinely_unconstrained_empty_arrays_have_a_focused_diagnostic() {
 }
 
 #[test]
-fn array_indexing_is_first_class_bidirectional_and_array_only() {
+fn indexing_is_first_class_and_rejects_types_without_the_index_capability() {
     let source = r#"
         state "game.exe" {}
 
@@ -1741,11 +1741,11 @@ fn array_indexing_is_first_class_bidirectional_and_array_only() {
             }
         "#,
     )
-    .expect_err("non-array values must not be indexable");
+    .expect_err("values without Index must not be indexable");
     assert!(errors.iter().any(|error| {
         error
             .message
-            .contains("cannot be indexed; expected an array")
+            .contains("does not satisfy the required `Index` capability")
     }));
 
     let errors = splitscript::compile(

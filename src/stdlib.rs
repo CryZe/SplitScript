@@ -269,6 +269,55 @@ impl StandardLibrary {
             .expect("every standard-library capability ID must have a declaration")
     }
 
+    /// Finds the capability in `capability`'s hierarchy that declares an
+    /// associated type visible under `name`.
+    ///
+    /// Catalog validation rejects ambiguous inherited names, so a successful
+    /// lookup always identifies one semantic owner even through a diamond.
+    pub fn associated_type_owner(
+        &self,
+        capability: StdlibCapabilityId,
+        name: &str,
+    ) -> Option<StdlibCapabilityId> {
+        self.capability_associated_types(capability)
+            .into_iter()
+            .find_map(|(owner, associated)| (associated.name == name).then_some(owner))
+    }
+
+    /// Returns all associated types visible through a capability, preserving
+    /// the declaration-first hierarchy order and reporting each declaring
+    /// capability only once through diamonds.
+    pub fn capability_associated_types(
+        &self,
+        capability: StdlibCapabilityId,
+    ) -> Vec<(StdlibCapabilityId, &'static StdlibAssociatedType)> {
+        fn collect(
+            library: &StandardLibrary,
+            capability: StdlibCapabilityId,
+            visited: &mut Vec<StdlibCapabilityId>,
+            output: &mut Vec<(StdlibCapabilityId, &'static StdlibAssociatedType)>,
+        ) {
+            if visited.contains(&capability) {
+                return;
+            }
+            visited.push(capability);
+            let declaration = library.capability(capability);
+            output.extend(
+                declaration
+                    .associated_types
+                    .iter()
+                    .map(|associated| (capability, associated)),
+            );
+            for super_capability in declaration.super_capabilities {
+                collect(library, *super_capability, visited, output);
+            }
+        }
+
+        let mut output = Vec::new();
+        collect(self, capability, &mut Vec::new(), &mut output);
+        output
+    }
+
     /// Whether providing `capability` also provides `required`, following the
     /// hierarchy authored in the standard-library source.
     pub fn capability_implies(

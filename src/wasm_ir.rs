@@ -323,6 +323,104 @@ pub enum CallTarget {
     },
 }
 
+impl CallTarget {
+    pub(crate) fn receiver_with_type(&self) -> Option<(&ResolvedReceiver, TypeId)> {
+        match self {
+            Self::UserMethod {
+                receiver,
+                receiver_type,
+                ..
+            }
+            | Self::CapabilityRequirement {
+                receiver,
+                receiver_type,
+                ..
+            }
+            | Self::DefaultFormatting {
+                receiver,
+                receiver_type,
+                ..
+            }
+            | Self::ManagedSnapshot {
+                receiver,
+                receiver_type,
+                ..
+            }
+            | Self::ManagedComponent {
+                receiver,
+                receiver_type,
+                ..
+            } => Some((receiver, *receiver_type)),
+            Self::Intrinsic {
+                receiver: Some(receiver),
+                receiver_type: Some(receiver_type),
+                ..
+            }
+            | Self::LibraryOverload {
+                receiver: Some(receiver),
+                receiver_type: Some(receiver_type),
+                ..
+            } => Some((receiver, *receiver_type)),
+            Self::Intrinsic { .. }
+            | Self::LibraryOverload { .. }
+            | Self::UserFunction { .. }
+            | Self::ManagedInstances { .. }
+            | Self::ResultError { .. }
+            | Self::OptionSome { .. }
+            | Self::IteratorItem { .. }
+            | Self::ResultSuccess { .. } => None,
+        }
+    }
+
+    fn receiver_with_type_mut(&mut self) -> Option<(&mut ResolvedReceiver, TypeId)> {
+        match self {
+            Self::UserMethod {
+                receiver,
+                receiver_type,
+                ..
+            }
+            | Self::CapabilityRequirement {
+                receiver,
+                receiver_type,
+                ..
+            }
+            | Self::DefaultFormatting {
+                receiver,
+                receiver_type,
+                ..
+            }
+            | Self::ManagedSnapshot {
+                receiver,
+                receiver_type,
+                ..
+            }
+            | Self::ManagedComponent {
+                receiver,
+                receiver_type,
+                ..
+            } => Some((receiver, *receiver_type)),
+            Self::Intrinsic {
+                receiver: Some(receiver),
+                receiver_type: Some(receiver_type),
+                ..
+            }
+            | Self::LibraryOverload {
+                receiver: Some(receiver),
+                receiver_type: Some(receiver_type),
+                ..
+            } => Some((receiver, *receiver_type)),
+            Self::Intrinsic { .. }
+            | Self::LibraryOverload { .. }
+            | Self::UserFunction { .. }
+            | Self::ManagedInstances { .. }
+            | Self::ResultError { .. }
+            | Self::OptionSome { .. }
+            | Self::IteratorItem { .. }
+            | Self::ResultSuccess { .. } => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormattingMode {
     Display,
@@ -2005,29 +2103,10 @@ fn lower_index_assignment_operation(
 }
 
 fn replace_call_receiver(call: &mut CallTarget, receiver: ResolvedReceiver) {
-    match call {
-        CallTarget::UserMethod {
-            receiver: call_receiver,
-            ..
-        }
-        | CallTarget::CapabilityRequirement {
-            receiver: call_receiver,
-            ..
-        }
-        | CallTarget::DefaultFormatting {
-            receiver: call_receiver,
-            ..
-        } => *call_receiver = receiver,
-        CallTarget::Intrinsic {
-            receiver: Some(call_receiver),
-            ..
-        }
-        | CallTarget::LibraryOverload {
-            receiver: Some(call_receiver),
-            ..
-        } => *call_receiver = receiver,
-        _ => unreachable!("receiver-bound compiler-generated calls retain a receiver"),
-    }
+    let (call_receiver, _) = call
+        .receiver_with_type_mut()
+        .expect("receiver-bound compiler-generated calls retain a receiver");
+    *call_receiver = receiver;
 }
 
 /// Builds the ordinary protocol call used when `for` consumes an existing
@@ -3318,20 +3397,7 @@ fn capture_await_operand(
         return operand;
     };
 
-    let receiver = match &mut target {
-        CallTarget::UserMethod {
-            receiver,
-            receiver_type,
-            ..
-        }
-        | CallTarget::Intrinsic {
-            receiver: Some(receiver),
-            receiver_type: Some(receiver_type),
-            ..
-        } => Some((receiver, *receiver_type)),
-        _ => None,
-    };
-    if let Some((receiver, receiver_type)) = receiver {
+    if let Some((receiver, receiver_type)) = target.receiver_with_type_mut() {
         match receiver.clone() {
             ResolvedReceiver::Expression {
                 expression,
@@ -3687,19 +3753,10 @@ fn map_expression_children(
             mut target,
             arguments,
         } => {
-            let receiver = match &mut target {
-                CallTarget::UserMethod {
-                    receiver: ResolvedReceiver::Expression { expression, .. },
-                    ..
-                }
-                | CallTarget::Intrinsic {
-                    receiver: Some(ResolvedReceiver::Expression { expression, .. }),
-                    ..
-                } => Some(expression),
-                _ => None,
-            };
-            if let Some(receiver) = receiver {
-                *receiver = map(*receiver);
+            if let Some((ResolvedReceiver::Expression { expression, .. }, _)) =
+                target.receiver_with_type_mut()
+            {
+                *expression = map(*expression);
             }
             ExpressionKind::Call {
                 target,

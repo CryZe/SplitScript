@@ -99,7 +99,17 @@ pub(super) fn materialize(
                 program,
                 capabilities,
             ) {
-                pending.push(semantics.specialize_function_instance(&instance, &called));
+                if matches!(
+                    expression.kind,
+                    wasm_ir::ExpressionKind::Call {
+                        target: wasm_ir::CallTarget::CapabilityRequirement { .. },
+                        ..
+                    }
+                ) {
+                    pending.push(called);
+                } else {
+                    pending.push(semantics.specialize_function_instance(&instance, &called));
+                }
             }
         }
     }

@@ -258,67 +258,15 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
             visit(*right);
         }
         ExpressionKind::Call { target, arguments } => {
-            let receiver = match target {
-                super::CallTarget::UserMethod {
-                    receiver:
-                        crate::semantic::ResolvedReceiver::Expression {
-                            expression: receiver,
-                            ..
-                        },
+            if let Some((
+                crate::semantic::ResolvedReceiver::Expression {
+                    expression: receiver,
                     ..
-                }
-                | super::CallTarget::LibraryOverload {
-                    receiver:
-                        Some(crate::semantic::ResolvedReceiver::Expression {
-                            expression: receiver,
-                            ..
-                        }),
-                    ..
-                }
-                | super::CallTarget::CapabilityRequirement {
-                    receiver:
-                        crate::semantic::ResolvedReceiver::Expression {
-                            expression: receiver,
-                            ..
-                        },
-                    ..
-                }
-                | super::CallTarget::DefaultFormatting {
-                    receiver:
-                        crate::semantic::ResolvedReceiver::Expression {
-                            expression: receiver,
-                            ..
-                        },
-                    ..
-                }
-                | super::CallTarget::ManagedSnapshot {
-                    receiver:
-                        crate::semantic::ResolvedReceiver::Expression {
-                            expression: receiver,
-                            ..
-                        },
-                    ..
-                }
-                | super::CallTarget::ManagedComponent {
-                    receiver:
-                        crate::semantic::ResolvedReceiver::Expression {
-                            expression: receiver,
-                            ..
-                        },
-                    ..
-                }
-                | super::CallTarget::Intrinsic {
-                    receiver:
-                        Some(crate::semantic::ResolvedReceiver::Expression {
-                            expression: receiver,
-                            ..
-                        }),
-                    ..
-                } => Some(*receiver),
-                _ => None,
-            };
-            if let Some(receiver) = receiver {
-                visit(receiver);
+                },
+                _,
+            )) = target.receiver_with_type()
+            {
+                visit(*receiver);
             }
             arguments.iter().copied().for_each(&mut visit);
         }

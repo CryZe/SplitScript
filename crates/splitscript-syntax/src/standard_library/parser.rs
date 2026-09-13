@@ -100,14 +100,31 @@ impl Parser<'_> {
                     return Err(self.error("`private` can only modify a type declaration"));
                 }
                 let name = self.ident("expected a capability name")?;
-                declarations.push(Declaration::Capability(self.callable_owner_declaration(
-                    name,
-                    documentation,
-                    attributes,
-                    false,
-                    false,
-                    AssociatedTypesMode::Requirements,
-                )?));
+                let mut constraints = Vec::new();
+                if self.eat(&TokenKind::Colon) {
+                    loop {
+                        constraints.push(self.ident("expected a capability constraint")?);
+                        if !self.eat(&TokenKind::Plus) {
+                            break;
+                        }
+                    }
+                }
+                declarations.push(Declaration::Capability(
+                    self.callable_owner_declaration_with_parameters(
+                        name,
+                        vec![TypeParameter {
+                            name: "Self".to_owned(),
+                            constraints,
+                        }],
+                        documentation,
+                        attributes,
+                        CallableOwnerOptions {
+                            functions_are_static: false,
+                            fields_allowed: false,
+                            associated_types: AssociatedTypesMode::Requirements,
+                        },
+                    )?,
+                ));
             } else if self.eat_ident("typeConstructor") {
                 if private {
                     return Err(self.error("`private` can only modify a type declaration"));
@@ -1604,6 +1621,28 @@ typeConstructor [T] {
     }
 
     #[test]
+    fn capability_receivers_are_implicit_self_types() {
+        let source = r#"
+/// Integer values.
+capability Integer: Numeric + Display {
+    /// Returns this value unchanged.
+    fn identity() -> Self;
+}
+"#;
+        let library = parse(source).expect("implicit capability receivers should parse");
+        let Declaration::Capability(capability) = &library.declarations[0] else {
+            panic!("expected a capability")
+        };
+        assert_eq!(capability.type_parameters.len(), 1);
+        assert_eq!(capability.type_parameters[0].name, "Self");
+        assert_eq!(
+            capability.type_parameters[0].constraints,
+            ["Numeric", "Display"]
+        );
+        assert_eq!(capability.functions[0].result.to_string(), "Self");
+    }
+
+    #[test]
     fn parses_every_callable_owner_and_state_providers() {
         let source = r#"
 root {
@@ -1615,7 +1654,7 @@ root {
 namespace process.read {}
 /// Numeric values.
 @behavior(declared)
-capability Numeric<T> {}
+capability Numeric {}
 /// Arrays.
 typeConstructor [T] {}
 extend address {}

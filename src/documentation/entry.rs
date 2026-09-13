@@ -147,13 +147,13 @@ mod tests {
         let generic = StandardLibraryDocumentation::generate(StdlibItemId::NumericClamp, &[]);
         let resolved = StandardLibraryDocumentation::generate(
             StdlibItemId::NumericClamp,
-            &[("T", "i32".to_owned())],
+            &[("Self", "i32".to_owned())],
         );
         assert_eq!(generic.canonical_name, resolved.canonical_name);
-        assert!(generic.signature.starts_with("T.clamp"));
+        assert!(generic.signature.starts_with("Self.clamp"));
         assert!(resolved.signature.starts_with("i32.clamp"));
         assert_eq!(generic.summary_markdown(), resolved.summary_markdown());
-        assert!(resolved.hover_markdown().contains("T = i32"));
+        assert!(resolved.hover_markdown().contains("Self = i32"));
     }
 
     #[test]

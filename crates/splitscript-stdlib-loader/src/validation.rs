@@ -12,6 +12,7 @@ use splitscript_syntax::PrimitiveType;
 use crate::{
     Attribute, AttributeArgument, CallableOwnerDeclaration, Declaration, Documentation, Error,
     FunctionDeclaration, Library, StructDeclaration, Type, TypeParameter,
+    visible_capability_associated_types,
 };
 
 pub(crate) fn validate(library: &Library) -> Vec<Error> {
@@ -167,11 +168,34 @@ impl<'a> Validator<'a> {
                     );
                     if value.type_parameters.len() != 1 {
                         self.error(format!(
-                            "capability `{}` must declare exactly one type parameter",
+                            "capability `{}` must have exactly one implicit receiver type",
                             value.name
                         ));
                     }
-                    self.validate_owner(value, &value.type_parameters, true);
+                    let visible = visible_capability_associated_types(self.library, value);
+                    let mut owners = HashMap::new();
+                    for (declaring_capability, associated) in &visible {
+                        if let Some(previous) =
+                            owners.insert(associated.name.as_str(), *declaring_capability)
+                            && previous != *declaring_capability
+                        {
+                            self.error(format!(
+                                "capability `{}` inherits ambiguous associated type `{}` from `{previous}` and `{declaring_capability}`",
+                                value.name, associated.name
+                            ));
+                        }
+                    }
+                    let mut available = value.type_parameters.clone();
+                    available.extend(
+                        visible
+                            .into_iter()
+                            .filter(|(declaring_capability, _)| *declaring_capability != value.name)
+                            .map(|(_, associated)| TypeParameter {
+                                name: associated.name.clone(),
+                                constraints: associated.constraints.clone(),
+                            }),
+                    );
+                    self.validate_owner(value, &available, true);
                 }
                 Declaration::TypeConstructor(value) => {
                     self.validate_attributes(
@@ -1544,6 +1568,7 @@ fn id(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::validate;
     use crate::{generate_catalog, parse};
 
     #[test]
@@ -1823,7 +1848,7 @@ root {
 /// print(5)
 /// ```
 @behavior(structuralMethods)
-capability Display<T> {
+capability Display {
     /// Converts this value to text.
     ///
     /// User types provide the matching method.
@@ -1867,7 +1892,7 @@ typeConstructor [T] {}
 /// let copiedValues: [u32] = []
 /// ```
 @behavior(declared)
-capability Values<T> {
+capability Values {
     /// Copies values.
     ///
     /// Returns the input values.
@@ -1881,8 +1906,8 @@ capability Values<T> {
     /// ```
     fn copy(
         /// The values to copy.
-        values: [T],
-    ) -> [T] {
+        values: [Self],
+    ) -> [Self] {
         return values
     }
 }
@@ -1928,16 +1953,37 @@ typeConstructor [T] {
         let source = r#"
 /// First capability.
 @behavior(declared)
-capability First<T: Second> {}
+capability First: Second {}
 /// Second capability.
 @behavior(declared)
-capability Second<T: First> {}
+capability Second: First {}
 "#;
         let errors = generate_catalog(&parse(source).unwrap()).unwrap_err();
         assert!(
             errors
                 .iter()
                 .any(|error| error.message.contains("hierarchy contains a cycle")),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn capability_hierarchy_rejects_ambiguous_inherited_associated_types() {
+        let source = r#"
+capability First {
+    type Item;
+}
+capability Second {
+    type Item;
+}
+capability Combined: First + Second {}
+"#;
+        let library = parse(source).expect("capability hierarchy should parse");
+        let errors = validate(&library);
+        assert!(
+            errors.iter().any(|error| error.message.contains(
+                "capability `Combined` inherits ambiguous associated type `Item` from `First` and `Second`"
+            )),
             "{errors:#?}"
         );
     }

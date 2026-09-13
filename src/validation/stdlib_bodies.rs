@@ -574,7 +574,7 @@ mod tests {
             documentation: "",
         }];
         let checked = checked(
-            "state \"game.exe\" {}\nfn count(values) { let first = values[0]; return values.length() }",
+            "state \"game.exe\" {}\nfn count(values) { values = []; return values.length() }",
         );
         let function = checked
             .syntax()

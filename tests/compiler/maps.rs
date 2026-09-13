@@ -92,6 +92,79 @@ fn map_index_compound_assignment_evaluates_as_a_read_and_write() {
 }
 
 #[test]
+fn indexing_infers_one_capability_with_associated_key_and_value_types() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn indexed(values, key) {
+            return values[key]
+        }
+
+        whileAttached {
+            let names = ["Ada", "Grace"]
+            let first: String = indexed(names, 0)
+            let scores = Map.new<String, u32>()
+            scores["Ada"] = 12
+            let score: u32 = indexed(scores, "Ada")
+            print(`{first}: {score}`)
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("indexing should infer its receiver, key, and value relationship");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("generic indexing should produce valid Wasm GC");
+
+    let mut database = CompilerDatabase::new(source);
+    let hover = database
+        .hover(source.find("indexed(values").unwrap())
+        .unwrap()
+        .expect("inferred indexing helper hover");
+    assert!(
+        hover
+            .markdown
+            .contains("fn indexed(values: T, key: T.Key) -> T.Value where T: Index"),
+        "{}",
+        hover.markdown
+    );
+}
+
+#[test]
+fn source_structs_implement_indexing_from_exact_at_and_set_methods() {
+    let source = r#"
+        state "game.exe" {}
+
+        struct Pair {
+            first: u32,
+            second: u32,
+        }
+
+        fn Pair.at(index: u32) -> u32 {
+            if index == 0 {
+                return self.first
+            }
+            return self.second
+        }
+
+        fn Pair.set(index: u32, value: u32) -> None {
+            print(`setting {index} to {value}`)
+        }
+
+        whileAttached {
+            let pair = Pair { first: 12, second: 34 }
+            print(pair[1])
+            pair[1] = 9
+            pair[0] += 1
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("exact source methods should structurally implement indexing");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("source-defined indexing should produce valid Wasm GC");
+}
+
+#[test]
 fn map_editor_surface_exposes_only_the_approved_lookup_api() {
     let source = r#"
         state "game.exe" {}

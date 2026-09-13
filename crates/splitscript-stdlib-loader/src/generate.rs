@@ -5,6 +5,7 @@ use splitscript_syntax::{PrimitiveType, standard_library::TypeConstructorSyntax}
 use crate::{
     Attribute, AttributeArgument, CallableOwnerDeclaration, Declaration, Error,
     FunctionDeclaration, Library, StructDeclaration, Type, TypeParameter,
+    visible_capability_associated_types,
 };
 
 pub fn generate_catalog(library: &Library) -> Result<String, Vec<Error>> {
@@ -593,6 +594,7 @@ impl<'a> CatalogGenerator<'a> {
         prefix: &str,
         kind: &str,
     ) {
+        let associated_types = self.visible_associated_types(owner);
         let mut public_parameters = public.type_parameters.clone();
         public_parameters[0].constraints = vec!["Numeric".to_owned()];
         let case_values = cases
@@ -617,9 +619,9 @@ impl<'a> CatalogGenerator<'a> {
                     ident(capability),
                     self.type_parameters(&parameters, owner),
                     case.type_parameters.len(),
-                    case.parameters.iter().map(|parameter| self.parameter(parameter, &parameters, &owner.associated_types)).collect::<Vec<_>>().join(","),
+                    case.parameters.iter().map(|parameter| self.parameter(parameter, &parameters, &associated_types)).collect::<Vec<_>>().join(","),
                     case.result_is_async,
-                    self.type_ref(&case.result, &parameters, &owner.associated_types),
+                    self.type_ref(&case.result, &parameters, &associated_types),
                     quote(&function_name),
                     quote(case.body.as_deref().expect("validated overload cases have bodies")),
                 )
@@ -648,9 +650,9 @@ impl<'a> CatalogGenerator<'a> {
             quote(&qualified_name),
             self.type_parameters(&public_parameters, owner),
             public.type_parameters.len(),
-            public.parameters.iter().map(|parameter| self.parameter(parameter, &public_parameters, &owner.associated_types)).collect::<Vec<_>>().join(","),
+            public.parameters.iter().map(|parameter| self.parameter(parameter, &public_parameters, &associated_types)).collect::<Vec<_>>().join(","),
             public.result_is_async,
-            self.type_ref(&public.result, &public_parameters, &owner.associated_types),
+            self.type_ref(&public.result, &public_parameters, &associated_types),
             quote(&public.documentation.summary),
             quote(&public.documentation.details),
         ));
@@ -669,6 +671,7 @@ impl<'a> CatalogGenerator<'a> {
         prefix: &str,
         kind: &str,
     ) {
+        let associated_types = self.visible_associated_types(owner);
         let qualified_name = if prefix.is_empty() {
             function.name.clone()
         } else {
@@ -745,9 +748,9 @@ impl<'a> CatalogGenerator<'a> {
                 quote(&qualified_name),
                 self.type_parameters(type_parameters, owner),
                 function.type_parameters.len(),
-                function.parameters.iter().map(|parameter| self.parameter(parameter, type_parameters, &owner.associated_types)).collect::<Vec<_>>().join(","),
+                function.parameters.iter().map(|parameter| self.parameter(parameter, type_parameters, &associated_types)).collect::<Vec<_>>().join(","),
                 function.result_is_async,
-                self.type_ref(&function.result, type_parameters, &owner.associated_types),
+                self.type_ref(&function.result, type_parameters, &associated_types),
                 quote(&function.documentation.summary), quote(&function.documentation.details),
             ));
     }
@@ -774,6 +777,29 @@ impl<'a> CatalogGenerator<'a> {
             )
         }).collect::<Vec<_>>();
         format!("&[{}]", values.join(","))
+    }
+
+    fn visible_associated_types(
+        &self,
+        owner: &CallableOwnerDeclaration,
+    ) -> Vec<crate::AssociatedTypeDeclaration> {
+        let Some(capability) =
+            self.library
+                .declarations
+                .iter()
+                .find_map(|declaration| match declaration {
+                    Declaration::Capability(candidate) if candidate.name == owner.name => {
+                        Some(candidate)
+                    }
+                    _ => None,
+                })
+        else {
+            return owner.associated_types.clone();
+        };
+        visible_capability_associated_types(self.library, capability)
+            .into_iter()
+            .map(|(_, associated)| associated.clone())
+            .collect()
     }
 
     fn associated_type_requirements(&self, owner: &CallableOwnerDeclaration) -> String {
@@ -1322,7 +1348,7 @@ namespace process.read {
     fn managedString() -> String;
 }
 @behavior(declared)
-capability Numeric<T> { @intrinsic(NumericMin) fn min() -> T; }
+capability Numeric { @intrinsic(NumericMin) fn min() -> Self; }
 @representation(gcStruct)
 @valueUsage(localVariable)
 struct Duration {
@@ -1422,7 +1448,7 @@ typeConstructor T..<T {
 /// let value = 1
 /// ```
 @behavior(declared)
-capability Integer<T> {}
+capability Integer {}
 "#;
         let library = parse(source).unwrap();
         let generated = generate_catalog(&library).unwrap();
@@ -1492,7 +1518,7 @@ struct Duration {
 /// let numericValue = 1
 /// ```
 @behavior(declared)
-capability Numeric<T> {}
+capability Numeric {}
 /// Integer values.
 ///
 /// # Example
@@ -1503,7 +1529,7 @@ capability Numeric<T> {}
 /// let integerValue = 2
 /// ```
 @behavior(declared)
-capability Integer<T: Numeric> {}
+capability Integer: Numeric {}
 /// Floating-point values.
 ///
 /// # Example
@@ -1514,7 +1540,7 @@ capability Integer<T: Numeric> {}
 /// let floatValue = 1.5
 /// ```
 @behavior(declared)
-capability Float<T: Numeric> {}
+capability Float: Numeric {}
 
 root {
     /// Preserves a numeric value.
@@ -1576,7 +1602,7 @@ root {
 /// let text = `{42}`
 /// ```
 @behavior(declared)
-capability Display<T> {}
+capability Display {}
 
 /// Text.
 ///
@@ -1727,7 +1753,7 @@ namespace lifecycle {}
 /// let total = 1 + 2
 /// ```
 @behavior(declared)
-capability Numeric<T> {
+capability Numeric {
     /// Restricts a value.
     ///
     /// Uses numeric primitives to apply both bounds.
@@ -1741,10 +1767,10 @@ capability Numeric<T> {
     /// ```
     fn clamp(
         /// The lower bound.
-        minimum: T,
+        minimum: Self,
         /// The upper bound.
-        maximum: T,
-    ) -> T {
+        maximum: Self,
+    ) -> Self {
         let lowerBounded = self.max(minimum)
         return lowerBounded.min(maximum)
     }
@@ -1753,7 +1779,7 @@ capability Numeric<T> {
         let generated = generate_catalog(&parse(source).unwrap()).unwrap();
         assert!(generated.contains("Implementation::LibraryBody"));
         assert!(generated.contains(
-            "TypeParameter { name: \"T\", constraints: &[StdlibCapabilityId::Numeric] }"
+            "TypeParameter { name: \"Self\", constraints: &[StdlibCapabilityId::Numeric] }"
         ));
         assert!(generated.contains("let lowerBounded = self.max(minimum)"));
         assert!(!generated.contains("IntrinsicId::NumericClamp"));
@@ -1772,7 +1798,7 @@ capability Numeric<T> {
 /// let text = `{1}`
 /// ```
 @behavior(declared)
-capability Display<T> {}
+capability Display {}
 /// Equatable values.
 ///
 /// # Example
@@ -1783,7 +1809,7 @@ capability Display<T> {}
 /// let equal = 1 == 1
 /// ```
 @behavior(structuralEquality)
-capability Equatable<T> {}
+capability Equatable {}
 /// Numeric values.
 ///
 /// # Example
@@ -1794,7 +1820,7 @@ capability Equatable<T> {}
 /// let total = 1 + 3
 /// ```
 @behavior(declared)
-capability Numeric<T: Equatable> {}
+capability Numeric: Equatable {}
 /// Integer values.
 ///
 /// # Example
@@ -1805,7 +1831,7 @@ capability Numeric<T: Equatable> {}
 /// let mask = 1 << 2
 /// ```
 @behavior(declared)
-capability Integer<T: Numeric + Display> {}
+capability Integer: Numeric + Display {}
 "#;
         let generated = generate_catalog(&parse(source).unwrap()).unwrap();
         assert!(generated.contains(

@@ -33,12 +33,10 @@ use super::{
 };
 
 impl Checker {
-    /// Resolves compiler-owned indexing syntax through the private `Map.at`
-    /// catalog method. Keeping the operation in the catalog gives indexing the
-    /// same generic specialization, reachability, and effect handling as an
-    /// ordinary standard-library call without exposing an awkward public
-    /// lookup method.
-    pub(super) fn resolve_map_index(
+    /// Resolves compiler-owned indexing syntax through the `Index.at`
+    /// capability requirement. Concrete arrays retain their direct lowering;
+    /// every other receiver follows ordinary structural capability dispatch.
+    pub(super) fn resolve_index_getter(
         &mut self,
         receiver_type: Type,
         receiver: ExprId,
@@ -46,12 +44,22 @@ impl Checker {
         expression: ExprId,
         span: Span,
     ) -> Option<Type> {
+        let requirement = Requirements::capability(crate::stdlib::StdlibCapabilityId::Index);
+        if self
+            .inference
+            .require(receiver_type, requirement.clone())
+            .is_err()
+        {
+            let message = self.capability_failure_message(receiver_type, &requirement);
+            self.error(message, span);
+            return None;
+        }
         let standard_library = self.standard_library.clone();
         let candidate = standard_library
             .method_candidates_including_private("at")
             .into_iter()
-            .find(|candidate| candidate.item.id == StdlibItemId::MapAt)
-            .expect("the bundled Map type declares its private indexing method");
+            .find(|candidate| candidate.item.id == StdlibItemId::IndexAt)
+            .expect("the bundled Index capability declares its indexing requirement");
         self.catalog_call(
             &candidate,
             Some(MethodReceiver {
@@ -69,30 +77,53 @@ impl Checker {
         )
     }
 
-    /// Records the private protocol operation used to write through Map
-    /// indexing. Compound assignment lowers to one getter, one operator call,
-    /// and this setter while preserving the language's evaluate-once rule for
-    /// the receiver and key.
-    pub(super) fn resolve_map_index_setter(
+    /// Records the `IndexAssign.set` capability operation used by compound
+    /// bracket assignment. Its inherited key and value projections are owned
+    /// by `Index`, so read and write syntax cannot disagree about their shape.
+    pub(super) fn resolve_index_setter(
         &mut self,
         assignment: crate::ast::AssignmentId,
         receiver_type: Type,
         receiver: ExprId,
+        span: Span,
     ) {
-        let Type::Application(application) = self.shallow_type(receiver_type) else {
-            return;
-        };
-        if self.inference.application_constructor(application) != StdlibTypeConstructorId::Map {
+        let receiver_type = self.shallow_type(receiver_type);
+        if matches!(receiver_type, Type::Array(_))
+            || matches!(
+                receiver_type,
+                Type::Known(id)
+                    if matches!(self.inference.type_store().kind(id), TypeKind::Array { .. })
+            )
+        {
             return;
         }
-        let arguments = self.inference.application_arguments(application).to_vec();
+        if self
+            .require(
+                receiver_type,
+                Requirements::capability(crate::stdlib::StdlibCapabilityId::IndexAssign),
+                span,
+            )
+            .is_none()
+        {
+            return;
+        }
+        let key = self.inference.associated_type(
+            receiver_type,
+            crate::stdlib::StdlibCapabilityId::Index,
+            "Key",
+        );
+        let value = self.inference.associated_type(
+            receiver_type,
+            crate::stdlib::StdlibCapabilityId::Index,
+            "Value",
+        );
         let none = self.core_type(crate::stdlib::CoreTypeId::None);
         self.semantics.resolve_index_assignment_setter(
             assignment,
             PendingResolvedCall::StandardLibrary {
-                item: StdlibItemId::MapSet,
-                type_arguments: arguments.clone(),
-                signature: vec![receiver_type, arguments[0], arguments[1], none],
+                item: StdlibItemId::IndexAssignSet,
+                type_arguments: vec![receiver_type],
+                signature: vec![receiver_type, key, value, none],
                 receiver: Some(ResolvedReceiver::Expression {
                     expression: receiver,
                     members: Vec::new(),
@@ -1574,14 +1605,13 @@ impl Checker {
                 .as_ref()
                 .expect("capability members are receiver methods")
                 .ty;
-            for associated in self
+            for (owner, associated) in self
                 .standard_library
-                .capability(capability)
-                .associated_types
+                .capability_associated_types(capability)
             {
                 let value = self
                     .inference
-                    .associated_type(receiver, capability, associated.name);
+                    .associated_type(receiver, owner, associated.name);
                 variables.insert(associated.name, value);
             }
         }

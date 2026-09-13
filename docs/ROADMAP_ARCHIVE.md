@@ -4570,3 +4570,19 @@ language catalog document the refinement rule.
 - Added no redundant feature-specific test because payload enums, lazy match
   evaluation, persistent expression-backed fields, and snapshot transitions
   are already independently covered by their owning compiler/runtime tests.
+
+# 2026-09-13: capability-driven indexing
+
+- Added catalog-defined `Index` and `IndexAssign` capabilities with inherited
+  `Key` and `Value` associated types. Arrays and maps implement the same
+  protocol, while source structs participate through exact ordinary `at` and
+  `set` methods without `impl` syntax.
+- Kept the receiver implicit in every capability declaration as `Self`, with
+  super-capabilities written after `:`. Associated types inherited through the
+  capability graph now have one validated owner and one projection path.
+- Generalized bracket reads, writes, and compound assignments while retaining
+  direct allocation-free array lowering. Untyped helpers infer the minimal
+  `T: Index` contract together with `T.Key` and `T.Value`.
+- Centralized method-receiver traversal in Wasm IR so capability calls,
+  ordinary methods, intrinsics, library overloads, and managed operations use
+  the same child order during async normalization and code generation.

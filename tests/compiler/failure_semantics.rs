@@ -1469,7 +1469,7 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
     let min = library.method_candidates("min");
     assert_eq!(min.len(), 1);
     assert_eq!(min[0].item.id, StdlibItemId::NumericMin);
-    assert_eq!(min[0].item.signature.type_parameters[0].name, "T");
+    assert_eq!(min[0].item.signature.type_parameters[0].name, "Self");
     assert_eq!(
         min[0].item.signature.type_parameters[0].constraints,
         [splitscript::compiler::stdlib::StdlibCapabilityId::Numeric]

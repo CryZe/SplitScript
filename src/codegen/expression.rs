@@ -1744,39 +1744,9 @@ fn resolved_receiver<'a>(
     target: &'a wasm_ir::CallTarget,
     context: &ExprContext<'_>,
 ) -> (&'a ResolvedReceiver, Type) {
-    let (receiver, receiver_type) = match target {
-        wasm_ir::CallTarget::UserMethod {
-            receiver,
-            receiver_type,
-            ..
-        } => (receiver, *receiver_type),
-        wasm_ir::CallTarget::Intrinsic {
-            receiver: Some(receiver),
-            receiver_type: Some(receiver_type),
-            ..
-        } => (receiver, *receiver_type),
-        wasm_ir::CallTarget::LibraryOverload {
-            receiver: Some(receiver),
-            receiver_type: Some(receiver_type),
-            ..
-        } => (receiver, *receiver_type),
-        wasm_ir::CallTarget::DefaultFormatting {
-            receiver,
-            receiver_type,
-            ..
-        } => (receiver, *receiver_type),
-        wasm_ir::CallTarget::ManagedSnapshot {
-            receiver,
-            receiver_type,
-            ..
-        } => (receiver, *receiver_type),
-        wasm_ir::CallTarget::ManagedComponent {
-            receiver,
-            receiver_type,
-            ..
-        } => (receiver, *receiver_type),
-        _ => unreachable!("only method calls have receivers"),
-    };
+    let (receiver, receiver_type) = target
+        .receiver_with_type()
+        .expect("only method calls have receivers");
     (receiver, context.ty(receiver_type))
 }
 
@@ -3954,6 +3924,7 @@ fn compile_expr_unconverted(
     else {
         return;
     };
+    let capability_call = matches!(target, wasm_ir::CallTarget::CapabilityRequirement { .. });
     let target =
         context
             .reachability
@@ -4023,7 +3994,11 @@ fn compile_expr_unconverted(
                 for argument in args {
                     compile_user_argument(function, *argument, context);
                 }
-                let target_function = context.called_instance(target_function);
+                let target_function = if capability_call {
+                    target_function.clone()
+                } else {
+                    context.called_instance(target_function)
+                };
                 function.instruction(&Instruction::Call(context.functions[&target_function].call));
             }
             wasm_ir::CallTarget::UserFunction { function: target } => {
@@ -4042,7 +4017,11 @@ fn compile_expr_unconverted(
                 }
                 let target = wasm_ir::resolve_library_overload(
                     target,
-                    context.function_instance,
+                    if capability_call {
+                        None
+                    } else {
+                        context.function_instance
+                    },
                     context.semantics,
                     context.wasm_ir.standard_library(),
                 )

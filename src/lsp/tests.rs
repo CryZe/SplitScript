@@ -1282,7 +1282,7 @@ fn hover_and_signature_help_preserve_resolved_catalog_information() {
         .as_str()
         .expect("hover markdown");
     assert!(markdown.contains("i32.clamp"));
-    assert!(markdown.contains("T = i32"));
+    assert!(markdown.contains("Self = i32"));
     assert!(markdown.contains("Runtime behavior"));
     assert!(markdown.contains("Examples"));
 
@@ -1515,7 +1515,7 @@ fn catalog_docs_completion_and_hover_stay_in_sync() {
     }));
     let resolved = StandardLibraryDocumentation::generate(
         StdlibItemId::NumericClamp,
-        &[("T", "i32".to_owned())],
+        &[("Self", "i32".to_owned())],
     );
     let hover_markdown = hover[0]["result"]["contents"]["value"]
         .as_str()

@@ -1275,14 +1275,13 @@ fn seed_library_body_signature(
             ItemKind::Function => unreachable!("capability members are receiver methods"),
             ItemKind::Constant => unreachable!("capabilities do not declare constants"),
         };
-        for associated in checker
+        for (owner, associated) in checker
             .standard_library
-            .capability(capability)
-            .associated_types
+            .capability_associated_types(capability)
         {
             let value = checker
                 .inference
-                .associated_type(receiver, capability, associated.name);
+                .associated_type(receiver, owner, associated.name);
             variables.insert(associated.name, value);
         }
     } else if let StdlibOwner::TypeConstructor(constructor) = item.owner

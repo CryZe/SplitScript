@@ -1729,7 +1729,7 @@ private struct UnityMetadataClass {
 /// let cappedStage = 12.min(7)
 /// ```
 @behavior(declared)
-capability Numeric<T: Equatable> {
+capability Numeric: Equatable {
     /// Adds another value of the same numeric type.
     ///
     /// This method is also the implementation of the
@@ -1747,8 +1747,8 @@ capability Numeric<T: Equatable> {
     @operator(add)
     fn add(
         /// The value to add.
-        other: T,
-    ) -> T;
+        other: Self,
+    ) -> Self;
 
     /// Subtracts another value of the same numeric type.
     ///
@@ -1767,8 +1767,8 @@ capability Numeric<T: Equatable> {
     @operator(subtract)
     fn subtract(
         /// The value to subtract.
-        other: T,
-    ) -> T;
+        other: Self,
+    ) -> Self;
 
     /// Multiplies by another value of the same numeric type.
     ///
@@ -1787,8 +1787,8 @@ capability Numeric<T: Equatable> {
     @operator(multiply)
     fn multiply(
         /// The value to multiply by.
-        other: T,
-    ) -> T;
+        other: Self,
+    ) -> Self;
 
     /// Divides by another value of the same numeric type.
     ///
@@ -1809,8 +1809,8 @@ capability Numeric<T: Equatable> {
     @operator(divide)
     fn divide(
         /// The divisor.
-        other: T,
-    ) -> T;
+        other: Self,
+    ) -> Self;
 
     /// Multiplies this value by itself.
     ///
@@ -1825,7 +1825,7 @@ capability Numeric<T: Equatable> {
     /// ```splitscript
     /// let squaredDistance = 3.5.squared()
     /// ```
-    fn squared() -> T {
+    fn squared() -> Self {
         return self * self
     }
 
@@ -1845,8 +1845,8 @@ capability Numeric<T: Equatable> {
     @intrinsic(NumericMin)
     fn min(
         /// The other value to compare with the receiver.
-        other: T,
-    ) -> T;
+        other: Self,
+    ) -> Self;
 
     /// Returns the larger of two numeric values.
     ///
@@ -1864,8 +1864,8 @@ capability Numeric<T: Equatable> {
     @intrinsic(NumericMax)
     fn max(
         /// The other value to compare with the receiver.
-        other: T,
-    ) -> T;
+        other: Self,
+    ) -> Self;
 
     /// Restricts a numeric value to an inclusive range.
     ///
@@ -1880,10 +1880,10 @@ capability Numeric<T: Equatable> {
     /// ```
     fn clamp(
         /// The inclusive lower bound.
-        minimum: T,
+        minimum: Self,
         /// The inclusive upper bound.
-        maximum: T,
-    ) -> T {
+        maximum: Self,
+    ) -> Self {
         let lowerBounded = self.max(minimum)
         return lowerBounded.min(maximum)
     }
@@ -1907,7 +1907,7 @@ capability Numeric<T: Equatable> {
     /// ```
     @mustUse("Byte swapping returns a new value and does not modify its receiver.")
     @intrinsic(NumericSwapBytes)
-    fn swapBytes() -> T;
+    fn swapBytes() -> Self;
 }
 
 /// Identifies integral numeric types.
@@ -1923,7 +1923,7 @@ capability Numeric<T: Equatable> {
 /// let inventoryMask: u8 = 1 << 2
 /// ```
 @behavior(declared)
-capability Integer<T: Numeric + Display> {
+capability Integer: Numeric + Display {
     /// Formats this integer using a positional numeral system.
     ///
     /// Radices from 2 through 36 are supported. Digits above nine use
@@ -1964,7 +1964,7 @@ capability Integer<T: Numeric + Display> {
     /// ```
     @intrinsic(IntegerBitNot)
     @operator(not)
-    fn bitNot() -> T;
+    fn bitNot() -> Self;
 
     /// Returns the remainder after integer division.
     ///
@@ -1984,8 +1984,8 @@ capability Integer<T: Numeric + Display> {
     @operator(remainder)
     fn remainder(
         /// The divisor.
-        other: T,
-    ) -> T;
+        other: Self,
+    ) -> Self;
 
     /// Combines two integers with a bitwise OR.
     ///
@@ -2003,8 +2003,8 @@ capability Integer<T: Numeric + Display> {
     @operator(bitOr)
     fn bitOr(
         /// The other integer.
-        other: T,
-    ) -> T;
+        other: Self,
+    ) -> Self;
 
     /// Combines two integers with a bitwise exclusive OR.
     ///
@@ -2022,8 +2022,8 @@ capability Integer<T: Numeric + Display> {
     @operator(bitXor)
     fn bitXor(
         /// The other integer.
-        other: T,
-    ) -> T;
+        other: Self,
+    ) -> Self;
 
     /// Combines two integers with a bitwise AND.
     ///
@@ -2041,8 +2041,8 @@ capability Integer<T: Numeric + Display> {
     @operator(bitAnd)
     fn bitAnd(
         /// The other integer.
-        other: T,
-    ) -> T;
+        other: Self,
+    ) -> Self;
 
     /// Shifts bits to the left.
     ///
@@ -2063,8 +2063,8 @@ capability Integer<T: Numeric + Display> {
     @operator(shiftLeft)
     fn shiftLeft(
         /// The shift count, inferred as the receiver's integer type.
-        count: T,
-    ) -> T;
+        count: Self,
+    ) -> Self;
 
     /// Shifts bits to the right.
     ///
@@ -2084,8 +2084,8 @@ capability Integer<T: Numeric + Display> {
     @operator(shiftRight)
     fn shiftRight(
         /// The shift count, inferred as the receiver's integer type.
-        count: T,
-    ) -> T;
+        count: Self,
+    ) -> Self;
 }
 
 /// Identifies signed numeric types.
@@ -2101,7 +2101,7 @@ capability Integer<T: Numeric + Display> {
 /// let levelDelta: i32 = -4
 /// ```
 @behavior(declared)
-capability Signed<T: Numeric> {
+capability Signed: Numeric {
     /// Returns this value with its sign inverted.
     ///
     /// This method is also the implementation of unary
@@ -2118,7 +2118,7 @@ capability Signed<T: Numeric> {
     /// ```
     @intrinsic(SignedNegate)
     @operator(negate)
-    fn negate() -> T;
+    fn negate() -> Self;
 
     /// Returns this value without a negative sign.
     ///
@@ -2134,7 +2134,7 @@ capability Signed<T: Numeric> {
     /// ```splitscript
     /// let distance = (-12i32).abs()
     /// ```
-    fn abs() -> T {
+    fn abs() -> Self {
         return self.max(-self)
     }
 }
@@ -2156,7 +2156,7 @@ capability Signed<T: Numeric> {
 /// let text = nearest as String
 /// ```
 @behavior(declared)
-capability Float<T: Signed + Debug> {
+capability Float: Signed + Debug {
     /// Returns the principal square root of this value.
     ///
     /// Positive finite values produce a non-negative result. Positive infinity
@@ -2171,7 +2171,7 @@ capability Float<T: Signed + Debug> {
     /// let distance = (3.0 * 3.0 + 4.0 * 4.0).sqrt()
     /// ```
     @intrinsic(FloatSqrt)
-    fn sqrt() -> T;
+    fn sqrt() -> Self;
 
     /// Rounds this value toward zero to an integral value.
     ///
@@ -2186,7 +2186,7 @@ capability Float<T: Signed + Debug> {
     /// let wholeSeconds = 12.75.truncate()
     /// ```
     @intrinsic(FloatTruncate)
-    fn truncate() -> T;
+    fn truncate() -> Self;
 
     /// Rounds down to the nearest integral value.
     ///
@@ -2201,7 +2201,7 @@ capability Float<T: Signed + Debug> {
     /// let wholeSeconds = 12.75.floor()
     /// ```
     @intrinsic(FloatFloor)
-    fn floor() -> T;
+    fn floor() -> Self;
 
     /// Rounds up to the nearest integral value.
     ///
@@ -2216,7 +2216,7 @@ capability Float<T: Signed + Debug> {
     /// let requiredPages = 2.25.ceil()
     /// ```
     @intrinsic(FloatCeil)
-    fn ceil() -> T;
+    fn ceil() -> Self;
 
     /// Rounds to the nearest integral value, with halfway values rounded to even.
     ///
@@ -2231,7 +2231,7 @@ capability Float<T: Signed + Debug> {
     /// let visibleDistance = 12.5.round()
     /// ```
     @intrinsic(FloatRound)
-    fn round() -> T;
+    fn round() -> Self;
 
     /// Rounds to a requested number of digits after the decimal point.
     ///
@@ -2248,7 +2248,7 @@ capability Float<T: Signed + Debug> {
     fn roundTo(
         /// The number of digits to preserve after the decimal point.
         decimalPlaces: u32,
-    ) -> T {
+    ) -> Self {
         let scale = 1
         let remaining = decimalPlaces
         while remaining > 0 {
@@ -2498,7 +2498,7 @@ extend bool {
 /// let sameRoom = 4 == 4
 /// ```
 @behavior(structuralEquality)
-capability Equatable<T> {
+capability Equatable {
     /// Reports whether this value and another value are equal.
     ///
     /// This method is also the implementation of the
@@ -2519,7 +2519,7 @@ capability Equatable<T> {
     @operator(equal)
     fn equals(
         /// The other value of the same type.
-        other: T,
+        other: Self,
     ) -> bool;
 
     /// Reports whether this value and another value differ.
@@ -2539,7 +2539,7 @@ capability Equatable<T> {
     @operator(notEqual)
     fn notEquals(
         /// The other value of the same type.
-        other: T,
+        other: Self,
     ) -> bool;
 }
 
@@ -2569,7 +2569,7 @@ capability Equatable<T> {
 /// print(checkpoints)
 /// ```
 @behavior(structuralMethods)
-capability Debug<T: Display> {
+capability Debug: Display {
     /// Converts the receiver to its unambiguous structural representation.
     ///
     /// User structs, enums, and managed class snapshots receive a recursive
@@ -2611,7 +2611,7 @@ capability Debug<T: Display> {
 /// let scoreText = `Score: {42}`
 /// ```
 @behavior(structuralMethods)
-capability Display<T> {
+capability Display {
     /// Converts the receiver to its user-facing string representation.
     ///
     /// A user struct or enum falls back to its derived [`Debug`] representation
@@ -2644,6 +2644,85 @@ capability Display<T> {
     fn toString() -> String;
 }
 
+/// Reads a value selected by bracket indexing.
+///
+/// The implementing type chooses one key type and one returned value type.
+/// Arrays use [`u32`] keys, while maps use their declared key type. Source
+/// structs can participate by defining an exact [`Index.at`] method.
+///
+/// # Example
+///
+/// Read an indexed value
+///
+/// ```splitscript
+/// let names = ["Ada", "Grace"]
+/// let first = names[0]
+/// ```
+@behavior(structuralMethods)
+capability Index {
+    /// Value accepted between `[` and `]`.
+    type Key;
+
+    /// Value produced by indexed access.
+    type Value;
+
+    /// Reads the value selected by a key.
+    ///
+    /// Bracket indexing dispatches to this operation. The standard array and
+    /// map implementations trap for an invalid index or absent key.
+    ///
+    /// # Example
+    ///
+    /// Read through an index
+    ///
+    /// ```splitscript
+    /// let first = [10, 20].at(0)
+    /// ```
+    fn at(
+        /// Key selecting one value.
+        key: Key,
+    ) -> Value;
+}
+
+/// Replaces or inserts a value through bracket assignment.
+///
+/// Every assignable index is also readable and therefore shares the exact
+/// `Index.Key` and `Index.Value` types. Source structs participate by defining
+/// both the inherited [`Index.at`] method and an exact [`IndexAssign.set`]
+/// method.
+///
+/// # Example
+///
+/// Assign through an index
+///
+/// ```splitscript
+/// let scores = Map.new<String, u32>()
+/// scores["Ada"] = 12
+/// ```
+@behavior(structuralMethods)
+capability IndexAssign: Index {
+    /// Stores a value selected by a key.
+    ///
+    /// Plain bracket assignment invokes only this operation. Compound
+    /// assignment reads with [`Index.at`], applies its operator, then invokes
+    /// this operation, evaluating the receiver and key once.
+    ///
+    /// # Example
+    ///
+    /// Assign through an index
+    ///
+    /// ```splitscript
+    /// let values = [10, 20]
+    /// values.set(0, 30)
+    /// ```
+    fn set(
+        /// Key selecting the destination.
+        key: Key,
+        /// New value to store.
+        value: Value,
+    ) -> None;
+}
+
 /// Produces a sequence of values one step at a time.
 ///
 /// Its associated item type is the value yielded by [`Iterator.next`].
@@ -2664,7 +2743,7 @@ capability Display<T> {
 /// }
 /// ```
 @behavior(structuralMethods)
-capability Iterator<T> {
+capability Iterator {
     /// The value produced by one successful iterator step.
     type Item;
 
@@ -2707,7 +2786,7 @@ capability Iterator<T> {
     fn map<U>(
         /// Transformation applied to each yielded item.
         transform: (Item) -> U,
-    ) -> MapIterator<T, Item, U> {
+    ) -> MapIterator<Self, Item, U> {
         return MapIterator { source: self, transform }
     }
 
@@ -2730,7 +2809,7 @@ capability Iterator<T> {
     fn filter(
         /// Predicate deciding whether an item is yielded.
         predicate: (Item) -> bool,
-    ) -> FilterIterator<T, Item> {
+    ) -> FilterIterator<Self, Item> {
         return FilterIterator { source: self, predicate }
     }
 }
@@ -2755,7 +2834,7 @@ capability Iterator<T> {
 /// }
 /// ```
 @behavior(structuralMethods)
-capability Iterable<T> {
+capability Iterable {
     /// The concrete cursor returned for this iterable value.
     type Iterator: Iterator;
 
@@ -3187,7 +3266,7 @@ typeConstructor InclusiveRangeIterator<T: Integer> {
 /// let health = process.read<i32>(0x1234) else 0
 /// ```
 @behavior(structuralMemoryLayout)
-capability MemoryReadable<T> {}
+capability MemoryReadable {}
 
 /// Reads typed values and bounded strings from an address space.
 ///
@@ -3211,7 +3290,7 @@ capability MemoryReadable<T> {}
 /// }
 /// ```
 @behavior(structuralMethods)
-capability MemoryReader<T> {
+capability MemoryReader {
     /// The address value accepted by this reader.
     type Address;
 
@@ -3308,8 +3387,12 @@ capability MemoryReader<T> {
 /// ```splitscript
 /// let inventory: [u8] = [1, 2, 3]
 /// ```
-@capabilities(Debug, Iterable)
+@capabilities(Debug, Iterable, IndexAssign)
 typeConstructor [T] {
+    /// Index accepted by bracket access.
+    type Key = u32;
+    /// Value read or written through an index.
+    type Value = T;
     /// The cursor created for this array.
     type Iterator = ArrayIterator<T>;
 
@@ -3411,6 +3494,12 @@ typeConstructor [T] {
             index += 1
         }
         return None
+    }
+
+    // Implements array indexing while direct concrete array access retains
+    // its allocation-free compiler lowering.
+    private fn at(index: u32) -> T {
+        return self[index]
     }
 
     /// Updates an array element.
@@ -4012,8 +4101,12 @@ typeConstructor MapEntry<K, V> {
 ///     print(routes["Atrium"])
 /// }
 /// ```
-@capabilities(Debug, Iterable)
+@capabilities(Debug, Iterable, IndexAssign)
 typeConstructor Map<K: Equatable, V> {
+    /// Key accepted by bracket access.
+    type Key = K;
+    /// Value read or written through a key.
+    type Value = V;
     /// Cursor created for this map.
     type Iterator = ArrayIterator<MapEntry<K, V>>;
 

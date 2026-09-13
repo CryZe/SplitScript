@@ -330,7 +330,7 @@ impl Checker {
                     && let Some(receiver_type) =
                         self.semantics.inferred_expression_type(receiver.id)
                 {
-                    self.resolve_map_index_setter(*id, receiver_type, receiver.id);
+                    self.resolve_index_setter(*id, receiver_type, receiver.id, receiver.span);
                 }
             }
             Stmt::If {

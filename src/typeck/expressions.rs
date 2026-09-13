@@ -15,7 +15,7 @@ use crate::{
         ResolvedWrapperPattern,
     },
     signature::parse_signature,
-    stdlib::{RuntimeRepresentation, StdlibCapabilityId, StdlibTypeConstructorId, StdlibTypeId},
+    stdlib::{RuntimeRepresentation, StdlibCapabilityId, StdlibTypeId},
     types::{EnumTypeId, TypeKind},
 };
 
@@ -2593,17 +2593,6 @@ impl Checker {
             return None;
         }
         let receiver_ty = self.shallow_type(receiver_ty);
-        if let Type::Application(application) = receiver_ty
-            && self.inference.application_constructor(application) == StdlibTypeConstructorId::Map
-        {
-            return self.resolve_map_index(
-                receiver_ty,
-                receiver.id,
-                index,
-                expression,
-                bracket_span,
-            );
-        }
         if matches!(
             receiver_ty,
             Type::Known(id)
@@ -2648,29 +2637,23 @@ impl Checker {
             Type::Known(id) => match self.inference.type_store().kind(id) {
                 crate::types::TypeKind::Array { element, .. } => Type::Known(*element),
                 _ => {
-                    let actual = self.type_name(receiver_ty);
-                    self.error(
-                        format!("type `{actual}` cannot be indexed; expected an array"),
+                    return self.resolve_index_getter(
+                        receiver_ty,
+                        receiver.id,
+                        index,
+                        expression,
                         bracket_span,
                     );
-                    return None;
                 }
             },
-            Type::Variable(variable)
-                if self.inference.variable_requirements(variable).is_empty() =>
-            {
-                let element = self.fresh_inference(Requirements::none(), None);
-                let array = Type::Array(self.inference.inferred_array_type(element));
-                self.unify(receiver_ty, array, receiver.span)?;
-                element
-            }
             _ => {
-                let actual = self.type_name(receiver_ty);
-                self.error(
-                    format!("type `{actual}` cannot be indexed; expected an array"),
+                return self.resolve_index_getter(
+                    receiver_ty,
+                    receiver.id,
+                    index,
+                    expression,
                     bracket_span,
                 );
-                return None;
             }
         };
         let u32_type = self.core_type(crate::stdlib::CoreTypeId::U32);

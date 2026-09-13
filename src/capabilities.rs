@@ -449,17 +449,11 @@ impl CapabilityAnalysis {
         };
         let standard = self
             .standard_library
-            .children_of(owner)
-            .filter_map(|symbol| match symbol {
-                crate::stdlib::StdlibSymbolId::Item(item) => Some(item),
-                _ => None,
-            })
+            .method_items_named_including_private(requirement.name)
             .find(|item| {
-                let item = self.standard_library.item(*item);
-                item.name == requirement.name
-                    && item.implementation != Implementation::CapabilityRequirement
+                item.owner == owner && item.implementation != Implementation::CapabilityRequirement
             })
-            .map(CapabilityMethodImplementation::Standard);
+            .map(|item| CapabilityMethodImplementation::Standard(item.id));
         if standard.is_some() {
             return standard;
         }
@@ -891,8 +885,10 @@ impl CapabilityAnalysis {
                     true
                 }
             },
-            TypeRef::Associated(name) => semantics
-                .source_associated_type(receiver, capability, name)
+            TypeRef::Associated(name) => self
+                .standard_library
+                .associated_type_owner(capability, name)
+                .and_then(|owner| semantics.source_associated_type(receiver, owner, name))
                 .is_some_and(|required| required == actual),
             TypeRef::Async(value) => {
                 let TypeKind::Async {

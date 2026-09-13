@@ -5,7 +5,57 @@ use splitscript::tooling::{
     highlight::SemanticTokenKind,
     language::LanguageItemId,
 };
-use wasmparser::{Validator, WasmFeatures};
+use wasmparser::{Operator, Parser, Payload, Validator, WasmFeatures};
+
+fn call_ref_count(wasm: &[u8]) -> usize {
+    Parser::new(0)
+        .parse_all(wasm)
+        .filter_map(Result::ok)
+        .filter_map(|payload| match payload {
+            Payload::CodeSectionEntry(body) => Some(body),
+            _ => None,
+        })
+        .flat_map(|body| body.get_operators_reader().unwrap().into_iter())
+        .filter_map(Result::ok)
+        .filter(|operator| matches!(operator, Operator::CallRef { .. }))
+        .count()
+}
+
+#[test]
+fn exact_callable_producers_use_direct_calls_and_heterogeneous_joins_stay_dynamic() {
+    let exact = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            whileAttached {
+                let addOne = value => value + 1
+                print(addOne(4))
+            }
+        "#,
+    )
+    .expect("an exact closure target should compile");
+    assert_eq!(call_ref_count(&exact), 0);
+
+    let heterogeneous = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn choose(first: bool) -> (u32) -> u32 {
+                if first {
+                    return value => value + 1
+                }
+                return value => value + 2
+            }
+
+            whileAttached {
+                let operation = choose(true)
+                print(operation(4))
+            }
+        "#,
+    )
+    .expect("joined closure targets should retain dynamic dispatch");
+    assert_eq!(call_ref_count(&heterogeneous), 1);
+}
 
 #[test]
 fn infers_closure_parameters_and_results_bidirectionally() {

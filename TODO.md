@@ -891,17 +891,19 @@ concepts rather than maintaining a parallel inventory.
   generators. Concrete cursor layouts and their raw intrinsics remain private
   standard-library implementation details and are absent from name resolution,
   completion, hover, and generated documentation.
-- [ ] Design one hidden exact-producer analysis for erased runtime values before
-  optimizing their dispatch. Public types should remain `iterator T`, `async T`,
-  and ordinary callable types, while compiler facts may retain one proven
-  concrete iterator frame, future frame, or closure target through locals,
-  forwarding calls, and unambiguous control flow. Direct calls may be
-  devirtualized only while that fact has exactly one target; heterogeneous
-  aggregates, joins with multiple producers, escaping values, and unknown calls
-  must deliberately fall back to the existing dynamic dispatch. Measure code
-  size and runtime behavior before implementing this as an optimization, and
-  keep it separate from source-level type inference and capability semantics so
-  optimization never changes which programs type-check.
+- [x] Implement one hidden exact-runtime-representation analysis for erased
+  values. Public types remain `iterator T`, `async T`, and ordinary callable
+  types; one backend fact domain now retains a proven generator frame, future
+  frame, closure, or named-function target through locals, forwarding calls,
+  and unambiguous control flow. Exact iterator advancement, future polling, and
+  callable invocation use direct calls. Heterogeneous aggregates, conflicting
+  joins, escaping values, and unknown calls monotonically fall back to the
+  existing dynamic dispatch, and a shared function body is never cloned merely
+  because its callers have different producers. This stays separate from type
+  inference and capability semantics, so it cannot change which programs
+  type-check. The release Lunistice fixture shrank from 45,921 to 42,780 bytes
+  (3,141 bytes / 6.8%), while the complete iterator, closure, and async runtime
+  suites retained their behavior.
 
 ### Engine and emulator providers
 

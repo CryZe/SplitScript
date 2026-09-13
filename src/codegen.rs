@@ -37,6 +37,7 @@ mod dependencies;
 mod display;
 mod display_plan;
 mod equality_plan;
+mod exact_runtime;
 mod expression;
 mod failure_payload;
 mod function_plan;
@@ -73,6 +74,7 @@ use self::data_plan::StaticData;
 use self::dependencies::BackendDependencies;
 use self::display_plan::DisplayFunctions;
 use self::equality_plan::EqualityFunctions;
+use self::exact_runtime::ExactRuntimeRepresentations;
 use self::failure_payload::FailurePayloadDemand;
 use self::gc_layout::GcLayout;
 use self::global_plan::SettingStorage;
@@ -493,6 +495,13 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             .chain(provider_preparation.clone()),
     );
     let async_frames = AsyncFrameLayouts::plan(program, wasm_ir, semantics, &reachability);
+    let exact_runtime = ExactRuntimeRepresentations::analyze(
+        program,
+        wasm_ir,
+        semantics,
+        &reachability,
+        &async_frames,
+    );
     let managed = crate::managed::ManagedBindingPlan::build(program, semantics);
     let explicit_shape_selection = crate::shape_selection::has_explicit_shape_selection(program);
     let automatic_shape = if explicit_shape_selection {
@@ -669,6 +678,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         wasm_ir,
         gc: &gc,
         async_frames: &async_frames,
+        exact_runtime: &exact_runtime,
         explicit_shape_selection,
         debug: debug_recorder.as_ref(),
     };

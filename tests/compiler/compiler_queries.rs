@@ -222,12 +222,12 @@ fn vscode_manifest_tracks_the_lsp_semantic_token_legend() {
         .as_array()
         .unwrap()
         .iter()
-        .filter_map(|pattern| {
+        .filter(|pattern| {
             pattern["name"]
                 .as_str()
                 .is_some_and(|name| name.starts_with("keyword."))
-                .then(|| pattern["match"].as_str().unwrap())
         })
+        .map(|pattern| pattern["match"].as_str().unwrap())
         .collect::<Vec<_>>();
     for keyword in splitscript::tooling::language::LanguageCatalog::new()
         .items()

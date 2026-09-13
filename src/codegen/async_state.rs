@@ -344,6 +344,7 @@ pub(super) fn compile_leaf_future_poll(
         wasm_ir: runtime.lowering.wasm_ir,
         gc: runtime.lowering.gc,
         async_frames: runtime.lowering.async_frames,
+        exact_runtime: runtime.lowering.exact_runtime,
         intrinsic_capture: Some(IntrinsicCapture { frame, layout }),
         debug: runtime.lowering.debug_emission(function_index),
         function_instance: instance.owner.as_ref(),
@@ -499,6 +500,7 @@ fn compile_continuation_body(
         wasm_ir: runtime.lowering.wasm_ir,
         gc: runtime.lowering.gc,
         async_frames: runtime.lowering.async_frames,
+        exact_runtime: runtime.lowering.exact_runtime,
         intrinsic_capture: None,
         debug: runtime.lowering.debug_emission(function_index),
         function_instance,
@@ -2912,6 +2914,9 @@ fn emit_future_timeout_poll(
         function,
         context.expression_type(operation),
         poll_destination,
+        context
+            .exact_runtime
+            .expression_continuation(context.function_instance, operation),
         context,
         |function| compile_expr(function, operation, context),
     );
@@ -3112,6 +3117,7 @@ fn emit_future_race_poll(
             destination,
             layout,
         },
+        None,
         context,
         |function| {
             compile_expr(function, operations, context);
@@ -3170,6 +3176,9 @@ fn compile_source_future_poll(
             destination,
             layout: parent_layout,
         },
+        context
+            .exact_runtime
+            .expression_continuation(context.function_instance, expression),
         context,
         |function| {
             parent.emit(function);
@@ -3211,6 +3220,7 @@ fn emit_future_poll_status(
     function: &mut Function,
     future_type: Type,
     destination: FuturePollDestination<'_>,
+    exact: Option<&super::exact_runtime::ContinuationProducer>,
     context: &ExprContext<'_>,
     mut emit_future: impl FnMut(&mut Function),
 ) {
@@ -3235,6 +3245,7 @@ fn emit_future_poll_status(
         })
         .map(|(candidate, layout)| {
             (
+                super::exact_runtime::ContinuationProducer::Function((*candidate).clone()),
                 context.gc.function_frame_index(candidate),
                 context.gc.function_frame_tag(candidate),
                 context.functions[candidate]
@@ -3263,6 +3274,7 @@ fn emit_future_poll_status(
         })
         .map(|(instance, layout)| {
             (
+                super::exact_runtime::ContinuationProducer::Closure((*instance).clone()),
                 context.gc.closure_frame_index(instance),
                 context.gc.closure_frame_tag(instance),
                 context.closure_resumes[instance],
@@ -3275,6 +3287,7 @@ fn emit_future_poll_status(
         .filter(|(_, layout)| layout.future == future_type)
         .map(|(instance, layout)| {
             (
+                super::exact_runtime::ContinuationProducer::Leaf((*instance).clone()),
                 context.gc.leaf_frame_index(instance),
                 context.gc.leaf_frame_tag(instance),
                 context.leaf_futures[instance],
@@ -3336,7 +3349,71 @@ fn emit_future_poll_status(
         })
         .instruction(&Instruction::End);
 
-    for (frame_type, tag, poll, completion) in candidates {
+    if let Some(exact) = exact {
+        let (_, frame_type, _, poll, completion) = candidates
+            .iter()
+            .find(|(producer, ..)| producer == exact)
+            .expect("exact future producers have a reachable poll implementation");
+        emit_future(function);
+        function
+            .instruction(&Instruction::RefCastNonNull(HeapType::Concrete(
+                *frame_type,
+            )))
+            .instruction(&Instruction::Call(*poll))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::Br(1))
+            .instruction(&Instruction::End);
+
+        let mut emit_completion = |function: &mut Function| {
+            if let Some((completion_field, completion_type)) = completion {
+                emit_future(function);
+                function.instruction(&Instruction::RefCastNonNull(HeapType::Concrete(
+                    *frame_type,
+                )));
+                emit_frame_typed_struct_get(
+                    function,
+                    *frame_type,
+                    *completion_field,
+                    *completion_type,
+                    context.gc,
+                );
+                *completion_type
+            } else {
+                emit_default(function, Type::None, context.gc);
+                Type::None
+            }
+        };
+        match destination {
+            FuturePollDestination::Frame {
+                destination,
+                layout,
+            } => {
+                if let Some((destination_field, destination_type)) = layout.field(destination) {
+                    parent.emit(function);
+                    let completion_type = emit_completion(function);
+                    debug_assert_eq!(destination_type, completion_type);
+                    function.instruction(&Instruction::StructSet {
+                        struct_type_index: parent.struct_type,
+                        field_index: destination_field,
+                    });
+                }
+            }
+            FuturePollDestination::Local { local, ty } => {
+                let completion_type = emit_completion(function);
+                debug_assert_eq!(ty, completion_type);
+                function.instruction(&Instruction::LocalSet(local));
+            }
+            FuturePollDestination::Discard => {}
+        }
+        function
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::End);
+        return;
+    }
+
+    for (_, frame_type, tag, poll, completion) in candidates {
         emit_future(function);
         function
             .instruction(&Instruction::StructGet {

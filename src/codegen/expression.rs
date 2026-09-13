@@ -147,6 +147,7 @@ pub(super) struct ExprContext<'a> {
     pub wasm_ir: &'a wasm_ir::Program,
     pub gc: &'a GcLayout,
     pub async_frames: &'a super::async_frame::AsyncFrameLayouts,
+    pub exact_runtime: &'a super::exact_runtime::ExactRuntimeRepresentations,
     pub intrinsic_capture: Option<IntrinsicCapture<'a>>,
     pub debug: Option<super::debug_artifacts::DebugEmission<'a>>,
     /// Concrete type arguments while emitting a generic function template.
@@ -236,6 +237,7 @@ impl<'a> ExprContext<'a> {
             wasm_ir: lowering.wasm_ir,
             gc: lowering.gc,
             async_frames: lowering.async_frames,
+            exact_runtime: lowering.exact_runtime,
             intrinsic_capture: None,
             debug: None,
             function_instance: None,
@@ -3862,15 +3864,28 @@ fn compile_expr_unconverted(
             for argument in arguments {
                 compile_expr(function, *argument, context);
             }
-            function
-                .instruction(&Instruction::LocalGet(closure_local))
-                .instruction(&Instruction::StructGet {
-                    struct_type_index: context.gc.index(Type::Callable(callable)),
-                    field_index: 0,
-                })
-                .instruction(&Instruction::CallRef(
-                    context.gc.callable_function_index(callable),
-                ));
+            match context
+                .exact_runtime
+                .invocation(context.function_instance, expression)
+            {
+                Some(super::exact_runtime::CallableProducer::Closure(instance)) => {
+                    function.instruction(&Instruction::Call(context.closures[instance]));
+                }
+                Some(super::exact_runtime::CallableProducer::Function(instance)) => {
+                    function.instruction(&Instruction::Call(context.function_values[instance]));
+                }
+                None => {
+                    function
+                        .instruction(&Instruction::LocalGet(closure_local))
+                        .instruction(&Instruction::StructGet {
+                            struct_type_index: context.gc.index(Type::Callable(callable)),
+                            field_index: 0,
+                        })
+                        .instruction(&Instruction::CallRef(
+                            context.gc.callable_function_index(callable),
+                        ));
+                }
+            }
         }
         wasm_ir::ExpressionKind::Closure { closure, .. } => {
             let Type::Callable(callable) = ty else {
@@ -5242,6 +5257,30 @@ fn emit_generator_next(
     let cursor = context.matches.intrinsic_temps[&expression][0];
     let receiver = compile_receiver(function, target, context);
     debug_assert_eq!(receiver, iterator_type);
+    if let Some(producer) = context
+        .exact_runtime
+        .call_receiver(context.function_instance, expression)
+    {
+        let (frame_type, next) = match producer {
+            super::exact_runtime::ContinuationProducer::Function(instance) => (
+                context.gc.function_frame_index(instance),
+                context.functions[instance]
+                    .resume
+                    .expect("exact generator functions have next entry points"),
+            ),
+            super::exact_runtime::ContinuationProducer::Closure(instance) => (
+                context.gc.closure_frame_index(instance),
+                context.closure_resumes[instance],
+            ),
+            super::exact_runtime::ContinuationProducer::Leaf(_) => {
+                unreachable!("leaf futures cannot implement synchronous Iterator.next")
+            }
+        };
+        function
+            .instruction(&Instruction::RefCastNonNull(HeapType::Concrete(frame_type)))
+            .instruction(&Instruction::Call(next));
+        return;
+    }
     function.instruction(&Instruction::LocalSet(cursor));
 
     let function_candidates = context

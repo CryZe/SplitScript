@@ -170,6 +170,7 @@ fn emit_runtime_global_initializers(
         wasm_ir: lowering.wasm_ir,
         gc: lowering.gc,
         async_frames: lowering.async_frames,
+        exact_runtime: lowering.exact_runtime,
         intrinsic_capture: None,
         debug,
         function_instance: None,

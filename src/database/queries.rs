@@ -758,6 +758,9 @@ impl CompilerDatabase {
             TypeKind::Option { .. } => Some(DefinitionTarget::Language(LanguageItemId::OptionType)),
             TypeKind::Result { .. } => Some(DefinitionTarget::Language(LanguageItemId::ResultType)),
             TypeKind::Async { .. } => Some(DefinitionTarget::Language(LanguageItemId::Async)),
+            TypeKind::Iterator { .. } => {
+                Some(DefinitionTarget::Language(LanguageItemId::IteratorType))
+            }
             TypeKind::Callable { .. } => {
                 Some(DefinitionTarget::Language(LanguageItemId::CallableType))
             }

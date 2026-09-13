@@ -155,6 +155,20 @@ impl AsyncTypeId {
     }
 }
 
+/// Stable identity for a synchronous iterator-value type expression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct IteratorTypeId(u32);
+
+impl IteratorTypeId {
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    pub(crate) fn from_index(index: u32) -> Self {
+        Self(index)
+    }
+}
+
 /// Stable identity for a callable type expression in one parsed program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CallableTypeId(u32);
@@ -281,6 +295,7 @@ display_stable_id!(
     OptionTypeId,
     ResultTypeId,
     AsyncTypeId,
+    IteratorTypeId,
     CallableTypeId,
     RangeTypeId,
     TypeApplicationId,
@@ -366,6 +381,7 @@ pub struct Program {
     pub option_types: Vec<OptionTypeDecl>,
     pub result_types: Vec<ResultTypeDecl>,
     pub async_types: Vec<AsyncTypeDecl>,
+    pub iterator_types: Vec<IteratorTypeDecl>,
     pub callable_types: Vec<CallableTypeDecl>,
     pub range_types: Vec<RangeTypeDecl>,
     pub type_applications: Vec<TypeApplicationDecl>,
@@ -685,6 +701,10 @@ impl ConstructedTypeIdAllocator {
         AsyncTypeId::from_index(self.take())
     }
 
+    pub fn iterator(&mut self) -> IteratorTypeId {
+        IteratorTypeId::from_index(self.take())
+    }
+
     pub fn callable(&mut self) -> CallableTypeId {
         CallableTypeId::from_index(self.take())
     }
@@ -795,6 +815,12 @@ pub struct AsyncTypeDecl {
     pub value: TypeRef,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct IteratorTypeDecl {
+    pub id: IteratorTypeId,
+    pub item: TypeRef,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RangeKind {
     Exclusive,
@@ -892,6 +918,9 @@ pub struct FunctionDecl {
     /// is inferred from the function body by semantic analysis.
     pub return_is_async: bool,
     pub return_async_span: Option<Span>,
+    /// Whether the explicitly written result is `iterator T`.
+    pub return_is_iterator: bool,
+    pub return_iterator_span: Option<Span>,
     pub return_annotation_span: Option<Span>,
     pub body: Block,
     pub span: Span,
@@ -1413,6 +1442,12 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
+    /// Produces one value from a synchronous generator and suspends it until
+    /// the cursor is advanced again.
+    Yield {
+        value: Expr,
+        span: Span,
+    },
     Expression(Expr),
 }
 
@@ -1889,6 +1924,7 @@ pub enum TypeRef {
     Option(OptionTypeId),
     Result(ResultTypeId),
     Async(AsyncTypeId),
+    Iterator(IteratorTypeId),
     Callable(CallableTypeId),
     Range(RangeTypeId),
     Application(TypeApplicationId),
@@ -1925,6 +1961,7 @@ impl fmt::Display for TypeRef {
             Self::Option(id) => write!(f, "Option#{id}"),
             Self::Result(id) => write!(f, "Result#{id}"),
             Self::Async(id) => write!(f, "Async#{id}"),
+            Self::Iterator(id) => write!(f, "Iterator#{id}"),
             Self::Callable(id) => write!(f, "Callable#{id}"),
             Self::Range(id) => write!(f, "Range#{id}"),
             Self::Application(id) => write!(f, "Application#{id}"),

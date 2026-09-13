@@ -115,6 +115,34 @@ fn choose(flag: bool) -> i32 {
 The important difference is the explicit [`return`]: even when the final
 expression is a [`loop`], a SplitScript function does not return it implicitly.
 
+## Generators create ordinary iterators
+
+SplitScript has synchronous generator functions even though stable Rust does
+not have equivalent [`yield`] syntax. A call is lazy, and only `next()` advances
+the body:
+
+```splitscript
+# state "game.exe" {}
+fn values(end: u32) -> iterator u32 {
+    let value = 0u32
+    while value < end {
+        yield value
+        value += 1
+    }
+}
+
+# setup {
+for value in values(3) {
+    print(value)
+}
+# }
+```
+
+The cursor implements [`Iterator`] and [`Iterable`], uses [`Item`] and [`End`]
+instead of `Option<T>`, and aliases its position when copied. Generators are
+synchronous: [`await`], [`retry`], fallible propagation, and value-returning
+[`return`] require a different protocol and are rejected.
+
 ## None is the unit type
 
 [`None`] is both the language's zero-sized unit value and the absent side of

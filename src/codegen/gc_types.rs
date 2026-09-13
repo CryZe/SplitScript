@@ -14,8 +14,8 @@ use crate::{
     },
     types::{
         ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType, ResolvedCallableType,
-        ResolvedOptionType, ResolvedRangeType, ResolvedResultType, ResolvedSetType, TypeId,
-        TypeKind,
+        ResolvedIteratorType, ResolvedOptionType, ResolvedRangeType, ResolvedResultType,
+        ResolvedSetType, TypeId, TypeKind,
     },
 };
 
@@ -42,6 +42,7 @@ pub(super) struct Inputs<'a> {
     pub option_types: &'a [ResolvedOptionType],
     pub result_types: &'a [ResolvedResultType],
     pub async_types: &'a [ResolvedAsyncType],
+    pub iterator_types: &'a [ResolvedIteratorType],
     pub callable_types: &'a [ResolvedCallableType],
     pub set_types: &'a [ResolvedSetType],
     pub application_types: &'a [ResolvedApplicationType],
@@ -61,6 +62,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         option_types,
         result_types,
         async_types,
+        iterator_types,
         callable_types,
         set_types,
         application_types,
@@ -77,6 +79,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         options: option_types,
         results: result_types,
         asyncs: async_types,
+        iterators: iterator_types,
         callables: callable_types,
         sets: set_types,
         applications: application_types,
@@ -657,6 +660,41 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
             },
         });
     }
+    for iterator in iterator_types
+        .iter()
+        .filter(|iterator| reachability.contains_iterator_type(iterator.id))
+    {
+        debug_assert_eq!(
+            layout.index(Type::Iterator(iterator.id)),
+            recursive_types.len() as u32
+        );
+        recursive_types.push(SubType {
+            is_final: false,
+            supertype_idx: None,
+            composite_type: CompositeType {
+                inner: CompositeInnerType::Struct(StructType {
+                    fields: vec![
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I32),
+                            mutable: true,
+                        },
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I32),
+                            mutable: false,
+                        },
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I64),
+                            mutable: true,
+                        },
+                    ]
+                    .into(),
+                }),
+                shared: false,
+                descriptor: None,
+                describes: None,
+            },
+        });
+    }
     for (instance, frame) in async_frames.functions() {
         let result = semantics.specialize_type(
             instance,
@@ -664,14 +702,17 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                 .function_result(instance.function)
                 .expect("checked functions have result types"),
         );
-        let Type::Async(future) = super::semantic_type(result, semantics) else {
-            unreachable!("suspending functions return async values")
+        let result = super::semantic_type(result, semantics);
+        let supertype = match result {
+            Type::Async(future) => layout.index(Type::Async(future)),
+            Type::Iterator(iterator) => layout.index(Type::Iterator(iterator)),
+            _ => unreachable!("continuation-backed functions return async or iterator values"),
         };
         let frame_index = layout.function_frame_index(instance);
         debug_assert_eq!(frame_index, recursive_types.len() as u32);
         recursive_types.push(SubType {
             is_final: true,
-            supertype_idx: Some(layout.index(Type::Async(future))),
+            supertype_idx: Some(supertype),
             composite_type: CompositeType {
                 inner: CompositeInnerType::Struct(StructType {
                     fields: [
@@ -719,14 +760,17 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         let TypeKind::Callable { result, .. } = semantics.types().kind(closure_type) else {
             unreachable!("checked closure expressions have callable types")
         };
-        let Type::Async(future) = super::semantic_type(*result, semantics) else {
-            unreachable!("suspending closures return async values")
+        let result = super::semantic_type(*result, semantics);
+        let supertype = match result {
+            Type::Async(future) => layout.index(Type::Async(future)),
+            Type::Iterator(iterator) => layout.index(Type::Iterator(iterator)),
+            _ => unreachable!("continuation-backed closures return async or iterator values"),
         };
         let frame_index = layout.closure_frame_index(instance);
         debug_assert_eq!(frame_index, recursive_types.len() as u32);
         recursive_types.push(SubType {
             is_final: true,
-            supertype_idx: Some(layout.index(Type::Async(future))),
+            supertype_idx: Some(supertype),
             composite_type: CompositeType {
                 inner: CompositeInnerType::Struct(StructType {
                     fields: [

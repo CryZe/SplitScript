@@ -4,6 +4,7 @@ use splitscript::{
     compiler::stdlib::StdlibItemId,
     tooling::{
         database::{CompilerDatabase, DefinitionTarget},
+        highlight::SemanticTokenKind,
         language::LanguageItemId,
     },
 };
@@ -45,6 +46,130 @@ whileAttached {
     printStep(explicitEnd)
 }
 "#;
+
+#[test]
+fn synchronous_generators_lower_to_lazy_iterator_state_machines() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn values(end: u32) -> iterator u32 {
+                let value = 0u32
+                while value < end {
+                    yield value
+                    value += 1
+                }
+            }
+
+            whileAttached {
+                let values = values(3)
+                print(values.next())
+                for value in values {
+                    print(value)
+                }
+                print(values.next())
+            }
+        "#,
+    )
+    .expect("synchronous generators should compile as first-class iterators");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("generator state machines should produce valid Wasm GC");
+}
+
+#[test]
+fn generator_closures_share_the_iterator_continuation_abi() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            whileAttached {
+                let offset = 10u32
+                let values: (u32) -> iterator u32 =
+                    (end: u32) -> iterator u32 => {
+                        let value = 0u32
+                        while value < end {
+                            yield value + offset
+                            value += 1
+                        }
+                    }
+                let cursor = values(2)
+                print(cursor.next())
+                print(cursor.next())
+                print(cursor.next())
+            }
+        "#,
+    )
+    .expect("generator closures should type-check and lower");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("generator closures should produce valid Wasm GC");
+}
+
+#[test]
+fn generator_syntax_is_documented_highlighted_and_contextually_completed() {
+    let source = r#"state "game.exe" {}
+fn values() -> iterator u32 {
+    yield 1
+}
+fn ordinary() {
+    yield 1
+}
+"#;
+    let mut database = CompilerDatabase::new(source);
+    let iterator = source.find("iterator").unwrap();
+    let generator_yield = source.find("yield").unwrap();
+    let ordinary_yield = source.rfind("yield").unwrap();
+
+    assert_eq!(
+        database.definition_at(iterator).unwrap(),
+        Some(DefinitionTarget::Language(LanguageItemId::IteratorType))
+    );
+    assert_eq!(
+        database.definition_at(generator_yield).unwrap(),
+        Some(DefinitionTarget::Language(LanguageItemId::Yield))
+    );
+
+    let highlights = database.semantic_highlights().unwrap();
+    for offset in [iterator, generator_yield] {
+        assert!(highlights.highlights().iter().any(|highlight| {
+            highlight.span.start == offset && highlight.kind == SemanticTokenKind::Keyword
+        }));
+    }
+
+    let generator_items = database
+        .completions(generator_yield + "yield".len())
+        .unwrap()
+        .items;
+    assert!(generator_items.iter().any(|item| item.label == "yield"));
+    let ordinary_items = database
+        .completions(ordinary_yield + "yield".len())
+        .unwrap()
+        .items;
+    assert!(!ordinary_items.iter().any(|item| item.label == "yield"));
+
+    let return_type_source = "state \"game.exe\" {}\nfn values() ->  {}";
+    let mut database = CompilerDatabase::new(return_type_source);
+    let type_offset = return_type_source.find("->  ").unwrap() + 3;
+    assert!(
+        database
+            .completions(type_offset)
+            .unwrap()
+            .items
+            .iter()
+            .any(|item| item.label == "iterator T")
+    );
+}
+
+#[test]
+fn generator_syntax_uses_the_ordinary_formatter_pipeline() {
+    let mut database =
+        CompilerDatabase::new("state \"game.exe\"{}\nfn values()->iterator u32{yield 1}\n");
+    assert_eq!(
+        &*database.format().unwrap(),
+        "state \"game.exe\" {}\nfn values() -> iterator u32 {\n    yield 1\n}\n"
+    );
+}
 
 #[test]
 fn compiles_first_class_iterators_and_step_patterns() {

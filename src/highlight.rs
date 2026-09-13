@@ -536,6 +536,12 @@ impl HighlightCollector<'_> {
                 .iter()
                 .find(|future| future.id == id)
                 .is_some_and(|future| self.type_contains_none(future.value)),
+            TypeRef::Iterator(id) => self
+                .syntax
+                .iterator_types
+                .iter()
+                .find(|iterator| iterator.id == id)
+                .is_some_and(|iterator| self.type_contains_none(iterator.item)),
             TypeRef::Callable(id) => self
                 .syntax
                 .callable_types

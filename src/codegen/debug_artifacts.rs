@@ -263,6 +263,7 @@ fn type_name(
         TypeKind::Option { value, .. } => format!("{}?", nested(*value)),
         TypeKind::Result { value, .. } => format!("{}!", nested(*value)),
         TypeKind::Async { value, .. } => format!("async {}", nested(*value)),
+        TypeKind::Iterator { item, .. } => format!("iterator {}", nested(*item)),
         TypeKind::Callable {
             parameters, result, ..
         } => {
@@ -848,6 +849,7 @@ fn scalar_type_entry(
         | Type::Option(_)
         | Type::Result(_)
         | Type::Async(_)
+        | Type::Iterator(_)
         | Type::Callable(_)
         | Type::Range(_)
         | Type::Set(_)

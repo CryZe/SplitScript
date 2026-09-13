@@ -504,7 +504,8 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             Stmt::Assign { span, .. }
             | Stmt::StateAssign { span, .. }
             | Stmt::IndexAssign { span, .. }
-            | Stmt::Suspend { span, .. } => {
+            | Stmt::Suspend { span, .. }
+            | Stmt::Yield { span, .. } => {
                 self.continuation_before_block(span.start, span.end);
             }
             Stmt::Expression(expression) => {

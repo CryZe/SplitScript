@@ -26,7 +26,7 @@ use crate::{
 use super::{
     DisplayFunctions, EqualityFunctions, GcLayout, MemoryByteOrder, RuntimeHelperPlan, STATE_TYPE,
     SetFunctions, SettingStorage, Type, application_type_argument, array_element_type, array_value,
-    async_frame::{AsyncFrameRef, LeafFutureInstance, LeafFutureLayout},
+    async_frame::{AsyncFrameRef, CONTINUATION_TAG_FIELD, LeafFutureInstance, LeafFutureLayout},
     emit_array_get, emit_default, emit_failure_transfer, emit_frame_typed_struct_get, emit_int,
     emit_integer_literal, emit_memory_value_result, emit_monotonic_nanoseconds,
     emit_native_memory_read_destination_and_size, emit_native_memory_value_result,
@@ -95,6 +95,10 @@ pub(super) enum BareReturn {
         frame: AsyncFrameRef,
         completion: Option<(u32, Type)>,
     },
+    Generator {
+        frame: AsyncFrameRef,
+        step: Type,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -117,7 +121,7 @@ pub(super) struct ExprContext<'a> {
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
     pub closures: &'a HashMap<crate::semantic::ClosureInstance, u32>,
     pub function_values: &'a HashMap<crate::semantic::FunctionValueInstance, u32>,
-    pub closure_polls: &'a HashMap<crate::semantic::ClosureInstance, u32>,
+    pub closure_resumes: &'a HashMap<crate::semantic::ClosureInstance, u32>,
     pub closure_environment: Option<ClosureEnvironment<'a>>,
     pub leaf_futures: &'a HashMap<LeafFutureInstance, u32>,
     pub display_functions: &'a DisplayFunctions,
@@ -209,7 +213,7 @@ impl<'a> ExprContext<'a> {
             functions: lowering.functions,
             closures: lowering.closures,
             function_values: lowering.function_values,
-            closure_polls: lowering.closure_polls,
+            closure_resumes: lowering.closure_resumes,
             closure_environment: None,
             leaf_futures: lowering.leaf_futures,
             display_functions: lowering.display_functions,
@@ -692,7 +696,8 @@ fn compile_block_with_loop(
         },
         wasm_ir::Terminator::Retry { .. }
         | wasm_ir::Terminator::RetryComplete { .. }
-        | wasm_ir::Terminator::Suspend { .. } => {
+        | wasm_ir::Terminator::Suspend { .. }
+        | wasm_ir::Terminator::Yield { .. } => {
             unreachable!("suspension is lowered by the async action compiler")
         }
     }
@@ -4042,6 +4047,12 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
+            wasm_ir::CallTarget::IteratorIdentity { .. } => {
+                compile_receiver(function, target, context);
+            }
+            wasm_ir::CallTarget::GeneratorNext { receiver_type, .. } => {
+                emit_generator_next(function, expression, target, *receiver_type, context);
+            }
             wasm_ir::CallTarget::ManagedSnapshot { class, .. } => {
                 compile_receiver(function, target, context);
                 function.instruction(&Instruction::Call(
@@ -5213,6 +5224,123 @@ fn emit_iterator_constructor(
     ));
 }
 
+fn emit_generator_next(
+    function: &mut Function,
+    expression: ExprId,
+    target: &wasm_ir::CallTarget,
+    receiver_type: TypeId,
+    context: &ExprContext<'_>,
+) {
+    let iterator_type = context.ty(receiver_type);
+    let Type::Iterator(_) = iterator_type else {
+        unreachable!("generator next dispatch requires an iterator receiver")
+    };
+    let step = context.expression_type(expression);
+    let Type::Application(_) = step else {
+        unreachable!("generator next dispatch produces IteratorStep<T>")
+    };
+    let cursor = context.matches.intrinsic_temps[&expression][0];
+    let receiver = compile_receiver(function, target, context);
+    debug_assert_eq!(receiver, iterator_type);
+    function.instruction(&Instruction::LocalSet(cursor));
+
+    let function_candidates = context
+        .async_frames
+        .functions()
+        .filter(|(candidate, _)| {
+            let result = context.semantics.specialize_type(
+                candidate,
+                context
+                    .semantics
+                    .function_result(candidate.function)
+                    .expect("checked functions have result types"),
+            );
+            semantic_type(result, context.semantics) == iterator_type
+                && matches!(
+                    context
+                        .wasm_ir
+                        .body(wasm_ir::BodyOwner::Function((*candidate).clone()))
+                        .expect("reachable functions have Wasm IR bodies")
+                        .abi,
+                    wasm_ir::BodyAbi::Generator(_)
+                )
+        })
+        .map(|(candidate, _)| {
+            (
+                context.gc.function_frame_index(candidate),
+                context.gc.function_frame_tag(candidate),
+                context.functions[candidate]
+                    .resume
+                    .expect("consumed generators have next entry points"),
+            )
+        });
+    let closure_candidates = context
+        .async_frames
+        .closures()
+        .filter(|(candidate, _)| {
+            let callable = context
+                .wasm_ir
+                .expression(candidate.expression)
+                .expect("reachable closure expressions belong to Wasm IR")
+                .ty;
+            let callable = candidate.owner.as_ref().map_or(callable, |owner| {
+                context.semantics.specialize_type(owner, callable)
+            });
+            let crate::types::TypeKind::Callable { result, .. } =
+                context.semantics.types().kind(callable)
+            else {
+                unreachable!("checked closure expressions have callable types")
+            };
+            semantic_type(*result, context.semantics) == iterator_type
+                && matches!(
+                    context
+                        .wasm_ir
+                        .closure(candidate.expression)
+                        .expect("reachable generator closures have Wasm IR bodies")
+                        .abi,
+                    wasm_ir::BodyAbi::Generator(_)
+                )
+        })
+        .map(|(candidate, _)| {
+            (
+                context.gc.closure_frame_index(candidate),
+                context.gc.closure_frame_tag(candidate),
+                context.closure_resumes[candidate],
+            )
+        });
+    let candidates = function_candidates
+        .chain(closure_candidates)
+        .collect::<Vec<_>>();
+    debug_assert!(
+        !candidates.is_empty(),
+        "reachable generator cursors have at least one concrete producer"
+    );
+
+    function.instruction(&Instruction::Block(BlockType::Result(
+        context.gc.val_type(step),
+    )));
+    for (frame_type, tag, next) in candidates {
+        function
+            .instruction(&Instruction::LocalGet(cursor))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::StructGet {
+                struct_type_index: context.gc.index(iterator_type),
+                field_index: CONTINUATION_TAG_FIELD,
+            })
+            .instruction(&Instruction::I32Const(tag as i32))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::LocalGet(cursor))
+            .instruction(&Instruction::RefCastNonNull(HeapType::Concrete(frame_type)))
+            .instruction(&Instruction::Call(next))
+            .instruction(&Instruction::Br(1))
+            .instruction(&Instruction::End);
+    }
+    function
+        .instruction(&Instruction::Unreachable)
+        .instruction(&Instruction::End);
+}
+
 fn emit_iterator_next(
     function: &mut Function,
     expression: ExprId,
@@ -5523,6 +5651,26 @@ fn compile_return_expression(
                     field_index: 0,
                 });
             function.instruction(&Instruction::I32Const(1));
+        }
+        BareReturn::Generator { frame, step } => {
+            if let Some(value) = value {
+                debug_assert_eq!(
+                    context.expression_type(value),
+                    Type::None,
+                    "generator returns cannot carry values"
+                );
+                compile_expr(function, value, &context.erasing_none());
+            }
+            frame.emit(function);
+            function
+                .instruction(&Instruction::I32Const(-1))
+                .instruction(&Instruction::StructSet {
+                    struct_type_index: frame.struct_type,
+                    field_index: 0,
+                })
+                .instruction(&Instruction::RefNull(HeapType::Concrete(
+                    context.gc.index(step),
+                )));
         }
         BareReturn::AsyncAction {
             action,

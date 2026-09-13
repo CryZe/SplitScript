@@ -25,7 +25,10 @@ pub(super) struct RuntimeHelperPlan {
 
 impl RuntimeHelperPlan {
     pub(super) fn function(&self, helper: RuntimeHelperId) -> u32 {
-        self.functions[&helper]
+        self.functions
+            .get(&helper)
+            .copied()
+            .unwrap_or_else(|| panic!("runtime helper {helper:?} was not planned"))
     }
 
     pub(super) fn optional_function(&self, helper: RuntimeHelperId) -> Option<u32> {

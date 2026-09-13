@@ -326,7 +326,8 @@ fn statement_span(statement: &Stmt) -> Span {
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
         | Stmt::For { span, .. }
-        | Stmt::Suspend { span, .. } => *span,
+        | Stmt::Suspend { span, .. }
+        | Stmt::Yield { span, .. } => *span,
         Stmt::Variable(variable) => variable.span,
         Stmt::Expression(expression) => expression.span,
     }

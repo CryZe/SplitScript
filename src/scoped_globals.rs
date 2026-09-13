@@ -760,6 +760,7 @@ impl Initializer<'_> {
     fn eval_statement(&self, statement: &crate::hir::TypedStatement, input: Vec<EvalPath>) -> Flow {
         match &statement.kind {
             TypedStatementKind::Variable { initializer, .. }
+            | TypedStatementKind::Yield { value: initializer }
             | TypedStatementKind::Expression(initializer) => self.eval_expr(*initializer, input),
             TypedStatementKind::Assign {
                 assignment,
@@ -1593,6 +1594,7 @@ fn walk_block(
     for statement in &block.statements {
         match &statement.kind {
             TypedStatementKind::Variable { initializer, .. }
+            | TypedStatementKind::Yield { value: initializer }
             | TypedStatementKind::Expression(initializer) => {
                 walk_expression(visitor, *initializer, hir, shapes, refined)
             }

@@ -243,6 +243,14 @@ pub(super) fn add_type_completions(
         "async ${1:T}".to_owned(),
         true,
     ));
+    let iterator = language.item(LanguageItemId::IteratorType);
+    builder.add(catalog_language_completion(
+        "iterator T",
+        CompletionKind::Type,
+        iterator,
+        "iterator ${1:T}".to_owned(),
+        true,
+    ));
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -265,7 +273,8 @@ fn parse_type_prefix(tokens: &[&Token], index: &mut usize) -> TypePrefix {
     let Some(token) = tokens.get(*index) else {
         return TypePrefix::ExpectsType;
     };
-    if matches!(&token.kind, TokenKind::Ident(name) if name == "async") {
+    if matches!(&token.kind, TokenKind::Ident(name) if matches!(name.as_str(), "async" | "iterator"))
+    {
         *index += 1;
         return parse_type_prefix(tokens, index);
     }

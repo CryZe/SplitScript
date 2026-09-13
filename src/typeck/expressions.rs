@@ -1004,7 +1004,16 @@ impl Checker {
                         expr.span,
                     );
                 }
-                if !self.callable.can_suspend() {
+                if self.generator_item.is_some() {
+                    let keyword = match mode {
+                        SuspensionMode::Await => "await",
+                        SuspensionMode::Retry => "retry",
+                    };
+                    self.error(
+                        format!("`{keyword}` is not available inside a synchronous generator"),
+                        expr.span,
+                    );
+                } else if !self.callable.can_suspend() {
                     let keyword = match mode {
                         SuspensionMode::Await => "await",
                         SuspensionMode::Retry => "retry",
@@ -1367,9 +1376,19 @@ impl Checker {
                     let ty = self.syntax_type(ty);
                     self.inference.freshen_omitted_array_shapes(ty)
                 });
+                let generator_item =
+                    annotated_result.and_then(|result| match self.shallow_type(result) {
+                        Type::Iterator(iterator) => Some(self.inference.iterator_item(iterator)),
+                        Type::Known(result) => match self.inference.type_store().kind(result) {
+                            TypeKind::Iterator { item, .. } => Some(Type::Known(*item)),
+                            _ => None,
+                        },
+                        _ => None,
+                    });
                 let annotated_completion =
                     annotated_result.map(|result| match self.shallow_type(result) {
                         Type::Async(future) => self.inference.async_value(future),
+                        Type::Iterator(_) => self.core_type(crate::stdlib::CoreTypeId::None),
                         result => result,
                     });
                 let completion = annotated_completion
@@ -1382,10 +1401,13 @@ impl Checker {
                             })
                     })
                     .unwrap_or_else(|| self.fresh_inference(Requirements::none(), None));
-                let is_async = annotated_result
-                    .is_some_and(|result| matches!(self.shallow_type(result), Type::Async(_)))
-                    || crate::typeck::control_flow::expression_contains_suspension(body);
-                let result = if is_async {
+                let is_async = generator_item.is_none()
+                    && (annotated_result
+                        .is_some_and(|result| matches!(self.shallow_type(result), Type::Async(_)))
+                        || crate::typeck::control_flow::expression_contains_suspension(body));
+                let result = if generator_item.is_some() {
+                    annotated_result.expect("generator closures have explicit iterator results")
+                } else if is_async {
                     match annotated_result {
                         Some(result @ Type::Async(_)) => result,
                         _ => Type::Async(self.inference.async_type(completion)),
@@ -1431,13 +1453,15 @@ impl Checker {
                         completion,
                         failure,
                         |checker| {
-                            if let Some(source) = return_type_source {
-                                checker.with_expected_type_source(source, |checker| {
+                            checker.with_generator_item(generator_item, |checker| {
+                                if let Some(source) = return_type_source {
+                                    checker.with_expected_type_source(source, |checker| {
+                                        checker.expr(body, Some(completion));
+                                    });
+                                } else {
                                     checker.expr(body, Some(completion));
-                                });
-                            } else {
-                                checker.expr(body, Some(completion));
-                            }
+                                }
+                            });
                         },
                     );
                 });

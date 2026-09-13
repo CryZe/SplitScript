@@ -684,6 +684,7 @@ impl SemanticModel {
             TypeKind::Option { value, .. } => Some((1, self.specialize_type(instance, *value))),
             TypeKind::Result { value, .. } => Some((2, self.specialize_type(instance, *value))),
             TypeKind::Async { value, .. } => Some((3, self.specialize_type(instance, *value))),
+            TypeKind::Iterator { item, .. } => Some((6, self.specialize_type(instance, *item))),
             // Callable signatures are specialized by the closure/callable
             // monomorphization pass because they contain more than one child.
             TypeKind::Callable { .. } => None,
@@ -712,6 +713,7 @@ impl SemanticModel {
             TypeKind::Option { value, .. }
             | TypeKind::Result { value, .. }
             | TypeKind::Async { value, .. } => *value,
+            TypeKind::Iterator { item, .. } => *item,
             TypeKind::Set { element, .. } => *element,
             TypeKind::Range { bound, .. } => *bound,
             TypeKind::Application { .. } => unreachable!(
@@ -736,6 +738,7 @@ impl SemanticModel {
                 (3, TypeKind::Async { value, .. }) if *value == child => Some(candidate),
                 (4, TypeKind::Set { element, .. }) if *element == child => Some(candidate),
                 (5, TypeKind::Range { bound, .. }) if *bound == child => Some(candidate),
+                (6, TypeKind::Iterator { item, .. }) if *item == child => Some(candidate),
                 _ => None,
             })
             .unwrap_or_else(|| {
@@ -867,6 +870,26 @@ impl SemanticModel {
                         value: self.resolved_type_ref(value),
                     });
                     self.types.intern(TypeKind::Async { layout, value })
+                }
+            }
+            TypeKind::Iterator { item, .. } => {
+                let item = self.materialize_specialized_type(instance, item, ids, constructed);
+                if item
+                    == match self.types.kind(ty) {
+                        TypeKind::Iterator { item, .. } => *item,
+                        _ => unreachable!(),
+                    }
+                {
+                    ty
+                } else {
+                    let layout = ids.iterator();
+                    constructed
+                        .iterators
+                        .push(crate::types::ResolvedIteratorType {
+                            id: layout,
+                            item: self.resolved_type_ref(item),
+                        });
+                    self.types.intern(TypeKind::Iterator { layout, item })
                 }
             }
             TypeKind::Set { element, .. } => {
@@ -1329,6 +1352,7 @@ impl SemanticModel {
             TypeKind::Option { layout, .. } => crate::types::ResolvedTypeRef::Option(*layout),
             TypeKind::Result { layout, .. } => crate::types::ResolvedTypeRef::Result(*layout),
             TypeKind::Async { layout, .. } => crate::types::ResolvedTypeRef::Async(*layout),
+            TypeKind::Iterator { layout, .. } => crate::types::ResolvedTypeRef::Iterator(*layout),
             TypeKind::Callable { layout, .. } => crate::types::ResolvedTypeRef::Callable(*layout),
             TypeKind::Set { layout, .. } => crate::types::ResolvedTypeRef::Set(*layout),
             TypeKind::Range { layout, .. } => crate::types::ResolvedTypeRef::Range(*layout),
@@ -2247,6 +2271,7 @@ impl SemanticBuilder {
             options,
             results,
             asyncs,
+            iterators,
             callables,
             sets,
             applications,
@@ -2256,6 +2281,7 @@ impl SemanticBuilder {
             options,
             results,
             asyncs,
+            iterators,
             callables,
             sets,
             applications,

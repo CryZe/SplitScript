@@ -39,6 +39,8 @@ pub struct CapabilityAnalysis {
 pub(crate) enum CapabilityMethodImplementation {
     Source(FunctionId),
     Standard(StdlibItemId),
+    GeneratorNext,
+    IteratorIdentity,
     /// The compiler-provided fallback used when a value satisfies `Display`
     /// through its primitive or structurally derived representation.
     DefaultDisplay,
@@ -219,6 +221,17 @@ impl CapabilityAnalysis {
                     {
                         true
                     }
+                    TypeKind::Iterator { .. }
+                        if matches!(
+                            capability,
+                            StdlibCapabilityId::Iterator
+                                | StdlibCapabilityId::Iterable
+                                | StdlibCapabilityId::Debug
+                                | StdlibCapabilityId::Display
+                        ) =>
+                    {
+                        true
+                    }
                     _ => false,
                 };
                 let requirements = self.structural_method_requirements(capability);
@@ -327,6 +340,17 @@ impl CapabilityAnalysis {
                 {
                     Ok(())
                 }
+                TypeKind::Iterator { .. }
+                    if matches!(
+                        capability,
+                        StdlibCapabilityId::Iterator
+                            | StdlibCapabilityId::Iterable
+                            | StdlibCapabilityId::Debug
+                            | StdlibCapabilityId::Display
+                    ) =>
+                {
+                    Ok(())
+                }
                 kind => Err(format!(
                     "type `{kind:?}` does not provide capability `{capability:?}`"
                 )),
@@ -406,6 +430,17 @@ impl CapabilityAnalysis {
         {
             return Some(CapabilityMethodImplementation::Source(function));
         }
+        if matches!(semantics.types().kind(ty), TypeKind::Iterator { .. }) {
+            match requirement.id {
+                StdlibItemId::IteratorNext => {
+                    return Some(CapabilityMethodImplementation::GeneratorNext);
+                }
+                StdlibItemId::IterableIterator => {
+                    return Some(CapabilityMethodImplementation::IteratorIdentity);
+                }
+                _ => {}
+            }
+        }
 
         let fallback = || match requirement.id {
             StdlibItemId::DisplayToString if self.has_derived_display(ty, semantics) => {
@@ -445,6 +480,7 @@ impl CapabilityAnalysis {
             | TypeKind::ManagedReference(_)
             | TypeKind::GenericParameter { .. }
             | TypeKind::Async { .. }
+            | TypeKind::Iterator { .. }
             | TypeKind::Callable { .. } => return fallback(),
         };
         let standard = self
@@ -569,6 +605,7 @@ impl CapabilityAnalysis {
             | TypeKind::Option { .. }
             | TypeKind::Result { .. }
             | TypeKind::Async { .. }
+            | TypeKind::Iterator { .. }
             | TypeKind::Callable { .. }
             | TypeKind::Range { .. }
             | TypeKind::Set { .. }
@@ -600,6 +637,11 @@ impl CapabilityAnalysis {
                 arguments,
                 ..
             } if *constructor == StdlibTypeConstructorId::Map => arguments.clone(),
+            TypeKind::Application {
+                constructor: StdlibTypeConstructorId::IteratorStep,
+                arguments,
+                ..
+            } => arguments.clone(),
             TypeKind::Application {
                 constructor,
                 arguments,
@@ -651,6 +693,8 @@ impl CapabilityAnalysis {
                         Some(CapabilityMethodImplementation::Source(function)) => vec![function],
                         Some(
                             CapabilityMethodImplementation::Standard(_)
+                            | CapabilityMethodImplementation::GeneratorNext
+                            | CapabilityMethodImplementation::IteratorIdentity
                             | CapabilityMethodImplementation::DefaultDisplay
                             | CapabilityMethodImplementation::DefaultDebug,
                         )

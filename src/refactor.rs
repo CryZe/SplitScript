@@ -224,7 +224,9 @@ fn can_hoist_from_statement(statement: &Stmt, target: ExprId) -> bool {
                 .expect("local variables have initializers"),
             false,
         ),
-        Stmt::Assign { value, .. } | Stmt::Expression(value) => (value, false),
+        Stmt::Assign { value, .. } | Stmt::Yield { value, .. } | Stmt::Expression(value) => {
+            (value, false)
+        }
         Stmt::StateAssign { .. } | Stmt::IndexAssign { .. } => return false,
         Stmt::If { condition, .. } => (condition, false),
         Stmt::While { condition, .. } => (condition, true),
@@ -860,6 +862,7 @@ fn contains_generic_parameter(ty: TypeId, snapshot: &SemanticSnapshot) -> bool {
         | TypeKind::Option { value: element, .. }
         | TypeKind::Result { value: element, .. }
         | TypeKind::Async { value: element, .. }
+        | TypeKind::Iterator { item: element, .. }
         | TypeKind::Range { bound: element, .. } => contains_generic_parameter(*element, snapshot),
         TypeKind::Application { arguments, .. } => arguments
             .iter()
@@ -1001,7 +1004,8 @@ fn statement_span(statement: &Stmt) -> Span {
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
         | Stmt::For { span, .. }
-        | Stmt::Suspend { span, .. } => *span,
+        | Stmt::Suspend { span, .. }
+        | Stmt::Yield { span, .. } => *span,
         Stmt::Variable(variable) => variable.span,
         Stmt::Expression(expression) => expression.span,
     }

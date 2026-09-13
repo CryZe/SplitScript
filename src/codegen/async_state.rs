@@ -20,8 +20,8 @@ use crate::{
 use super::{
     LocalPlanOptions, MemoryByteOrder, Type, array_element_type,
     async_frame::{
-        AsyncFrameLayout, AsyncFrameRef, AsyncFrameSource, FUTURE_POLL_EPOCH_FIELD,
-        FUTURE_STATE_FIELD, FUTURE_TAG_FIELD, LeafFutureInstance, LeafFutureLayout,
+        AsyncFrameLayout, AsyncFrameRef, AsyncFrameSource, CONTINUATION_POLL_EPOCH_FIELD,
+        CONTINUATION_STATE_FIELD, CONTINUATION_TAG_FIELD, LeafFutureInstance, LeafFutureLayout,
     },
     call_target,
     context::AttachContext,
@@ -88,13 +88,11 @@ pub(super) fn compile_async_action(
         ),
         _ => unreachable!("only suspending lifecycle actions use the async action compiler"),
     };
-    compile_async_body(
+    compile_continuation_body(
         &wasm_body.entry,
         &wasm_body.locals,
         wasm_body.async_state_count,
-        wasm_body
-            .cancellation_region
-            .expect("suspending lifecycle actions have an attachment-lifetime cancellation region"),
+        wasm_body.cancellation_region,
         layout,
         runtime,
         frame,
@@ -123,13 +121,11 @@ pub(super) fn compile_async_function_poll(
         struct_type: runtime.lowering.gc.function_frame_index(instance),
         source: AsyncFrameSource::NonNullLocal(0),
     };
-    compile_async_body(
+    compile_continuation_body(
         &wasm_body.entry,
         &wasm_body.locals,
         wasm_body.async_state_count,
-        wasm_body
-            .cancellation_region
-            .expect("suspending functions have a cancellation region"),
+        wasm_body.cancellation_region,
         layout,
         runtime,
         frame,
@@ -138,6 +134,45 @@ pub(super) fn compile_async_function_poll(
             frame,
             completion: layout.completion,
         },
+        None,
+        function_index,
+    )
+}
+
+pub(super) fn compile_generator_function_next(
+    instance: &FunctionInstance,
+    function_index: u32,
+    layout: &AsyncFrameLayout,
+    runtime: &AttachContext<'_>,
+) -> Function {
+    let wasm_body = runtime
+        .lowering
+        .wasm_ir
+        .body(BodyOwner::Function(instance.clone()))
+        .expect("checked functions have Wasm IR bodies");
+    let wasm_ir::BodyAbi::Generator(generator) = wasm_body.abi else {
+        unreachable!("generator continuation entry points have generator bodies")
+    };
+    let item = runtime
+        .lowering
+        .semantics
+        .specialize_type(instance, generator.item);
+    let step = super::function_plan::iterator_step_type(item, runtime.lowering.semantics)
+        .expect("consumed generator item types have materialized IteratorStep types");
+    let frame = AsyncFrameRef {
+        struct_type: runtime.lowering.gc.function_frame_index(instance),
+        source: AsyncFrameSource::NonNullLocal(0),
+    };
+    compile_continuation_body(
+        &wasm_body.entry,
+        &wasm_body.locals,
+        wasm_body.async_state_count,
+        None,
+        layout,
+        runtime,
+        frame,
+        Some(instance),
+        BareReturn::Generator { frame, step },
         None,
         function_index,
     )
@@ -154,11 +189,11 @@ pub(super) fn compile_async_closure_poll(
         struct_type: runtime.lowering.gc.closure_frame_index(instance),
         source: AsyncFrameSource::NonNullLocal(0),
     };
-    compile_async_body(
+    compile_continuation_body(
         &closure.entry,
         &closure.locals,
         closure.async_state_count,
-        wasm_ir::CancellationRegion::AttachmentLifetime,
+        Some(wasm_ir::CancellationRegion::AttachmentLifetime),
         layout,
         runtime,
         frame,
@@ -167,6 +202,43 @@ pub(super) fn compile_async_closure_poll(
             frame,
             completion: layout.completion,
         },
+        None,
+        function_index,
+    )
+}
+
+pub(super) fn compile_generator_closure_next(
+    instance: &crate::semantic::ClosureInstance,
+    closure: &wasm_ir::ClosureBody,
+    function_index: u32,
+    layout: &AsyncFrameLayout,
+    runtime: &AttachContext<'_>,
+) -> Function {
+    let wasm_ir::BodyAbi::Generator(generator) = closure.abi else {
+        unreachable!("generator closure continuation entry points have generator bodies")
+    };
+    let item = instance.owner.as_ref().map_or(generator.item, |owner| {
+        runtime
+            .lowering
+            .semantics
+            .specialize_type(owner, generator.item)
+    });
+    let step = super::function_plan::iterator_step_type(item, runtime.lowering.semantics)
+        .expect("consumed generator closure items have materialized IteratorStep types");
+    let frame = AsyncFrameRef {
+        struct_type: runtime.lowering.gc.closure_frame_index(instance),
+        source: AsyncFrameSource::NonNullLocal(0),
+    };
+    compile_continuation_body(
+        &closure.entry,
+        &closure.locals,
+        closure.async_state_count,
+        None,
+        layout,
+        runtime,
+        frame,
+        instance.owner.as_ref(),
+        BareReturn::Generator { frame, step },
         None,
         function_index,
     )
@@ -249,7 +321,7 @@ pub(super) fn compile_leaf_future_poll(
         functions: runtime.lowering.functions,
         closures: runtime.lowering.closures,
         function_values: runtime.lowering.function_values,
-        closure_polls: runtime.lowering.closure_polls,
+        closure_resumes: runtime.lowering.closure_resumes,
         closure_environment: None,
         leaf_futures: runtime.lowering.leaf_futures,
         display_functions: runtime.lowering.display_functions,
@@ -338,11 +410,11 @@ pub(super) fn compile_leaf_future_poll(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn compile_async_body(
+fn compile_continuation_body(
     entry: &wasm_ir::Block,
     locals: &[wasm_ir::Local],
     async_state_count: u32,
-    cancellation_region: wasm_ir::CancellationRegion,
+    cancellation_region: Option<wasm_ir::CancellationRegion>,
     layout: &AsyncFrameLayout,
     runtime: &AttachContext<'_>,
     frame: AsyncFrameRef,
@@ -365,7 +437,9 @@ fn compile_async_body(
                     action: crate::ast::ActionKind::WhileAttached,
                     ..
                 } => 2,
-                BareReturn::AsyncAction { .. } | BareReturn::AsyncFuture { .. } => 1,
+                BareReturn::AsyncAction { .. }
+                | BareReturn::AsyncFuture { .. }
+                | BareReturn::Generator { .. } => 1,
                 BareReturn::None | BareReturn::Action(_) => {
                     unreachable!("direct bodies do not use the async compiler")
                 }
@@ -402,7 +476,7 @@ fn compile_async_body(
         functions: runtime.lowering.functions,
         closures: runtime.lowering.closures,
         function_values: runtime.lowering.function_values,
-        closure_polls: runtime.lowering.closure_polls,
+        closure_resumes: runtime.lowering.closure_resumes,
         closure_environment: None,
         leaf_futures: runtime.lowering.leaf_futures,
         display_functions: runtime.lowering.display_functions,
@@ -574,8 +648,7 @@ fn compile_async_body(
                     .is_some()
                 {
                     assert_eq!(
-                        cancellation,
-                        Some(cancellation_region),
+                        cancellation, cancellation_region,
                         "awaited standard-library operation must participate in its body's cancellation region"
                     );
                 }
@@ -595,11 +668,7 @@ fn compile_async_body(
             }
         };
         if falls_through {
-            emit_async_action_default(&mut function, bare_return);
-            mark_future_complete(&mut function, bare_return);
-            function
-                .instruction(&Instruction::I32Const(1))
-                .instruction(&Instruction::Return);
+            emit_continuation_fallthrough(&mut function, bare_return, context.gc);
         }
         if !table_dispatch {
             function.instruction(&Instruction::End);
@@ -608,12 +677,11 @@ fn compile_async_body(
     if table_dispatch {
         function.instruction(&Instruction::End);
     }
-    function
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::Return)
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::End);
+    emit_continuation_result(&mut function, bare_return, context.gc);
+    function.instruction(&Instruction::Return);
+    function.instruction(&Instruction::End);
+    emit_continuation_result(&mut function, bare_return, context.gc);
+    function.instruction(&Instruction::End);
     function
 }
 
@@ -630,7 +698,7 @@ fn emit_async_action_default(function: &mut Function, target: BareReturn) {
 }
 
 fn mark_future_complete(function: &mut Function, target: BareReturn) {
-    if let BareReturn::AsyncFuture { frame, .. } = target {
+    if let BareReturn::AsyncFuture { frame, .. } | BareReturn::Generator { frame, .. } = target {
         frame.emit(function);
         function
             .instruction(&Instruction::I32Const(-1))
@@ -639,6 +707,35 @@ fn mark_future_complete(function: &mut Function, target: BareReturn) {
                 field_index: 0,
             });
     }
+}
+
+fn emit_continuation_result(function: &mut Function, target: BareReturn, gc: &super::GcLayout) {
+    match target {
+        BareReturn::Generator { step, .. } => {
+            function.instruction(&Instruction::RefNull(HeapType::Concrete(gc.index(step))));
+        }
+        BareReturn::AsyncAction { .. } | BareReturn::AsyncFuture { .. } => {
+            function.instruction(&Instruction::I32Const(1));
+        }
+        BareReturn::None | BareReturn::Action(_) => {
+            unreachable!("direct bodies do not use the continuation compiler")
+        }
+    }
+}
+
+fn emit_continuation_fallthrough(
+    function: &mut Function,
+    target: BareReturn,
+    gc: &super::GcLayout,
+) {
+    emit_async_action_default(function, target);
+    emit_continuation_return(function, target, gc);
+}
+
+fn emit_continuation_return(function: &mut Function, target: BareReturn, gc: &super::GcLayout) {
+    mark_future_complete(function, target);
+    emit_continuation_result(function, target, gc);
+    function.instruction(&Instruction::Return);
 }
 
 fn intrinsic_state(context: &ExprContext<'_>, slot: usize) -> (AsyncFrameRef, u32, Type) {
@@ -3141,7 +3238,7 @@ fn emit_future_poll_status(
                 context.gc.function_frame_index(candidate),
                 context.gc.function_frame_tag(candidate),
                 context.functions[candidate]
-                    .poll
+                    .resume
                     .expect("async source functions have poll entries"),
                 layout.completion,
             )
@@ -3168,7 +3265,7 @@ fn emit_future_poll_status(
             (
                 context.gc.closure_frame_index(instance),
                 context.gc.closure_frame_tag(instance),
-                context.closure_polls[instance],
+                context.closure_resumes[instance],
                 layout.completion,
             )
         });
@@ -3207,7 +3304,7 @@ fn emit_future_poll_status(
     function
         .instruction(&Instruction::StructGet {
             struct_type_index: erased_frame,
-            field_index: FUTURE_POLL_EPOCH_FIELD,
+            field_index: CONTINUATION_POLL_EPOCH_FIELD,
         })
         .instruction(&Instruction::GlobalGet(
             context.runtime_globals.future_poll_epoch,
@@ -3218,7 +3315,7 @@ fn emit_future_poll_status(
     function
         .instruction(&Instruction::StructGet {
             struct_type_index: erased_frame,
-            field_index: FUTURE_STATE_FIELD,
+            field_index: CONTINUATION_STATE_FIELD,
         })
         .instruction(&Instruction::I32Const(-1))
         .instruction(&Instruction::I32Ne)
@@ -3235,7 +3332,7 @@ fn emit_future_poll_status(
         ))
         .instruction(&Instruction::StructSet {
             struct_type_index: erased_frame,
-            field_index: FUTURE_POLL_EPOCH_FIELD,
+            field_index: CONTINUATION_POLL_EPOCH_FIELD,
         })
         .instruction(&Instruction::End);
 
@@ -3244,7 +3341,7 @@ fn emit_future_poll_status(
         function
             .instruction(&Instruction::StructGet {
                 struct_type_index: erased_frame,
-                field_index: FUTURE_TAG_FIELD,
+                field_index: CONTINUATION_TAG_FIELD,
             })
             .instruction(&Instruction::I32Const(tag as i32))
             .instruction(&Instruction::I32Eq)
@@ -3551,6 +3648,18 @@ fn collect_async_states<'a>(
         }
     }
     match &block.terminator {
+        wasm_ir::Terminator::Yield {
+            resume_state,
+            continuation,
+            ..
+        } => {
+            states[resume_state.index() as usize] = Some(AsyncState::Block {
+                block: continuation,
+                loop_targets,
+                resume_source: None,
+            });
+            collect_async_states(continuation, states, loop_targets);
+        }
         wasm_ir::Terminator::Suspend {
             mode,
             destination,
@@ -3691,7 +3800,7 @@ fn compile_async_flow(
     loop_depth: u32,
     loop_control: Option<LoopControl>,
     result_global: Option<u32>,
-    cancellation_region: wasm_ir::CancellationRegion,
+    cancellation_region: Option<wasm_ir::CancellationRegion>,
     layout: &AsyncFrameLayout,
     context: &ExprContext<'_>,
 ) -> bool {
@@ -4082,13 +4191,38 @@ fn compile_async_flow(
                         debug_assert!(value.is_none());
                     }
                 }
+                BareReturn::Generator { .. } => {
+                    if let Some(value) = value {
+                        debug_assert_eq!(
+                            context.expression_type(*value),
+                            Type::None,
+                            "generator returns cannot carry values"
+                        );
+                        compile_expr(function, *value, &context.erasing_none());
+                    }
+                }
                 BareReturn::None | BareReturn::Action(_) => {
                     unreachable!("direct bodies do not use the async state emitter")
                 }
             }
-            mark_future_complete(function, context.bare_return);
+            // Explicit action returns already stored either their value or the
+            // action's source-level bare-return default above. Only lexical
+            // fallthrough applies the continuation default here; doing so a
+            // second time would overwrite `return false` in `whileAttached`.
+            emit_continuation_return(function, context.bare_return, context.gc);
+        }
+        wasm_ir::Terminator::Yield {
+            value,
+            resume_state,
+            ..
+        } => {
+            let BareReturn::Generator { step, .. } = context.bare_return else {
+                unreachable!("yield terminators only occur in generator continuations")
+            };
+            set_async_state(function, *resume_state, context.locals.frame());
+            compile_expr(function, *value, context);
             function
-                .instruction(&Instruction::I32Const(1))
+                .instruction(&Instruction::StructNew(context.gc.index(step)))
                 .instruction(&Instruction::Return);
         }
         wasm_ir::Terminator::Suspend {
@@ -4104,8 +4238,7 @@ fn compile_async_flow(
                 .is_some()
             {
                 assert_eq!(
-                    *cancellation,
-                    Some(cancellation_region),
+                    *cancellation, cancellation_region,
                     "awaited standard-library operation must participate in its body's cancellation region"
                 );
             }
@@ -4135,8 +4268,7 @@ fn compile_async_flow(
             ..
         } => {
             assert_eq!(
-                *cancellation,
-                Some(cancellation_region),
+                *cancellation, cancellation_region,
                 "retry must participate in its body's cancellation region"
             );
             if let Some(debug) = context.debug {

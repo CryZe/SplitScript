@@ -79,6 +79,7 @@ pub struct CheckOutput {
     pub option_types: Vec<ResolvedOptionType>,
     pub result_types: Vec<ResolvedResultType>,
     pub async_types: Vec<ResolvedAsyncType>,
+    pub iterator_types: Vec<crate::types::ResolvedIteratorType>,
     pub callable_types: Vec<ResolvedCallableType>,
     pub range_types: Vec<crate::types::ResolvedRangeType>,
     pub set_types: Vec<ResolvedSetType>,
@@ -172,6 +173,7 @@ struct Checker {
     active_condition_bindings: Vec<HashSet<String>>,
     conditional_binding_declarations: Vec<(String, Span)>,
     return_ty: Type,
+    generator_item: Option<Type>,
     callable: CallableContext,
     expression_mode: ExpressionMode,
     debug_context: DebugContext,
@@ -389,6 +391,17 @@ impl Checker {
         self.failure = previous_failure;
         self.loops = previous_loops;
         self.conditional_binding_declarations = previous_conditional_bindings;
+        output
+    }
+
+    fn with_generator_item<T>(
+        &mut self,
+        item: Option<Type>,
+        operation: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let previous = std::mem::replace(&mut self.generator_item, item);
+        let output = operation(self);
+        self.generator_item = previous;
         output
     }
 
@@ -819,6 +832,7 @@ fn resolved_type_ref(ty: ResolvedTypeRef, types: &TypeStore) -> Type {
         ResolvedTypeRef::Option(id) => Type::Option(id),
         ResolvedTypeRef::Result(id) => Type::Result(id),
         ResolvedTypeRef::Async(id) => Type::Async(id),
+        ResolvedTypeRef::Iterator(id) => Type::Iterator(id),
         ResolvedTypeRef::Callable(id) => Type::Callable(id),
         ResolvedTypeRef::Range(id) => Type::Range(id),
         ResolvedTypeRef::Set(id) => Type::Set(id),
@@ -900,6 +914,60 @@ mod tests {
                 .iter()
                 .any(|error| error.message.contains("Duration has no field `seconds`")),
             "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn checks_generator_yields_against_the_declared_item_type() {
+        check_source(
+            r#"
+            state "game" {}
+            fn values(end: u32) -> iterator u32 {
+                let value = 0
+                while value < end {
+                    yield value
+                    value += 1
+                }
+            }
+            whileAttached {
+                for value in values(3) {
+                    print(value)
+                }
+            }
+            "#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn rejects_suspension_and_value_returns_in_generators() {
+        let errors = check_source(
+            r#"
+            state "game" {}
+            fn values() -> iterator u32 {
+                await nextTick()
+                retry process.read<u32>(0x1000)
+                return 1
+            }
+            "#,
+        )
+        .unwrap_err();
+        assert!(
+            errors.iter().any(|error| error
+                .message
+                .contains("`await` is not available inside a synchronous generator")),
+            "{errors:#?}"
+        );
+        assert!(
+            errors.iter().any(|error| error
+                .message
+                .contains("`retry` is not available inside a synchronous generator")),
+            "{errors:#?}"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("a generator cannot return a value"))
         );
     }
 }

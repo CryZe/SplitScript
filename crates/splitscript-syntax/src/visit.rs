@@ -342,7 +342,9 @@ pub fn walk_stmt<'ast, V: Visitor<'ast>>(visitor: &mut V, statement: &'ast Stmt)
     match statement {
         Stmt::Debug { statement, .. } => visitor.visit_stmt(statement),
         Stmt::Variable(variable) => visitor.visit_variable(variable),
-        Stmt::Assign { value, .. } | Stmt::Expression(value) => visitor.visit_expr(value),
+        Stmt::Assign { value, .. } | Stmt::Yield { value, .. } | Stmt::Expression(value) => {
+            visitor.visit_expr(value)
+        }
         Stmt::StateAssign { target, value, .. } | Stmt::IndexAssign { target, value, .. } => {
             visitor.visit_expr(target);
             visitor.visit_expr(value);
@@ -841,7 +843,9 @@ pub fn walk_stmt_mut<F: Folder>(folder: &mut F, statement: &mut Stmt) {
     match statement {
         Stmt::Debug { statement, .. } => folder.fold_stmt(statement),
         Stmt::Variable(variable) => folder.fold_variable(variable),
-        Stmt::Assign { value, .. } | Stmt::Expression(value) => folder.fold_expr(value),
+        Stmt::Assign { value, .. } | Stmt::Yield { value, .. } | Stmt::Expression(value) => {
+            folder.fold_expr(value)
+        }
         Stmt::StateAssign { target, value, .. } | Stmt::IndexAssign { target, value, .. } => {
             folder.fold_expr(target);
             folder.fold_expr(value);

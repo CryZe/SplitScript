@@ -292,6 +292,14 @@ pub enum CallTarget {
         receiver: ResolvedReceiver,
         receiver_type: TypeId,
     },
+    GeneratorNext {
+        receiver: ResolvedReceiver,
+        receiver_type: TypeId,
+    },
+    IteratorIdentity {
+        receiver: ResolvedReceiver,
+        receiver_type: TypeId,
+    },
     ManagedSnapshot {
         class: ManagedClassId,
         result: ResultTypeId,
@@ -341,6 +349,14 @@ impl CallTarget {
                 receiver_type,
                 ..
             }
+            | Self::GeneratorNext {
+                receiver,
+                receiver_type,
+            }
+            | Self::IteratorIdentity {
+                receiver,
+                receiver_type,
+            }
             | Self::ManagedSnapshot {
                 receiver,
                 receiver_type,
@@ -388,6 +404,14 @@ impl CallTarget {
                 receiver,
                 receiver_type,
                 ..
+            }
+            | Self::GeneratorNext {
+                receiver,
+                receiver_type,
+            }
+            | Self::IteratorIdentity {
+                receiver,
+                receiver_type,
             }
             | Self::ManagedSnapshot {
                 receiver,
@@ -605,6 +629,11 @@ pub struct AsyncFunctionAbi {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratorAbi {
+    pub item: TypeId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BodyAbi {
     /// Ordinary parameters and result, unchanged from the synchronous Wasm
     /// calling convention.
@@ -617,6 +646,10 @@ pub enum BodyAbi {
     /// cancellation boundary cancels the computation without producing a
     /// Ready value.
     AsyncFunction(AsyncFunctionAbi),
+    /// A synchronous source generator. Calling it allocates the continuation
+    /// frame without executing the body; advancing the returned iterator
+    /// resumes the frame until its next `yield` or permanent completion.
+    Generator(GeneratorAbi),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -816,6 +849,12 @@ pub enum Terminator {
         live_values: Vec<ValueId>,
         continuation: Box<Block>,
     },
+    Yield {
+        value: ExprId,
+        resume_state: AsyncStateId,
+        live_values: Vec<ValueId>,
+        continuation: Box<Block>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -868,9 +907,10 @@ pub struct ClosureBody {
     /// Values and temporaries that survive a suspension in this closure.
     pub frame_values: Vec<ValueId>,
     pub frame_temporaries: Vec<TemporaryId>,
-    /// The completed value stored in a typed future frame. Synchronous
-    /// closures have no completion contract and use their direct callable ABI.
-    pub completion: Option<TypeId>,
+    /// Calling convention selected from the closure's result type. Async and
+    /// generator closures allocate lazy continuation frames; direct closures
+    /// execute immediately.
+    pub abi: BodyAbi,
     pub async_state_count: u32,
 }
 
@@ -1182,9 +1222,12 @@ impl Program {
             let TypeKind::Callable { result, .. } = semantics.types().kind(callable) else {
                 unreachable!("checked closure expressions have callable types")
             };
-            let completion = match semantics.types().kind(*result) {
-                TypeKind::Async { value, .. } => Some(*value),
-                _ => None,
+            let abi = match semantics.types().kind(*result) {
+                TypeKind::Async { value, .. } => {
+                    BodyAbi::AsyncFunction(AsyncFunctionAbi { completion: *value })
+                }
+                TypeKind::Iterator { item, .. } => BodyAbi::Generator(GeneratorAbi { item: *item }),
+                _ => BodyAbi::Direct,
             };
             program.closures.push(ClosureBody {
                 expression,
@@ -1194,7 +1237,7 @@ impl Program {
                 locals,
                 frame_values,
                 frame_temporaries,
-                completion,
+                abi,
                 async_state_count: next_async_state,
             });
         }
@@ -2057,6 +2100,18 @@ pub(crate) fn resolve_capability_requirement(
                 }
             }
         }
+        crate::capabilities::CapabilityMethodImplementation::GeneratorNext => {
+            Some(CallTarget::GeneratorNext {
+                receiver: receiver.clone(),
+                receiver_type,
+            })
+        }
+        crate::capabilities::CapabilityMethodImplementation::IteratorIdentity => {
+            Some(CallTarget::IteratorIdentity {
+                receiver: receiver.clone(),
+                receiver_type,
+            })
+        }
         crate::capabilities::CapabilityMethodImplementation::DefaultDisplay => {
             Some(CallTarget::DefaultFormatting {
                 mode: FormattingMode::Display,
@@ -2357,6 +2412,7 @@ fn closure_captures(
                 | TypedStatementKind::If { .. }
                 | TypedStatementKind::While { .. }
                 | TypedStatementKind::Suspend { .. }
+                | TypedStatementKind::Yield { .. }
                 | TypedStatementKind::Expression(_) => {}
             }
             hir::walk_typed_statement(self, statement, program);
@@ -2448,6 +2504,14 @@ fn lower_body(
             BodyAbi::AsyncAction
         }
         BodyOwner::Action(_) => BodyAbi::Direct,
+        BodyOwner::Function(instance)
+            if let Some(result) = semantics.function_result(instance.function)
+                && let result = semantics.specialize_type(instance, result)
+                && let crate::types::TypeKind::Iterator { item, .. } =
+                    semantics.types().kind(result) =>
+        {
+            BodyAbi::Generator(GeneratorAbi { item: *item })
+        }
         BodyOwner::Function(instance)
             if effects.function(instance.function).suspension == SuspensionKind::Suspends =>
         {
@@ -2572,6 +2636,36 @@ fn analyze_suspension_liveness(
     frame_values: &mut HashSet<ValueId>,
 ) -> HashSet<ValueId> {
     let mut live = match &mut block.terminator {
+        Terminator::Yield {
+            value,
+            live_values,
+            continuation,
+            ..
+        } => {
+            let continuation_live = analyze_suspension_liveness(
+                continuation,
+                live_after,
+                local_values,
+                ordered_locals,
+                program,
+                frame_values,
+            );
+            live_values.clear();
+            live_values.extend(
+                ordered_locals
+                    .iter()
+                    .filter_map(|local| match local.purpose {
+                        LocalPurpose::Value(value) if continuation_live.contains(&value) => {
+                            Some(value)
+                        }
+                        _ => None,
+                    }),
+            );
+            frame_values.extend(live_values.iter().copied());
+            let mut before_yield = continuation_live;
+            collect_expression_values(*value, &mut before_yield, local_values, program);
+            before_yield
+        }
         Terminator::Suspend {
             destination,
             value,
@@ -4759,6 +4853,17 @@ fn lower_async_statements(
                     },
                 };
             }
+            TypedStatementKind::Yield { value } => {
+                result = Block {
+                    statements: Vec::new(),
+                    terminator: Terminator::Yield {
+                        value: *value,
+                        resume_state: AsyncStateId::ENTRY,
+                        live_values: Vec::new(),
+                        continuation: Box::new(result),
+                    },
+                };
+            }
             TypedStatementKind::Expression(expression) => {
                 let expression = typed_hir
                     .expression(*expression)
@@ -4853,7 +4958,7 @@ fn typed_block_contains_await(
             return false;
         }
         match &statement.kind {
-            TypedStatementKind::Suspend { .. } => true,
+            TypedStatementKind::Suspend { .. } | TypedStatementKind::Yield { .. } => true,
             TypedStatementKind::Variable { initializer, .. } => {
                 typed_expression_contains_suspension(*initializer, typed_hir)
             }
@@ -4957,6 +5062,15 @@ fn assign_async_states(block: &mut Block, next: &mut u32) {
         *resume_state = AsyncStateId(*next);
         *next += 1;
         assign_async_states(continuation, next);
+    } else if let Terminator::Yield {
+        resume_state,
+        continuation,
+        ..
+    } = &mut block.terminator
+    {
+        *resume_state = AsyncStateId(*next);
+        *next += 1;
+        assign_async_states(continuation, next);
     } else if let Terminator::Retry {
         attempt,
         continuation,
@@ -5054,6 +5168,9 @@ fn set_retry_complete_state(block: &mut Block, resume_state: AsyncStateId) {
         Terminator::Suspend { .. } => {
             unreachable!("a retry operand cannot contain await")
         }
+        Terminator::Yield { .. } => {
+            unreachable!("a retry operand cannot contain yield")
+        }
         Terminator::AsyncWhile {
             header,
             continuation,
@@ -5123,7 +5240,7 @@ fn set_async_while_targets(
             *condition_header = header_state;
             *condition_exit = exit_state;
         }
-        Terminator::Suspend { continuation, .. } => {
+        Terminator::Suspend { continuation, .. } | Terminator::Yield { continuation, .. } => {
             set_async_while_targets(continuation, header_state, exit_state);
         }
         Terminator::Retry {
@@ -5558,6 +5675,41 @@ impl Visitor for LocalPlanner<'_> {
 
         walk_expression(self, expression, program);
         if let ExpressionKind::Call {
+            target: CallTarget::GeneratorNext { receiver_type, .. },
+            ..
+        } = &expression.kind
+        {
+            self.push(
+                *receiver_type,
+                LocalPurpose::IntrinsicScratch {
+                    expression: expression.id,
+                    slot: 0,
+                },
+            );
+        }
+        if let ExpressionKind::Call {
+            target:
+                CallTarget::CapabilityRequirement {
+                    item,
+                    receiver_type,
+                    ..
+                },
+            ..
+        } = &expression.kind
+            && self
+                .capabilities
+                .resolve_method_requirement(*receiver_type, *item, self.semantics)
+                == Some(crate::capabilities::CapabilityMethodImplementation::GeneratorNext)
+        {
+            self.push(
+                *receiver_type,
+                LocalPurpose::IntrinsicScratch {
+                    expression: expression.id,
+                    slot: 0,
+                },
+            );
+        }
+        if let ExpressionKind::Call {
             target: CallTarget::ManagedComponent { helper_result, .. },
             ..
         } = &expression.kind
@@ -5606,7 +5758,9 @@ impl Visitor for LocalPlanner<'_> {
                 Some(
                     crate::capabilities::CapabilityMethodImplementation::Source(_)
                     | crate::capabilities::CapabilityMethodImplementation::DefaultDisplay
-                    | crate::capabilities::CapabilityMethodImplementation::DefaultDebug,
+                    | crate::capabilities::CapabilityMethodImplementation::DefaultDebug
+                    | crate::capabilities::CapabilityMethodImplementation::GeneratorNext
+                    | crate::capabilities::CapabilityMethodImplementation::IteratorIdentity,
                 )
                 | None => None,
             },

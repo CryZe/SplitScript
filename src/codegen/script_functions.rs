@@ -58,7 +58,7 @@ pub(super) fn compile_read(
             functions: lowering.functions,
             closures: lowering.closures,
             function_values: lowering.function_values,
-            closure_polls: lowering.closure_polls,
+            closure_resumes: lowering.closure_resumes,
             closure_environment: None,
             leaf_futures: lowering.leaf_futures,
             display_functions: lowering.display_functions,
@@ -437,7 +437,7 @@ pub(super) fn compile_state_transform(
         functions: lowering.functions,
         closures: lowering.closures,
         function_values: lowering.function_values,
-        closure_polls: lowering.closure_polls,
+        closure_resumes: lowering.closure_resumes,
         closure_environment: None,
         leaf_futures: lowering.leaf_futures,
         display_functions: lowering.display_functions,
@@ -957,7 +957,7 @@ pub(super) fn compile_user_function(
         functions: lowering.functions,
         closures: lowering.closures,
         function_values: lowering.function_values,
-        closure_polls: lowering.closure_polls,
+        closure_resumes: lowering.closure_resumes,
         closure_environment: None,
         leaf_futures: lowering.leaf_futures,
         display_functions: lowering.display_functions,
@@ -1139,7 +1139,7 @@ pub(super) fn compile_closure(
         functions: lowering.functions,
         closures: lowering.closures,
         function_values: lowering.function_values,
-        closure_polls: lowering.closure_polls,
+        closure_resumes: lowering.closure_resumes,
         closure_environment: environment,
         leaf_futures: lowering.leaf_futures,
         display_functions: lowering.display_functions,
@@ -1368,7 +1368,7 @@ pub(super) fn compile_action(
         functions: lowering.functions,
         closures: lowering.closures,
         function_values: lowering.function_values,
-        closure_polls: lowering.closure_polls,
+        closure_resumes: lowering.closure_resumes,
         closure_environment: None,
         leaf_futures: lowering.leaf_futures,
         display_functions: lowering.display_functions,
@@ -1478,13 +1478,25 @@ pub(super) fn plan_wasm_locals(
             if !matches!(target, wasm_ir::CallTarget::CapabilityRequirement { .. }) {
                 continue;
             }
+            let resolved =
+                options
+                    .reachability
+                    .resolved_call_target(Some(instance), expression, target);
+            if let wasm_ir::CallTarget::GeneratorNext { receiver_type, .. } = resolved {
+                specialized_scratch.push((
+                    options.semantics.specialize_type(instance, *receiver_type),
+                    LocalPurpose::IntrinsicScratch {
+                        expression,
+                        slot: 0,
+                    },
+                ));
+                continue;
+            }
             let wasm_ir::CallTarget::Intrinsic {
                 intrinsic,
                 receiver_type,
                 ..
-            } = options
-                .reachability
-                .resolved_call_target(Some(instance), expression, target)
+            } = resolved
             else {
                 continue;
             };

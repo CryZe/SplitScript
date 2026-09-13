@@ -8,8 +8,8 @@ use crate::{
     semantic::{FunctionInstance, SemanticModel},
     types::{
         ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType, ResolvedCallableType,
-        ResolvedConstructedTypesMut, ResolvedOptionType, ResolvedRangeType, ResolvedResultType,
-        ResolvedSetType, TypeId,
+        ResolvedConstructedTypesMut, ResolvedIteratorType, ResolvedOptionType, ResolvedRangeType,
+        ResolvedResultType, ResolvedSetType, TypeId,
     },
     wasm_ir::{self, BodyOwner, Visitor},
 };
@@ -24,6 +24,7 @@ pub(super) fn materialize(
     options: &mut Vec<ResolvedOptionType>,
     results: &mut Vec<ResolvedResultType>,
     asyncs: &mut Vec<ResolvedAsyncType>,
+    iterators: &mut Vec<ResolvedIteratorType>,
     callables: &mut Vec<ResolvedCallableType>,
     ranges: &mut Vec<ResolvedRangeType>,
     sets: &mut Vec<ResolvedSetType>,
@@ -35,6 +36,7 @@ pub(super) fn materialize(
         .chain(options.iter().map(|ty| ty.id.index() as u32 + 1))
         .chain(results.iter().map(|ty| ty.id.index() as u32 + 1))
         .chain(asyncs.iter().map(|ty| ty.id.index() as u32 + 1))
+        .chain(iterators.iter().map(|ty| ty.id.index() as u32 + 1))
         .chain(callables.iter().map(|ty| ty.id.index() as u32 + 1))
         .chain(ranges.iter().map(|ty| ty.id.index() as u32 + 1))
         .chain(sets.iter().map(|ty| ty.id.index() as u32 + 1))
@@ -47,6 +49,7 @@ pub(super) fn materialize(
         options,
         results,
         asyncs,
+        iterators,
         callables,
         ranges,
         sets,
@@ -252,6 +255,8 @@ fn called_function(
                 }
                 wasm_ir::CallTarget::Intrinsic { .. }
                 | wasm_ir::CallTarget::DefaultFormatting { .. }
+                | wasm_ir::CallTarget::GeneratorNext { .. }
+                | wasm_ir::CallTarget::IteratorIdentity { .. }
                 | wasm_ir::CallTarget::ManagedSnapshot { .. }
                 | wasm_ir::CallTarget::ManagedComponent { .. }
                 | wasm_ir::CallTarget::ManagedInstances { .. }
@@ -266,6 +271,8 @@ fn called_function(
         }
         wasm_ir::CallTarget::Intrinsic { .. }
         | wasm_ir::CallTarget::DefaultFormatting { .. }
+        | wasm_ir::CallTarget::GeneratorNext { .. }
+        | wasm_ir::CallTarget::IteratorIdentity { .. }
         | wasm_ir::CallTarget::ManagedSnapshot { .. }
         | wasm_ir::CallTarget::ManagedComponent { .. }
         | wasm_ir::CallTarget::ManagedInstances { .. }
@@ -333,6 +340,10 @@ fn materialize_expression_types(
                 }
             }
             wasm_ir::CallTarget::DefaultFormatting { receiver_type, .. } => {
+                materialize_type(semantics, instance, *receiver_type, ids, constructed);
+            }
+            wasm_ir::CallTarget::GeneratorNext { receiver_type, .. }
+            | wasm_ir::CallTarget::IteratorIdentity { receiver_type, .. } => {
                 materialize_type(semantics, instance, *receiver_type, ids, constructed);
             }
             wasm_ir::CallTarget::ManagedSnapshot { receiver_type, .. } => {

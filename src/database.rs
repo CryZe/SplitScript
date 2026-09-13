@@ -1607,6 +1607,11 @@ fn named_type(
             .iter()
             .find(|future| future.id == id)
             .and_then(|future| named_type(syntax, future.value)),
+        SyntaxTypeRef::Iterator(id) => syntax
+            .iterator_types
+            .iter()
+            .find(|iterator| iterator.id == id)
+            .and_then(|iterator| named_type(syntax, iterator.item)),
         SyntaxTypeRef::Application(id) => syntax
             .type_applications
             .iter()

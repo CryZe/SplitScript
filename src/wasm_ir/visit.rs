@@ -175,6 +175,14 @@ pub fn walk_terminator(
             }
         }
         Terminator::Throw { error, .. } => visitor.visit_expression_id(*error, program),
+        Terminator::Yield {
+            value,
+            continuation,
+            ..
+        } => {
+            visitor.visit_expression_id(*value, program);
+            visitor.visit_block(continuation, program);
+        }
         Terminator::Retry {
             attempt,
             continuation,

@@ -147,7 +147,7 @@ fn emit_runtime_global_initializers(
         functions: lowering.functions,
         closures: lowering.closures,
         function_values: lowering.function_values,
-        closure_polls: lowering.closure_polls,
+        closure_resumes: lowering.closure_resumes,
         closure_environment: None,
         leaf_futures: lowering.leaf_futures,
         display_functions: lowering.display_functions,

@@ -384,6 +384,9 @@ fn render_typed_block(
                 )
                 .unwrap();
             }
+            TypedStatementKind::Yield { value } => {
+                writeln!(output, "{indent}yield e{}", value.index()).unwrap();
+            }
             TypedStatementKind::Expression(expression) => {
                 writeln!(output, "{indent}evaluate e{}", expression.index()).unwrap();
             }
@@ -614,6 +617,9 @@ fn snapshot_type_name(
         TypeKind::Result { value, .. } => format!("{}!", snapshot_type_name(checked, *value)),
         TypeKind::Async { value, .. } => {
             format!("async {}", snapshot_type_name(checked, *value))
+        }
+        TypeKind::Iterator { item, .. } => {
+            format!("iterator {}", snapshot_type_name(checked, *item))
         }
         TypeKind::Callable {
             parameters, result, ..

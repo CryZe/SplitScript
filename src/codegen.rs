@@ -65,7 +65,7 @@ use self::array_functions::ArrayFunctions;
 use self::async_frame::AsyncFrameLayouts;
 use self::async_state::{
     compile_async_action, compile_async_closure_poll, compile_async_function_poll,
-    compile_leaf_future_poll,
+    compile_generator_closure_next, compile_generator_function_next, compile_leaf_future_poll,
 };
 use self::backend_type::Type;
 use self::context::{AttachContext, EmissionContext};
@@ -262,6 +262,7 @@ struct ConstructedTypes {
     options: Vec<ResolvedOptionType>,
     results: Vec<ResolvedResultType>,
     asyncs: Vec<crate::types::ResolvedAsyncType>,
+    iterators: Vec<crate::types::ResolvedIteratorType>,
     callables: Vec<crate::types::ResolvedCallableType>,
     ranges: Vec<ResolvedRangeType>,
     sets: Vec<crate::types::ResolvedSetType>,
@@ -296,6 +297,7 @@ impl<'a> BackendProgram<'a> {
             options: checked.option_types.clone(),
             results: checked.result_types.clone(),
             asyncs: checked.async_types.clone(),
+            iterators: checked.iterator_types.clone(),
             callables: checked.callable_types.clone(),
             ranges: checked.range_types.clone(),
             sets: checked.set_types.clone(),
@@ -310,6 +312,7 @@ impl<'a> BackendProgram<'a> {
             &mut constructed_types.options,
             &mut constructed_types.results,
             &mut constructed_types.asyncs,
+            &mut constructed_types.iterators,
             &mut constructed_types.callables,
             &mut constructed_types.ranges,
             &mut constructed_types.sets,
@@ -380,6 +383,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         options: option_types,
         results: result_types,
         asyncs: async_types,
+        iterators: iterator_types,
         callables: callable_types,
         ranges: range_types,
         sets: set_types,
@@ -390,6 +394,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let array_types = &array_types;
     let option_types = &option_types;
     let result_types = &result_types;
+    let iterator_types = &iterator_types;
     let callable_types = &callable_types;
     let set_types = &set_types;
     let application_types = &application_types;
@@ -535,6 +540,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         option_types,
         result_types,
         async_types: &async_types,
+        iterator_types,
         callable_types,
         set_types,
         application_types,
@@ -580,7 +586,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         users: user_functions,
         closures: closure_functions,
         function_values: function_value_functions,
-        closure_polls,
+        closure_resumes,
         leaf_futures,
         displays: display_functions,
         managed_state_reads: managed_state_read_functions,
@@ -642,7 +648,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         functions: &user_functions,
         closures: &closure_functions,
         function_values: &function_value_functions,
-        closure_polls: &closure_polls,
+        closure_resumes: &closure_resumes,
         leaf_futures: &leaf_futures,
         display_functions: &display_functions,
         equality_functions: &equality_functions,
@@ -692,7 +698,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         );
         ProviderAttach {
             init: plan.call,
-            poll: plan.poll.expect("source provider attachments are async"),
+            poll: plan.resume.expect("source provider attachments are async"),
             frame_global: runtime_globals
                 .provider_attachment_frame
                 .expect("source provider attachments have frame storage"),
@@ -720,7 +726,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
                     debug_assert_eq!(completion_type, Type::Standard(declaration.process_type));
                     ProviderAttach {
                         init: plan.call,
-                        poll: plan.poll.expect("source provider attachments are async"),
+                        poll: plan.resume.expect("source provider attachments are async"),
                         frame_global: provider_attachment_frames[variant],
                         frame_type: gc.function_frame_index(instance),
                         completion_field,
@@ -748,7 +754,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             .expect("source provider preparations return a runtime context");
         ProviderPreparation {
             init: plan.call,
-            poll: plan.poll.expect("source provider preparations are async"),
+            poll: plan.resume.expect("source provider preparations are async"),
             frame_global: runtime_globals
                 .provider_preparation_frame
                 .expect("source provider preparations have frame storage"),
@@ -874,13 +880,31 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
                 .expect("reachable functions have final function plans");
             let body = compile_async_function_init(function, instance, layout, &lowering);
             codes.push(&body);
-            let body = compile_async_function_poll(
-                instance,
-                plan.poll.expect("async functions have poll entry points"),
-                layout,
-                &runtime,
-            );
-            codes.push(&body);
+            match wasm_ir
+                .body(wasm_ir::BodyOwner::Function(instance.clone()))
+                .expect("reachable functions have Wasm IR bodies")
+                .abi
+            {
+                wasm_ir::BodyAbi::AsyncFunction(_) => {
+                    let body = compile_async_function_poll(
+                        instance,
+                        plan.resume.expect("async functions have poll entry points"),
+                        layout,
+                        &runtime,
+                    );
+                    codes.push(&body);
+                }
+                wasm_ir::BodyAbi::Generator(_) => {
+                    if let Some(next) = plan.resume {
+                        let body =
+                            compile_generator_function_next(instance, next, layout, &runtime);
+                        codes.push(&body);
+                    }
+                }
+                wasm_ir::BodyAbi::Direct | wasm_ir::BodyAbi::AsyncAction => {
+                    unreachable!("planned continuation frames have continuation bodies")
+                }
+            }
         } else {
             let function_index = user_functions[instance].call;
             let body = compile_user_function(function, instance, function_index, &lowering);
@@ -949,14 +973,26 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     for (instance, layout) in async_frames.closures() {
         let closure = wasm_ir
             .closure(instance.expression)
-            .expect("async closure instances have bodies");
-        let body = compile_async_closure_poll(
-            instance,
-            closure,
-            closure_polls[instance],
-            layout,
-            &runtime,
-        );
+            .expect("continuation-backed closure instances have bodies");
+        let body = match closure.abi {
+            wasm_ir::BodyAbi::AsyncFunction(_) => compile_async_closure_poll(
+                instance,
+                closure,
+                closure_resumes[instance],
+                layout,
+                &runtime,
+            ),
+            wasm_ir::BodyAbi::Generator(_) => compile_generator_closure_next(
+                instance,
+                closure,
+                closure_resumes[instance],
+                layout,
+                &runtime,
+            ),
+            wasm_ir::BodyAbi::Direct | wasm_ir::BodyAbi::AsyncAction => {
+                unreachable!("planned closure frames have continuation bodies")
+            }
+        };
         codes.push(&body);
     }
     for instance in reachability.closure_instances() {
@@ -1021,6 +1057,8 @@ fn resolved_intrinsic(target: &wasm_ir::CallTarget) -> Option<IntrinsicId> {
         | wasm_ir::CallTarget::LibraryOverload { .. }
         | wasm_ir::CallTarget::CapabilityRequirement { .. }
         | wasm_ir::CallTarget::DefaultFormatting { .. }
+        | wasm_ir::CallTarget::GeneratorNext { .. }
+        | wasm_ir::CallTarget::IteratorIdentity { .. }
         | wasm_ir::CallTarget::ManagedSnapshot { .. }
         | wasm_ir::CallTarget::ManagedComponent { .. }
         | wasm_ir::CallTarget::ManagedInstances { .. }
@@ -1060,6 +1098,7 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
         TypeKind::Option { layout, .. } => Type::Option(*layout),
         TypeKind::Result { layout, .. } => Type::Result(*layout),
         TypeKind::Async { layout, .. } => Type::Async(*layout),
+        TypeKind::Iterator { layout, .. } => Type::Iterator(*layout),
         TypeKind::Callable { layout, .. } => Type::Callable(*layout),
         TypeKind::Set { layout, .. } => Type::Set(*layout),
         TypeKind::Range { layout, .. } => Type::Range(*layout),

@@ -1341,6 +1341,7 @@ fn validate_future_storage(
             | TypeKind::Set { element, .. }
             | TypeKind::Option { value: element, .. }
             | TypeKind::Result { value: element, .. }
+            | TypeKind::Iterator { item: element, .. }
             | TypeKind::Range { bound: element, .. } => {
                 contains_future(*element, syntax, semantics, enum_types, visited)
             }
@@ -1965,6 +1966,7 @@ impl TypedVisitor for LocalUsageCollector {
             | TypedStatementKind::While { .. }
             | TypedStatementKind::For { .. }
             | TypedStatementKind::Suspend { binding: None, .. }
+            | TypedStatementKind::Yield { .. }
             | TypedStatementKind::Expression(_) => {}
         }
 
@@ -2964,6 +2966,7 @@ fn expand_fully_observed_types(
             | TypeKind::Option { value: element, .. }
             | TypeKind::Result { value: element, .. }
             | TypeKind::Async { value: element, .. }
+            | TypeKind::Iterator { item: element, .. }
             | TypeKind::Range { bound: element, .. } => pending.push_back(*element),
             TypeKind::Application { arguments, .. } => {
                 pending.extend(arguments.iter().copied());
@@ -3051,6 +3054,7 @@ fn expand_reachable_nominal_types(
             | TypeKind::Option { value: element, .. }
             | TypeKind::Result { value: element, .. }
             | TypeKind::Async { value: element, .. }
+            | TypeKind::Iterator { item: element, .. }
             | TypeKind::Range { bound: element, .. } => pending.push_back(*element),
             TypeKind::Application { arguments, .. } => {
                 pending.extend(arguments.iter().copied());
@@ -3175,7 +3179,8 @@ fn validate_must_use_block(
             | TypedStatementKind::Assign { .. }
             | TypedStatementKind::StateAssign { .. }
             | TypedStatementKind::IndexAssign { .. }
-            | TypedStatementKind::Suspend { .. } => {}
+            | TypedStatementKind::Suspend { .. }
+            | TypedStatementKind::Yield { .. } => {}
         }
     }
 }

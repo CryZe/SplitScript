@@ -445,6 +445,10 @@ fn render_actual_type(
             "async {}",
             render_actual_type(library, semantics, *value, parameter_bindings)
         ),
+        TypeKind::Iterator { item, .. } => format!(
+            "iterator {}",
+            render_actual_type(library, semantics, *item, parameter_bindings)
+        ),
         TypeKind::Callable {
             parameters, result, ..
         } => {

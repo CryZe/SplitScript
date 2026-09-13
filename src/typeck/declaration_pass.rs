@@ -968,6 +968,8 @@ fn collect_function_signatures(checker: &mut Checker, program: &Program) {
         });
         let completion = if let Some(Type::Async(future)) = annotated {
             checker.inference.async_value(future)
+        } else if matches!(annotated, Some(Type::Iterator(_))) {
+            checker.core_type(crate::stdlib::CoreTypeId::None)
         } else if let Some(annotation) = annotated {
             annotation
         } else if contains_value_return(&function.body) {
@@ -977,7 +979,9 @@ fn collect_function_signatures(checker: &mut Checker, program: &Program) {
         };
         let is_async = function.return_is_async
             || crate::typeck::control_flow::contains_suspension(&function.body);
-        let result = if is_async {
+        let result = if function.return_is_iterator {
+            annotated.expect("an explicit iterator result has an annotation")
+        } else if is_async {
             match annotated {
                 Some(result @ Type::Async(_)) => result,
                 _ => Type::Async(checker.inference.async_type(completion)),

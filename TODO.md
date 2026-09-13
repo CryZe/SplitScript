@@ -867,11 +867,24 @@ concepts rather than maintaining a parallel inventory.
   Constructed callable layouts, generic standard-library struct fields,
   reachability, scratch planning, and intrinsic dependencies all use the same
   demand-driven specialization path rather than adapter-specific intrinsics.
-- [ ] Design user-defined mutable iterator storage. Associated result types can
-  now be inferred from ordinary source methods, but scripts still cannot define
-  the hidden mutable cursor state needed by a practical iterator. Specify
-  fallible and asynchronous iteration separately; do not conflate either one
-  with the completed synchronous `IteratorStep` protocol.
+- [x] Add synchronous generator functions as the ergonomic source-defined
+  iterator facility. `fn values() -> iterator T { yield value }` constructs a
+  lazy resumable cursor: the call executes no body code, each `next()` resumes
+  until one `yield`, and fallthrough or bare `return` permanently yields
+  [`End`]. Generator values implement both [`Iterator`] and identity
+  [`Iterable`], alias one cursor when copied, and compose with `for`, `map`,
+  `filter`, generic capability dispatch, and closures. Reuse async continuation
+  graphs, suspension liveness, typed GC frames, captures, specialization, and
+  dynamic frame dispatch behind one resumable-frame architecture; add `Yield`
+  as a distinct IR terminator rather than disguising a yielded item as future
+  completion. Keep generator construction lazy and generated implementations
+  reachable on demand. Initially reject `await`, `retry`, value-returning
+  `return`, and uncaught failure inside generators: fallible and asynchronous
+  iteration need separately approved protocols and must not be flattened into
+  synchronous `IteratorStep`. Cover syntax recovery, formatting, inference,
+  diagnostics, Debug, hover, navigation, highlighting, completion, selection,
+  documentation, nested control flow, aliasing, permanent exhaustion, generic
+  calls, closures, runtime behavior, and Wasm validation.
 
 ### Engine and emulator providers
 

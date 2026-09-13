@@ -9,9 +9,9 @@ use std::fmt;
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, CallableTypeId, EnumDecl, EnumId, FunctionId, ManagedClassDecl,
-        ManagedClassId, OptionTypeId, RangeKind, RangeTypeId, ResultTypeId, StructDecl, StructId,
-        TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, CallableTypeId, EnumDecl, EnumId, FunctionId, IteratorTypeId,
+        ManagedClassDecl, ManagedClassId, OptionTypeId, RangeKind, RangeTypeId, ResultTypeId,
+        StructDecl, StructId, TypeApplicationId,
     },
     inference::Type,
     stdlib::{CoreTypeId, StandardLibrary, StdlibTypeConstructorId, StdlibTypeId},
@@ -64,6 +64,7 @@ pub enum ResolvedTypeRef {
     Option(OptionTypeId),
     Result(ResultTypeId),
     Async(AsyncTypeId),
+    Iterator(IteratorTypeId),
     Callable(CallableTypeId),
     Range(RangeTypeId),
     Set(TypeApplicationId),
@@ -104,6 +105,12 @@ pub struct ResolvedAsyncType {
     pub value: ResolvedTypeRef,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedIteratorType {
+    pub id: IteratorTypeId,
+    pub item: ResolvedTypeRef,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedCallableType {
     pub id: CallableTypeId,
@@ -139,6 +146,7 @@ pub struct ResolvedConstructedTypes<'a> {
     pub options: &'a [ResolvedOptionType],
     pub results: &'a [ResolvedResultType],
     pub asyncs: &'a [ResolvedAsyncType],
+    pub iterators: &'a [ResolvedIteratorType],
     pub callables: &'a [ResolvedCallableType],
     pub sets: &'a [ResolvedSetType],
     pub applications: &'a [ResolvedApplicationType],
@@ -154,6 +162,7 @@ pub(crate) struct ResolvedConstructedTypesMut<'a> {
     pub options: &'a mut Vec<ResolvedOptionType>,
     pub results: &'a mut Vec<ResolvedResultType>,
     pub asyncs: &'a mut Vec<ResolvedAsyncType>,
+    pub iterators: &'a mut Vec<ResolvedIteratorType>,
     pub callables: &'a mut Vec<ResolvedCallableType>,
     pub ranges: &'a mut Vec<ResolvedRangeType>,
     pub sets: &'a mut Vec<ResolvedSetType>,
@@ -210,6 +219,10 @@ pub enum TypeKind {
     Async {
         layout: AsyncTypeId,
         value: TypeId,
+    },
+    Iterator {
+        layout: IteratorTypeId,
+        item: TypeId,
     },
     Callable {
         layout: CallableTypeId,
@@ -326,6 +339,7 @@ impl TypeStore {
             TypeKind::Option { value, .. }
             | TypeKind::Result { value, .. }
             | TypeKind::Async { value, .. } => self.contains_error(*value),
+            TypeKind::Iterator { item, .. } => self.contains_error(*item),
             TypeKind::Callable {
                 parameters, result, ..
             } => {
@@ -406,6 +420,7 @@ impl TypeStore {
             options,
             results,
             asyncs,
+            iterators,
             callables,
             sets,
             applications,
@@ -457,6 +472,15 @@ impl TypeStore {
                     .value;
                 let value = self.intern_type_ref(value, constructed);
                 TypeKind::Async { layout: id, value }
+            }
+            Type::Iterator(id) => {
+                let item = iterators
+                    .iter()
+                    .find(|iterator| iterator.id == id)
+                    .unwrap_or_else(|| panic!("missing checked iterator type {id}"))
+                    .item;
+                let item = self.intern_type_ref(item, constructed);
+                TypeKind::Iterator { layout: id, item }
             }
             Type::Callable(id) => {
                 let callable = callables
@@ -540,6 +564,7 @@ impl TypeStore {
             ResolvedTypeRef::Option(id) => self.intern_inferred(Type::Option(id), constructed),
             ResolvedTypeRef::Result(id) => self.intern_inferred(Type::Result(id), constructed),
             ResolvedTypeRef::Async(id) => self.intern_inferred(Type::Async(id), constructed),
+            ResolvedTypeRef::Iterator(id) => self.intern_inferred(Type::Iterator(id), constructed),
             ResolvedTypeRef::Callable(id) => self.intern_inferred(Type::Callable(id), constructed),
             ResolvedTypeRef::Range(id) => self
                 .kinds

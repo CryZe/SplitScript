@@ -369,8 +369,8 @@ mod tests {
     fn rendered_reference_snapshot_is_stable() {
         let reference = DocumentationReference::default();
         let snapshot = reference_snapshot(&reference);
-        assert_eq!(snapshot.page_count, 529);
-        assert_eq!(snapshot.fingerprint, 4_942_921_999_150_807_270);
+        assert_eq!(snapshot.page_count, 531);
+        assert_eq!(snapshot.fingerprint, 17_217_774_830_340_404_465);
     }
 
     #[derive(Debug)]

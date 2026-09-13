@@ -147,6 +147,16 @@ impl Parser<'_> {
                 span: Span { start, end },
             });
         }
+        if self.eat_ident("yield").is_some() {
+            let start = self.previous().span.start;
+            let value = self.root_expression();
+            self.terminator()?;
+            let span = Span {
+                start,
+                end: self.previous().span.end,
+            };
+            return Ok(Stmt::Yield { value, span });
+        }
         if self.at_ident("timer")
             && self.peek(1).kind == TokenKind::Dot
             && matches!(&self.peek(2).kind, TokenKind::Ident(name) if name == "Run")

@@ -7,7 +7,7 @@ use crate::{
     capabilities::CapabilityAnalysis,
     equality::EqualityCapabilities,
     semantic::{ClosureInstance, FunctionInstance, FunctionValueInstance, SemanticModel},
-    stdlib::{IntrinsicId, RuntimeRepresentation, StandardLibrary},
+    stdlib::{IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibTypeConstructorId},
     structural::{StructuralTypeId, StructuralTypes},
     types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, ResolvedSetType},
 };
@@ -35,7 +35,7 @@ pub(super) struct FunctionPlan<'a> {
     pub users: HashMap<FunctionInstance, UserFunctionPlan>,
     pub closures: HashMap<ClosureInstance, u32>,
     pub function_values: HashMap<FunctionValueInstance, u32>,
-    pub closure_polls: HashMap<ClosureInstance, u32>,
+    pub closure_resumes: HashMap<ClosureInstance, u32>,
     pub leaf_futures: HashMap<LeafFutureInstance, u32>,
     pub displays: DisplayFunctions,
     pub managed_state_reads: HashMap<ManagedFieldId, u32>,
@@ -97,7 +97,7 @@ impl<'a> FunctionDeclarations<'a> {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct UserFunctionPlan {
     pub call: u32,
-    pub poll: Option<u32>,
+    pub resume: Option<u32>,
 }
 
 pub(super) struct Inputs<'a> {
@@ -479,7 +479,10 @@ pub(super) fn encode<'a>(
                 enums,
             )
         });
-        let plan = if matches!(body.abi, crate::wasm_ir::BodyAbi::AsyncFunction(_)) {
+        let plan = if matches!(
+            body.abi,
+            crate::wasm_ir::BodyAbi::AsyncFunction(_) | crate::wasm_ir::BodyAbi::Generator(_)
+        ) {
             let frame = ValType::Ref(RefType {
                 nullable: false,
                 heap_type: HeapType::Concrete(gc.function_frame_index(instance)),
@@ -497,18 +500,40 @@ pub(super) fn encode<'a>(
                     params,
                     vec![frame],
                 ),
-                poll: Some(declarations.declare(
-                    || {
-                        format!(
-                            "{}::poll",
-                            source_name
-                                .as_deref()
-                                .expect("debug builds have source names")
-                        )
-                    },
-                    vec![frame],
-                    vec![ValType::I32],
-                )),
+                resume: match body.abi {
+                    crate::wasm_ir::BodyAbi::AsyncFunction(_) => Some(declarations.declare(
+                        || {
+                            format!(
+                                "{}::poll",
+                                source_name
+                                    .as_deref()
+                                    .expect("debug builds have source names")
+                            )
+                        },
+                        vec![frame],
+                        vec![ValType::I32],
+                    )),
+                    crate::wasm_ir::BodyAbi::Generator(generator) => {
+                        let item = semantics.specialize_type(instance, generator.item);
+                        iterator_step_type(item, semantics).map(|step| {
+                            declarations.declare(
+                                || {
+                                    format!(
+                                        "{}::next",
+                                        source_name
+                                            .as_deref()
+                                            .expect("debug builds have source names")
+                                    )
+                                },
+                                vec![frame],
+                                vec![gc.val_type(step)],
+                            )
+                        })
+                    }
+                    crate::wasm_ir::BodyAbi::Direct | crate::wasm_ir::BodyAbi::AsyncAction => {
+                        unreachable!("continuation function planning has a continuation ABI")
+                    }
+                },
             }
         } else {
             UserFunctionPlan {
@@ -521,7 +546,7 @@ pub(super) fn encode<'a>(
                         .into_iter()
                         .collect(),
                 ),
-                poll: None,
+                resume: None,
             }
         };
         users.insert(instance.clone(), plan);
@@ -638,23 +663,49 @@ pub(super) fn encode<'a>(
 
     let start = declarations.declare(|| "_start".to_owned(), vec![], vec![]);
     let update = declarations.declare(|| "update".to_owned(), vec![], vec![]);
-    let mut closure_polls = HashMap::new();
+    let mut closure_resumes = HashMap::new();
     for (instance, _) in async_frames.closures() {
         let frame = ValType::Ref(RefType {
             nullable: false,
             heap_type: HeapType::Concrete(gc.closure_frame_index(instance)),
         });
-        closure_polls.insert(
+        let closure = wasm_ir
+            .closure(instance.expression)
+            .expect("continuation-backed closures have Wasm IR bodies");
+        let result = match closure.abi {
+            crate::wasm_ir::BodyAbi::AsyncFunction(_) => vec![ValType::I32],
+            crate::wasm_ir::BodyAbi::Generator(generator) => vec![
+                gc.val_type(
+                    iterator_step_type(
+                        instance.owner.as_ref().map_or(generator.item, |owner| {
+                            semantics.specialize_type(owner, generator.item)
+                        }),
+                        semantics,
+                    )
+                    .expect("consumed generator closures materialize IteratorStep types"),
+                ),
+            ],
+            crate::wasm_ir::BodyAbi::Direct | crate::wasm_ir::BodyAbi::AsyncAction => {
+                unreachable!("planned closure frames have continuation ABIs")
+            }
+        };
+        closure_resumes.insert(
             instance.clone(),
             declarations.declare(
                 || {
                     format!(
-                        "__splitscript::closure::expr{}::poll",
-                        instance.expression.index()
+                        "__splitscript::closure::expr{}::{}",
+                        instance.expression.index(),
+                        match closure.abi {
+                            crate::wasm_ir::BodyAbi::AsyncFunction(_) => "poll",
+                            crate::wasm_ir::BodyAbi::Generator(_) => "next",
+                            crate::wasm_ir::BodyAbi::Direct
+                            | crate::wasm_ir::BodyAbi::AsyncAction => unreachable!(),
+                        }
                     )
                 },
                 vec![frame],
-                vec![ValType::I32],
+                result,
             ),
         );
     }
@@ -705,7 +756,7 @@ pub(super) fn encode<'a>(
         users,
         closures,
         function_values,
-        closure_polls,
+        closure_resumes,
         leaf_futures,
         displays,
         managed_state_reads: managed_state_read_functions,
@@ -718,6 +769,20 @@ pub(super) fn encode<'a>(
         arrays,
         debug_names: declarations.debug_names.unwrap_or_default(),
     }
+}
+
+pub(super) fn iterator_step_type(
+    item: crate::types::TypeId,
+    semantics: &SemanticModel,
+) -> Option<Type> {
+    semantics.types().iter().find_map(|(_, kind)| match kind {
+        crate::types::TypeKind::Application {
+            layout,
+            constructor: StdlibTypeConstructorId::IteratorStep,
+            arguments,
+        } if arguments.as_slice() == [item] => Some(Type::Application(*layout)),
+        _ => None,
+    })
 }
 
 #[cfg(test)]

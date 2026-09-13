@@ -5,15 +5,15 @@ use std::collections::HashMap;
 use wasm_encoder::{AbstractHeapType, HeapType, RefType, StorageType, ValType};
 
 use crate::{
-    ast::{AsyncTypeId, EnumDecl, Program},
+    ast::{AsyncTypeId, EnumDecl, IteratorTypeId, Program},
     semantic::{ClosureInstance, FunctionInstance, ResolvedEnumVariantId},
     stdlib::{
         DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibTypeId,
     },
     types::{
         EnumTypeId, ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType,
-        ResolvedCallableType, ResolvedOptionType, ResolvedRangeType, ResolvedResultType,
-        ResolvedSetType, ResolvedTypeRef,
+        ResolvedCallableType, ResolvedIteratorType, ResolvedOptionType, ResolvedRangeType,
+        ResolvedResultType, ResolvedSetType, ResolvedTypeRef,
     },
 };
 
@@ -29,6 +29,7 @@ pub(super) struct GcLayout {
     standard_fields: HashMap<StdlibFieldId, u32>,
     async_frame: u32,
     async_values: HashMap<AsyncTypeId, u32>,
+    iterator_values: HashMap<IteratorTypeId, u32>,
     callable_functions: HashMap<crate::ast::CallableTypeId, u32>,
     capture_cells: HashMap<Type, u32>,
     ordered_capture_cells: Vec<Type>,
@@ -54,6 +55,7 @@ pub(super) struct Inputs<'a> {
     pub options: &'a [ResolvedOptionType],
     pub results: &'a [ResolvedResultType],
     pub asyncs: &'a [ResolvedAsyncType],
+    pub iterators: &'a [ResolvedIteratorType],
     pub callables: &'a [ResolvedCallableType],
     pub sets: &'a [ResolvedSetType],
     pub applications: &'a [ResolvedApplicationType],
@@ -74,6 +76,7 @@ impl GcLayout {
             options,
             results,
             asyncs,
+            iterators,
             callables,
             sets,
             applications,
@@ -358,6 +361,14 @@ impl GcLayout {
             async_values.insert(future.id, next);
             next += 1;
         }
+        let mut iterator_values = HashMap::new();
+        for iterator in iterators
+            .iter()
+            .filter(|iterator| reachability.contains_iterator_type(iterator.id))
+        {
+            iterator_values.insert(iterator.id, next);
+            next += 1;
+        }
         let mut function_frames = HashMap::new();
         let mut function_frame_tags = HashMap::new();
         for (tag, (instance, _)) in async_frames.functions().enumerate() {
@@ -388,6 +399,7 @@ impl GcLayout {
             standard_fields,
             async_frame,
             async_values,
+            iterator_values,
             callable_functions,
             capture_cells,
             ordered_capture_cells,
@@ -528,6 +540,10 @@ impl GcLayout {
                 .async_values
                 .get(&future)
                 .expect("reachable async values have erased GC headers"),
+            Type::Iterator(iterator) => *self
+                .iterator_values
+                .get(&iterator)
+                .expect("reachable iterator values have erased GC headers"),
             Type::Standard(standard) => self.standard_index(standard),
             Type::Struct(_)
             | Type::ManagedClass(_)
@@ -594,6 +610,7 @@ impl GcLayout {
             | Type::Option(_)
             | Type::Result(_)
             | Type::Async(_)
+            | Type::Iterator(_)
             | Type::Callable(_)
             | Type::Range(_)
             | Type::Set(_)

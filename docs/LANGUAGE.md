@@ -1115,6 +1115,49 @@ the same assignments. [`return`] exits the closure itself; [`break`] and
 [`continue`] cannot target a loop outside it. Callable values do not implement
 [`Equatable`].
 
+### Synchronous generators
+
+A function returning `iterator T` is a lazy synchronous generator. Calling it
+creates a cursor without executing the body. Each `next()` resumes the body
+until one `yield`, returning `Item(value)`; reaching the end or a bare `return`
+permanently returns `End`.
+
+```text
+fn values(end: u32) -> iterator u32 {
+    let value = 0u32
+    while value < end {
+        yield value
+        value += 1
+    }
+}
+
+for value in values(3) {
+    print(value)
+}
+```
+
+Generator cursors implement both [`Iterator`] and [`Iterable`], so they compose
+with `for`, `map`, `filter`, and generic helpers accepting an iterable. Copying
+a cursor creates an alias to the same position; call the generator again for
+an independent traversal. A closure can use the same protocol by explicitly
+returning `iterator T`:
+
+```text
+let offset = 10u32
+let values: (u32) -> iterator u32 = (end: u32) -> iterator u32 => {
+    let value = 0u32
+    while value < end {
+        yield value + offset
+        value += 1
+    }
+}
+```
+
+This initial protocol is deliberately synchronous. A generator cannot use
+[`await`] or [`retry`], return a value, or let an error escape; those operations
+need a separately typed asynchronous or fallible iteration protocol rather
+than changing what [`IteratorStep`] means.
+
 ## Structs
 
 Structs are immutable, named value shapes. Declarations can refer to structs

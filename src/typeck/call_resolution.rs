@@ -3271,6 +3271,10 @@ impl Checker {
                 let value = self.inference.async_value(future);
                 format!("async {}", self.type_name(value))
             }
+            Type::Iterator(iterator) => {
+                let item = self.inference.iterator_item(iterator);
+                format!("iterator {}", self.type_name(item))
+            }
             Type::Callable(callable) => {
                 let parameters = self
                     .inference

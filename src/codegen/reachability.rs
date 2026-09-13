@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, ExprId, ManagedClassId, OptionTypeId,
-        Program, ResultTypeId, StructId, TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, ExprId, IteratorTypeId, ManagedClassId,
+        OptionTypeId, Program, ResultTypeId, StructId, TypeApplicationId,
     },
     semantic::{ClosureInstance, FunctionInstance, FunctionValueInstance, SemanticModel},
     stdlib::{
@@ -40,6 +40,7 @@ pub(super) struct Reachability {
     gc_options: BTreeSet<OptionTypeId>,
     gc_results: BTreeSet<ResultTypeId>,
     gc_asyncs: BTreeSet<AsyncTypeId>,
+    gc_iterators: BTreeSet<IteratorTypeId>,
     gc_callables: BTreeSet<CallableTypeId>,
     gc_sets: BTreeSet<TypeApplicationId>,
     set_operations: BTreeSet<(TypeApplicationId, IntrinsicId)>,
@@ -347,6 +348,8 @@ impl Reachability {
                     wasm_ir::CallTarget::Intrinsic { .. }
                     | wasm_ir::CallTarget::CapabilityRequirement { .. }
                     | wasm_ir::CallTarget::DefaultFormatting { .. }
+                    | wasm_ir::CallTarget::GeneratorNext { .. }
+                    | wasm_ir::CallTarget::IteratorIdentity { .. }
                     | wasm_ir::CallTarget::ManagedSnapshot { .. }
                     | wasm_ir::CallTarget::ManagedInstances { .. }
                     | wasm_ir::CallTarget::ResultError { .. }
@@ -604,6 +607,10 @@ impl Reachability {
                         wasm_ir::CallTarget::DefaultFormatting { receiver_type, .. } => {
                             type_roots.push(specialize(*receiver_type));
                         }
+                        wasm_ir::CallTarget::GeneratorNext { receiver_type, .. }
+                        | wasm_ir::CallTarget::IteratorIdentity { receiver_type, .. } => {
+                            type_roots.push(specialize(*receiver_type));
+                        }
                         wasm_ir::CallTarget::ManagedSnapshot { receiver_type, .. } => {
                             type_roots.push(specialize(*receiver_type));
                         }
@@ -838,6 +845,10 @@ impl Reachability {
         self.gc_asyncs.contains(&future)
     }
 
+    pub fn contains_iterator_type(&self, iterator: IteratorTypeId) -> bool {
+        self.gc_iterators.contains(&iterator)
+    }
+
     pub fn contains_callable_type(&self, callable: CallableTypeId) -> bool {
         self.gc_callables.contains(&callable)
     }
@@ -961,6 +972,10 @@ impl Reachability {
                     self.gc_asyncs.insert(*layout);
                     pending.push(*value);
                 }
+                TypeKind::Iterator { layout, item } => {
+                    self.gc_iterators.insert(*layout);
+                    pending.push(*item);
+                }
                 TypeKind::Callable {
                     layout,
                     parameters,
@@ -1071,6 +1086,7 @@ impl Reachability {
                 | TypeKind::Option { .. }
                 | TypeKind::Result { .. }
                 | TypeKind::Async { .. }
+                | TypeKind::Iterator { .. }
                 | TypeKind::Callable { .. }
                 | TypeKind::Range { .. }
                 | TypeKind::Set { .. } => {}
@@ -1159,7 +1175,9 @@ fn constant_roots(
             | wasm_ir::CallTarget::ManagedSnapshot { receiver, .. }
             | wasm_ir::CallTarget::ManagedComponent { receiver, .. }
             | wasm_ir::CallTarget::CapabilityRequirement { receiver, .. }
-            | wasm_ir::CallTarget::DefaultFormatting { receiver, .. } => Some(receiver),
+            | wasm_ir::CallTarget::DefaultFormatting { receiver, .. }
+            | wasm_ir::CallTarget::GeneratorNext { receiver, .. }
+            | wasm_ir::CallTarget::IteratorIdentity { receiver, .. } => Some(receiver),
             wasm_ir::CallTarget::Intrinsic { receiver, .. }
             | wasm_ir::CallTarget::LibraryOverload { receiver, .. } => receiver.as_ref(),
             wasm_ir::CallTarget::UserFunction { .. }

@@ -135,6 +135,8 @@ impl Visitor for Collector<'_> {
                     CallTarget::UserMethod { receiver, .. }
                     | CallTarget::CapabilityRequirement { receiver, .. }
                     | CallTarget::DefaultFormatting { receiver, .. }
+                    | CallTarget::GeneratorNext { receiver, .. }
+                    | CallTarget::IteratorIdentity { receiver, .. }
                     | CallTarget::ManagedSnapshot { receiver, .. }
                     | CallTarget::ManagedComponent { receiver, .. } => Some(receiver),
                     CallTarget::Intrinsic { receiver, .. }

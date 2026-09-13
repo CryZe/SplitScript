@@ -33,6 +33,7 @@ pub enum LanguageCompletionSite {
     Statement,
     Loop,
     Return,
+    Generator,
     Method,
 }
 
@@ -617,6 +618,22 @@ whileAttached {
     print(label)
 }"#;
 
+const GENERATOR_SOURCE: &str = r#"state "game.exe" {}
+
+fn values(end: u32) -> iterator u32 {
+    let value = 0u32
+    while value < end {
+        yield value
+        value += 1
+    }
+}
+
+whileAttached {
+    for value in values(3) {
+        print(value)
+    }
+}"#;
+
 const LIFECYCLE_SOURCE: &str = r#"state "game.exe" {}
 
 setup {}
@@ -1077,6 +1094,18 @@ focused_example!(
     ASYNC_RESULT_SOURCE
 );
 focused_example!(
+    ITERATOR_TYPE_EXAMPLE,
+    "Declare a synchronous generator",
+    "fn values(end: u32) -> iterator u32 {\n    let value = 0u32\n    while value < end {\n        yield value\n        value += 1\n    }\n}",
+    GENERATOR_SOURCE
+);
+focused_example!(
+    YIELD_EXAMPLE,
+    "Produce the next item",
+    "yield value",
+    GENERATOR_SOURCE
+);
+focused_example!(
     AWAIT_EXAMPLE,
     "Wait during attachment",
     "let module = await process.module(\"GameAssembly.dll\")",
@@ -1375,7 +1404,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "fn name(parameters) { ... }",
         "Declares a function or method.",
-        "Each parameter may be an irrefutable [`binding pattern`]. It still consumes exactly one argument; an annotation applies to that complete argument while the projected names receive their field or payload types. Parameter and result annotations are optional when constraints from the body and call sites determine them.",
+        "Each parameter may be an irrefutable [`binding pattern`]. It still consumes exactly one argument; an annotation applies to that complete argument while the projected names receive their field or payload types. Parameter and result annotations are optional when constraints from the body and call sites determine them. A function returning [`iterator`] `T` is a synchronous generator whose body advances only when its cursor is consumed.",
         FUNCTION_EXAMPLE
     ),
     language_item!(
@@ -1384,7 +1413,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "value => expression | (left: T, right: U) -> Result => { ... }",
         "Creates a callable value with lexical captures.",
-        "Each parenthesized parameter may be an irrefutable [`binding pattern`] and still consumes one argument. Parameter and result types are inferred bidirectionally from the body, invocation sites, and any expected [`callable type`]. A single inferred name may omit parentheses; zero, multiple, annotated, or destructured parameters use parentheses. An explicit result uses `(parameters) -> Result => body`; write [`async`] `T` as the result when the closure itself is explicitly asynchronous. The body is any expression, including a [`value block`], and may use [`await`] or [`retry`] to infer an [`async`] result. Calling such a closure creates a typed future; creating the closure itself does not execute or poll its body. Captured immutable values are retained in the closure environment. A mutable local is captured by reference through one shared cell, so assignments in the closure and its declaring scope observe each other even after the closure is returned or stored across [`await`]. [`return`] exits the closure itself; [`break`] and [`continue`] cannot escape into an outer loop.",
+        "Each parenthesized parameter may be an irrefutable [`binding pattern`] and still consumes one argument. Parameter and result types are inferred bidirectionally from the body, invocation sites, and any expected [`callable type`]. A single inferred name may omit parentheses; zero, multiple, annotated, or destructured parameters use parentheses. An explicit result uses `(parameters) -> Result => body`; write [`async`] `T` for an explicitly asynchronous closure or [`iterator`] `T` for a synchronous generator closure. The body is any expression, including a [`value block`]. An async body may use [`await`] or [`retry`]; a generator body produces values with [`yield`]. Calling either kind creates its lazy continuation without executing the body. Captured immutable values are retained in the closure environment. A mutable local is captured by reference through one shared cell, so assignments in the closure and its declaring scope observe each other even after the closure is returned or stored across [`await`]. [`return`] exits the closure itself; [`break`] and [`continue`] cannot escape into an outer loop.",
         CLOSURE_EXAMPLES
     ),
     language_item!(
@@ -1402,7 +1431,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "(Parameter, ...) -> Result",
         "Describes a first-class callable value.",
-        "The parameter list may be empty and the result may be any ordinary type, including [`async`] `T`. A value of this type is invoked with ordinary call syntax. Both named [`fn`] values and [`closure`] expressions infer this type from either direction and share one runtime representation. Merely storing either kind of callable does not execute its effects. Callable values are intentionally not [`Equatable`].",
+        "The parameter list may be empty and the result may be any ordinary type, including [`async`] `T` and [`iterator`] `T`. A value of this type is invoked with ordinary call syntax. Both named [`fn`] values and [`closure`] expressions infer this type from either direction and share one runtime representation. Calling an async or generator callable creates a lazy continuation; merely storing the callable never executes its effects. Callable values are intentionally not [`Equatable`].",
         CALLABLE_TYPE_EXAMPLE
     ),
     language_item!(
@@ -1791,6 +1820,24 @@ define_language_catalog! {
         "Marks an explicitly typed function result as asynchronous.",
         "A function containing [`await`] or [`retry`] has an async result. Write [`async`] `T` when its result type is explicit; when the result type is omitted, both [`async`] and `T` are inferred. Calling a source-defined async function creates an attachment-lifetime future value without polling it. That [`async`] `T` value can be stored in locals and aggregates, passed to functions, and awaited later. Its typed continuation frame retains parameters, live locals, nested futures, and the completed `T`. Futures cannot escape into globals because state-provider detachment owns their cancellation.",
         ASYNC_RESULT_EXAMPLE
+    ),
+    language_item!(
+        IteratorType,
+        "iterator",
+        LanguageItemKind::Keyword,
+        "fn name(...) -> iterator T { ... } | (...) -> iterator T => { ... }",
+        "Declares a lazy synchronous generator result.",
+        "Calling a function or closure returning [`iterator`] `T` allocates a cursor without running its body. Each [`Iterator.next`] resumes that body until one [`yield`] and returns [`Item`]`(T)`; fallthrough or a bare [`return`] permanently returns [`End`]. Copies alias the same cursor position, and the value implements both [`Iterator`] and identity [`Iterable`], so it composes with [`for`], [`map`], and [`filter`]. Generators are synchronous: [`await`], [`retry`], value-returning [`return`], and uncaught fallible control are rejected rather than silently changing the iterator protocol.",
+        ITERATOR_TYPE_EXAMPLE
+    ),
+    language_item!(
+        Yield,
+        "yield",
+        LanguageItemKind::Keyword,
+        "yield expression",
+        "Suspends a generator after producing one item.",
+        "[`yield`] is available only inside a function or closure explicitly returning [`iterator`] `T`. Its expression must have type `T`. The generator preserves its parameters, captures, and live locals, and the next [`Iterator.next`] continues immediately after the yield. It is distinct from [`return`]: a bare return exhausts the cursor, while returning a value is an error.",
+        YIELD_EXAMPLE
     ),
     language_item!(
         Await,
@@ -2300,6 +2347,7 @@ impl LanguageCatalog {
                 true,
             ),
             LanguageItemId::Return => (LanguageCompletionSite::Return, "return${1: value}", true),
+            LanguageItemId::Yield => (LanguageCompletionSite::Generator, "yield ${1:value}", true),
             LanguageItemId::Throw => (LanguageCompletionSite::Expression, "throw ${1:error}", true),
             LanguageItemId::Await => (
                 LanguageCompletionSite::Expression,

@@ -115,6 +115,15 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             value: future.value.to_ref(checker.inference.type_store()),
         })
         .collect::<Vec<_>>();
+    let iterator_types = checker
+        .inference
+        .iterators()
+        .iter()
+        .map(|iterator| crate::types::ResolvedIteratorType {
+            id: iterator.id,
+            item: iterator.item.to_ref(checker.inference.type_store()),
+        })
+        .collect::<Vec<_>>();
     let callable_types = checker
         .inference
         .callables()
@@ -182,6 +191,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             options: &option_types,
             results: &result_types,
             asyncs: &async_types,
+            iterators: &iterator_types,
             callables: &callable_types,
             sets: &set_types,
             applications: &application_types,
@@ -236,6 +246,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             option_types,
             result_types,
             async_types,
+            iterator_types,
             callable_types,
             range_types,
             set_types,

@@ -81,6 +81,14 @@ fn initialize_checker(
             value: syntax_type(future.value, &semantic_types, resolutions),
         })
         .collect::<Vec<_>>();
+    let iterator_types = program
+        .iterator_types
+        .iter()
+        .map(|iterator| crate::inference::IteratorLayout {
+            id: iterator.id,
+            item: syntax_type(iterator.item, &semantic_types, resolutions),
+        })
+        .collect::<Vec<_>>();
     let callable_types = program
         .callable_types
         .iter()
@@ -151,6 +159,7 @@ fn initialize_checker(
             options: option_types,
             results: result_types,
             asyncs: async_types,
+            iterators: iterator_types,
             callables: callable_types,
             ranges: range_types,
             sets: set_types,
@@ -218,6 +227,7 @@ fn initialize_checker(
         active_condition_bindings: Vec::new(),
         conditional_binding_declarations: Vec::new(),
         return_ty: none_type,
+        generator_item: None,
         callable: CallableContext::TopLevel,
         expression_mode: ExpressionMode::Normal,
         debug_context: DebugContext::Normal,

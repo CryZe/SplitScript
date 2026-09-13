@@ -1,9 +1,9 @@
 //! Source type-expression parsing and constructed syntax-type interning.
 
 use super::{
-    ArrayTypeDecl, AsyncTypeDecl, CallableTypeDecl, Diagnostic, OptionTypeDecl, Parser, RangeKind,
-    RangeTypeDecl, ResultTypeDecl, Span, TokenKind, TypeApplicationDecl, TypeApplicationOccurrence,
-    TypeNameId, TypeRef, ambiguous_range_diagnostic,
+    ArrayTypeDecl, AsyncTypeDecl, CallableTypeDecl, Diagnostic, IteratorTypeDecl, OptionTypeDecl,
+    Parser, RangeKind, RangeTypeDecl, ResultTypeDecl, Span, TokenKind, TypeApplicationDecl,
+    TypeApplicationOccurrence, TypeNameId, TypeRef, ambiguous_range_diagnostic,
 };
 use crate::ast::{
     CallableTypeOccurrence, ManagedReferenceTypeDecl, ManagedReferenceTypeOccurrence,
@@ -68,6 +68,18 @@ impl Parser<'_> {
                 id
             };
             return Ok((TypeRef::Async(id), start.join(end)));
+        }
+        if let Some(start) = self.eat_ident("iterator") {
+            let (item, end) = self.parse_type("expected an iterator item type")?;
+            let id = if let Some(&id) = self.iterator_type_ids.get(&item) {
+                id
+            } else {
+                let id = self.constructed_type_ids.iterator();
+                self.iterator_types.push(IteratorTypeDecl { id, item });
+                self.iterator_type_ids.insert(item, id);
+                id
+            };
+            return Ok((TypeRef::Iterator(id), start.join(end)));
         }
         let (mut ty, start, mut end) = self.parse_type_atom(message)?;
 

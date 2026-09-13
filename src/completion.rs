@@ -89,6 +89,7 @@ struct ContextAvailability {
     statement_position: bool,
     loop_control: bool,
     return_control: bool,
+    generator_control: bool,
     method_receiver: bool,
 }
 
@@ -216,6 +217,7 @@ pub(crate) fn complete(
                 ),
                 loop_control: cursor_inside_loop(syntax, offset),
                 return_control: action.is_some() || inside_function,
+                generator_control: cursor_inside_generator(syntax, offset),
                 method_receiver: containing_function
                     .is_some_and(|function| function.method_of.is_some()),
             },
@@ -1205,6 +1207,56 @@ fn cursor_inside_loop(syntax: &Program, offset: usize) -> bool {
         .is_some_and(|start| finder.closure_start.is_none_or(|closure| closure < start))
 }
 
+fn cursor_inside_generator(syntax: &Program, offset: usize) -> bool {
+    struct Finder {
+        offset: usize,
+        innermost: Option<(usize, bool)>,
+    }
+
+    impl Finder {
+        fn record(&mut self, span: Span, generator: bool) {
+            if contains_offset(span, self.offset) {
+                let width = span.end.saturating_sub(span.start);
+                if self
+                    .innermost
+                    .is_none_or(|(current_width, _)| width < current_width)
+                {
+                    self.innermost = Some((width, generator));
+                }
+            }
+        }
+    }
+
+    impl<'ast> Visitor<'ast> for Finder {
+        fn visit_function(&mut self, function: &'ast crate::ast::FunctionDecl) {
+            self.record(function.body.span, function.return_is_iterator);
+            visit::walk_function(self, function);
+        }
+
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if let ExprKind::Closure {
+                return_annotation,
+                body,
+                ..
+            } = &expression.kind
+            {
+                self.record(
+                    body.span,
+                    return_annotation.is_some_and(|ty| matches!(ty, SyntaxTypeRef::Iterator(_))),
+                );
+            }
+            visit::walk_expr(self, expression);
+        }
+    }
+
+    let mut finder = Finder {
+        offset,
+        innermost: None,
+    };
+    finder.visit_program(syntax);
+    finder.innermost.is_some_and(|(_, generator)| generator)
+}
+
 fn language_completion(
     item: &LanguageItem,
     availability: ContextAvailability,
@@ -1241,6 +1293,7 @@ fn language_completion(
                 LanguageCompletionSite::Statement => availability.statement_position,
                 LanguageCompletionSite::Loop => availability.loop_control,
                 LanguageCompletionSite::Return => availability.return_control,
+                LanguageCompletionSite::Generator => availability.generator_control,
                 LanguageCompletionSite::Method => availability.method_receiver,
             };
             if !available {
@@ -1685,6 +1738,7 @@ fn add_completed_statement_binding(builder: &mut CompletionBuilder, statement: &
         | Stmt::While { .. }
         | Stmt::For { .. }
         | Stmt::Suspend { binding: None, .. }
+        | Stmt::Yield { .. }
         | Stmt::Expression(_) => {}
     }
 }
@@ -1701,7 +1755,10 @@ fn add_statement_inner_bindings(builder: &mut CompletionBuilder, statement: &Stm
                 add_expression_bindings(builder, value, offset);
             }
         }
-        Stmt::Assign { value, .. } | Stmt::Suspend { value, .. } | Stmt::Expression(value) => {
+        Stmt::Assign { value, .. }
+        | Stmt::Suspend { value, .. }
+        | Stmt::Yield { value, .. }
+        | Stmt::Expression(value) => {
             add_expression_bindings(builder, value, offset);
         }
         Stmt::StateAssign { target, value, .. } | Stmt::IndexAssign { target, value, .. } => {
@@ -2081,7 +2138,8 @@ fn statement_span(statement: &Stmt) -> Span {
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
         | Stmt::For { span, .. }
-        | Stmt::Suspend { span, .. } => *span,
+        | Stmt::Suspend { span, .. }
+        | Stmt::Yield { span, .. } => *span,
         Stmt::Variable(variable) => variable.span,
         Stmt::Expression(expression) => expression.span,
     }
@@ -2250,6 +2308,7 @@ fn add_inferred_fields(
         | TypeKind::Enum(_)
         | TypeKind::GenericParameter { .. }
         | TypeKind::Async { .. }
+        | TypeKind::Iterator { .. }
         | TypeKind::Callable { .. } => {}
     }
 }

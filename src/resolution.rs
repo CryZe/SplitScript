@@ -83,6 +83,7 @@ impl ProgramResolutions {
             TypeRef::Option(id) => Some(ResolvedTypeRef::Option(id)),
             TypeRef::Result(id) => Some(ResolvedTypeRef::Result(id)),
             TypeRef::Async(id) => Some(ResolvedTypeRef::Async(id)),
+            TypeRef::Iterator(id) => Some(ResolvedTypeRef::Iterator(id)),
             TypeRef::Callable(id) => Some(ResolvedTypeRef::Callable(id)),
             TypeRef::Range(id) => Some(ResolvedTypeRef::Range(id)),
             TypeRef::Application(id) => self.type_applications.get(&id).copied(),

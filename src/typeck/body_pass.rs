@@ -381,6 +381,17 @@ fn actual_async_value(checker: &mut Checker, actual: Type) -> Option<Type> {
     }
 }
 
+fn actual_iterator_item(checker: &mut Checker, actual: Type) -> Option<Type> {
+    match checker.inference.shallow(actual) {
+        Type::Iterator(iterator) => Some(checker.inference.iterator_item(iterator)),
+        Type::Known(actual) => match checker.inference.type_store().kind(actual) {
+            crate::types::TypeKind::Iterator { item, .. } => Some(Type::Known(*item)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn actual_callable(checker: &mut Checker, actual: Type) -> Option<(Vec<Type>, Type)> {
     match checker.inference.shallow(actual) {
         Type::Callable(callable) => Some((
@@ -473,7 +484,11 @@ fn actual_application(
             )),
             _ => None,
         },
-        Type::Variable(_) | Type::Async(_) | Type::Callable(_) | Type::Array(_) => None,
+        Type::Variable(_)
+        | Type::Async(_)
+        | Type::Iterator(_)
+        | Type::Callable(_)
+        | Type::Array(_) => None,
     }
 }
 
@@ -1148,6 +1163,7 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
         DebugContext::from_declaration(function.debug_only),
         |checker| {
             let signature = checker.declarations.function_signatures[&function.id].clone();
+            let generator_item = actual_iterator_item(checker, signature.result);
             let library_item = checker
                 .standard_library
                 .source_body_item_by_function_name(&function.name);
@@ -1182,23 +1198,26 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
             });
             checker.with_return_type_source(return_type_source, |checker| {
                 checker.with_callable_context(callable, signature.completion, failure, |checker| {
-                    checker.scopes.clear();
-                    checker.scopes.push(HashMap::new());
-                    for (parameter, ty) in
-                        function.params.iter().zip(signature.params.iter().copied())
-                    {
-                        checker.bind_irrefutable_parameter(
-                            &parameter.binding,
-                            ty,
-                            checker.debug_context.is_debug(),
-                            "function parameter",
-                            "function",
-                        );
-                    }
-                    checker.block(&function.body, false);
-                    if signature.completion != checker.core_type(crate::stdlib::CoreTypeId::None)
-                        && !block_is_terminal(checker, &function.body)
-                    {
+                    checker.with_generator_item(generator_item, |checker| {
+                        checker.scopes.clear();
+                        checker.scopes.push(HashMap::new());
+                        for (parameter, ty) in
+                            function.params.iter().zip(signature.params.iter().copied())
+                        {
+                            checker.bind_irrefutable_parameter(
+                                &parameter.binding,
+                                ty,
+                                checker.debug_context.is_debug(),
+                                "function parameter",
+                                "function",
+                            );
+                        }
+                        checker.block(&function.body, false);
+                        if generator_item.is_none()
+                            && signature.completion
+                                != checker.core_type(crate::stdlib::CoreTypeId::None)
+                            && !block_is_terminal(checker, &function.body)
+                        {
                         let result = checker.type_name(signature.completion);
                         let tail = function.body.statements.last().and_then(|statement| {
                             match statement {
@@ -1238,8 +1257,9 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
                         if let Some(source) = checker.return_type_source.clone() {
                             diagnostic = diagnostic.with_secondary_label(source.span, source.label);
                         }
-                        checker.errors.push(diagnostic);
-                    }
+                            checker.errors.push(diagnostic);
+                        }
+                    });
                 });
             });
         },
@@ -1592,6 +1612,10 @@ pub(super) fn statement_is_terminal(checker: &mut Checker, statement: &crate::as
             };
             checker.is_never_type(completion)
         }
+        // `yield` transfers control out of the current `next()` call, but the
+        // generator resumes at the following statement. It therefore is not
+        // terminal for lexical fallthrough or value-block typing.
+        crate::ast::Stmt::Yield { .. } => false,
         crate::ast::Stmt::Expression(expression) => expression_is_never(checker, expression),
     }
 }

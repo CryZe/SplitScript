@@ -484,6 +484,15 @@ impl Checker {
                                 )
                             }
                         })
+                } else if let Type::Iterator(iterator) = iterable_ty {
+                    consumes_iterator = true;
+                    Some((self.inference.iterator_item(iterator), None))
+                } else if let Type::Known(receiver) = iterable_ty
+                    && let crate::types::TypeKind::Iterator { item, .. } =
+                        self.inference.type_store().kind(receiver)
+                {
+                    consumes_iterator = true;
+                    Some((Type::Known(*item), None))
                 } else if let Type::Known(receiver) = iterable_ty
                     && matches!(
                         self.inference.type_store().kind(receiver),
@@ -643,7 +652,16 @@ impl Checker {
                 value,
                 span,
             } => {
-                if !self.callable.can_suspend() {
+                if self.generator_item.is_some() {
+                    let keyword = match mode {
+                        SuspensionMode::Await => "await",
+                        SuspensionMode::Retry => "retry",
+                    };
+                    self.error(
+                        format!("`{keyword}` is not available inside a synchronous generator"),
+                        *span,
+                    );
+                } else if !self.callable.can_suspend() {
                     let keyword = match mode {
                         SuspensionMode::Await => "await",
                         SuspensionMode::Retry => "retry",
@@ -749,6 +767,17 @@ impl Checker {
                     );
                 }
             }
+            Stmt::Yield { value, span } => {
+                let Some(item) = self.generator_item else {
+                    self.expr(value, None);
+                    self.error(
+                        "`yield` is only available inside a generator function declared `-> iterator T`",
+                        *span,
+                    );
+                    return;
+                };
+                self.expr(value, Some(item));
+            }
             Stmt::Expression(expr) => {
                 self.expr(expr, None);
             }
@@ -756,6 +785,16 @@ impl Checker {
     }
 
     pub(super) fn check_return(&mut self, value: Option<&Expr>, span: Span) {
+        if self.generator_item.is_some() {
+            if let Some(value) = value {
+                self.expr(value, None);
+                self.error(
+                    "a generator cannot return a value; produce values with `yield`",
+                    span,
+                );
+            }
+            return;
+        }
         let returns_none = self.return_ty == self.core_type(crate::stdlib::CoreTypeId::None);
         match (returns_none, self.return_ty, value) {
             (true, _, None) => {}

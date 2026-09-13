@@ -13,19 +13,19 @@ use crate::{
         AsyncTypeId, BinaryOp, BindingPattern, Block, CallableTypeDecl, CallableTypeId,
         ConditionalFieldsDecl, ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference,
         EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, ForBinding, FunctionDecl, FunctionId,
-        InterpolatedPart, ManagedClassDecl, ManagedClassId, ManagedFieldDecl, ManagedFieldId,
-        ManagedImageDecl, ManagedImageId, ManagedItemDecl, ManagedMetadataName,
-        ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId, ManagedReferenceTypeDecl,
-        ManagedReferenceTypeId, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter,
-        PatternBinding, PatternId, PatternNode, PointerPath, PointerPathBase, Program, RangeKind,
-        RangeTypeDecl, RangeTypeId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
-        SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFamilyDecl,
-        SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span, StateDecl,
-        StateField, StateMemoryDecoder, StateProviderAlternativeDecl, StateProviderRef,
-        StateProviderSelectorRef, StateSource, StateTransform, Stmt, StructDecl, StructField,
-        StructFieldId, StructId, SuspensionMode, TickRateDecl, TickRateValue, TypeApplicationDecl,
-        TypeApplicationId, TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId,
-        VariableDecl,
+        InterpolatedPart, IteratorTypeDecl, IteratorTypeId, ManagedClassDecl, ManagedClassId,
+        ManagedFieldDecl, ManagedFieldId, ManagedImageDecl, ManagedImageId, ManagedItemDecl,
+        ManagedMetadataName, ManagedMetadataNames, ManagedNamespaceDecl, ManagedNamespaceId,
+        ManagedReferenceTypeDecl, ManagedReferenceTypeId, MatchArm, MatchPattern, OptionTypeDecl,
+        OptionTypeId, Parameter, PatternBinding, PatternId, PatternNode, PointerPath,
+        PointerPathBase, Program, RangeKind, RangeTypeDecl, RangeTypeId, ResultTypeDecl,
+        ResultTypeId, SettingChoiceOption, SettingChoiceOptionId, SettingDecl, SettingExternalKey,
+        SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern,
+        Span, StateDecl, StateField, StateMemoryDecoder, StateProviderAlternativeDecl,
+        StateProviderRef, StateProviderSelectorRef, StateSource, StateTransform, Stmt, StructDecl,
+        StructField, StructFieldId, StructId, SuspensionMode, TickRateDecl, TickRateValue,
+        TypeApplicationDecl, TypeApplicationId, TypeApplicationOccurrence, TypeNameId, TypeRef,
+        UnaryOp, ValueId, VariableDecl,
     },
     cursor::DelimiterDepth,
     diagnostic::{Diagnostic, DiagnosticFix, FixApplicability, TextEdit},
@@ -82,6 +82,8 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         result_type_ids: HashMap::new(),
         async_types: Vec::new(),
         async_type_ids: HashMap::new(),
+        iterator_types: Vec::new(),
+        iterator_type_ids: HashMap::new(),
         callable_types: Vec::new(),
         callable_type_ids: HashMap::new(),
         range_types: Vec::new(),
@@ -127,6 +129,8 @@ struct Parser<'a> {
     result_type_ids: HashMap<TypeRef, ResultTypeId>,
     async_types: Vec<AsyncTypeDecl>,
     async_type_ids: HashMap<TypeRef, AsyncTypeId>,
+    iterator_types: Vec<IteratorTypeDecl>,
+    iterator_type_ids: HashMap<TypeRef, IteratorTypeId>,
     callable_types: Vec<CallableTypeDecl>,
     callable_type_ids: HashMap<(Vec<TypeRef>, TypeRef), CallableTypeId>,
     range_types: Vec<RangeTypeDecl>,
@@ -436,6 +440,7 @@ impl Parser<'_> {
         program.option_types = self.option_types;
         program.result_types = self.result_types;
         program.async_types = self.async_types;
+        program.iterator_types = self.iterator_types;
         program.callable_types = self.callable_types;
         program.range_types = self.range_types;
         program.type_applications = self.type_applications;
@@ -463,7 +468,8 @@ fn statement_span(statement: &Stmt) -> Span {
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
         | Stmt::For { span, .. }
-        | Stmt::Suspend { span, .. } => *span,
+        | Stmt::Suspend { span, .. }
+        | Stmt::Yield { span, .. } => *span,
         Stmt::Variable(variable) => variable.span,
         Stmt::Expression(expression) => expression.span,
     }

@@ -112,6 +112,7 @@ fn compile_opaque(ty: TypeId, inputs: &DisplayInputs<'_>) -> Function {
         TypeKind::Option { .. } => "optional value { .. }".to_owned(),
         TypeKind::Result { .. } => "fallible value { .. }".to_owned(),
         TypeKind::Async { .. } => "<future>".to_owned(),
+        TypeKind::Iterator { .. } => "<iterator>".to_owned(),
         TypeKind::Callable { .. } => "<closure>".to_owned(),
         TypeKind::Range { .. } => "range { .. }".to_owned(),
         TypeKind::Set { .. } => "Set { .. }".to_owned(),

@@ -591,6 +591,9 @@ pub enum TypedStatementKind {
         returns: bool,
         value: ExprId,
     },
+    Yield {
+        value: ExprId,
+    },
     Expression(ExprId),
 }
 
@@ -1308,7 +1311,9 @@ pub fn walk_typed_statement<V: TypedVisitor>(
             visit_expression(*iterable);
             visitor.visit_block(body, program);
         }
-        TypedStatementKind::Suspend { value, .. } | TypedStatementKind::Expression(value) => {
+        TypedStatementKind::Suspend { value, .. }
+        | TypedStatementKind::Yield { value }
+        | TypedStatementKind::Expression(value) => {
             visit_expression(*value);
         }
     }
@@ -1949,7 +1954,8 @@ fn lower_block(
                             | Stmt::If { span, .. }
                             | Stmt::While { span, .. }
                             | Stmt::For { span, .. }
-                            | Stmt::Suspend { span, .. } => *span,
+                            | Stmt::Suspend { span, .. }
+                            | Stmt::Yield { span, .. } => *span,
                             Stmt::Expression(expression) => expression.span,
                             Stmt::Debug { .. } => {
                                 unreachable!("nested debug modifiers are rejected during checking")
@@ -2097,6 +2103,7 @@ fn lower_block(
                             returns: *returns,
                             value: value.id,
                         },
+                        Stmt::Yield { value, .. } => TypedStatementKind::Yield { value: value.id },
                         Stmt::Expression(expression) => {
                             TypedStatementKind::Expression(expression.id)
                         }

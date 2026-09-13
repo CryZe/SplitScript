@@ -663,6 +663,102 @@ fn execute_with_mock_host_with_profile(
 }
 
 #[test]
+fn synchronous_generators_are_lazy_shared_and_permanently_exhausted() {
+    let source = r#"
+        state "game.exe" {}
+
+        let resumptions = 0u32
+        let exercised = false
+
+        fn values(end: u32) -> iterator u32 {
+            resumptions += 1
+            yield 11
+            if end > 1 {
+                resumptions += 1
+                yield 22
+            }
+            resumptions += 1
+        }
+
+        fn printAll(values) {
+            for value in values {
+                print(value)
+            }
+        }
+
+        fn selected() -> iterator u32 {
+            let value = 0u32
+            loop {
+                value += 1
+                if value == 2 { continue }
+                if value == 4 { return }
+                yield value
+            }
+        }
+
+        whileAttached {
+            if !exercised {
+                let cursor = values(2)
+                let alias = cursor
+                print(cursor)
+                print(resumptions)
+                print(cursor.next())
+                print(resumptions)
+                print(alias.next())
+                print(resumptions)
+                print(cursor.next())
+                print(resumptions)
+                print(alias.next())
+                print(resumptions)
+
+                printAll(
+                    values(2)
+                        .map(value => value * 2)
+                        .filter(value => value > 30)
+                )
+
+                let offset = 100u32
+                let generated: () -> iterator u32 = () -> iterator u32 => {
+                    yield offset + 1
+                    yield offset + 2
+                }
+                printAll(generated())
+                let selectedFactory: () -> iterator u32 = selected
+                printAll(selectedFactory())
+                exercised = true
+            }
+        }
+    "#;
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        [
+            "<iterator>",
+            "0",
+            "Item(\n    11,\n)",
+            "1",
+            "Item(\n    22,\n)",
+            "2",
+            "End",
+            "3",
+            "End",
+            "3",
+            "44",
+            "101",
+            "102",
+            "1",
+            "3",
+        ]
+    );
+}
+
+#[test]
 fn timer_lifecycle_actions_observe_transitions_once_while_detached() {
     let source = r#"
         state "missing.exe" {}

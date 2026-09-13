@@ -7,8 +7,8 @@ use std::{collections::HashMap, fmt, ops::BitOr};
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, CallableTypeId, ConstructedTypeIdAllocator, OptionTypeId,
-        RangeKind, RangeTypeId, ResultTypeId, TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, CallableTypeId, ConstructedTypeIdAllocator, IteratorTypeId,
+        OptionTypeId, RangeKind, RangeTypeId, ResultTypeId, TypeApplicationId,
     },
     stdlib::{
         CapabilityBehavior, CoreTypeId, StandardLibrary, StdlibCapabilityId,
@@ -24,6 +24,7 @@ pub(crate) enum Type {
     Option(OptionTypeId),
     Result(ResultTypeId),
     Async(AsyncTypeId),
+    Iterator(IteratorTypeId),
     Callable(CallableTypeId),
     Range(RangeTypeId),
     Set(TypeApplicationId),
@@ -59,6 +60,7 @@ impl Type {
                 TypeKind::Option { layout, .. } => ResolvedTypeRef::Option(*layout),
                 TypeKind::Result { layout, .. } => ResolvedTypeRef::Result(*layout),
                 TypeKind::Async { layout, .. } => ResolvedTypeRef::Async(*layout),
+                TypeKind::Iterator { layout, .. } => ResolvedTypeRef::Iterator(*layout),
                 TypeKind::Callable { layout, .. } => ResolvedTypeRef::Callable(*layout),
                 TypeKind::Range { layout, .. } => ResolvedTypeRef::Range(*layout),
                 TypeKind::Set { layout, .. } => ResolvedTypeRef::Set(*layout),
@@ -68,6 +70,7 @@ impl Type {
             Self::Option(id) => ResolvedTypeRef::Option(id),
             Self::Result(id) => ResolvedTypeRef::Result(id),
             Self::Async(id) => ResolvedTypeRef::Async(id),
+            Self::Iterator(id) => ResolvedTypeRef::Iterator(id),
             Self::Callable(id) => ResolvedTypeRef::Callable(id),
             Self::Range(id) => ResolvedTypeRef::Range(id),
             Self::Set(id) => ResolvedTypeRef::Set(id),
@@ -87,6 +90,7 @@ impl fmt::Display for Type {
             Self::Option(id) => write!(formatter, "T?#{id}"),
             Self::Result(id) => write!(formatter, "T!#{id}"),
             Self::Async(id) => write!(formatter, "Async#{id}"),
+            Self::Iterator(id) => write!(formatter, "Iterator#{id}"),
             Self::Callable(id) => write!(formatter, "Callable#{id}"),
             Self::Range(id) => write!(formatter, "Range#{id}"),
             Self::Set(id) => write!(formatter, "Set#{id}"),
@@ -273,6 +277,12 @@ pub(crate) struct AsyncLayout {
     pub(crate) value: Type,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct IteratorLayout {
+    pub(crate) id: IteratorTypeId,
+    pub(crate) item: Type,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct CallableLayout {
     pub(crate) id: CallableTypeId,
@@ -308,6 +318,7 @@ pub(crate) struct ConstructedLayouts {
     pub(crate) options: Vec<OptionLayout>,
     pub(crate) results: Vec<ResultLayout>,
     pub(crate) asyncs: Vec<AsyncLayout>,
+    pub(crate) iterators: Vec<IteratorLayout>,
     pub(crate) callables: Vec<CallableLayout>,
     pub(crate) ranges: Vec<RangeLayout>,
     pub(crate) sets: Vec<SetLayout>,
@@ -326,6 +337,7 @@ pub(crate) struct InferenceContext {
     options: Vec<OptionLayout>,
     results: Vec<ResultLayout>,
     asyncs: Vec<AsyncLayout>,
+    iterators: Vec<IteratorLayout>,
     callables: Vec<CallableLayout>,
     ranges: Vec<RangeLayout>,
     sets: Vec<SetLayout>,
@@ -334,6 +346,7 @@ pub(crate) struct InferenceContext {
     canonical_options: HashMap<OptionTypeId, OptionTypeId>,
     canonical_results: HashMap<ResultTypeId, ResultTypeId>,
     canonical_asyncs: HashMap<AsyncTypeId, AsyncTypeId>,
+    canonical_iterators: HashMap<IteratorTypeId, IteratorTypeId>,
     canonical_callables: HashMap<CallableTypeId, CallableTypeId>,
     canonical_ranges: HashMap<RangeTypeId, RangeTypeId>,
     canonical_sets: HashMap<TypeApplicationId, TypeApplicationId>,
@@ -354,6 +367,7 @@ impl InferenceContext {
             options,
             results,
             asyncs,
+            iterators,
             callables,
             ranges,
             mut sets,
@@ -365,6 +379,7 @@ impl InferenceContext {
             .chain(options.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(results.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(asyncs.iter().map(|layout| layout.id.index() as u32 + 1))
+            .chain(iterators.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(callables.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(ranges.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(sets.iter().map(|layout| layout.id.index() as u32 + 1))
@@ -404,6 +419,7 @@ impl InferenceContext {
             options,
             results,
             asyncs,
+            iterators,
             callables,
             ranges,
             sets,
@@ -412,6 +428,7 @@ impl InferenceContext {
             canonical_options: HashMap::new(),
             canonical_results: HashMap::new(),
             canonical_asyncs: HashMap::new(),
+            canonical_iterators: HashMap::new(),
             canonical_callables: HashMap::new(),
             canonical_ranges: HashMap::new(),
             canonical_sets: HashMap::new(),
@@ -536,6 +553,9 @@ impl InferenceContext {
             TypeKind::Option { value, .. } => format!("{}?", self.known_type_name(*value)),
             TypeKind::Result { value, .. } => format!("{}!", self.known_type_name(*value)),
             TypeKind::Async { value, .. } => format!("async {}", self.known_type_name(*value)),
+            TypeKind::Iterator { item, .. } => {
+                format!("iterator {}", self.known_type_name(*item))
+            }
             TypeKind::Callable {
                 parameters, result, ..
             } => {
@@ -856,6 +876,13 @@ impl InferenceContext {
         {
             return Some(value);
         }
+        if let Type::Iterator(iterator) = receiver {
+            return match (capability, name) {
+                (StdlibCapabilityId::Iterator, "Item") => Some(self.iterator_item(iterator)),
+                (StdlibCapabilityId::Iterable, "Iterator") => Some(Type::Iterator(iterator)),
+                _ => None,
+            };
+        }
         if let Some(standard) = self.standard_type(receiver) {
             if !self
                 .standard_library
@@ -923,7 +950,11 @@ impl InferenceContext {
                 self.application_constructor(application),
                 self.application_arguments(application).to_vec(),
             )),
-            Type::Known(_) | Type::Async(_) | Type::Callable(_) | Type::Variable(_) => None,
+            Type::Known(_)
+            | Type::Async(_)
+            | Type::Iterator(_)
+            | Type::Callable(_)
+            | Type::Variable(_) => None,
         }
     }
 
@@ -1143,6 +1174,21 @@ impl InferenceContext {
                     Type::Async(self.async_type(instantiated))
                 }
             }
+            Type::Iterator(iterator) => {
+                let item = self.iterator_item(iterator);
+                let instantiated = self.instantiate_type_with_array_shapes(
+                    item,
+                    generalized,
+                    generalized_shapes,
+                    substitutions,
+                    shape_substitutions,
+                );
+                if instantiated == item {
+                    Type::Iterator(iterator)
+                } else {
+                    Type::Iterator(self.iterator_type(instantiated))
+                }
+            }
             Type::Callable(callable) => {
                 let parameters = self.callable_parameters(callable).to_vec();
                 let result = self.callable_result(callable);
@@ -1222,6 +1268,9 @@ impl InferenceContext {
                 self.collect_unbound_variables(self.result_value(result), output)
             }
             Type::Async(future) => self.collect_unbound_variables(self.async_value(future), output),
+            Type::Iterator(iterator) => {
+                self.collect_unbound_variables(self.iterator_item(iterator), output)
+            }
             Type::Callable(callable) => {
                 for parameter in self.callable_parameters(callable).to_vec() {
                     self.collect_unbound_variables(parameter, output);
@@ -1269,6 +1318,9 @@ impl InferenceContext {
             Type::Async(future) => {
                 self.collect_unbound_array_shapes(self.async_value(future), output)
             }
+            Type::Iterator(iterator) => {
+                self.collect_unbound_array_shapes(self.iterator_item(iterator), output)
+            }
             Type::Callable(callable) => {
                 for parameter in self.callable_parameters(callable).to_vec() {
                     self.collect_unbound_array_shapes(parameter, output);
@@ -1307,6 +1359,10 @@ impl InferenceContext {
             Type::Async(future) => {
                 let value = self.freshen_omitted_array_shapes(self.async_value(future));
                 Type::Async(self.async_type(value))
+            }
+            Type::Iterator(iterator) => {
+                let item = self.freshen_omitted_array_shapes(self.iterator_item(iterator));
+                Type::Iterator(self.iterator_type(item))
             }
             Type::Callable(callable) => {
                 let parameters = self.callable_parameters(callable).to_vec();
@@ -1473,6 +1529,12 @@ impl InferenceContext {
                 let right_value = self.async_value(right);
                 self.unify_inner(left_value, right_value)?;
                 Ok(Type::Async(left))
+            }
+            (Type::Iterator(left), Type::Iterator(right)) => {
+                let left_item = self.iterator_item(left);
+                let right_item = self.iterator_item(right);
+                self.unify_inner(left_item, right_item)?;
+                Ok(Type::Iterator(left))
             }
             (Type::Callable(left), Type::Callable(right)) => {
                 let left_parameters = self.callable_parameters(left).to_vec();
@@ -1691,6 +1753,12 @@ impl InferenceContext {
                     .copied()
                     .unwrap_or(future),
             ),
+            Type::Iterator(iterator) => Type::Iterator(
+                self.canonical_iterators
+                    .get(&iterator)
+                    .copied()
+                    .unwrap_or(iterator),
+            ),
             Type::Callable(callable) => Type::Callable(
                 self.canonical_callables
                     .get(&callable)
@@ -1736,6 +1804,11 @@ impl InferenceContext {
             .iter()
             .map(|layout| Type::Async(layout.id))
             .collect::<Vec<_>>();
+        let iterators = self
+            .iterators
+            .iter()
+            .map(|layout| Type::Iterator(layout.id))
+            .collect::<Vec<_>>();
         let callables = self
             .callables
             .iter()
@@ -1761,6 +1834,7 @@ impl InferenceContext {
             .chain(options)
             .chain(results)
             .chain(asyncs)
+            .chain(iterators)
             .chain(callables)
             .chain(ranges)
             .chain(sets)
@@ -1906,6 +1980,14 @@ impl InferenceContext {
             .value
     }
 
+    pub(crate) fn iterator_item(&self, id: IteratorTypeId) -> Type {
+        self.iterators
+            .iter()
+            .find(|iterator| iterator.id == id)
+            .expect("checked iterator type has a declaration")
+            .item
+    }
+
     pub(crate) fn callable_parameters(&self, id: CallableTypeId) -> &[Type] {
         &self
             .callables
@@ -1947,6 +2029,15 @@ impl InferenceContext {
         }
         let id = self.constructed_type_ids.async_value();
         self.asyncs.push(AsyncLayout { id, value });
+        id
+    }
+
+    pub(crate) fn iterator_type(&mut self, item: Type) -> IteratorTypeId {
+        if let Some(iterator) = self.iterators.iter().find(|iterator| iterator.item == item) {
+            return iterator.id;
+        }
+        let id = self.constructed_type_ids.iterator();
+        self.iterators.push(IteratorLayout { id, item });
         id
     }
 
@@ -2117,6 +2208,7 @@ impl InferenceContext {
                     &self.canonical_options,
                     &self.canonical_results,
                     &self.canonical_asyncs,
+                    &self.canonical_iterators,
                     &self.canonical_sets,
                 );
                 let canonical = representatives
@@ -2143,6 +2235,7 @@ impl InferenceContext {
                 &self.canonical_options,
                 &self.canonical_results,
                 &self.canonical_asyncs,
+                &self.canonical_iterators,
                 &self.canonical_sets,
             );
         }
@@ -2188,6 +2281,19 @@ impl InferenceContext {
             future.value = value;
         }
 
+        let iterator_items = self
+            .iterators
+            .iter()
+            .map(|iterator| iterator.item)
+            .collect::<Vec<_>>();
+        let iterator_items = iterator_items
+            .into_iter()
+            .map(|item| self.resolve(item))
+            .collect::<Vec<_>>();
+        for (iterator, item) in self.iterators.iter_mut().zip(iterator_items) {
+            iterator.item = item;
+        }
+
         // Constructors can allocate a provisional wrapper before later uses
         // constrain its value type. Once all inference variables resolve,
         // collapse layouts with identical value types to the first stable ID.
@@ -2197,9 +2303,11 @@ impl InferenceContext {
             let previous_options = self.canonical_options.clone();
             let previous_results = self.canonical_results.clone();
             let previous_asyncs = self.canonical_asyncs.clone();
+            let previous_iterators = self.canonical_iterators.clone();
             self.canonical_options.clear();
             self.canonical_results.clear();
             self.canonical_asyncs.clear();
+            self.canonical_iterators.clear();
 
             let mut option_representatives = Vec::<(Type, OptionTypeId)>::new();
             for option in &self.options {
@@ -2209,6 +2317,7 @@ impl InferenceContext {
                     &previous_options,
                     &previous_results,
                     &previous_asyncs,
+                    &previous_iterators,
                     &self.canonical_sets,
                 );
                 let canonical = option_representatives
@@ -2229,6 +2338,7 @@ impl InferenceContext {
                     &previous_options,
                     &previous_results,
                     &previous_asyncs,
+                    &previous_iterators,
                     &self.canonical_sets,
                 );
                 let canonical = result_representatives
@@ -2249,6 +2359,7 @@ impl InferenceContext {
                     &previous_options,
                     &previous_results,
                     &previous_asyncs,
+                    &previous_iterators,
                     &self.canonical_sets,
                 );
                 let canonical = async_representatives
@@ -2261,9 +2372,31 @@ impl InferenceContext {
                 self.canonical_asyncs.insert(future.id, canonical);
             }
 
+            let mut iterator_representatives = Vec::<(Type, IteratorTypeId)>::new();
+            for iterator in &self.iterators {
+                let item = canonical_constructed_type(
+                    iterator.item,
+                    &self.canonical_arrays,
+                    &previous_options,
+                    &previous_results,
+                    &previous_asyncs,
+                    &previous_iterators,
+                    &self.canonical_sets,
+                );
+                let canonical = iterator_representatives
+                    .iter()
+                    .find_map(|(candidate, id)| (*candidate == item).then_some(*id))
+                    .unwrap_or_else(|| {
+                        iterator_representatives.push((item, iterator.id));
+                        iterator.id
+                    });
+                self.canonical_iterators.insert(iterator.id, canonical);
+            }
+
             if self.canonical_options == previous_options
                 && self.canonical_results == previous_results
                 && self.canonical_asyncs == previous_asyncs
+                && self.canonical_iterators == previous_iterators
             {
                 break;
             }
@@ -2272,6 +2405,7 @@ impl InferenceContext {
         let canonical_options = self.canonical_options.clone();
         let canonical_results = self.canonical_results.clone();
         let canonical_asyncs = self.canonical_asyncs.clone();
+        let canonical_iterators = self.canonical_iterators.clone();
         for option in &mut self.options {
             option.value = canonical_constructed_type(
                 option.value,
@@ -2279,6 +2413,7 @@ impl InferenceContext {
                 &canonical_options,
                 &canonical_results,
                 &canonical_asyncs,
+                &canonical_iterators,
                 &self.canonical_sets,
             );
         }
@@ -2289,6 +2424,7 @@ impl InferenceContext {
                 &canonical_options,
                 &canonical_results,
                 &canonical_asyncs,
+                &canonical_iterators,
                 &self.canonical_sets,
             );
         }
@@ -2299,6 +2435,18 @@ impl InferenceContext {
                 &canonical_options,
                 &canonical_results,
                 &canonical_asyncs,
+                &canonical_iterators,
+                &self.canonical_sets,
+            );
+        }
+        for iterator in &mut self.iterators {
+            iterator.item = canonical_constructed_type(
+                iterator.item,
+                &self.canonical_arrays,
+                &canonical_options,
+                &canonical_results,
+                &canonical_asyncs,
+                &canonical_iterators,
                 &self.canonical_sets,
             );
         }
@@ -2470,6 +2618,10 @@ impl InferenceContext {
         &self.asyncs
     }
 
+    pub(crate) fn iterators(&self) -> &[IteratorLayout] {
+        &self.iterators
+    }
+
     pub(crate) fn callables(&self) -> &[CallableLayout] {
         &self.callables
     }
@@ -2518,6 +2670,11 @@ impl InferenceContext {
                 let value = self.async_value(layout);
                 let value = self.intern_resolved_type(value);
                 TypeKind::Async { layout, value }
+            }
+            Type::Iterator(layout) => {
+                let item = self.iterator_item(layout);
+                let item = self.intern_resolved_type(item);
+                TypeKind::Iterator { layout, item }
             }
             Type::Callable(layout) => {
                 let parameters = self.callable_parameters(layout).to_vec();
@@ -2671,6 +2828,9 @@ impl InferenceContext {
             Type::Option(option) => self.occurs_in(variable, self.option_value(option), visited),
             Type::Result(result) => self.occurs_in(variable, self.result_value(result), visited),
             Type::Async(future) => self.occurs_in(variable, self.async_value(future), visited),
+            Type::Iterator(iterator) => {
+                self.occurs_in(variable, self.iterator_item(iterator), visited)
+            }
             Type::Callable(callable) => {
                 self.callable_parameters(callable)
                     .to_vec()
@@ -2791,6 +2951,7 @@ pub(crate) fn type_may_have_capability(
             Type::Option(_)
             | Type::Result(_)
             | Type::Async(_)
+            | Type::Iterator(_)
             | Type::Callable(_)
             | Type::Range(_)
             | Type::Array(_)
@@ -2834,6 +2995,13 @@ pub(crate) fn type_may_have_capability(
                     )
             }
             TypeKind::Async { .. } | TypeKind::Callable { .. } => false,
+            TypeKind::Iterator { .. } => matches!(
+                capability,
+                StdlibCapabilityId::Iterator
+                    | StdlibCapabilityId::Iterable
+                    | StdlibCapabilityId::Debug
+                    | StdlibCapabilityId::Display
+            ),
             TypeKind::Range { kind, .. } => library.type_constructor_has_capability(
                 match kind {
                     RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
@@ -2866,6 +3034,13 @@ pub(crate) fn type_may_have_capability(
                     .type_constructor_has_capability(StdlibTypeConstructorId::Result, capability)
         }
         Type::Async(_) | Type::Callable(_) => false,
+        Type::Iterator(_) => matches!(
+            capability,
+            StdlibCapabilityId::Iterator
+                | StdlibCapabilityId::Iterable
+                | StdlibCapabilityId::Debug
+                | StdlibCapabilityId::Display
+        ),
         Type::Range(_) => [
             StdlibTypeConstructorId::ExclusiveRange,
             StdlibTypeConstructorId::InclusiveRange,
@@ -2907,6 +3082,7 @@ fn canonical_constructed_type(
     options: &HashMap<OptionTypeId, OptionTypeId>,
     results: &HashMap<ResultTypeId, ResultTypeId>,
     asyncs: &HashMap<AsyncTypeId, AsyncTypeId>,
+    iterators: &HashMap<IteratorTypeId, IteratorTypeId>,
     sets: &HashMap<TypeApplicationId, TypeApplicationId>,
 ) -> Type {
     match ty {
@@ -2914,6 +3090,9 @@ fn canonical_constructed_type(
         Type::Option(option) => Type::Option(options.get(&option).copied().unwrap_or(option)),
         Type::Result(result) => Type::Result(results.get(&result).copied().unwrap_or(result)),
         Type::Async(future) => Type::Async(asyncs.get(&future).copied().unwrap_or(future)),
+        Type::Iterator(iterator) => {
+            Type::Iterator(iterators.get(&iterator).copied().unwrap_or(iterator))
+        }
         Type::Set(set) => Type::Set(sets.get(&set).copied().unwrap_or(set)),
         ty => ty,
     }

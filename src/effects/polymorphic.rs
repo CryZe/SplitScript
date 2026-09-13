@@ -392,6 +392,9 @@ impl<'a> Evaluator<'a> {
                 self.accumulator.availability(Availability::OnAttach);
                 self.suspended_expression(*value);
             }
+            TypedStatementKind::Yield { value } => {
+                self.expression(*value);
+            }
             TypedStatementKind::Expression(expression) => {
                 self.expression(*expression);
             }

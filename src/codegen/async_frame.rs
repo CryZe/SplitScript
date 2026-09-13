@@ -1,4 +1,8 @@
-//! Planned GC-frame storage for values that survive async suspension.
+//! Planned GC-frame storage for values that survive continuation suspension.
+//!
+//! Async futures and synchronous generators deliberately share this planner:
+//! both are lazy resumable bodies whose parameters, captures, locals, and
+//! nested state must survive a transfer back to the caller.
 
 use std::collections::{HashMap, HashSet};
 
@@ -12,17 +16,20 @@ use wasm_encoder::{Function, Instruction};
 
 use super::{Type, semantic_type};
 
-/// Common fields shared by every first-class future frame.
-pub(super) const FUTURE_STATE_FIELD: u32 = 0;
-pub(super) const FUTURE_TAG_FIELD: u32 = 1;
-pub(super) const FUTURE_POLL_EPOCH_FIELD: u32 = 2;
-pub(super) const FUTURE_BASE_FIELDS: u32 = 3;
+/// Shared header used by every first-class continuation frame. Async futures and
+/// synchronous generators differ in their resume result, not in how their
+/// state and dynamic implementation identity are represented.
+pub(super) const CONTINUATION_STATE_FIELD: u32 = 0;
+pub(super) const CONTINUATION_TAG_FIELD: u32 = 1;
+pub(super) const CONTINUATION_POLL_EPOCH_FIELD: u32 = 2;
+pub(super) const CONTINUATION_BASE_FIELDS: u32 = 3;
 
-/// How an async body reaches the continuation frame it is currently polling.
+/// How a resumable body reaches the continuation frame it is currently running.
 ///
 /// The host-owned `onAttach` frame lives in a global. Source-defined futures
-/// pass their typed frame as a poll-function parameter. Keeping that detail in
-/// one value lets the state-machine emitter remain independent of ownership.
+/// and generators pass their typed frame as a resume-function parameter.
+/// Keeping that detail in one value lets the state-machine emitter remain
+/// independent of ownership.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct AsyncFrameRef {
     pub struct_type: u32,
@@ -72,7 +79,7 @@ impl AsyncFrameLayout {
     pub(super) fn for_leaf_completion(completion: Option<(u32, Type)>) -> Self {
         Self {
             completion,
-            base_fields: FUTURE_BASE_FIELDS,
+            base_fields: CONTINUATION_BASE_FIELDS,
             ..Self::default()
         }
     }
@@ -119,8 +126,9 @@ impl AsyncFrameLayout {
                     semantic_type(semantics.specialize_type(instance, completion), semantics);
                 completion.has_runtime_value().then_some(completion)
             }
+            wasm_ir::BodyAbi::Generator(_) => None,
             wasm_ir::BodyAbi::Direct | wasm_ir::BodyAbi::AsyncAction => {
-                unreachable!("only suspending functions receive typed future frames")
+                unreachable!("only resumable functions receive typed continuation frames")
             }
         };
         Self::for_body(
@@ -131,7 +139,7 @@ impl AsyncFrameLayout {
             wasm_ir,
             semantics,
             Some(instance),
-            FUTURE_BASE_FIELDS,
+            CONTINUATION_BASE_FIELDS,
             declaration
                 .params
                 .iter()
@@ -146,15 +154,17 @@ impl AsyncFrameLayout {
         program: &wasm_ir::Program,
         semantics: &SemanticModel,
     ) -> Self {
-        let completion = closure
-            .completion
-            .map(|completion| {
-                instance.owner.as_ref().map_or(completion, |owner| {
+        let completion = match closure.abi {
+            wasm_ir::BodyAbi::AsyncFunction(wasm_ir::AsyncFunctionAbi { completion }) => {
+                Some(instance.owner.as_ref().map_or(completion, |owner| {
                     semantics.specialize_type(owner, completion)
-                })
-            })
-            .map(|completion| semantic_type(completion, semantics))
-            .filter(|completion| completion.has_runtime_value());
+                }))
+            }
+            wasm_ir::BodyAbi::Generator(_) => None,
+            wasm_ir::BodyAbi::Direct | wasm_ir::BodyAbi::AsyncAction => None,
+        }
+        .map(|completion| semantic_type(completion, semantics))
+        .filter(|completion| completion.has_runtime_value());
         let captures = closure
             .captures
             .iter()
@@ -172,7 +182,7 @@ impl AsyncFrameLayout {
             program,
             semantics,
             instance.owner.as_ref(),
-            FUTURE_BASE_FIELDS,
+            CONTINUATION_BASE_FIELDS,
             captures.chain(parameters),
         )
         .with_completion(completion)
@@ -376,7 +386,10 @@ impl AsyncFrameLayouts {
             let body = wasm_ir
                 .body(BodyOwner::Function(instance.clone()))
                 .expect("reachable functions have Wasm IR bodies");
-            if !matches!(body.abi, wasm_ir::BodyAbi::AsyncFunction(_)) {
+            if !matches!(
+                body.abi,
+                wasm_ir::BodyAbi::AsyncFunction(_) | wasm_ir::BodyAbi::Generator(_)
+            ) {
                 continue;
             }
             ordered_functions.push(instance.clone());
@@ -391,7 +404,7 @@ impl AsyncFrameLayouts {
             let closure = wasm_ir
                 .closure(instance.expression)
                 .expect("reachable closures have Wasm IR bodies");
-            if closure.completion.is_none() {
+            if matches!(closure.abi, wasm_ir::BodyAbi::Direct) {
                 continue;
             }
             ordered_closures.push(instance.clone());
@@ -510,7 +523,7 @@ impl AsyncFrameLayouts {
                         specialize(receiver_type.expect("method receivers have semantic types")),
                         semantics,
                     );
-                    let field = FUTURE_BASE_FIELDS + types.len() as u32;
+                    let field = CONTINUATION_BASE_FIELDS + types.len() as u32;
                     types.push(ty);
                     (field, ty)
                 }),
@@ -530,7 +543,7 @@ impl AsyncFrameLayouts {
                         continue;
                     }
                     let ty = semantic_type(specialize(argument_expression.ty), semantics);
-                    let field = FUTURE_BASE_FIELDS + types.len() as u32;
+                    let field = CONTINUATION_BASE_FIELDS + types.len() as u32;
                     types.push(ty);
                     captured_arguments.insert(*argument, (field, ty));
                 }
@@ -557,7 +570,7 @@ impl AsyncFrameLayouts {
                             }
                         };
                         for _ in 0..policy.slots {
-                            let field = FUTURE_BASE_FIELDS + types.len() as u32;
+                            let field = CONTINUATION_BASE_FIELDS + types.len() as u32;
                             types.push(ty);
                             state.push((field, ty));
                         }
@@ -572,7 +585,7 @@ impl AsyncFrameLayouts {
                     );
                     let result = semantic_type(*value, semantics);
                     for ty in [cursor, cursor, result] {
-                        let field = FUTURE_BASE_FIELDS + types.len() as u32;
+                        let field = CONTINUATION_BASE_FIELDS + types.len() as u32;
                         types.push(ty);
                         state.push((field, ty));
                     }
@@ -581,7 +594,7 @@ impl AsyncFrameLayouts {
             }
             let completion_type = semantic_type(specialize(*value), semantics);
             let completion = completion_type.has_runtime_value().then(|| {
-                let field = FUTURE_BASE_FIELDS + types.len() as u32;
+                let field = CONTINUATION_BASE_FIELDS + types.len() as u32;
                 types.push(completion_type);
                 (field, completion_type)
             });

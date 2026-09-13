@@ -209,7 +209,7 @@ fn semantic_type_may_have_capability(
             behavior == CapabilityBehavior::StructuralMemoryLayout && length.is_some()
         }
         TypeKind::GenericParameter { .. } => false,
-        TypeKind::Async { .. } | TypeKind::Callable { .. } => false,
+        TypeKind::Async { .. } | TypeKind::Iterator { .. } | TypeKind::Callable { .. } => false,
         TypeKind::Range { .. } => false,
         TypeKind::Set { .. } => false,
         TypeKind::Application { constructor, .. } => {

@@ -6,8 +6,8 @@
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, ManagedClassId, OptionTypeId,
-        RangeTypeId, ResultTypeId, StructId, TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, IteratorTypeId, ManagedClassId,
+        OptionTypeId, RangeTypeId, ResultTypeId, StructId, TypeApplicationId,
     },
     stdlib::{
         CoreTypeId, DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibTypeId,
@@ -34,6 +34,7 @@ macro_rules! define_backend_type {
             Option(OptionTypeId),
             Result(ResultTypeId),
             Async(AsyncTypeId),
+            Iterator(IteratorTypeId),
             Callable(CallableTypeId),
             Range(RangeTypeId),
             Set(TypeApplicationId),

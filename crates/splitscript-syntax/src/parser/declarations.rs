@@ -667,20 +667,29 @@ impl Parser<'_> {
         if !missing_closing_parenthesis {
             self.expect(TokenKind::RParen, "expected `)` after the parameters")?;
         }
-        let (return_annotation, return_is_async, return_async_span, return_annotation_span) =
-            if self.eat(&TokenKind::Minus).is_some() {
-                self.expect(TokenKind::Gt, "expected `>` in the return arrow `->`")?;
-                let async_span = self.at_ident("async").then_some(self.current().span);
-                let (ty, span) = self.parse_type("expected a return type")?;
-                (
-                    Some(ty),
-                    matches!(ty, TypeRef::Async(_)),
-                    async_span,
-                    Some(span),
-                )
-            } else {
-                (None, false, None, None)
-            };
+        let (
+            return_annotation,
+            return_is_async,
+            return_async_span,
+            return_is_iterator,
+            return_iterator_span,
+            return_annotation_span,
+        ) = if self.eat(&TokenKind::Minus).is_some() {
+            self.expect(TokenKind::Gt, "expected `>` in the return arrow `->`")?;
+            let async_span = self.at_ident("async").then_some(self.current().span);
+            let iterator_span = self.at_ident("iterator").then_some(self.current().span);
+            let (ty, span) = self.parse_type("expected a return type")?;
+            (
+                Some(ty),
+                matches!(ty, TypeRef::Async(_)),
+                async_span,
+                matches!(ty, TypeRef::Iterator(_)),
+                iterator_span,
+                Some(span),
+            )
+        } else {
+            (None, false, None, false, None, None)
+        };
         let body = self.block()?;
         let span = Span {
             start,
@@ -697,6 +706,8 @@ impl Parser<'_> {
             return_annotation,
             return_is_async,
             return_async_span,
+            return_is_iterator,
+            return_iterator_span,
             return_annotation_span,
             body,
             span,

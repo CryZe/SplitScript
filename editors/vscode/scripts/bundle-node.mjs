@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const extension = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const outputDirectory = resolve(process.env.SPLITSCRIPT_VSCODE_DIST ?? resolve(extension, 'dist'));
 const production = process.argv.includes('--production');
 const common = {
     bundle: true,
@@ -17,7 +18,7 @@ const common = {
 await build({
     ...common,
     entryPoints: [resolve(extension, 'src', 'extension.ts')],
-    outfile: resolve(extension, 'dist', 'extension.js'),
+    outfile: resolve(outputDirectory, 'extension.js'),
     external: ['vscode'],
 });
 
@@ -30,6 +31,14 @@ for (const [source, output] of [
     await build({
         ...common,
         entryPoints: [resolve(extension, 'src', source)],
-        outfile: resolve(extension, 'dist', output),
+        outfile: resolve(outputDirectory, output),
+    });
+}
+
+if (!production) {
+    await build({
+        ...common,
+        entryPoints: [resolve(extension, 'src', 'embeddedCompilerWorkerClient.ts')],
+        outfile: resolve(outputDirectory, 'embeddedCompilerWorkerClient.js'),
     });
 }

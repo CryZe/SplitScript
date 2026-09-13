@@ -4,14 +4,9 @@ import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { nativeBridgeFileName, supportedNativePlatforms } from './native-platforms.mjs';
 
-const supportedPlatforms = new Set([
-    'win32-x64',
-    'linux-x64',
-    'linux-arm64',
-    'darwin-x64',
-    'darwin-arm64',
-]);
+const supportedPlatforms = new Set(supportedNativePlatforms);
 const platform = `${process.platform}-${process.arch}`;
 if (!supportedPlatforms.has(platform)) {
     console.log(`Skipping native process probe on unsupported host ${platform}.`);
@@ -27,7 +22,7 @@ const require = createRequire(import.meta.url);
 const native = require(resolve(
     nativeRoot,
     platform,
-    'splitscript_process_native.node',
+    nativeBridgeFileName,
 ));
 
 if (process.platform === 'darwin') {

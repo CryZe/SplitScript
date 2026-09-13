@@ -159,19 +159,9 @@ jobs:
         working-directory: editors/vscode
         env:
           SPLITSCRIPT_NATIVE_ARTIFACTS: ${{ runner.temp }}/splitscript-native
-          SPLITSCRIPT_REQUIRED_NATIVE_PLATFORMS: win32-x64,linux-x64,linux-arm64,darwin-x64,darwin-arm64
-        run: npm run package:vsix -- --out splitscript-latest.vsix
-
-      - name: Verify native bridges in the VSIX
-        shell: bash
         run: |
-          archive="editors/vscode/splitscript-latest.vsix"
-          for platform in win32-x64 linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
-            if ! unzip -Z1 "$archive" | grep -Fxq "extension/dist/native/$platform/splitscript_process_native.node"; then
-              echo "Missing native bridge for $platform" >&2
-              exit 1
-            fi
-          done
+          node scripts/build.mjs --production --output ../../target/vscode-package/dist
+          node scripts/probe-package.mjs ../../target/vscode-package/dist splitscript-latest.vsix
 
       - name: Upload the assembled VSIX
         uses: actions/upload-artifact@v7

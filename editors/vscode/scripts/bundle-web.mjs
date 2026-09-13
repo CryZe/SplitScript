@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const extension = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const outputDirectory = resolve(process.env.SPLITSCRIPT_VSCODE_DIST ?? resolve(extension, 'dist'));
 const production = process.argv.includes('--production');
 const common = {
     bundle: true,
@@ -15,7 +16,7 @@ const common = {
 await build({
     ...common,
     entryPoints: [resolve(extension, 'src', 'extensionBrowser.ts')],
-    outfile: resolve(extension, 'dist', 'web', 'extension.js'),
+    outfile: resolve(outputDirectory, 'web', 'extension.js'),
     platform: 'browser',
     format: 'cjs',
     external: ['vscode'],
@@ -29,7 +30,7 @@ for (const [source, output] of [
     await build({
         ...common,
         entryPoints: [resolve(extension, 'src', source)],
-        outfile: resolve(extension, 'dist', 'web', output),
+        outfile: resolve(outputDirectory, 'web', output),
         platform: 'browser',
         format: 'iife',
         mainFields: ['browser', 'module', 'main'],
@@ -40,7 +41,7 @@ if (!production) {
     await build({
         ...common,
         entryPoints: [resolve(extension, 'test', 'webHost.ts')],
-        outfile: resolve(extension, 'dist', 'web', 'test', 'index.js'),
+        outfile: resolve(outputDirectory, 'web', 'test', 'index.js'),
         platform: 'browser',
         format: 'cjs',
         external: ['vscode'],

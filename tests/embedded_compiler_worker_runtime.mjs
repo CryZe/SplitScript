@@ -5,16 +5,16 @@ import { resolve } from "node:path";
 
 const workerPath = process.argv[2];
 const modulePath = process.argv[3];
-if (!workerPath || !modulePath) {
+const clientPath = process.argv[4];
+if (!workerPath || !modulePath || !clientPath) {
     throw new Error(
-        "usage: node tests/embedded_compiler_worker_runtime.mjs <worker.js> <compiler.wasm>",
+        "usage: node tests/embedded_compiler_worker_runtime.mjs "
+        + "<worker.js> <compiler.wasm> <client.js>",
     );
 }
 
 const require = createRequire(import.meta.url);
-const { EmbeddedCompilerWorkerClient } = require(
-    "../editors/vscode/dist/embeddedCompilerWorkerClient.js",
-);
+const { EmbeddedCompilerWorkerClient } = require(resolve(clientPath));
 const client = await EmbeddedCompilerWorkerClient.create(
     resolve(workerPath),
     fs.readFileSync(resolve(modulePath)),

@@ -832,19 +832,19 @@ fn check() -> Result<(), String> {
     let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
     run(&extension, npm, &["run", "check"])?;
     run(&extension, npm, &["test"])?;
-    run(&extension, npm, &["run", "clean"])?;
-    run(&extension, npm, &["run", "compile:ts"])?;
-    run(&extension, npm, &["run", "bundle:web"])?;
+    let verification_extension = root.join("target/vscode-check/dist");
+    run(
+        &extension,
+        "node",
+        &[
+            "scripts/build.mjs",
+            "--output",
+            path_text(&verification_extension)?,
+        ],
+    )?;
     let embedded_compiler =
         root.join("target/wasm32-unknown-unknown/max-opt/splitscript_vscode_wasm.wasm");
-    let packaged_compiler = extension.join("dist/splitscript_vscode_wasm.wasm");
-    fs::copy(&embedded_compiler, &packaged_compiler).map_err(|error| {
-        format!(
-            "could not package {} as {}: {error}",
-            embedded_compiler.display(),
-            packaged_compiler.display()
-        )
-    })?;
+    let packaged_compiler = verification_extension.join("splitscript_vscode_wasm.wasm");
     run(
         &root,
         "wasm-tools",
@@ -858,7 +858,7 @@ fn check() -> Result<(), String> {
             path_text(&embedded_compiler)?,
         ],
     )?;
-    let embedded_worker = extension.join("dist/embeddedCompilerNodeWorker.js");
+    let embedded_worker = verification_extension.join("embeddedCompilerNodeWorker.js");
     run(
         &root,
         "node",
@@ -866,6 +866,7 @@ fn check() -> Result<(), String> {
             "tests/embedded_compiler_worker_runtime.mjs",
             path_text(&embedded_worker)?,
             path_text(&packaged_compiler)?,
+            path_text(&verification_extension.join("embeddedCompilerWorkerClient.js"))?,
         ],
     )?;
     run(
@@ -873,15 +874,22 @@ fn check() -> Result<(), String> {
         "node",
         &[
             "tests/web_worker_bundles_runtime.mjs",
-            path_text(&extension.join("dist/web/extension.js"))?,
-            path_text(&extension.join("dist/web/embeddedCompilerWorker.js"))?,
-            path_text(&extension.join("dist/web/embeddedLanguageServerWorker.js"))?,
+            path_text(&verification_extension.join("web/extension.js"))?,
+            path_text(&verification_extension.join("web/embeddedCompilerWorker.js"))?,
+            path_text(&verification_extension.join("web/embeddedLanguageServerWorker.js"))?,
             path_text(&packaged_compiler)?,
         ],
     )?;
-    run(&extension, npm, &["run", "test:web-host"])?;
+    run(
+        &extension,
+        "node",
+        &[
+            "scripts/test-web-host.mjs",
+            path_text(&verification_extension)?,
+        ],
+    )?;
     let embedded_language_server_worker =
-        extension.join("dist/embeddedLanguageServerNodeWorker.js");
+        verification_extension.join("embeddedLanguageServerNodeWorker.js");
     run(
         &root,
         "node",
@@ -889,6 +897,29 @@ fn check() -> Result<(), String> {
             "tests/embedded_language_server_worker_runtime.mjs",
             path_text(&embedded_language_server_worker)?,
             path_text(&packaged_compiler)?,
+        ],
+    )?;
+
+    // Build the exact production tree that VSCE packages outside `dist`, which
+    // may be held open by an Extension Development Host on Windows. Audit its
+    // manifest and construct an isolated VSIX without mutating those outputs.
+    let production_extension = root.join("target/vscode-package/dist");
+    run(
+        &extension,
+        "node",
+        &[
+            "scripts/build.mjs",
+            "--production",
+            "--output",
+            path_text(&production_extension)?,
+        ],
+    )?;
+    run(
+        &extension,
+        "node",
+        &[
+            "scripts/probe-package.mjs",
+            path_text(&production_extension)?,
         ],
     )?;
 

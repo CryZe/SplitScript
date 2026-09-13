@@ -535,7 +535,7 @@
     "clean": "node scripts/clean.mjs",
     "compile:ts": "tsc -p tsconfig.node.json",
     "bundle:web": "node scripts/bundle-web.mjs",
-    "test:web-host": "vscode-test-web --browser=chromium --headless=true --quality=stable --commit=e4c7e7b1d6d060162f4aa7f8225271b67ce1df75 --extensionDevelopmentPath=. --extensionTestsPath=dist/web/test/index.js test-workspace",
+    "test:web-host": "node scripts/test-web-host.mjs",
     "open:web-host": "vscode-test-web --browser=chromium --headless=false --quality=stable --commit=e4c7e7b1d6d060162f4aa7f8225271b67ce1df75 --extensionDevelopmentPath=. test-workspace",
     "watch": "tsc --watch -p ./",
     "check": "tsc --noEmit -p ./",

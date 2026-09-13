@@ -1107,8 +1107,14 @@ remaining work is product hardening and distribution.
   contents; reject native files outside that closed manifest rather than
   applying the older no-native-binaries assumption.
 - [ ] Test one platform-neutral VSIX on Windows, Linux, macOS, desktop, remote,
-  and web hosts. Publish native `splitc`/`splitls` archives separately with
-  checksums, versions, smoke tests, and the same conformance corpus.
+  and web hosts.
+- [x] Publish a native `splitc` / `splitls` ZIP for Windows x64 and tarballs for
+  Linux x64 and ARM64 and macOS Intel and Apple Silicon from the same rolling
+  `latest` release as the VSIX. Each native runner builds and starts both tools,
+  packages the installation guide, and contributes to one release checksum
+  manifest.
+- [ ] Run the complete compiler and runtime conformance corpus on every native
+  release platform rather than only building and smoke-testing its tools.
 - [x] Document batteries-included extension installation separately from native
   CLI/LSP installation, including supported hosts, package size, memory use,
   debug-watch output, and failure recovery.

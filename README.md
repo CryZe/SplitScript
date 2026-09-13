@@ -8,9 +8,8 @@ Runtime ABI.
 
 The project is usable for early ports and real-game testing, but it is not yet a
 stable release. Source compatibility may change, the VS Code extension is
-distributed as a VSIX rather than through the Marketplace, native binaries are
-not published, and the generated module still needs a compatible autosplitting
-host with WebAssembly GC enabled.
+distributed as a VSIX rather than through the Marketplace, and the generated
+module still needs a compatible autosplitting host with WebAssembly GC enabled.
 
 ## The language at a glance
 
@@ -39,9 +38,9 @@ documentation catalog, formatter, diagnostics, and language service.
 ## Choose your path
 
 The [installation and host-support guide](docs/INSTALLATION.md) compares the
-batteries-included VSIX with source-built native `splitc` / `splitls`, including
-platform boundaries, artifact budgets, worker memory behavior, output, and
-failure recovery.
+batteries-included VSIX with native `splitc` / `splitls`, including platform
+boundaries, artifact budgets, worker memory behavior, output, and failure
+recovery.
 
 ### Visual Studio Code authors
 
@@ -59,9 +58,10 @@ requirement, limitation, and recovery step.
 
 ### Native CLI users
 
-Prebuilt native archives are not published yet. Follow the [native installation
-instructions](docs/INSTALLATION.md#native-command-line-tools), or run directly
-from a repository checkout with the Rust toolchain installed:
+Download the matching `splitc` / `splitls` archive from the [latest rolling
+release][latest-release], or follow the [native installation
+instructions](docs/INSTALLATION.md#native-command-line-tools) to build from
+source. From a repository checkout with the Rust toolchain installed:
 
 ```console
 cargo run --bin splitc -- game.split -o game.wasm --profile release
@@ -159,3 +159,4 @@ implementation evidence. They are not the user guide, are not compatibility
 promises, and should not be treated as templates for new scripts.
 
 [latest-vsix]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-latest.vsix
+[latest-release]: https://github.com/CryZe/SplitScript/releases/tag/latest

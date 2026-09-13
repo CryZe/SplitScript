@@ -75,23 +75,28 @@ jobs:
         run: cargo xtask check
 
   vscode-native:
-    name: VS Code native bridge (${{ matrix.platform }})
+    name: Native artifacts (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: win32-x64
+          - platform: windows-x64
             runner: windows-latest
+            archive: splitscript-windows-x64.zip
           - platform: linux-x64
             runner: ubuntu-latest
+            archive: splitscript-linux-x64.tar.gz
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
-          - platform: darwin-x64
+            archive: splitscript-linux-arm64.tar.gz
+          - platform: macos-x64
             runner: macos-15-intel
-          - platform: darwin-arm64
+            archive: splitscript-macos-x64.tar.gz
+          - platform: macos-arm64
             runner: macos-15
+            archive: splitscript-macos-arm64.tar.gz
 
     steps:
       - name: Check out the repository
@@ -114,11 +119,26 @@ jobs:
       - name: Probe process discovery and memory access
         run: node editors/vscode/scripts/probe-native.mjs
 
+      - name: Build the native CLI and language server
+        env:
+          SPLITSCRIPT_GIT_REVISION: ${{ github.sha }}
+        run: cargo build --profile max-opt --bin splitc --bin splitls
+
+      - name: Smoke-test and package the native tools
+        run: node scripts/package-native.mjs ${{ matrix.platform }}
+
       - name: Upload the native process bridge
         uses: actions/upload-artifact@v7
         with:
           name: vscode-native-${{ matrix.platform }}
           path: editors/vscode/dist/native
+          if-no-files-found: error
+
+      - name: Upload the native CLI and language server
+        uses: actions/upload-artifact@v7
+        with:
+          name: splitscript-tools-${{ matrix.platform }}
+          path: target/release-assets/${{ matrix.archive }}
           if-no-files-found: error
 
   vscode-package:
@@ -170,9 +190,11 @@ jobs:
           path: editors/vscode/splitscript-latest.vsix
           if-no-files-found: error
 
-  vscode-release:
-    name: Publish latest VS Code extension
-    needs: vscode-package
+  release:
+    name: Publish latest release
+    needs:
+      - vscode-native
+      - vscode-package
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
@@ -186,23 +208,44 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: splitscript-vscode-extension
-          path: editors/vscode
+          path: target/release-assets
+
+      - name: Download the native CLI and language server archives
+        uses: actions/download-artifact@v7
+        with:
+          pattern: splitscript-tools-*
+          path: target/release-assets
+          merge-multiple: true
 
       - name: Publish the latest release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          asset="editors/vscode/splitscript-latest.vsix"
-          title="Latest SplitScript VS Code Extension"
-          notes="Continuously updated from the latest verified commit on master. This early build may introduce breaking language changes."
+          cd target/release-assets
+          assets=(
+            splitscript-latest.vsix
+            splitscript-windows-x64.zip
+            splitscript-linux-x64.tar.gz
+            splitscript-linux-arm64.tar.gz
+            splitscript-macos-x64.tar.gz
+            splitscript-macos-arm64.tar.gz
+          )
+          for asset in "${assets[@]}"; do
+            test -s "$asset"
+          done
+          sha256sum "${assets[@]}" > SHA256SUMS
+          assets+=(SHA256SUMS)
+
+          title="Latest SplitScript"
+          notes="Continuously updated from the latest verified commit on master. Includes the VS Code extension and native splitc/splitls archives. This early build may introduce breaking language changes."
 
           git tag --force latest "$GITHUB_SHA"
           git push --force origin refs/tags/latest
 
           if gh release view latest >/dev/null 2>&1; then
             gh release edit latest --title "$title" --notes "$notes" --latest
-            gh release upload latest "$asset" --clobber
+            gh release upload latest "${assets[@]}" --clobber
           else
-            gh release create latest "$asset" --verify-tag --title "$title" --notes "$notes" --latest
+            gh release create latest "${assets[@]}" --verify-tag --title "$title" --notes "$notes" --latest
           fi

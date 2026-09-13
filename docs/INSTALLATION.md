@@ -9,7 +9,7 @@ formatter, diagnostics, documentation catalog, and language service.
 | VS Code VSIX | Editor support, embedded compiler and language server, documentation, build commands, and the desktop autosplitter debugger | Writing and testing autosplitters without installing a compiler |
 | Native `splitc` and `splitls` | Command-line compilation, formatting, documentation, watch builds, and a standard-input/output language server | Other editors, scripts, and build automation |
 
-SplitScript is still an early moving language. The `latest` extension release
+SplitScript is still an early moving language. The `latest` rolling release
 follows each verified `master` build, and source compatibility can change.
 
 ## Visual Studio Code extension
@@ -78,8 +78,29 @@ state.
 
 ## Native command-line tools
 
-Prebuilt native `splitc` and `splitls` archives are not published yet. Build
-them from a repository checkout with the latest stable Rust toolchain:
+The [latest SplitScript release][latest-release] provides one archive containing
+both `splitc` and `splitls` for each supported native host:
+
+| Host | Release asset |
+| --- | --- |
+| Windows x64 | [`splitscript-windows-x64.zip`][windows-x64] |
+| Linux x64 | [`splitscript-linux-x64.tar.gz`][linux-x64] |
+| Linux ARM64 | [`splitscript-linux-arm64.tar.gz`][linux-arm64] |
+| macOS Intel | [`splitscript-macos-x64.tar.gz`][macos-x64] |
+| macOS Apple Silicon | [`splitscript-macos-arm64.tar.gz`][macos-arm64] |
+
+Download and extract the matching archive. The created platform-named directory
+contains both executables and a copy of this installation guide. Keep the
+directory together, add it to `PATH`, or configure an editor with the absolute
+path to `splitls`. Windows executable names end in `.exe`.
+
+These are rolling early builds from the commit named by the `latest` release,
+not stable versioned releases. Each runner starts `splitc --version` and
+`splitls` before publishing its archive. `SHA256SUMS` on the release records the
+digest of every native archive and the VSIX.
+
+To build the tools yourself instead, use a repository checkout with the latest
+stable Rust toolchain:
 
 ```console
 cargo build --profile max-opt --bin splitc --bin splitls
@@ -91,30 +112,31 @@ editor with their absolute paths. The `max-opt` profile is the distribution
 profile; it favors compiler execution speed and executable size at the cost of
 a slower initial build.
 
-The complete repository check runs on Windows in CI. The Rust tools are not
-intentionally tied to Windows, but source builds on other desktop targets are
-early-user territory until native archives and the cross-platform smoke matrix
-are published. This is separate from the five-platform debugger bridges inside
-the VSIX.
+The complete repository verification matrix runs on Windows. The five native
+release runners additionally build and smoke-test their own binaries. Running
+the complete compiler and runtime conformance corpus independently on every
+native platform remains future hardening work. This is separate from the
+five-platform debugger bridges inside the VSIX.
 
 Compile, watch, format, or browse documentation with:
 
 ```console
-target/max-opt/splitc game.split -o game.wasm --profile release
-target/max-opt/splitc watch game.split -o game.wasm
-target/max-opt/splitc fmt game.split
-target/max-opt/splitc docs
+splitc game.split -o game.wasm --profile release
+splitc watch game.split -o game.wasm
+splitc fmt game.split
+splitc docs
 ```
 
-On Windows, use `target\max-opt\splitc.exe` instead. `splitc watch` performs an
-initial build and then rebuilds after source changes. Compilation failures keep
-the last successful output. `splitc fmt` follows applicable `.editorconfig`
-formatting properties. Run `splitc --help` or a subcommand's `--help` for the
-current command surface.
+When running a source build without adding `target/max-opt` to `PATH`, replace
+`splitc` above with `target/max-opt/splitc` or
+`target\max-opt\splitc.exe`. `splitc watch` performs an initial build and then
+rebuilds after source changes. Compilation failures keep the last successful
+output. `splitc fmt` follows applicable `.editorconfig` formatting properties.
+Run `splitc --help` or a subcommand's `--help` for the current command surface.
 
 `splitls` is a Language Server Protocol server over standard input and output.
 For another editor, configure the server command as the absolute path to
-`target/max-opt/splitls` with no arguments and associate it with `.split` files.
+`splitls` with no arguments and associate it with `.split` files.
 Do not configure `splitls` as a TCP server, and do not parse its standard output
 as logs: that stream carries framed LSP messages.
 
@@ -123,3 +145,8 @@ as extension builds. They likewise do not install, register, or execute the
 result in a timer host.
 
 [latest-release]: https://github.com/CryZe/SplitScript/releases/tag/latest
+[windows-x64]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-windows-x64.zip
+[linux-x64]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-linux-x64.tar.gz
+[linux-arm64]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-linux-arm64.tar.gz
+[macos-x64]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-macos-x64.tar.gz
+[macos-arm64]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-macos-arm64.tar.gz

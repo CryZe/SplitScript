@@ -1106,7 +1106,7 @@ remaining work is product hardening and distribution.
 - [ ] Test one platform-neutral VSIX on Windows, Linux, macOS, desktop, remote,
   and web hosts. Publish native `splitc`/`splitls` archives separately with
   checksums, versions, smoke tests, and the same conformance corpus.
-- [ ] Document batteries-included extension installation separately from native
+- [x] Document batteries-included extension installation separately from native
   CLI/LSP installation, including supported hosts, package size, memory use,
   debug-watch output, and failure recovery.
 

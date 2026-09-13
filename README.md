@@ -38,6 +38,11 @@ documentation catalog, formatter, diagnostics, and language service.
 
 ## Choose your path
 
+The [installation and host-support guide](docs/INSTALLATION.md) compares the
+batteries-included VSIX with source-built native `splitc` / `splitls`, including
+platform boundaries, artifact budgets, worker memory behavior, output, and
+failure recovery.
+
 ### Visual Studio Code authors
 
 Install the [latest SplitScript VSIX][latest-vsix], open a saved `.split` file,
@@ -54,7 +59,9 @@ requirement, limitation, and recovery step.
 
 ### Native CLI users
 
-From a repository checkout with the Rust toolchain installed:
+Prebuilt native archives are not published yet. Follow the [native installation
+instructions](docs/INSTALLATION.md#native-command-line-tools), or run directly
+from a repository checkout with the Rust toolchain installed:
 
 ```console
 cargo run --bin splitc -- game.split -o game.wasm --profile release
@@ -136,9 +143,10 @@ links, or anchors. `cargo xtask docs` writes a local preview to the ignored
 SplitScript already supports native process attachment, typed memory paths,
 transactional state snapshots, settings, timer actions and observers, failure
 and optional values, async discovery, closures and iterators, structs and enums,
-strings and collections, layouts, source-defined Unity schemas, and typed
-emulator providers. The compiler-owned reference is the canonical source for
-exact symbols, signatures, effects, runtime availability, and examples.
+strings and collections, conditional state shapes, source-defined Unity
+schemas, and typed emulator providers. The compiler-owned reference is the
+canonical source for exact symbols, signatures, effects, runtime availability,
+and examples.
 
 The compiler emits a Core WebAssembly GC module matching the existing Auto
 Splitting Runtime host calls. It does not install that module, configure a timer,

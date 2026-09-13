@@ -25,8 +25,456 @@ pub(super) fn check(checker: &mut Checker, program: &Program) {
     check_shape_conditions(checker, program);
     super::declaration_pass::collect_conditional_fields(checker, program);
     check_function_bodies(checker, program);
+    infer_source_associated_types(checker, program);
     check_state_expressions(checker, program);
     check_action_bodies(checker, program);
+}
+
+/// Infers the associated types of structurally implemented capabilities from
+/// the complete signatures of their required source methods.
+///
+/// This deliberately runs after every user function body. A method may omit
+/// its result annotation, so its body is part of the evidence that determines
+/// an associated type. Projections created by earlier generic callers remain
+/// ordinary inference variables until these definitions are registered.
+fn infer_source_associated_types(checker: &mut Checker, program: &Program) {
+    let source_types = program
+        .structs
+        .iter()
+        .map(|structure| checker.inference.type_store().id_for_struct(structure.id))
+        .chain(
+            program
+                .enum_declarations()
+                .map(|enumeration| checker.inference.type_store().id_for_enum(enumeration.id)),
+        )
+        .collect::<Vec<_>>();
+    let capabilities = checker
+        .standard_library
+        .capabilities()
+        .iter()
+        .filter(|capability| {
+            capability.behavior == crate::stdlib::CapabilityBehavior::StructuralMethods
+                && !capability.associated_types.is_empty()
+        })
+        .map(|capability| {
+            let requirements = checker
+                .standard_library
+                .children_of(StdlibOwner::Capability(capability.id))
+                .filter_map(|symbol| match symbol {
+                    crate::stdlib::StdlibSymbolId::Item(item)
+                        if checker.standard_library.item(item).implementation
+                            == crate::stdlib::Implementation::CapabilityRequirement =>
+                    {
+                        Some(*checker.standard_library.item(item))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            (*capability, requirements)
+        })
+        .collect::<Vec<_>>();
+
+    for receiver in source_types {
+        for (capability, requirements) in &capabilities {
+            let mut associated = HashMap::new();
+            let mut complete = true;
+            for requirement in requirements {
+                let Some(signature) = checker
+                    .declarations
+                    .methods
+                    .get(&(Type::Known(receiver), requirement.name.to_owned()))
+                    .cloned()
+                else {
+                    complete = false;
+                    break;
+                };
+                let mut parameters = HashMap::new();
+                let ItemKind::Method {
+                    receiver: required_receiver,
+                } = requirement.kind
+                else {
+                    unreachable!("capability requirements are methods")
+                };
+                let Some((&actual_receiver, actual_parameters)) = signature.params.split_first()
+                else {
+                    complete = false;
+                    break;
+                };
+                if !match_capability_contract_type(
+                    checker,
+                    required_receiver,
+                    actual_receiver,
+                    &mut parameters,
+                    &mut associated,
+                ) || actual_parameters.len() != requirement.signature.parameters.len()
+                    || !actual_parameters
+                        .iter()
+                        .zip(requirement.signature.parameters)
+                        .all(|(&actual, required)| {
+                            match_capability_contract_type(
+                                checker,
+                                required.ty,
+                                actual,
+                                &mut parameters,
+                                &mut associated,
+                            )
+                        })
+                    || !match_capability_contract_type(
+                        checker,
+                        requirement.signature.result,
+                        signature.completion,
+                        &mut parameters,
+                        &mut associated,
+                    )
+                    || !source_method_type_parameters_match(
+                        checker,
+                        requirement,
+                        &signature,
+                        &parameters,
+                    )
+                {
+                    complete = false;
+                    break;
+                }
+            }
+            if !complete
+                || capability
+                    .associated_types
+                    .iter()
+                    .any(|declaration| !associated.contains_key(declaration.name))
+            {
+                continue;
+            }
+            for declaration in capability.associated_types {
+                let value = associated[declaration.name];
+                let requirements = crate::inference::Requirements::capabilities(
+                    declaration.constraints.iter().copied(),
+                );
+                if checker.inference.require(value, requirements).is_err()
+                    || checker
+                        .inference
+                        .define_source_associated_type(
+                            receiver,
+                            capability.id,
+                            declaration.name,
+                            value,
+                        )
+                        .is_err()
+                {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn source_method_type_parameters_match(
+    checker: &mut Checker,
+    requirement: &crate::stdlib::StdlibItem,
+    signature: &crate::typeck::declarations::FunctionSignature,
+    bindings: &HashMap<&'static str, Type>,
+) -> bool {
+    let inherited = requirement
+        .signature
+        .type_parameters
+        .len()
+        .saturating_sub(requirement.signature.explicit_type_parameters);
+    requirement.signature.type_parameters[inherited..]
+        .iter()
+        .all(|parameter| {
+            let Some(Type::Variable(variable)) = bindings
+                .get(parameter.name)
+                .copied()
+                .map(|ty| checker.inference.shallow(ty))
+            else {
+                return false;
+            };
+            let variable = match checker.inference.shallow(Type::Variable(variable)) {
+                Type::Variable(variable) => variable,
+                _ => return false,
+            };
+            signature.generalized.contains(&variable)
+                && parameter.constraints.iter().all(|required| {
+                    checker.standard_library.capabilities_satisfy(
+                        checker.inference.variable_requirements(variable).as_slice(),
+                        *required,
+                    )
+                })
+        })
+}
+
+fn match_capability_contract_type(
+    checker: &mut Checker,
+    required: crate::stdlib::TypeRef,
+    actual: Type,
+    parameters: &mut HashMap<&'static str, Type>,
+    associated: &mut HashMap<&'static str, Type>,
+) -> bool {
+    use crate::stdlib::TypeRef as Required;
+
+    let actual = checker.inference.shallow(actual);
+    match required {
+        Required::Core(required) => matches!(
+            actual,
+            Type::Known(actual)
+                if matches!(
+                    checker.inference.type_store().kind(actual),
+                    crate::types::TypeKind::Builtin(found) if *found == required
+                )
+        ),
+        Required::Standard(required) => matches!(
+            actual,
+            Type::Known(actual)
+                if matches!(
+                    checker.inference.type_store().kind(actual),
+                    crate::types::TypeKind::Standard(found) if *found == required
+                )
+        ),
+        Required::Parameter(name) => bind_contract_type(checker, parameters, name, actual),
+        Required::Associated(name) => bind_contract_type(checker, associated, name, actual),
+        Required::Async(required) => actual_async_value(checker, actual).is_some_and(|actual| {
+            match_capability_contract_type(checker, *required, actual, parameters, associated)
+        }),
+        Required::Callable {
+            parameters: required_parameters,
+            result,
+        } => {
+            let Some((actual_parameters, actual_result)) = actual_callable(checker, actual) else {
+                return false;
+            };
+            required_parameters.len() == actual_parameters.len()
+                && required_parameters
+                    .iter()
+                    .zip(actual_parameters)
+                    .all(|(&required, actual)| {
+                        match_capability_contract_type(
+                            checker, required, actual, parameters, associated,
+                        )
+                    })
+                && match_capability_contract_type(
+                    checker,
+                    *result,
+                    actual_result,
+                    parameters,
+                    associated,
+                )
+        }
+        Required::FixedArray { element, length } => {
+            let Some((actual_element, actual_length)) = actual_array(checker, actual) else {
+                return false;
+            };
+            actual_length == Some(length)
+                && match_capability_contract_type(
+                    checker,
+                    *element,
+                    actual_element,
+                    parameters,
+                    associated,
+                )
+        }
+        Required::Application {
+            constructor,
+            arguments,
+        } => {
+            let Some((actual_constructor, actual_arguments)) = actual_application(checker, actual)
+            else {
+                return false;
+            };
+            constructor == actual_constructor
+                && arguments.len() == actual_arguments.len()
+                && arguments
+                    .iter()
+                    .zip(actual_arguments)
+                    .all(|(&required, actual)| {
+                        match_capability_contract_type(
+                            checker, required, actual, parameters, associated,
+                        )
+                    })
+        }
+    }
+}
+
+fn bind_contract_type(
+    checker: &mut Checker,
+    bindings: &mut HashMap<&'static str, Type>,
+    name: &'static str,
+    actual: Type,
+) -> bool {
+    match bindings.get(name).copied() {
+        None => {
+            bindings.insert(name, actual);
+            true
+        }
+        Some(previous) => capability_contract_types_equal(checker, previous, actual),
+    }
+}
+
+fn capability_contract_types_equal(checker: &mut Checker, left: Type, right: Type) -> bool {
+    let left = checker.inference.shallow(left);
+    let right = checker.inference.shallow(right);
+    if left == right {
+        return true;
+    }
+    if let (Some((left_element, left_length)), Some((right_element, right_length))) =
+        (actual_array(checker, left), actual_array(checker, right))
+    {
+        return left_length == right_length
+            && capability_contract_types_equal(checker, left_element, right_element);
+    }
+    if let (Some(left_value), Some(right_value)) = (
+        actual_async_value(checker, left),
+        actual_async_value(checker, right),
+    ) {
+        return capability_contract_types_equal(checker, left_value, right_value);
+    }
+    if let (Some((left_parameters, left_result)), Some((right_parameters, right_result))) = (
+        actual_callable(checker, left),
+        actual_callable(checker, right),
+    ) {
+        return left_parameters.len() == right_parameters.len()
+            && left_parameters
+                .into_iter()
+                .zip(right_parameters)
+                .all(|(left, right)| capability_contract_types_equal(checker, left, right))
+            && capability_contract_types_equal(checker, left_result, right_result);
+    }
+    match (
+        actual_application(checker, left),
+        actual_application(checker, right),
+    ) {
+        (Some((left_constructor, left_arguments)), Some((right_constructor, right_arguments))) => {
+            left_constructor == right_constructor
+                && left_arguments.len() == right_arguments.len()
+                && left_arguments
+                    .into_iter()
+                    .zip(right_arguments)
+                    .all(|(left, right)| capability_contract_types_equal(checker, left, right))
+        }
+        _ => false,
+    }
+}
+
+fn actual_array(checker: &mut Checker, actual: Type) -> Option<(Type, Option<u32>)> {
+    match checker.inference.shallow(actual) {
+        Type::Array(array) => Some((
+            checker.inference.array_element(array),
+            checker.inference.array_length(array),
+        )),
+        Type::Known(actual) => match checker.inference.type_store().kind(actual) {
+            crate::types::TypeKind::Array {
+                element, length, ..
+            } => Some((Type::Known(*element), *length)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn actual_async_value(checker: &mut Checker, actual: Type) -> Option<Type> {
+    match checker.inference.shallow(actual) {
+        Type::Async(future) => Some(checker.inference.async_value(future)),
+        Type::Known(actual) => match checker.inference.type_store().kind(actual) {
+            crate::types::TypeKind::Async { value, .. } => Some(Type::Known(*value)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn actual_callable(checker: &mut Checker, actual: Type) -> Option<(Vec<Type>, Type)> {
+    match checker.inference.shallow(actual) {
+        Type::Callable(callable) => Some((
+            checker.inference.callable_parameters(callable).to_vec(),
+            checker.inference.callable_result(callable),
+        )),
+        Type::Known(actual) => match checker.inference.type_store().kind(actual) {
+            crate::types::TypeKind::Callable {
+                parameters, result, ..
+            } => Some((
+                parameters.iter().copied().map(Type::Known).collect(),
+                Type::Known(*result),
+            )),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn actual_application(
+    checker: &mut Checker,
+    actual: Type,
+) -> Option<(crate::stdlib::StdlibTypeConstructorId, Vec<Type>)> {
+    let actual = checker.inference.shallow(actual);
+    if let Some((element, _)) = actual_array(checker, actual) {
+        return Some((crate::stdlib::StdlibTypeConstructorId::Array, vec![element]));
+    }
+    match actual {
+        Type::Option(option) => Some((
+            crate::stdlib::StdlibTypeConstructorId::Option,
+            vec![checker.inference.option_value(option)],
+        )),
+        Type::Result(result) => Some((
+            crate::stdlib::StdlibTypeConstructorId::Result,
+            vec![checker.inference.result_value(result)],
+        )),
+        Type::Set(set) => Some((
+            crate::stdlib::StdlibTypeConstructorId::Set,
+            vec![checker.inference.set_element(set)],
+        )),
+        Type::Range(range) => Some((
+            match checker.inference.range_kind(range) {
+                crate::ast::RangeKind::Exclusive => {
+                    crate::stdlib::StdlibTypeConstructorId::ExclusiveRange
+                }
+                crate::ast::RangeKind::Inclusive => {
+                    crate::stdlib::StdlibTypeConstructorId::InclusiveRange
+                }
+            },
+            vec![checker.inference.range_bound(range)],
+        )),
+        Type::Application(application) => Some((
+            checker.inference.application_constructor(application),
+            checker
+                .inference
+                .application_arguments(application)
+                .to_vec(),
+        )),
+        Type::Known(actual) => match checker.inference.type_store().kind(actual) {
+            crate::types::TypeKind::Option { value, .. } => Some((
+                crate::stdlib::StdlibTypeConstructorId::Option,
+                vec![Type::Known(*value)],
+            )),
+            crate::types::TypeKind::Result { value, .. } => Some((
+                crate::stdlib::StdlibTypeConstructorId::Result,
+                vec![Type::Known(*value)],
+            )),
+            crate::types::TypeKind::Set { element, .. } => Some((
+                crate::stdlib::StdlibTypeConstructorId::Set,
+                vec![Type::Known(*element)],
+            )),
+            crate::types::TypeKind::Range { bound, kind, .. } => Some((
+                match kind {
+                    crate::ast::RangeKind::Exclusive => {
+                        crate::stdlib::StdlibTypeConstructorId::ExclusiveRange
+                    }
+                    crate::ast::RangeKind::Inclusive => {
+                        crate::stdlib::StdlibTypeConstructorId::InclusiveRange
+                    }
+                },
+                vec![Type::Known(*bound)],
+            )),
+            crate::types::TypeKind::Application {
+                constructor,
+                arguments,
+                ..
+            } => Some((
+                *constructor,
+                arguments.iter().copied().map(Type::Known).collect(),
+            )),
+            _ => None,
+        },
+        Type::Variable(_) | Type::Async(_) | Type::Callable(_) | Type::Array(_) => None,
+    }
 }
 
 fn check_shape_conditions(checker: &mut Checker, program: &Program) {

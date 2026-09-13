@@ -398,7 +398,7 @@ impl Checker {
                 // still-unbound receiver, its catalog owner supplies the
                 // concrete `Iterable` constructor. This is the same
                 // contextual receiver constraint used by deferred member
-                // resolution, applied before projecting `Iterable.Item`.
+                // resolution, applied before projecting `Iterable.Iterator`.
                 if matches!(iterable_ty, Type::Variable(_))
                     && let crate::typeck::CallableContext::LibraryFunction(item) = self.callable
                     && let crate::stdlib::StdlibOwner::TypeConstructor(constructor) =
@@ -433,7 +433,7 @@ impl Checker {
                 let iterator_capability = crate::stdlib::StdlibCapabilityId::Iterator;
                 let mut consumes_iterator = false;
                 let mut converts_iterable = false;
-                let element_ty = if matches!(iterable_ty, Type::Variable(_)) {
+                let (element_ty, projected_iterator_ty) = if matches!(iterable_ty, Type::Variable(_)) {
                     // An associated cursor such as `T.Iterator` already carries
                     // the `Iterator` constraint declared by `Iterable`. Preserve
                     // that stronger protocol instead of adding an unrelated
@@ -446,13 +446,9 @@ impl Checker {
                                 iterator_capability,
                             ) =>
                         {
-                            consumes_iterator = true;
                             iterator_capability
                         }
-                        _ => {
-                            converts_iterable = true;
-                            iterable_capability
-                        }
+                        _ => iterable_capability,
                     };
                     self.inference
                         .require(
@@ -461,12 +457,72 @@ impl Checker {
                         )
                         .ok()
                         .map(|()| {
+                            if capability == iterator_capability {
+                                consumes_iterator = true;
+                                (
+                                    self.inference.associated_type(
+                                        iterable_ty,
+                                        iterator_capability,
+                                        "Item",
+                                    ),
+                                    None,
+                                )
+                            } else {
+                                converts_iterable = true;
+                                let iterator_ty = self.inference.associated_type(
+                                    iterable_ty,
+                                    iterable_capability,
+                                    "Iterator",
+                                );
+                                (
+                                    self.inference.associated_type(
+                                        iterator_ty,
+                                        iterator_capability,
+                                        "Item",
+                                    ),
+                                    Some(iterator_ty),
+                                )
+                            }
+                        })
+                } else if let Type::Known(receiver) = iterable_ty
+                    && matches!(
+                        self.inference.type_store().kind(receiver),
+                        crate::types::TypeKind::Struct(_) | crate::types::TypeKind::Enum(_)
+                    )
+                {
+                    let has_method = |name: &str| {
+                        self.declarations
+                            .methods
+                            .contains_key(&(iterable_ty, name.to_owned()))
+                    };
+                    if has_method("next") {
+                        consumes_iterator = true;
+                        Some((
                             self.inference.associated_type(
                                 iterable_ty,
-                                capability,
+                                iterator_capability,
                                 "Item",
-                            )
-                        })
+                            ),
+                            None,
+                        ))
+                    } else if has_method("iterator") {
+                        converts_iterable = true;
+                        let iterator_ty = self.inference.associated_type(
+                            iterable_ty,
+                            iterable_capability,
+                            "Iterator",
+                        );
+                        Some((
+                            self.inference.associated_type(
+                                iterator_ty,
+                                iterator_capability,
+                                "Item",
+                            ),
+                            Some(iterator_ty),
+                        ))
+                    } else {
+                        None
+                    }
                 } else {
                     self.constructed_field_receiver(iterable_ty).and_then(
                         |(constructor, arguments)| {
@@ -491,11 +547,30 @@ impl Checker {
                             .zip(arguments)
                             .map(|(parameter, argument)| (parameter.name, argument))
                             .collect();
-                        declaration
-                            .associated_types
-                            .iter()
-                            .find(|associated| associated.name == "Item")
-                            .map(|associated| self.catalog_type(associated.value, &variables))
+                        if consumes_iterator {
+                            declaration
+                                .associated_types
+                                .iter()
+                                .find(|associated| associated.name == "Item")
+                                .map(|associated| {
+                                    (self.catalog_type(associated.value, &variables), None)
+                                })
+                        } else {
+                            declaration
+                                .associated_types
+                                .iter()
+                                .find(|associated| associated.name == "Iterator")
+                                .map(|associated| {
+                                    let iterator_ty =
+                                        self.catalog_type(associated.value, &variables);
+                                    let item_ty = self.inference.associated_type(
+                                        iterator_ty,
+                                        iterator_capability,
+                                        "Item",
+                                    );
+                                    (item_ty, Some(iterator_ty))
+                                })
+                        }
                     },
                     )
                 }
@@ -507,15 +582,17 @@ impl Checker {
                             ),
                             iterable.span,
                         );
-                        self.fresh_inference(Requirements::none(), None)
+                        (self.fresh_inference(Requirements::none(), None), None)
                     });
                 // A literal range keeps its upper bound directly in the
                 // compiler-owned iterable slot. This lets the backend lower a
                 // direct range loop without allocating the first-class range
                 // object that is needed when a range escapes into a value.
                 let iterable_storage_ty = if converts_iterable {
-                    self.inference
-                        .associated_type(iterable_ty, iterable_capability, "Iterator")
+                    projected_iterator_ty.unwrap_or_else(|| {
+                        self.inference
+                            .associated_type(iterable_ty, iterable_capability, "Iterator")
+                    })
                 } else if !consumes_iterator
                     && matches!(iterable.kind, crate::ast::ExprKind::Range { .. })
                 {

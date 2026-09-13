@@ -829,15 +829,19 @@ concepts rather than maintaining a parallel inventory.
   respectively, and implicit conversion calls retain the source method's
   reachability and effects. Standard-library implementations remain explicit
   and privileged.
-- [ ] Continue designing the user-facing trait/type-class model around the
-  existing source-defined capability graph. Evaluate memory reading, equality,
-  numeric operations, and hashing individually; representation-sensitive
-  capabilities must remain sealed unless their contracts can be implemented
-  safely in ordinary source. Decide separately whether user programs ever need
-  to declare their own capabilities.
-- [ ] Keep trait declarations, implementations, documentation, method lookup,
-  and capability inheritance in the source-defined standard-library model,
-  never in a parallel checker table.
+- [x] Establish the initial user-facing capability policy without adding `impl`
+  syntax. Behavioral capabilities are satisfied structurally by exact ordinary
+  methods, and associated types are inferred from a complete matching method
+  contract. `Debug` remains universally compiler-derived, `Display` uses an
+  exact `toString` override and otherwise falls back to `Debug`, and equality
+  remains structurally derived. Representation-sensitive `MemoryReadable` and
+  the numeric capability hierarchy remain sealed. User-declared capabilities
+  stay deferred until scripts demonstrate a concrete need for them.
+- [x] Keep capability declarations, requirements, associated types,
+  documentation, method lookup, and inheritance in the source-defined
+  standard-library model rather than introducing a parallel checker table.
+  The checker stores only inferred source implementations of those catalog
+  contracts in the semantic model.
 - [ ] Add a custom capability handler registry only when the first capability
   cannot be expressed by declared membership, structural equality, structural
   memory layout, or a source-defined implementation.
@@ -849,8 +853,8 @@ concepts rather than maintaining a parallel inventory.
   from confusing `Item(None)` with exhaustion. Array and set cursors detect
   structural mutation; direct `for` loops retain their allocation-free
   specialized lowering. Untyped helper parameters infer the minimal
-  `T: Iterable` constraint, and the projected `T.Item` participates in ordinary
-  bidirectional parameter, result, and capability inference.
+  `T: Iterable` constraint, and the projected `T.Iterator.Item` participates in
+  ordinary bidirectional parameter, result, and capability inference.
 - [x] Lower `for` over an existing `Iterator` through its ordinary `next`
   protocol, consuming that cursor, while `for` over `Iterable` retains an
   independent traversal. Lazy source-defined `map` and `filter` adapters store
@@ -863,10 +867,11 @@ concepts rather than maintaining a parallel inventory.
   Constructed callable layouts, generic standard-library struct fields,
   reachability, scratch planning, and intrinsic dependencies all use the same
   demand-driven specialization path rather than adapter-specific intrinsics.
-- [ ] Design user-defined mutable iterator state once user-authored associated
-  types are available. Specify fallible and asynchronous iteration separately;
-  do not conflate either one with the completed synchronous `IteratorStep`
-  protocol.
+- [ ] Design user-defined mutable iterator storage. Associated result types can
+  now be inferred from ordinary source methods, but scripts still cannot define
+  the hidden mutable cursor state needed by a practical iterator. Specify
+  fallible and asynchronous iteration separately; do not conflate either one
+  with the completed synchronous `IteratorStep` protocol.
 
 ### Engine and emulator providers
 

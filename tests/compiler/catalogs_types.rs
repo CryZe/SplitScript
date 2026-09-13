@@ -3751,3 +3751,31 @@ fn option_and_result_matches_bind_values_and_require_exhaustiveness() {
             .contains("use `Some(present)` or `Ok(present)`")
     }));
 }
+
+#[test]
+fn source_structs_can_implement_the_generic_memory_reader_contract() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            struct Reader {}
+
+            fn Reader.read(address: address) {
+                return process.read(address)
+            }
+
+            fn readU32(reader, address) -> u32! {
+                return reader.read(address)
+            }
+
+            whileAttached {
+                let value = readU32(Reader {}, 0x1000) else 0
+                print(value)
+            }
+        "#,
+    )
+    .expect("a source method should satisfy MemoryReader with its inferred generic read type");
+    wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("source-defined generic capability dispatch should emit valid Wasm");
+}

@@ -1157,6 +1157,28 @@ backend plans both kinds of generated helper from reachable uses rather than
 emitting one for every declaration. This intentionally avoids requiring
 `impl` blocks in short user scripts.
 
+Structural requirements may include ordinary generic method parameters and
+associated result types. The checker infers a source implementation only when
+all required methods match as one complete contract, including generic bounds;
+it then publishes the inferred associated types in the semantic model. Generic
+projections and concrete source projections use the same inference relations,
+so a `for` loop over a source-defined `Iterable` obtains its element type as
+`Iterable.Iterator.Item` without a checker-only guess or a duplicate
+`Iterable.Item` declaration. Incomplete or mismatched contracts are recovered
+during inference and diagnosed at the capability use site, with the candidate
+method identified when available. The catalog remains the single source of
+truth for the contract itself.
+
+The initial public policy deliberately distinguishes behavioral and
+representation-sensitive capabilities. Exact ordinary source methods can
+satisfy behavioral contracts such as iteration and generic memory-reader
+dispatch. `Debug` is universally derived, `Display` may be overridden by an
+exact `toString` method and otherwise falls back to `Debug`, and `Equatable`
+remains structurally derived. Physical `MemoryReadable` layout and the numeric
+capability hierarchy remain compiler-sealed. SplitScript does not expose
+`impl` blocks or user-declared capability syntax; those features remain
+deferred until a concrete script needs them.
+
 Nominal standard-library types remain explicit. They connect a parameterless
 `String`-returning source method to `Display` with the private `@display`
 annotation. The generated type declaration owns that implementation identity,

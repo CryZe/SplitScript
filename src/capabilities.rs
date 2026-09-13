@@ -145,6 +145,9 @@ impl CapabilityAnalysis {
         capability: StdlibCapabilityId,
         semantics: &SemanticModel,
     ) -> Result<(), String> {
+        if matches!(semantics.types().kind(ty), TypeKind::Error) {
+            return Ok(());
+        }
         if matches!(
             semantics.types().kind(ty),
             TypeKind::GenericParameter { .. }
@@ -773,6 +776,9 @@ impl CapabilityAnalysis {
         requirement: &StdlibItem,
         semantics: &SemanticModel,
     ) -> bool {
+        let StdlibOwner::Capability(capability) = requirement.owner else {
+            return false;
+        };
         let ItemKind::Method {
             receiver: required_receiver,
         } = requirement.kind
@@ -783,13 +789,27 @@ impl CapabilityAnalysis {
         let Some((actual_receiver, parameters)) = parameters.split_first() else {
             return false;
         };
-        if !self.type_ref_matches(required_receiver, *actual_receiver, receiver, semantics)
-            || parameters.len() != requirement.signature.parameters.len()
+        let mut type_parameters = HashMap::new();
+        if !self.type_ref_matches(
+            required_receiver,
+            *actual_receiver,
+            receiver,
+            capability,
+            &mut type_parameters,
+            semantics,
+        ) || parameters.len() != requirement.signature.parameters.len()
             || !parameters
                 .iter()
                 .zip(requirement.signature.parameters)
                 .all(|(actual, required)| {
-                    self.type_ref_matches(required.ty, *actual, receiver, semantics)
+                    self.type_ref_matches(
+                        required.ty,
+                        *actual,
+                        receiver,
+                        capability,
+                        &mut type_parameters,
+                        semantics,
+                    )
                 })
         {
             return false;
@@ -797,19 +817,55 @@ impl CapabilityAnalysis {
         let Some(actual_result) = semantics.function_result(function) else {
             return false;
         };
-        if requirement.signature.result_is_async {
+        let result_matches = if requirement.signature.result_is_async {
             let TypeKind::Async { value, .. } = semantics.types().kind(actual_result) else {
                 return false;
             };
-            self.type_ref_matches(requirement.signature.result, *value, receiver, semantics)
+            self.type_ref_matches(
+                requirement.signature.result,
+                *value,
+                receiver,
+                capability,
+                &mut type_parameters,
+                semantics,
+            )
         } else {
             self.type_ref_matches(
                 requirement.signature.result,
                 actual_result,
                 receiver,
+                capability,
+                &mut type_parameters,
                 semantics,
             )
+        };
+        if !result_matches {
+            return false;
         }
+        let inherited = requirement
+            .signature
+            .type_parameters
+            .len()
+            .saturating_sub(requirement.signature.explicit_type_parameters);
+        requirement.signature.type_parameters[inherited..]
+            .iter()
+            .all(|parameter| {
+                let Some(actual) = type_parameters.get(parameter.name).copied() else {
+                    return false;
+                };
+                matches!(
+                    semantics.types().kind(actual),
+                    TypeKind::GenericParameter { owner, .. } if *owner == function
+                ) && semantics
+                    .function_type_parameters(function)
+                    .contains(&actual)
+                    && parameter.constraints.iter().all(|required| {
+                        self.standard_library.capabilities_satisfy(
+                            semantics.generic_parameter_constraints(actual),
+                            *required,
+                        )
+                    })
+            })
     }
 
     fn type_ref_matches(
@@ -817,6 +873,8 @@ impl CapabilityAnalysis {
         required: TypeRef,
         actual: TypeId,
         receiver: TypeId,
+        capability: StdlibCapabilityId,
+        parameters: &mut HashMap<&'static str, TypeId>,
         semantics: &SemanticModel,
     ) -> bool {
         match required {
@@ -826,8 +884,16 @@ impl CapabilityAnalysis {
             TypeRef::Standard(required) => {
                 matches!(semantics.types().kind(actual), TypeKind::Standard(found) if *found == required)
             }
-            TypeRef::Parameter(_) => actual == receiver,
-            TypeRef::Associated(_) => false,
+            TypeRef::Parameter(name) => match parameters.get(name).copied() {
+                Some(previous) => previous == actual,
+                None => {
+                    parameters.insert(name, actual);
+                    true
+                }
+            },
+            TypeRef::Associated(name) => semantics
+                .source_associated_type(receiver, capability, name)
+                .is_some_and(|required| required == actual),
             TypeRef::Async(value) => {
                 let TypeKind::Async {
                     value: actual_value,
@@ -836,44 +902,34 @@ impl CapabilityAnalysis {
                 else {
                     return false;
                 };
-                self.type_ref_matches(*value, *actual_value, receiver, semantics)
+                self.type_ref_matches(
+                    *value,
+                    *actual_value,
+                    receiver,
+                    capability,
+                    parameters,
+                    semantics,
+                )
             }
             TypeRef::Application {
                 constructor,
-                arguments: [element],
+                arguments,
             } => {
-                let child = match (constructor, semantics.types().kind(actual)) {
-                    (StdlibTypeConstructorId::Array, TypeKind::Array { element, .. }) => *element,
-                    (StdlibTypeConstructorId::Option, TypeKind::Option { value, .. })
-                    | (StdlibTypeConstructorId::Result, TypeKind::Result { value, .. }) => *value,
-                    (StdlibTypeConstructorId::Set, TypeKind::Set { element, .. }) => *element,
-                    (
-                        required,
-                        TypeKind::Application {
-                            constructor,
-                            arguments,
-                            ..
-                        },
-                    ) if required == *constructor && arguments.len() == 1 => arguments[0],
-                    (
-                        StdlibTypeConstructorId::ExclusiveRange,
-                        TypeKind::Range {
-                            kind: crate::ast::RangeKind::Exclusive,
-                            bound,
-                            ..
-                        },
-                    )
-                    | (
-                        StdlibTypeConstructorId::InclusiveRange,
-                        TypeKind::Range {
-                            kind: crate::ast::RangeKind::Inclusive,
-                            bound,
-                            ..
-                        },
-                    ) => *bound,
-                    _ => return false,
+                let Some((actual_constructor, actual_arguments)) =
+                    Self::application_parts(actual, semantics)
+                else {
+                    return false;
                 };
-                self.type_ref_matches(*element, child, receiver, semantics)
+                constructor == actual_constructor
+                    && arguments.len() == actual_arguments.len()
+                    && arguments
+                        .iter()
+                        .zip(actual_arguments)
+                        .all(|(required, actual)| {
+                            self.type_ref_matches(
+                                *required, actual, receiver, capability, parameters, semantics,
+                            )
+                        })
             }
             TypeRef::FixedArray { element, length } => {
                 let TypeKind::Array {
@@ -885,9 +941,14 @@ impl CapabilityAnalysis {
                     return false;
                 };
                 *actual_length == length
-                    && self.type_ref_matches(*element, *actual, receiver, semantics)
+                    && self.type_ref_matches(
+                        *element, *actual, receiver, capability, parameters, semantics,
+                    )
             }
-            TypeRef::Callable { parameters, result } => {
+            TypeRef::Callable {
+                parameters: required_parameters,
+                result,
+            } => {
                 let TypeKind::Callable {
                     parameters: actual_parameters,
                     result: actual_result,
@@ -896,16 +957,50 @@ impl CapabilityAnalysis {
                 else {
                     return false;
                 };
-                parameters.len() == actual_parameters.len()
-                    && parameters
-                        .iter()
-                        .zip(actual_parameters)
-                        .all(|(required, actual)| {
-                            self.type_ref_matches(*required, *actual, receiver, semantics)
-                        })
-                    && self.type_ref_matches(*result, *actual_result, receiver, semantics)
+                required_parameters.len() == actual_parameters.len()
+                    && required_parameters.iter().zip(actual_parameters).all(
+                        |(required, actual)| {
+                            self.type_ref_matches(
+                                *required, *actual, receiver, capability, parameters, semantics,
+                            )
+                        },
+                    )
+                    && self.type_ref_matches(
+                        *result,
+                        *actual_result,
+                        receiver,
+                        capability,
+                        parameters,
+                        semantics,
+                    )
             }
-            TypeRef::Application { .. } => false,
+        }
+    }
+
+    fn application_parts(
+        actual: TypeId,
+        semantics: &SemanticModel,
+    ) -> Option<(StdlibTypeConstructorId, Vec<TypeId>)> {
+        match semantics.types().kind(actual) {
+            TypeKind::Array { element, .. } => {
+                Some((StdlibTypeConstructorId::Array, vec![*element]))
+            }
+            TypeKind::Option { value, .. } => Some((StdlibTypeConstructorId::Option, vec![*value])),
+            TypeKind::Result { value, .. } => Some((StdlibTypeConstructorId::Result, vec![*value])),
+            TypeKind::Set { element, .. } => Some((StdlibTypeConstructorId::Set, vec![*element])),
+            TypeKind::Range { bound, kind, .. } => Some((
+                match kind {
+                    crate::ast::RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
+                    crate::ast::RangeKind::Inclusive => StdlibTypeConstructorId::InclusiveRange,
+                },
+                vec![*bound],
+            )),
+            TypeKind::Application {
+                constructor,
+                arguments,
+                ..
+            } => Some((*constructor, arguments.clone())),
+            _ => None,
         }
     }
 

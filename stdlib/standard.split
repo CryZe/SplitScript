@@ -2756,9 +2756,6 @@ capability Iterator<T> {
 /// ```
 @behavior(structuralMethods)
 capability Iterable<T> {
-    /// The value yielded by the iterator.
-    type Item;
-
     /// The concrete cursor returned for this iterable value.
     type Iterator: Iterator;
 
@@ -2800,9 +2797,6 @@ capability Iterable<T> {
 /// ```
 @capabilities(Debug)
 typeConstructor IteratorStep<T> {
-    /// The value carried by an item step.
-    type Item = T;
-
     /// Compiler-private payload used by the `Item(value)` variant.
     private value: T,
 }
@@ -3316,8 +3310,6 @@ capability MemoryReader<T> {
 /// ```
 @capabilities(Debug, Iterable)
 typeConstructor [T] {
-    /// The array element yielded during iteration.
-    type Item = T;
     /// The cursor created for this array.
     type Iterator = ArrayIterator<T>;
 
@@ -3608,8 +3600,6 @@ typeConstructor [T] {
 /// ```
 @capabilities(Debug, Iterable)
 typeConstructor T..<T {
-    /// The integer yielded during iteration.
-    type Item = T;
     /// The cursor created for this exclusive range.
     type Iterator = ExclusiveRangeIterator<T>;
 
@@ -3710,8 +3700,6 @@ typeConstructor T..<T {
 /// ```
 @capabilities(Debug, Iterable)
 typeConstructor T..=T {
-    /// The integer yielded during iteration.
-    type Item = T;
     /// The cursor created for this inclusive range.
     type Iterator = InclusiveRangeIterator<T>;
 
@@ -3811,8 +3799,6 @@ typeConstructor T..=T {
 /// ```
 @capabilities(Debug, Iterable)
 typeConstructor Set<T: Equatable> {
-    /// The set element yielded during iteration.
-    type Item = T;
     /// The cursor created for this set.
     type Iterator = SetIterator<T>;
 
@@ -4028,8 +4014,6 @@ typeConstructor MapEntry<K, V> {
 /// ```
 @capabilities(Debug, Iterable)
 typeConstructor Map<K: Equatable, V> {
-    /// Entry yielded during iteration.
-    type Item = MapEntry<K, V>;
     /// Cursor created for this map.
     type Iterator = ArrayIterator<MapEntry<K, V>>;
 

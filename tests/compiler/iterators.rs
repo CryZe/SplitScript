@@ -267,13 +267,13 @@ fn for_loop_parameters_infer_the_iterable_contract_and_associated_item() {
     assert!(
         checked
             .semantics()
-            .generic_parameter_constraints(type_parameters[1])
+            .generic_parameter_constraints(type_parameters[2])
             .contains(&splitscript::compiler::stdlib::StdlibCapabilityId::Display)
     );
     assert_eq!(
         checked
             .semantics()
-            .generic_parameter_constraints(type_parameters[2]),
+            .generic_parameter_constraints(type_parameters[1]),
         [splitscript::compiler::stdlib::StdlibCapabilityId::Iterator]
     );
     let mut database = CompilerDatabase::new(source);
@@ -284,7 +284,7 @@ fn for_loop_parameters_infer_the_iterable_contract_and_associated_item() {
     assert!(
         function_hover
             .markdown
-            .contains("fn inspect(values: T) -> None where T: Iterable, T.Item: Display"),
+            .contains("fn inspect(values: T) -> None where T: Iterable, T.Iterator: Iterator, T.Iterator.Item: Display"),
         "{}",
         function_hover.markdown
     );
@@ -293,7 +293,7 @@ fn for_loop_parameters_infer_the_iterable_contract_and_associated_item() {
         .hover(binding)
         .unwrap()
         .expect("projected iterator binding hover");
-    assert!(binding_hover.markdown.contains("value: T.Item"));
+    assert!(binding_hover.markdown.contains("value: T.Iterator.Item"));
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
         .expect("each projected iterator item should specialize to valid Wasm GC");
@@ -329,7 +329,7 @@ fn inferred_iterable_items_participate_in_parameter_and_result_inference() {
     assert!(
         function_hover
             .markdown
-            .contains("fn firstOr(values: T, fallback: T.Item) -> T.Item where T: Iterable"),
+            .contains("fn firstOr(values: T, fallback: T.Iterator.Item) -> T.Iterator.Item where T: Iterable, T.Iterator: Iterator"),
         "{}",
         function_hover.markdown
     );
@@ -341,6 +341,64 @@ fn inferred_iterable_items_participate_in_parameter_and_result_inference() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
         .expect("projected parameter and result types should specialize to valid Wasm GC");
+}
+
+#[test]
+fn source_structs_implement_iterable_by_defining_the_required_method() {
+    let source = r#"
+        state "game.exe" {}
+
+        struct Numbers {
+            values: [u32],
+        }
+
+        fn Numbers.iterator() {
+            return self.values.iterator()
+        }
+
+        whileAttached {
+            let numbers = Numbers { values: [1u32, 2, 3] }
+            for value in numbers {
+                print(value)
+            }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("a source iterator method should structurally implement Iterable");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("source-defined Iterable dispatch should produce valid Wasm GC");
+}
+
+#[test]
+fn mismatched_source_iterable_methods_are_diagnosed_without_inference_failure() {
+    let source = r#"
+        state "game.exe" {}
+
+        struct Numbers {}
+
+        fn Numbers.iterator() -> u32 {
+            return 0
+        }
+
+        whileAttached {
+            for value in (Numbers {}) {
+                print(value)
+            }
+        }
+    "#;
+    let diagnostics = splitscript::check(splitscript::parse(source).unwrap())
+        .expect_err("a wrong iterator result must not satisfy Iterable");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("Iterable")
+                && diagnostic
+                    .labels
+                    .iter()
+                    .any(|label| label.span.start == source.find("iterator()").unwrap())
+        }),
+        "{diagnostics:#?}"
+    );
 }
 
 #[test]

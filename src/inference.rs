@@ -186,6 +186,28 @@ pub(crate) struct AssociatedProjection {
     pub(crate) name: &'static str,
 }
 
+/// A projection whose receiver was already a concrete source-defined type.
+///
+/// Catalog types resolve their associated types immediately. Source types are
+/// proven structurally after user method bodies have been inferred, so these
+/// projections retain the ordinary output variable until that proof is
+/// available.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ConcreteAssociatedProjection {
+    receiver: TypeId,
+    output: u32,
+    capability: StdlibCapabilityId,
+    name: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SourceAssociatedType {
+    pub(crate) receiver: TypeId,
+    pub(crate) capability: StdlibCapabilityId,
+    pub(crate) name: &'static str,
+    pub(crate) value: Type,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LiteralDefault {
     Integer,
@@ -298,6 +320,8 @@ pub(crate) struct InferenceContext {
     variables: Vec<Variable>,
     array_shape_variables: Vec<ArrayShapeVariable>,
     associated_projections: Vec<AssociatedProjection>,
+    concrete_associated_projections: Vec<ConcreteAssociatedProjection>,
+    source_associated_types: HashMap<(TypeId, StdlibCapabilityId, &'static str), Type>,
     arrays: Vec<ArrayLayout>,
     options: Vec<OptionLayout>,
     results: Vec<ResultLayout>,
@@ -374,6 +398,8 @@ impl InferenceContext {
             variables: Vec::new(),
             array_shape_variables: Vec::new(),
             associated_projections: Vec::new(),
+            concrete_associated_projections: Vec::new(),
+            source_associated_types: HashMap::new(),
             arrays,
             options,
             results,
@@ -625,27 +651,61 @@ impl InferenceContext {
         let value = if let Some(value) = self.concrete_associated_type(receiver, capability, name) {
             value
         } else {
-            let Type::Variable(receiver) = receiver else {
-                panic!("validated associated type `{name}` has no implementation for {receiver}");
-            };
-            let receiver = self.root(receiver);
-            if let Some(projection) = self.associated_projections.iter().find(|projection| {
-                projection.receiver == receiver
-                    && projection.capability == capability
-                    && projection.name == name
-            }) {
-                Type::Variable(self.root_without_compression(projection.output))
-            } else {
-                let Type::Variable(output) = self.fresh(Requirements::none(), None) else {
-                    unreachable!("fresh inference values are variables")
-                };
-                self.associated_projections.push(AssociatedProjection {
-                    receiver,
-                    output,
-                    capability,
-                    name,
-                });
-                Type::Variable(output)
+            match receiver {
+                Type::Variable(receiver) => {
+                    let receiver = self.root(receiver);
+                    if let Some(projection) =
+                        self.associated_projections.iter().find(|projection| {
+                            projection.receiver == receiver
+                                && projection.capability == capability
+                                && projection.name == name
+                        })
+                    {
+                        Type::Variable(self.root_without_compression(projection.output))
+                    } else {
+                        let Type::Variable(output) = self.fresh(Requirements::none(), None) else {
+                            unreachable!("fresh inference values are variables")
+                        };
+                        self.associated_projections.push(AssociatedProjection {
+                            receiver,
+                            output,
+                            capability,
+                            name,
+                        });
+                        Type::Variable(output)
+                    }
+                }
+                Type::Known(receiver)
+                    if matches!(
+                        self.types.kind(receiver),
+                        TypeKind::Struct(_) | TypeKind::Enum(_)
+                    ) =>
+                {
+                    if let Some(projection) =
+                        self.concrete_associated_projections
+                            .iter()
+                            .find(|projection| {
+                                projection.receiver == receiver
+                                    && projection.capability == capability
+                                    && projection.name == name
+                            })
+                    {
+                        Type::Variable(self.root_without_compression(projection.output))
+                    } else {
+                        let Type::Variable(output) = self.fresh(Requirements::none(), None) else {
+                            unreachable!("fresh inference values are variables")
+                        };
+                        self.concrete_associated_projections
+                            .push(ConcreteAssociatedProjection {
+                                receiver,
+                                output,
+                                capability,
+                                name,
+                            });
+                        Type::Variable(output)
+                    }
+                }
+                _ => return self.error_type(),
             }
         };
         let constraints = self
@@ -668,6 +728,86 @@ impl InferenceContext {
             return self.error_type();
         }
         value
+    }
+
+    /// Records one associated type proven from a source type's complete method
+    /// contract. The value remains an inference type until ordinary
+    /// finalization so return-type and wrapper inference can participate.
+    pub(crate) fn define_source_associated_type(
+        &mut self,
+        receiver: TypeId,
+        capability: StdlibCapabilityId,
+        name: &'static str,
+        value: Type,
+    ) -> Result<(), InferenceError> {
+        let key = (receiver, capability, name);
+        if let Some(previous) = self.source_associated_types.get(&key).copied() {
+            self.unify_deferred(previous, value)?;
+        } else {
+            self.source_associated_types.insert(key, value);
+        }
+        self.solve_associated_projections()
+    }
+
+    pub(crate) fn source_associated_types(
+        &self,
+    ) -> impl Iterator<Item = SourceAssociatedType> + '_ {
+        self.source_associated_types
+            .iter()
+            .map(
+                |(&(receiver, capability, name), &value)| SourceAssociatedType {
+                    receiver,
+                    capability,
+                    name,
+                    value,
+                },
+            )
+    }
+
+    /// Resolves every projection whose source implementation was proven and
+    /// poisons only the outputs of missing implementations. Semantic
+    /// capability validation subsequently reports the missing or mismatched
+    /// method at the actual use site; inference recovery must not replace that
+    /// precise diagnostic with a span-less unbound-variable error.
+    pub(crate) fn finish_associated_projections(&mut self) {
+        let _ = self.solve_associated_projections();
+        let error = Type::Known(self.types.id_for_error());
+        for projection in self.concrete_associated_projections.clone() {
+            if self
+                .concrete_associated_type(
+                    Type::Known(projection.receiver),
+                    projection.capability,
+                    projection.name,
+                )
+                .is_none()
+            {
+                let output = self.root(projection.output);
+                self.variables[output as usize].binding = Some(error);
+            }
+        }
+        // A generic projection can receive the output of a concrete source
+        // projection (for example `Iterable.Iterator.Item`). Resolve the
+        // concrete layer first so recovery propagates through the chain.
+        for _ in 0..=self.associated_projections.len() {
+            let mut changed = false;
+            for projection in self.associated_projections.clone() {
+                let receiver = self.shallow(Type::Variable(projection.receiver));
+                if !matches!(receiver, Type::Variable(_))
+                    && self
+                        .concrete_associated_type(receiver, projection.capability, projection.name)
+                        .is_none()
+                {
+                    let output = self.root(projection.output);
+                    if self.variables[output as usize].binding.is_none() {
+                        self.variables[output as usize].binding = Some(error);
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
     }
 
     pub(crate) fn associated_projections_for(
@@ -708,6 +848,14 @@ impl InferenceContext {
         name: &'static str,
     ) -> Option<Type> {
         let receiver = self.shallow(receiver);
+        if let Type::Known(receiver) = receiver
+            && let Some(value) = self
+                .source_associated_types
+                .get(&(receiver, capability, name))
+                .copied()
+        {
+            return Some(value);
+        }
         if let Some(standard) = self.standard_type(receiver) {
             if !self
                 .standard_library
@@ -1377,13 +1525,25 @@ impl InferenceContext {
             if matches!(receiver, Type::Variable(_)) {
                 continue;
             }
-            let Some(value) =
-                self.concrete_associated_type(receiver, projection.capability, projection.name)
-            else {
-                return Err(InferenceError::UnsupportedOperation {
-                    ty: receiver,
-                    requirements: Requirements::capability(projection.capability),
-                });
+            let value = match self.concrete_associated_type(
+                receiver,
+                projection.capability,
+                projection.name,
+            ) {
+                Some(value) => value,
+                None => continue,
+            };
+            self.unify_inner(Type::Variable(projection.output), value)?;
+        }
+        let concrete = self.concrete_associated_projections.clone();
+        for projection in concrete {
+            let value = match self.concrete_associated_type(
+                Type::Known(projection.receiver),
+                projection.capability,
+                projection.name,
+            ) {
+                Some(value) => value,
+                None => continue,
             };
             self.unify_inner(Type::Variable(projection.output), value)?;
         }

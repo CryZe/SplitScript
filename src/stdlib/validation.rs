@@ -333,6 +333,12 @@ fn validate_associated_type_definitions(
                 definition.name
             ));
         }
+        if !required.contains(definition.name) {
+            errors.push(format!(
+                "{kind} `{owner}` defines associated type `{}` without declaring a capability that requires it",
+                definition.name
+            ));
+        }
     }
     for required in required {
         if !defined.contains(required) {

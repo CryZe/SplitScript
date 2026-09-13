@@ -76,6 +76,13 @@ pub(crate) fn validate(
         &standard_library,
         &capabilities,
     ));
+    diagnostics.extend(validate_for_iterables(
+        syntax,
+        hir,
+        semantics,
+        &standard_library,
+        &capabilities,
+    ));
     diagnostics.extend(validate_future_storage(syntax, semantics, enum_types));
     diagnostics.extend(validate_must_use(&standard_library, hir, semantics));
     let unused_declarations = validate_unused_declarations(syntax, hir, semantics, &capabilities);
@@ -312,6 +319,71 @@ pub(crate) fn validate(
         effects,
         diagnostics,
     }
+}
+
+fn validate_for_iterables(
+    syntax: &Program,
+    hir: &TypedProgram,
+    semantics: &SemanticModel,
+    standard_library: &StandardLibrary,
+    capabilities: &CapabilityAnalysis,
+) -> Vec<Diagnostic> {
+    struct Collector<'a> {
+        syntax: &'a Program,
+        semantics: &'a SemanticModel,
+        standard_library: &'a StandardLibrary,
+        capabilities: &'a CapabilityAnalysis,
+        diagnostics: Vec<Diagnostic>,
+    }
+
+    impl TypedVisitor for Collector<'_> {
+        fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
+            if let TypedStatementKind::For { iterable, .. } = statement.kind {
+                let expression = program
+                    .expression(iterable)
+                    .expect("for iterables belong to typed HIR");
+                let iterator = StdlibCapabilityId::Iterator;
+                let iterable_capability = StdlibCapabilityId::Iterable;
+                if self
+                    .capabilities
+                    .require(expression.ty, iterator, self.semantics)
+                    .is_err()
+                    && let Err(error) = self.capabilities.require(
+                        expression.ty,
+                        iterable_capability,
+                        self.semantics,
+                    )
+                {
+                    self.diagnostics.push(capability_diagnostic(
+                        format!("`for ... in` requires capability `Iterable`: {error}"),
+                        expression.span,
+                        expression.ty,
+                        iterable_capability,
+                        self.syntax,
+                        self.semantics,
+                        self.standard_library,
+                        self.capabilities,
+                    ));
+                }
+            }
+            hir::walk_typed_statement(self, statement, program);
+        }
+    }
+
+    let mut collector = Collector {
+        syntax,
+        semantics,
+        standard_library,
+        capabilities,
+        diagnostics: Vec::new(),
+    };
+    for body in hir.function_bodies() {
+        collector.visit_block(&body.body, hir);
+    }
+    for body in hir.action_bodies() {
+        collector.visit_block(&body.body, hir);
+    }
+    collector.diagnostics
 }
 
 fn validate_enum_memory_layouts(

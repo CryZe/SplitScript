@@ -21,6 +21,9 @@ use super::{CheckOutput, Checker, RecoveringCheckOutput};
 pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheckOutput {
     checker.resolve_deferred_member_paths();
     checker.diagnose_ambiguous_process_reads();
+    if checker.errors.is_empty() {
+        checker.inference.finish_associated_projections();
+    }
     let (function_type_parameters, generic_parameter_constraints, function_associated_projections) =
         if checker.errors.is_empty() {
             bind_function_generics(&mut checker, program)
@@ -65,6 +68,10 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
     checker.inference.finalize_sets();
     checker.inference.finalize_applications();
     checker.inference.intern_resolved_constructed_types();
+    let source_associated_types = checker
+        .inference
+        .source_associated_types()
+        .collect::<Vec<_>>();
     let array_types = checker
         .inference
         .arrays()
@@ -205,6 +212,20 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
         function_type_parameters,
         generic_parameter_constraints,
         function_associated_projections,
+    );
+    semantics.set_source_associated_types(
+        source_associated_types
+            .into_iter()
+            .map(|associated| {
+                let Type::Known(value) = checker.resolved_type(associated.value) else {
+                    unreachable!("resolved associated types have semantic identities")
+                };
+                (
+                    (associated.receiver, associated.capability, associated.name),
+                    value,
+                )
+            })
+            .collect(),
     );
     diagnose_float_literal_ranges(program, &semantics, &mut diagnostics);
     RecoveringCheckOutput {

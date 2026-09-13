@@ -405,6 +405,8 @@ pub struct SemanticModel {
     function_parameter_types: HashMap<FunctionId, Vec<TypeId>>,
     function_type_parameters: HashMap<FunctionId, Vec<TypeId>>,
     function_associated_projections: HashMap<FunctionId, Vec<FunctionAssociatedProjection>>,
+    source_associated_types:
+        HashMap<(TypeId, crate::stdlib::StdlibCapabilityId, &'static str), TypeId>,
     generic_parameter_constraints: HashMap<TypeId, Vec<crate::stdlib::StdlibCapabilityId>>,
     specialized_types: HashMap<(FunctionInstance, TypeId), TypeId>,
     struct_field_types: HashMap<StructFieldId, TypeId>,
@@ -601,6 +603,19 @@ impl SemanticModel {
             .values()
             .flatten()
             .find(|projection| projection.output == output)
+            .copied()
+    }
+
+    /// Returns an associated type inferred from the method contract of a
+    /// source-defined nominal type.
+    pub fn source_associated_type(
+        &self,
+        receiver: TypeId,
+        capability: crate::stdlib::StdlibCapabilityId,
+        name: &'static str,
+    ) -> Option<TypeId> {
+        self.source_associated_types
+            .get(&(receiver, capability, name))
             .copied()
     }
 
@@ -1441,6 +1456,16 @@ impl SemanticModel {
         parameters: HashMap<FunctionId, Vec<TypeId>>,
     ) {
         self.function_parameter_types = parameters;
+    }
+
+    pub(crate) fn set_source_associated_types(
+        &mut self,
+        associated_types: HashMap<
+            (TypeId, crate::stdlib::StdlibCapabilityId, &'static str),
+            TypeId,
+        >,
+    ) {
+        self.source_associated_types = associated_types;
     }
 
     pub fn struct_field_type(&self, field: StructFieldId) -> Option<TypeId> {
@@ -2566,6 +2591,7 @@ impl SemanticBuilder {
             function_parameter_types: HashMap::new(),
             function_type_parameters: HashMap::new(),
             function_associated_projections: HashMap::new(),
+            source_associated_types: HashMap::new(),
             generic_parameter_constraints: HashMap::new(),
             specialized_types: HashMap::new(),
             struct_field_types,

@@ -1096,6 +1096,24 @@ impl SemanticModel {
                 });
                 self.types.intern(TypeKind::Async { layout, value })
             }
+            CatalogTypeRef::Iterator(item) => {
+                let item =
+                    self.materialize_catalog_type(*item, variables, ids, constructed, library);
+                if let Some(existing) = self.types.iter().find_map(|(id, kind)| {
+                    matches!(kind, TypeKind::Iterator { item: candidate, .. } if *candidate == item)
+                        .then_some(id)
+                }) {
+                    return existing;
+                }
+                let layout = ids.iterator();
+                constructed
+                    .iterators
+                    .push(crate::types::ResolvedIteratorType {
+                        id: layout,
+                        item: self.resolved_type_ref(item),
+                    });
+                self.types.intern(TypeKind::Iterator { layout, item })
+            }
             CatalogTypeRef::FixedArray { element, length } => {
                 let element =
                     self.materialize_catalog_type(*element, variables, ids, constructed, library);
@@ -1403,6 +1421,10 @@ impl SemanticModel {
                 TypeKind::Async {
                     value: concrete, ..
                 },
+            )
+            | (
+                TypeKind::Iterator { item: template, .. },
+                TypeKind::Iterator { item: concrete, .. },
             ) => self.specialize_signature_node(*template, *concrete, searched),
             (
                 TypeKind::Range {
@@ -1440,6 +1462,26 @@ impl SemanticModel {
                     },
                 )
             }
+            (
+                TypeKind::Callable {
+                    parameters: template_parameters,
+                    result: template_result,
+                    ..
+                },
+                TypeKind::Callable {
+                    parameters: concrete_parameters,
+                    result: concrete_result,
+                    ..
+                },
+            ) if template_parameters.len() == concrete_parameters.len() => template_parameters
+                .iter()
+                .zip(concrete_parameters)
+                .find_map(|(template, concrete)| {
+                    self.specialize_signature_node(*template, *concrete, searched)
+                })
+                .or_else(|| {
+                    self.specialize_signature_node(*template_result, *concrete_result, searched)
+                }),
             _ => None,
         }
     }
@@ -1553,6 +1595,13 @@ impl SemanticModel {
                 let value = self.instantiated_catalog_type(*value, variables)?;
                 self.types.iter().find_map(|(id, kind)| {
                     matches!(kind, TypeKind::Async { value: candidate, .. } if *candidate == value)
+                        .then_some(id)
+                })
+            }
+            CatalogTypeRef::Iterator(item) => {
+                let item = self.instantiated_catalog_type(*item, variables)?;
+                self.types.iter().find_map(|(id, kind)| {
+                    matches!(kind, TypeKind::Iterator { item: candidate, .. } if *candidate == item)
                         .then_some(id)
                 })
             }

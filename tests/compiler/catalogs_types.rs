@@ -2367,8 +2367,7 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         )
         .chain(
             library
-                .type_constructors()
-                .iter()
+                .public_type_constructors()
                 .map(|value| (value.name, value.documentation)),
         )
         .chain(
@@ -2427,8 +2426,7 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         )
         .chain(
             library
-                .type_constructors()
-                .iter()
+                .public_type_constructors()
                 .map(|value| ("type constructor", value.name, value.documentation)),
         )
         .chain(

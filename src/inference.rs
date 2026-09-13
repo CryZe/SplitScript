@@ -971,6 +971,10 @@ impl InferenceContext {
                 let value = self.catalog_type(*value, variables);
                 Type::Async(self.async_type(value))
             }
+            CatalogTypeRef::Iterator(item) => {
+                let item = self.catalog_type(*item, variables);
+                Type::Iterator(self.iterator_type(item))
+            }
             CatalogTypeRef::FixedArray { element, length } => {
                 let element = self.catalog_type(*element, variables);
                 Type::Array(self.array_type_with_length(element, Some(length)))

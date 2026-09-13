@@ -232,7 +232,8 @@ impl<'a> CatalogGenerator<'a> {
                     .map(|reason| format!("Some({})", quote(reason)))
                     .unwrap_or_else(|| "None".to_owned());
                 output.push_str(&format!(
-                    "StdlibTypeConstructor {{ id: StdlibTypeConstructorId::{id}, syntax: TypeConstructorSyntax::{syntax}, name: {}, parameters: {}, capabilities: {}, must_use: {must_use}, associated_types: {}, documentation: {} }},\n",
+                    "StdlibTypeConstructor {{ id: StdlibTypeConstructorId::{id}, public: {}, syntax: TypeConstructorSyntax::{syntax}, name: {}, parameters: {}, capabilities: {}, must_use: {must_use}, associated_types: {}, documentation: {} }},\n",
+                    !owner.private,
                     quote(&owner.name),
                     self.type_parameters(&owner.type_parameters, owner),
                     self.capabilities(&owner.attributes),
@@ -295,7 +296,7 @@ impl<'a> CatalogGenerator<'a> {
                     &declaration.fields,
                     &declaration.type_parameters,
                     FieldEmissionOptions {
-                        owner_private: false,
+                        owner_private: declaration.private,
                         test_only: has_attribute(&declaration.attributes, "testOnly"),
                     },
                 ),
@@ -472,6 +473,7 @@ impl<'a> CatalogGenerator<'a> {
                     }
                     let owner = CallableOwnerDeclaration {
                         name: declaration.name.clone(),
+                        private: declaration.private,
                         type_constructor_syntax: None,
                         type_parameters: Vec::new(),
                         documentation: declaration.documentation.clone(),
@@ -645,7 +647,7 @@ impl<'a> CatalogGenerator<'a> {
             .unwrap_or_else(|| "&[]".to_owned());
         output.push_str(&format!(
             "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, visibility: ItemVisibility::{}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: None, unary_operator: None, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result_is_async: {}, result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: {examples}, related: &[] }}, intrinsic_context: None, implementation: Implementation::LibraryOverloads {{ dispatch_parameter: 0, cases: &[{case_values}] }} }},\n",
-            if public.private { "LibraryPrivate" } else { "Public" },
+            if owner.private || public.private { "LibraryPrivate" } else { "Public" },
             quote(&public.name),
             quote(&qualified_name),
             self.type_parameters(&public_parameters, owner),
@@ -743,7 +745,7 @@ impl<'a> CatalogGenerator<'a> {
             .unwrap_or_else(|| "&[]".to_owned());
         output.push_str(&format!(
                 "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, visibility: ItemVisibility::{}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: {binary_operator}, unary_operator: {unary_operator}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result_is_async: {}, result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: {examples}, related: &[] }}, intrinsic_context: {intrinsic_context}, implementation: {implementation} }},\n",
-                if function.private { "LibraryPrivate" } else { "Public" },
+                if owner.private || function.private { "LibraryPrivate" } else { "Public" },
                 quote(&function.name),
                 quote(&qualified_name),
                 self.type_parameters(type_parameters, owner),
@@ -905,6 +907,10 @@ impl<'a> CatalogGenerator<'a> {
             Type::Async(value) => format!(
                 "TypeRef::Async(&{})",
                 self.type_ref(value, parameters, associated_types)
+            ),
+            Type::Iterator(item) => format!(
+                "TypeRef::Iterator(&{})",
+                self.type_ref(item, parameters, associated_types)
             ),
             Type::Option(value) => format!(
                 "TypeRef::Application {{ constructor: StdlibTypeConstructorId::Option, arguments: &[{}] }}",

@@ -885,6 +885,23 @@ concepts rather than maintaining a parallel inventory.
   diagnostics, Debug, hover, navigation, highlighting, completion, selection,
   documentation, nested control flow, aliasing, permanent exhaustion, generic
   calls, closures, runtime behavior, and Wasm validation.
+- [x] Make `iterator T` the single public erased iterator type. Arrays, sets,
+  maps, integer ranges, `map`, `filter`, and generators now expose the same
+  type; ordinary functions can forward any existing iterator without becoming
+  generators. Concrete cursor layouts and their raw intrinsics remain private
+  standard-library implementation details and are absent from name resolution,
+  completion, hover, and generated documentation.
+- [ ] Design one hidden exact-producer analysis for erased runtime values before
+  optimizing their dispatch. Public types should remain `iterator T`, `async T`,
+  and ordinary callable types, while compiler facts may retain one proven
+  concrete iterator frame, future frame, or closure target through locals,
+  forwarding calls, and unambiguous control flow. Direct calls may be
+  devirtualized only while that fact has exactly one target; heterogeneous
+  aggregates, joins with multiple producers, escaping values, and unknown calls
+  must deliberately fall back to the existing dynamic dispatch. Measure code
+  size and runtime behavior before implementing this as an optimization, and
+  keep it separate from source-level type inference and capability semantics so
+  optimization never changes which programs type-check.
 
 ### Engine and emulator providers
 
@@ -1413,12 +1430,10 @@ remaining work is product hardening and distribution.
   and search results, preventing the same class of drift from recurring.
 - [x] Make exact documentation queries for concrete generic members resolve to
   their canonical operation instead of only returning a ranked type list. For
-  example, `splitc docs SetIterator.next` should show the specialized signature,
-  explain `IteratorStep`, and include the relevant example. Drive array, set,
-  range, future map/filter, and `Map` iterator pages through the same catalog
-  operation so this improves lookup without duplicating documentation. Concise
-  generic owner/member aliases are now derived from catalog identities and only
-  resolve directly when they identify one canonical page.
+  example, `splitc docs MapEntry.key` shows the specialized field. Concise
+  generic owner/member aliases are derived from catalog identities and resolve
+  directly only when they identify one canonical public page; private iterator
+  cursor implementations deliberately have no documentation topics.
 - [ ] Improve navigation for very long terminal guide results without changing
   their content model. Put stable exact subsection identities near the top of
   monolithic guides and make focused `splitc docs` queries obvious before a

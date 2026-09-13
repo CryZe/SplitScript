@@ -966,9 +966,26 @@ fn collect_function_signatures(checker: &mut Checker, program: &Program) {
             let ty = checker.syntax_type(annotation);
             checker.inference.freshen_omitted_array_shapes(ty)
         });
+        let is_generator = crate::typeck::control_flow::contains_yield(&function.body);
+        // Generic catalog bodies omit their source-level result annotation and
+        // are seeded from the privileged catalog during body checking. Keep
+        // generator classification independent from that rendering detail.
+        let catalog_generator = is_generator
+            && checker
+                .standard_library
+                .source_body_item_by_function_name(&function.name)
+                .is_some_and(|item| {
+                    matches!(item.signature.result, crate::stdlib::TypeRef::Iterator(_))
+                });
+        let inferred_generator_result = catalog_generator.then(|| {
+            let item = checker.fresh_inference(Requirements::none(), None);
+            Type::Iterator(checker.inference.iterator_type(item))
+        });
         let completion = if let Some(Type::Async(future)) = annotated {
             checker.inference.async_value(future)
-        } else if matches!(annotated, Some(Type::Iterator(_))) {
+        } else if (is_generator && matches!(annotated, Some(Type::Iterator(_))))
+            || catalog_generator
+        {
             checker.core_type(crate::stdlib::CoreTypeId::None)
         } else if let Some(annotation) = annotated {
             annotation
@@ -981,6 +998,8 @@ fn collect_function_signatures(checker: &mut Checker, program: &Program) {
             || crate::typeck::control_flow::contains_suspension(&function.body);
         let result = if function.return_is_iterator {
             annotated.expect("an explicit iterator result has an annotation")
+        } else if let Some(result) = inferred_generator_result {
+            result
         } else if is_async {
             match annotated {
                 Some(result @ Type::Async(_)) => result,

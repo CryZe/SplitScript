@@ -1404,7 +1404,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "fn name(parameters) { ... }",
         "Declares a function or method.",
-        "Each parameter may be an irrefutable [`binding pattern`]. It still consumes exactly one argument; an annotation applies to that complete argument while the projected names receive their field or payload types. Parameter and result annotations are optional when constraints from the body and call sites determine them. A function returning [`iterator`] `T` is a synchronous generator whose body advances only when its cursor is consumed.",
+        "Each parameter may be an irrefutable [`binding pattern`]. It still consumes exactly one argument; an annotation applies to that complete argument while the projected names receive their field or payload types. Parameter and result annotations are optional when constraints from the body and call sites determine them. A function declared `->` [`iterator`] `T` may either forward an existing iterator with ordinary [`return`] or become a lazy synchronous generator by using [`yield`].",
         FUNCTION_EXAMPLE
     ),
     language_item!(
@@ -1413,7 +1413,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "value => expression | (left: T, right: U) -> Result => { ... }",
         "Creates a callable value with lexical captures.",
-        "Each parenthesized parameter may be an irrefutable [`binding pattern`] and still consumes one argument. Parameter and result types are inferred bidirectionally from the body, invocation sites, and any expected [`callable type`]. A single inferred name may omit parentheses; zero, multiple, annotated, or destructured parameters use parentheses. An explicit result uses `(parameters) -> Result => body`; write [`async`] `T` for an explicitly asynchronous closure or [`iterator`] `T` for a synchronous generator closure. The body is any expression, including a [`value block`]. An async body may use [`await`] or [`retry`]; a generator body produces values with [`yield`]. Calling either kind creates its lazy continuation without executing the body. Captured immutable values are retained in the closure environment. A mutable local is captured by reference through one shared cell, so assignments in the closure and its declaring scope observe each other even after the closure is returned or stored across [`await`]. [`return`] exits the closure itself; [`break`] and [`continue`] cannot escape into an outer loop.",
+        "Each parenthesized parameter may be an irrefutable [`binding pattern`] and still consumes one argument. Parameter and result types are inferred bidirectionally from the body, invocation sites, and any expected [`callable type`]. A single inferred name may omit parentheses; zero, multiple, annotated, or destructured parameters use parentheses. An explicit result uses `(parameters) -> Result => body`; write [`async`] `T` for an explicitly asynchronous closure or [`iterator`] `T` for a closure that forwards or generates an iterator. The body is any expression, including a [`value block`]. An async body may use [`await`] or [`retry`]; an iterator body becomes a lazy generator only when it uses [`yield`]. Calling an async function or generator creates its continuation without executing the body. Captured immutable values are retained in the closure environment. A mutable local is captured by reference through one shared cell, so assignments in the closure and its declaring scope observe each other even after the closure is returned or stored across [`await`]. [`return`] exits the closure itself; [`break`] and [`continue`] cannot escape into an outer loop.",
         CLOSURE_EXAMPLES
     ),
     language_item!(
@@ -1826,8 +1826,8 @@ define_language_catalog! {
         "iterator",
         LanguageItemKind::Keyword,
         "fn name(...) -> iterator T { ... } | (...) -> iterator T => { ... }",
-        "Declares a lazy synchronous generator result.",
-        "Calling a function or closure returning [`iterator`] `T` allocates a cursor without running its body. Each [`Iterator.next`] resumes that body until one [`yield`] and returns [`Item`]`(T)`; fallthrough or a bare [`return`] permanently returns [`End`]. Copies alias the same cursor position, and the value implements both [`Iterator`] and identity [`Iterable`], so it composes with [`for`], [`map`], and [`filter`]. Generators are synchronous: [`await`], [`retry`], value-returning [`return`], and uncaught fallible control are rejected rather than silently changing the iterator protocol.",
+        "Names the type-erased synchronous iterator over `T`.",
+        "Arrays, sets, ranges, maps, adapters, and generator bodies expose the same [`iterator`] `T` type; their representation-specific cursor types are private standard-library details. A function or closure may return any existing iterator with ordinary [`return`]. If its body contains [`yield`], the body instead becomes a lazy generator: calling it allocates a cursor without running the body, and each [`Iterator.next`] resumes until one yield. Fallthrough or a bare return permanently returns [`End`]. Copies alias the same cursor position, and the value implements both [`Iterator`] and identity [`Iterable`], so it composes with [`for`], [`map`], and [`filter`]. Generators are synchronous: [`await`], [`retry`], value-returning return, and uncaught fallible control are rejected rather than silently changing the iterator protocol.",
         ITERATOR_TYPE_EXAMPLE
     ),
     language_item!(

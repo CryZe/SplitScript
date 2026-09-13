@@ -69,6 +69,9 @@ impl TypeRef {
             Self::Async(value) => {
                 format!("async {}", value.render_with(library, substitutions))
             }
+            Self::Iterator(item) => {
+                format!("iterator {}", item.render_with(library, substitutions))
+            }
             Self::Application {
                 constructor,
                 arguments,
@@ -374,6 +377,12 @@ impl StandardLibrary {
         TYPE_CONSTRUCTORS
     }
 
+    pub fn public_type_constructors(&self) -> impl Iterator<Item = &'static StdlibTypeConstructor> {
+        self.type_constructors()
+            .iter()
+            .filter(|constructor| constructor.public)
+    }
+
     pub fn type_constructor(&self, id: StdlibTypeConstructorId) -> &'static StdlibTypeConstructor {
         self.graph
             .type_constructors
@@ -394,6 +403,15 @@ impl StandardLibrary {
     /// Structural forms such as `[T]`, `T?`, and `T!` deliberately have no
     /// identifier lookup path.
     pub fn named_type_constructor_by_name(
+        &self,
+        name: &str,
+    ) -> Option<&'static StdlibTypeConstructor> {
+        self.public_type_constructors().find(|constructor| {
+            constructor.syntax == TypeConstructorSyntax::Named && constructor.name == name
+        })
+    }
+
+    pub(crate) fn named_type_constructor_by_name_including_private(
         &self,
         name: &str,
     ) -> Option<&'static StdlibTypeConstructor> {
@@ -1854,7 +1872,7 @@ fn validate_catalog_type_ref(
             }
         }
         TypeRef::Associated(_) => {}
-        TypeRef::Async(value) => {
+        TypeRef::Async(value) | TypeRef::Iterator(value) => {
             validate_catalog_type_ref(*value, parameters, item, errors);
         }
         TypeRef::Application {

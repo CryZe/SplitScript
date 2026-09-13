@@ -137,7 +137,8 @@ fn initialize_checker(
                 return None;
             };
             let name = program.type_name(application.constructor);
-            let constructor = standard_library.named_type_constructor_by_name(name)?;
+            let constructor =
+                standard_library.named_type_constructor_by_name_including_private(name)?;
             Some(ApplicationLayout {
                 id: application.id,
                 constructor: constructor.id,
@@ -271,7 +272,7 @@ fn initialize_checker(
         let name = program.type_name(application.constructor);
         let Some(constructor) = checker
             .standard_library
-            .named_type_constructor_by_name(name)
+            .named_type_constructor_by_name_including_private(name)
         else {
             continue;
         };

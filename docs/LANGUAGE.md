@@ -1115,12 +1115,26 @@ the same assignments. [`return`] exits the closure itself; [`break`] and
 [`continue`] cannot target a loop outside it. Callable values do not implement
 [`Equatable`].
 
-### Synchronous generators
+### Iterators and synchronous generators
 
-A function returning `iterator T` is a lazy synchronous generator. Calling it
-creates a cursor without executing the body. Each `next()` resumes the body
-until one `yield`, returning `Item(value)`; reaching the end or a bare `return`
-permanently returns `End`.
+`iterator T` is the common, type-erased cursor type returned by arrays, sets,
+ranges, maps, adapters, and generators. Their concrete cursor representations
+are standard-library implementation details. This means one function can
+forward any iterator with the same item type:
+
+```text
+fn values(useRange: bool) -> iterator u32 {
+    if useRange {
+        return (1..<4).iterator()
+    }
+    return [1, 2, 3].iterator()
+}
+```
+
+A function or closure whose `iterator T` body contains `yield` is a lazy
+synchronous generator. Calling it creates a cursor without executing the body.
+Each `next()` resumes the body until one `yield`, returning `Item(value)`;
+reaching the end or a bare `return` permanently returns `End`.
 
 ```text
 fn values(end: u32) -> iterator u32 {

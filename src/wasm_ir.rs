@@ -1179,6 +1179,7 @@ impl Program {
         }
         for (expression, parameters, body) in closures {
             let captures = program.closure_captures[&expression].clone();
+            let is_generator = hir::typed_expression_contains_yield(body, typed_hir);
             let mut entry = lower_expression_body(
                 body,
                 typed_hir,
@@ -1226,7 +1227,9 @@ impl Program {
                 TypeKind::Async { value, .. } => {
                     BodyAbi::AsyncFunction(AsyncFunctionAbi { completion: *value })
                 }
-                TypeKind::Iterator { item, .. } => BodyAbi::Generator(GeneratorAbi { item: *item }),
+                TypeKind::Iterator { item, .. } if is_generator => {
+                    BodyAbi::Generator(GeneratorAbi { item: *item })
+                }
                 _ => BodyAbi::Direct,
             };
             program.closures.push(ClosureBody {
@@ -2508,7 +2511,8 @@ fn lower_body(
             if let Some(result) = semantics.function_result(instance.function)
                 && let result = semantics.specialize_type(instance, result)
                 && let crate::types::TypeKind::Iterator { item, .. } =
-                    semantics.types().kind(result) =>
+                    semantics.types().kind(result)
+                && hir::typed_block_contains_yield(block, typed_hir) =>
         {
             BodyAbi::Generator(GeneratorAbi { item: *item })
         }

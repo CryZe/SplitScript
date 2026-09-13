@@ -489,7 +489,7 @@ fn validate_field_type(
                 );
             }
         }
-        TypeRef::Async(value) => {
+        TypeRef::Async(value) | TypeRef::Iterator(value) => {
             validate_field_type(
                 *value,
                 field,
@@ -580,6 +580,9 @@ fn validate_memory_type(
             Err("associated fields have no fixed process-memory layout".to_owned())
         }
         TypeRef::Async(_) => Err("async fields have no fixed process-memory layout".to_owned()),
+        TypeRef::Iterator(_) => {
+            Err("iterator fields have no fixed process-memory layout".to_owned())
+        }
         TypeRef::Callable { .. } => {
             Err("callable fields have no fixed process-memory layout".to_owned())
         }
@@ -623,6 +626,7 @@ fn validate_equality_type(
         TypeRef::Parameter(_) => Err("its generic type is not Equatable".to_owned()),
         TypeRef::Associated(_) => Err("its associated type is not Equatable".to_owned()),
         TypeRef::Async(_) => Err("its async type is not Equatable".to_owned()),
+        TypeRef::Iterator(_) => Err("its iterator type is not Equatable".to_owned()),
         TypeRef::Callable { .. } => Err("its callable type is not Equatable".to_owned()),
     }
 }

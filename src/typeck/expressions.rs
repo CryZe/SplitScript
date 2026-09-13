@@ -572,7 +572,7 @@ impl Checker {
                 } else if self.is_library_function()
                     && let Some(declaration) = self
                         .standard_library
-                        .named_type_constructor_by_name(name)
+                        .named_type_constructor_by_name_including_private(name)
                         .copied()
                 {
                     let variables = declaration
@@ -1376,19 +1376,27 @@ impl Checker {
                     let ty = self.syntax_type(ty);
                     self.inference.freshen_omitted_array_shapes(ty)
                 });
-                let generator_item =
-                    annotated_result.and_then(|result| match self.shallow_type(result) {
-                        Type::Iterator(iterator) => Some(self.inference.iterator_item(iterator)),
-                        Type::Known(result) => match self.inference.type_store().kind(result) {
-                            TypeKind::Iterator { item, .. } => Some(Type::Known(*item)),
+                let is_generator = crate::typeck::control_flow::expression_contains_yield(body);
+                let generator_item = is_generator
+                    .then(|| {
+                        annotated_result.and_then(|result| match self.shallow_type(result) {
+                            Type::Iterator(iterator) => {
+                                Some(self.inference.iterator_item(iterator))
+                            }
+                            Type::Known(result) => match self.inference.type_store().kind(result) {
+                                TypeKind::Iterator { item, .. } => Some(Type::Known(*item)),
+                                _ => None,
+                            },
                             _ => None,
-                        },
-                        _ => None,
-                    });
+                        })
+                    })
+                    .flatten();
                 let annotated_completion =
                     annotated_result.map(|result| match self.shallow_type(result) {
                         Type::Async(future) => self.inference.async_value(future),
-                        Type::Iterator(_) => self.core_type(crate::stdlib::CoreTypeId::None),
+                        Type::Iterator(_) if is_generator => {
+                            self.core_type(crate::stdlib::CoreTypeId::None)
+                        }
                         result => result,
                     });
                 let completion = annotated_completion

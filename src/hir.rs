@@ -2129,3 +2129,76 @@ fn failure_target_for_propagation(semantics: &SemanticModel, expression: ExprId)
         },
     )
 }
+
+/// Returns whether a typed block contains a `yield` belonging to that block's
+/// callable body. Yields inside nested closures are deliberately excluded.
+pub fn typed_block_contains_yield(block: &TypedBlock, program: &TypedProgram) -> bool {
+    block
+        .statements
+        .iter()
+        .any(|statement| match &statement.kind {
+            TypedStatementKind::Yield { .. } => true,
+            TypedStatementKind::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                typed_expression_contains_yield(*condition, program)
+                    || typed_block_contains_yield(then_block, program)
+                    || else_block
+                        .as_ref()
+                        .is_some_and(|block| typed_block_contains_yield(block, program))
+            }
+            TypedStatementKind::While { condition, body } => {
+                typed_expression_contains_yield(*condition, program)
+                    || typed_block_contains_yield(body, program)
+            }
+            TypedStatementKind::For { iterable, body, .. } => {
+                typed_expression_contains_yield(*iterable, program)
+                    || typed_block_contains_yield(body, program)
+            }
+            TypedStatementKind::Variable { initializer, .. }
+            | TypedStatementKind::Assign {
+                value: initializer, ..
+            }
+            | TypedStatementKind::Suspend {
+                value: initializer, ..
+            }
+            | TypedStatementKind::Expression(initializer) => {
+                typed_expression_contains_yield(*initializer, program)
+            }
+            TypedStatementKind::StateAssign { target, value, .. }
+            | TypedStatementKind::IndexAssign { target, value, .. } => {
+                typed_expression_contains_yield(*target, program)
+                    || typed_expression_contains_yield(*value, program)
+            }
+        })
+}
+
+/// Returns whether a typed expression contains a `yield` belonging to its
+/// surrounding callable body. Yields inside nested closures are excluded.
+pub fn typed_expression_contains_yield(expression: ExprId, program: &TypedProgram) -> bool {
+    let Some(expression) = program.expression(expression) else {
+        return false;
+    };
+    match &expression.kind {
+        TypedExpressionKind::Block { statements, value } => {
+            typed_block_contains_yield(statements, program)
+                || value.is_some_and(|value| typed_expression_contains_yield(value, program))
+        }
+        TypedExpressionKind::Loop { body } => typed_block_contains_yield(body, program),
+        TypedExpressionKind::If {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            typed_expression_contains_yield(*then_expr, program)
+                || typed_expression_contains_yield(*else_expr, program)
+        }
+        TypedExpressionKind::Match { arms, .. } => arms
+            .iter()
+            .any(|arm| typed_expression_contains_yield(arm.value, program)),
+        TypedExpressionKind::Closure { .. } => false,
+        _ => false,
+    }
+}

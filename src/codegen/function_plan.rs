@@ -673,21 +673,22 @@ pub(super) fn encode<'a>(
             .closure(instance.expression)
             .expect("continuation-backed closures have Wasm IR bodies");
         let result = match closure.abi {
-            crate::wasm_ir::BodyAbi::AsyncFunction(_) => vec![ValType::I32],
-            crate::wasm_ir::BodyAbi::Generator(generator) => vec![
-                gc.val_type(
-                    iterator_step_type(
-                        instance.owner.as_ref().map_or(generator.item, |owner| {
-                            semantics.specialize_type(owner, generator.item)
-                        }),
-                        semantics,
-                    )
-                    .expect("consumed generator closures materialize IteratorStep types"),
-                ),
-            ],
+            crate::wasm_ir::BodyAbi::AsyncFunction(_) => Some(vec![ValType::I32]),
+            crate::wasm_ir::BodyAbi::Generator(generator) => iterator_step_type(
+                instance.owner.as_ref().map_or(generator.item, |owner| {
+                    semantics.specialize_type(owner, generator.item)
+                }),
+                semantics,
+            )
+            .map(|step| vec![gc.val_type(step)]),
             crate::wasm_ir::BodyAbi::Direct | crate::wasm_ir::BodyAbi::AsyncAction => {
                 unreachable!("planned closure frames have continuation ABIs")
             }
+        };
+        let Some(result) = result else {
+            // A constructed but never consumed generator needs its frame and
+            // initializer, but no `next` entry point or IteratorStep layout.
+            continue;
         };
         closure_resumes.insert(
             instance.clone(),

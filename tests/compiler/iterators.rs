@@ -329,14 +329,18 @@ fn iterator_methods_and_steps_are_available_to_editor_queries() {
     assert_eq!(
         database.definition_at(next).unwrap(),
         Some(DefinitionTarget::StandardLibrary(
-            StdlibItemId::ArrayIteratorNext,
+            StdlibItemId::IteratorNext,
         )),
     );
     let hover = database
         .hover(next)
         .unwrap()
         .expect("iterator method hover");
-    assert!(hover.markdown.contains("ArrayIterator<u32>.next"));
+    assert!(
+        hover.markdown.contains("iterator u32.next"),
+        "{}",
+        hover.markdown
+    );
 
     let patterns = r#"
         state "game.exe" {}
@@ -355,6 +359,43 @@ fn iterator_methods_and_steps_are_available_to_editor_queries() {
             Some(DefinitionTarget::Language(item)),
         );
         assert!(database.hover(offset).unwrap().is_some());
+    }
+}
+
+#[test]
+fn concrete_iterator_implementations_are_not_public_language_types() {
+    let source = "state \"game.exe\" {}\nfn inspect(value: ArrayIterator<u32>) {}\n";
+    let diagnostics = splitscript::compile(source)
+        .expect_err("private iterator implementation types must not be nameable");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("unknown type `ArrayIterator`") }),
+        "{diagnostics:#?}"
+    );
+
+    let completion_source = "state \"game.exe\" {}\nfn inspect(value: Arr) {}\n";
+    let mut database = CompilerDatabase::new(completion_source);
+    let offset = completion_source.find("Arr").unwrap() + "Arr".len();
+    let labels = database
+        .completions(offset)
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|item| item.label)
+        .collect::<Vec<_>>();
+    for private in [
+        "ArrayIterator",
+        "SetIterator",
+        "ExclusiveRangeIterator",
+        "InclusiveRangeIterator",
+        "MapIterator",
+        "FilterIterator",
+    ] {
+        assert!(
+            !labels.iter().any(|label| label.starts_with(private)),
+            "{labels:#?}"
+        );
     }
 }
 

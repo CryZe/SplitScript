@@ -126,9 +126,6 @@ impl Parser<'_> {
                     )?,
                 ));
             } else if self.eat_ident("typeConstructor") {
-                if private {
-                    return Err(self.error("`private` can only modify a type declaration"));
-                }
                 let (name, syntax, type_parameters) = self.type_constructor_head()?;
                 let mut declaration = self.callable_owner_declaration_with_parameters(
                     name,
@@ -141,6 +138,7 @@ impl Parser<'_> {
                         associated_types: AssociatedTypesMode::Definitions,
                     },
                 )?;
+                declaration.private = private;
                 declaration.type_constructor_syntax = Some(syntax);
                 declarations.push(Declaration::TypeConstructor(declaration));
             } else if self.eat_ident("extend") {
@@ -389,6 +387,7 @@ impl Parser<'_> {
         self.bump();
         Ok(CallableOwnerDeclaration {
             name,
+            private: false,
             type_constructor_syntax: None,
             type_parameters,
             documentation,
@@ -800,6 +799,8 @@ impl Parser<'_> {
                 return Err(self.error("an async type cannot wrap another async type"));
             }
             Type::Async(Box::new(value))
+        } else if self.eat_ident("iterator") {
+            Type::Iterator(Box::new(self.ty()?))
         } else if self.eat(&TokenKind::LParen) {
             let mut parameters = Vec::new();
             while !self.at(&TokenKind::RParen) {

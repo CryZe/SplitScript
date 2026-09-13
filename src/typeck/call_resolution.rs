@@ -1787,6 +1787,7 @@ impl Checker {
                 }),
             CatalogTypeRef::Associated(_) => false,
             CatalogTypeRef::Async(_) => matches!(receiver, Type::Async(_)),
+            CatalogTypeRef::Iterator(_) => matches!(receiver, Type::Iterator(_)),
             CatalogTypeRef::Callable { .. } => matches!(receiver, Type::Callable(_)),
         }
     }
@@ -1890,6 +1891,10 @@ impl Checker {
             CatalogTypeRef::Async(value) => {
                 let value = self.catalog_type(*value, variables);
                 Type::Async(self.inference.async_type(value))
+            }
+            CatalogTypeRef::Iterator(item) => {
+                let item = self.catalog_type(*item, variables);
+                Type::Iterator(self.inference.iterator_type(item))
             }
             CatalogTypeRef::FixedArray { element, length } => {
                 let element = self.catalog_type(*element, variables);

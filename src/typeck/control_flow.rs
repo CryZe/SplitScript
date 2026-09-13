@@ -37,6 +37,55 @@ pub(super) fn contains_suspension(block: &Block) -> bool {
     finder.0
 }
 
+pub(super) fn contains_yield(block: &Block) -> bool {
+    struct YieldFinder(bool);
+
+    impl<'ast> Visitor<'ast> for YieldFinder {
+        fn visit_stmt(&mut self, statement: &'ast Stmt) {
+            if matches!(statement, Stmt::Yield { .. }) {
+                self.0 = true;
+            } else if !self.0 {
+                visit::walk_stmt(self, statement);
+            }
+        }
+
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if !self.0 && !matches!(expression.kind, ExprKind::Closure { .. }) {
+                visit::walk_expr(self, expression);
+            }
+        }
+    }
+
+    let mut finder = YieldFinder(false);
+    finder.visit_block(block);
+    finder.0
+}
+
+pub(super) fn expression_contains_yield(expression: &Expr) -> bool {
+    struct YieldFinder(bool);
+
+    impl<'ast> Visitor<'ast> for YieldFinder {
+        fn visit_stmt(&mut self, statement: &'ast Stmt) {
+            if matches!(statement, Stmt::Yield { .. }) {
+                self.0 = true;
+            } else if !self.0 {
+                visit::walk_stmt(self, statement);
+            }
+        }
+
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if !self.0 && !matches!(expression.kind, ExprKind::Closure { .. }) {
+                visit::walk_expr(self, expression);
+            }
+        }
+    }
+
+    let mut finder = YieldFinder(false);
+    // The supplied expression is the closure body, not a nested closure node.
+    visit::walk_expr(&mut finder, expression);
+    finder.0
+}
+
 pub(super) fn expression_contains_suspension(expression: &Expr) -> bool {
     struct SuspensionFinder(bool);
 

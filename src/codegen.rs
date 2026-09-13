@@ -971,24 +971,19 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     );
     codes.push(&body);
     for (instance, layout) in async_frames.closures() {
+        let Some(&resume) = closure_resumes.get(instance) else {
+            continue;
+        };
         let closure = wasm_ir
             .closure(instance.expression)
             .expect("continuation-backed closure instances have bodies");
         let body = match closure.abi {
-            wasm_ir::BodyAbi::AsyncFunction(_) => compile_async_closure_poll(
-                instance,
-                closure,
-                closure_resumes[instance],
-                layout,
-                &runtime,
-            ),
-            wasm_ir::BodyAbi::Generator(_) => compile_generator_closure_next(
-                instance,
-                closure,
-                closure_resumes[instance],
-                layout,
-                &runtime,
-            ),
+            wasm_ir::BodyAbi::AsyncFunction(_) => {
+                compile_async_closure_poll(instance, closure, resume, layout, &runtime)
+            }
+            wasm_ir::BodyAbi::Generator(_) => {
+                compile_generator_closure_next(instance, closure, resume, layout, &runtime)
+            }
             wasm_ir::BodyAbi::Direct | wasm_ir::BodyAbi::AsyncAction => {
                 unreachable!("planned closure frames have continuation bodies")
             }

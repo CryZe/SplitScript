@@ -696,6 +696,13 @@ fn synchronous_generators_are_lazy_shared_and_permanently_exhausted() {
             }
         }
 
+        fn forwarded(useArray: bool) -> iterator u32 {
+            if useArray {
+                return [31u32, 32].iterator()
+            }
+            return (41u32..<43).iterator()
+        }
+
         whileAttached {
             if !exercised {
                 let cursor = values(2)
@@ -725,6 +732,8 @@ fn synchronous_generators_are_lazy_shared_and_permanently_exhausted() {
                 printAll(generated())
                 let selectedFactory: () -> iterator u32 = selected
                 printAll(selectedFactory())
+                printAll(forwarded(true))
+                printAll(forwarded(false))
                 exercised = true
             }
         }
@@ -754,6 +763,10 @@ fn synchronous_generators_are_lazy_shared_and_permanently_exhausted() {
             "102",
             "1",
             "3",
+            "31",
+            "32",
+            "41",
+            "42",
         ]
     );
 }
@@ -2846,13 +2859,13 @@ fn iterator_debug_is_uniformly_opaque() {
     assert_eq!(
         store.data().messages,
         [
-            "ArrayIterator { .. }",
-            "SetIterator { .. }",
-            "ArrayIterator { .. }",
-            "ExclusiveRangeIterator { .. }",
-            "InclusiveRangeIterator { .. }",
-            "MapIterator { .. }",
-            "FilterIterator { .. }",
+            "<iterator>",
+            "<iterator>",
+            "<iterator>",
+            "<iterator>",
+            "<iterator>",
+            "<iterator>",
+            "<iterator>",
         ]
     );
 }

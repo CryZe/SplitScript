@@ -183,7 +183,7 @@ fn target_uri(label: &str, library: &StandardLibrary) -> Option<String> {
     }) {
         return Some(symbol_uri(StdlibSymbolId::Namespace(namespace.id), library));
     }
-    if let Some(constructor) = library.type_constructors().iter().find(|constructor| {
+    if let Some(constructor) = library.public_type_constructors().find(|constructor| {
         library.render_type_constructor(constructor.id) == label
             || (constructor.syntax == TypeConstructorSyntax::Named && constructor.name == label)
     }) {
@@ -262,8 +262,7 @@ fn disambiguated_target_uri(
             })
             .or_else(|| {
                 library
-                    .type_constructors()
-                    .iter()
+                    .public_type_constructors()
                     .find(|constructor| {
                         library.render_type_constructor(constructor.id) == name
                             || (constructor.syntax == TypeConstructorSyntax::Named

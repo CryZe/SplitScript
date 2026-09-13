@@ -2045,6 +2045,31 @@ fn generic_iterable_helpers_preserve_lazy_adapter_effects() {
 }
 
 #[test]
+fn generator_closure_effects_remain_latent_until_iteration() {
+    let generator = r#"let generator: () -> iterator u32 = () -> iterator u32 => {
+        yield process.read<u32>(0x100) else 0u32
+    }"#;
+    let stored = format!(
+        "state \"game.exe\" {{}}\nsetup {{\n    {generator}\n    let values = generator()\n    print(\"ready\")\n}}"
+    );
+    splitscript::compile(&stored)
+        .expect("invoking a generator closure must construct it without executing its body");
+
+    let consumed = format!(
+        "state \"game.exe\" {{}}\nsetup {{\n    {generator}\n    for value in generator() {{\n        print(value)\n    }}\n}}"
+    );
+    let diagnostics =
+        splitscript::check(splitscript::lower(splitscript::parse(&consumed).unwrap()))
+            .expect_err("iterating a generator closure must apply its body effects");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("requires an attached process")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn state_snapshot_requirements_propagate_through_function_call_graphs() {
     let source = r#"
         state "game.exe" {

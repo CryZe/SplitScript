@@ -118,7 +118,7 @@ expression is a [`loop`], a SplitScript function does not return it implicitly.
 ## Generators create ordinary iterators
 
 SplitScript has synchronous generator functions even though stable Rust does
-not have equivalent [`yield`] syntax. A call is lazy, and only `next()` advances
+not have equivalent [`yield`] syntax. A call is lazy, and only [`next()`] advances
 the body:
 
 ```splitscript
@@ -137,6 +137,11 @@ for value in values(3) {
 }
 # }
 ```
+
+Unlike Rust's `impl Iterator<Item = T>`, the public `iterator T` spelling is an
+erased cursor type. Arrays, ranges, sets, maps, adapters, and generators all
+return it, so an ordinary function can forward any one of them with [`return`].
+Only an `iterator T` body that actually contains [`yield`] becomes a generator.
 
 The cursor implements [`Iterator`] and [`Iterable`], uses [`Item`] and [`End`]
 instead of `Option<T>`, and aliases its position when copied. Generators are

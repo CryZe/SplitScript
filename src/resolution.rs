@@ -366,7 +366,9 @@ pub(crate) fn resolve_program(
 
     for application in &program.type_applications {
         let name = program.type_name(application.constructor);
-        let Some(constructor) = standard_library.named_type_constructor_by_name(name) else {
+        let Some(constructor) =
+            standard_library.named_type_constructor_by_name_including_private(name)
+        else {
             if let Some((canonical, opening, closing)) = match name {
                 "Array" => Some(("[T]", "[", "]")),
                 "Option" => Some(("T?", "", "?")),

@@ -121,8 +121,13 @@ fn validate_signature(
     {
         matcher.slot(name, expected, actual)?;
     }
-    let Some(actual_result) = semantics.function_completion(function) else {
-        return Err("its body has no inferred completion type".to_owned());
+    let actual_result = if signature.result_is_async {
+        semantics.function_completion(function)
+    } else {
+        semantics.function_result(function)
+    };
+    let Some(actual_result) = actual_result else {
+        return Err("its body has no inferred result type".to_owned());
     };
     matcher.slot("result", signature.result, actual_result)?;
 
@@ -230,6 +235,15 @@ impl SchemeMatcher<'_> {
                 };
                 self.ty(*value, *actual_value)
             }
+            TypeRef::Iterator(item) => {
+                let TypeKind::Iterator {
+                    item: actual_item, ..
+                } = self.semantics.types().kind(actual)
+                else {
+                    return Err(String::new());
+                };
+                self.ty(*item, *actual_item)
+            }
             TypeRef::Callable { parameters, result } => {
                 let TypeKind::Callable {
                     parameters: actual_parameters,
@@ -292,7 +306,7 @@ fn type_ref_contains(ty: TypeRef, parameter: &str) -> bool {
     match ty {
         TypeRef::Parameter(name) => name == parameter,
         TypeRef::Associated(_) => false,
-        TypeRef::Async(value) => type_ref_contains(*value, parameter),
+        TypeRef::Async(value) | TypeRef::Iterator(value) => type_ref_contains(*value, parameter),
         TypeRef::Application { arguments, .. } => arguments
             .iter()
             .any(|argument| type_ref_contains(*argument, parameter)),
@@ -379,6 +393,13 @@ fn declared_type_has_capability(
             }),
         TypeRef::Associated(_) => false,
         TypeRef::Async(_) => false,
+        TypeRef::Iterator(_) => matches!(
+            capability,
+            StdlibCapabilityId::Iterator
+                | StdlibCapabilityId::Iterable
+                | StdlibCapabilityId::Debug
+                | StdlibCapabilityId::Display
+        ),
         TypeRef::Application {
             constructor,
             arguments: [element],

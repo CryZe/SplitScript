@@ -20,7 +20,7 @@ use crate::{
         DynamicCallCallee, ResolvedCall, ResolvedMember, ResolvedStructFieldId, ResolvedValue,
         SemanticModel,
     },
-    stdlib::{Availability, Effect, StdlibFieldId, StdlibItemId, StdlibTypeConstructorId},
+    stdlib::{Availability, CoreTypeId, Effect, StdlibItemId, StdlibTypeConstructorId},
     types::TypeKind,
 };
 use std::collections::HashMap;
@@ -39,8 +39,13 @@ enum SymbolicValue {
         parameters: Vec<ValueId>,
         body: ExprId,
         captures: Vec<(ValueId, SymbolicValue)>,
+        generator: bool,
     },
     NamedFunction(FunctionId),
+    Iterator {
+        operation: FunctionOperationSemantics,
+        inputs: Vec<SymbolicValue>,
+    },
     Struct {
         constructor: Option<StdlibTypeConstructorId>,
         fields: Vec<(ResolvedStructFieldId, SymbolicValue)>,
@@ -98,7 +103,10 @@ impl SymbolicValue {
                 Self::Union(values) => {
                     Self::union(values.into_iter().map(|value| value.project(&[*field])))
                 }
-                Self::Closure { .. } | Self::NamedFunction(_) | Self::Unknown => Self::Unknown,
+                Self::Closure { .. }
+                | Self::NamedFunction(_)
+                | Self::Iterator { .. }
+                | Self::Unknown => Self::Unknown,
             };
         }
         value
@@ -117,6 +125,7 @@ impl SymbolicValue {
                 parameters,
                 body,
                 captures,
+                generator,
             } => Self::Closure {
                 parameters: parameters.clone(),
                 body: *body,
@@ -124,8 +133,16 @@ impl SymbolicValue {
                     .iter()
                     .map(|(id, value)| (*id, value.substitute(arguments, depth + 1)))
                     .collect(),
+                generator: *generator,
             },
             Self::NamedFunction(function) => Self::NamedFunction(*function),
+            Self::Iterator { operation, inputs } => Self::Iterator {
+                operation: operation.clone(),
+                inputs: inputs
+                    .iter()
+                    .map(|value| value.substitute(arguments, depth + 1))
+                    .collect(),
+            },
             Self::Struct {
                 constructor,
                 fields,
@@ -591,11 +608,20 @@ impl<'a> Evaluator<'a> {
                     self.semantics.types().kind(expression.ty),
                     TypeKind::Async { .. }
                 );
-                if creates_future {
+                let creates_generator = self
+                    .program
+                    .call(id)
+                    .is_some_and(|call| self.call_is_generator(call));
+                if creates_future || creates_generator {
                     self.accumulator.effect(Effect::Allocates);
                 }
                 if let Some(call) = self.program.call(id) {
-                    self.apply_resolved_call(Some(id), call, &inputs, !creates_future)
+                    self.apply_resolved_call(
+                        Some(id),
+                        call,
+                        &inputs,
+                        !creates_future && !creates_generator,
+                    )
                 } else if let Some(ExpressionResolution::DynamicCall(callee)) =
                     expression.resolution
                 {
@@ -634,6 +660,7 @@ impl<'a> Evaluator<'a> {
                     .iter()
                     .map(|(id, value)| (*id, value.clone()))
                     .collect(),
+                generator: crate::hir::typed_expression_contains_yield(*body, self.program),
             },
         }
     }
@@ -761,6 +788,12 @@ impl<'a> Evaluator<'a> {
             return SymbolicValue::Unknown;
         };
 
+        if !execute && self.call_is_generator(call) {
+            return SymbolicValue::Iterator {
+                operation: summary.operation,
+                inputs: inputs.to_vec(),
+            };
+        }
         if !execute {
             self.accumulator
                 .availability(summary.operation.availability);
@@ -775,7 +808,12 @@ impl<'a> Evaluator<'a> {
     }
 
     fn call_summary(&self, call: &ResolvedCall) -> Option<&FunctionSummary> {
-        let function = match call {
+        let function = self.call_function(call)?;
+        self.summaries.get(function.index())
+    }
+
+    fn call_function(&self, call: &ResolvedCall) -> Option<FunctionId> {
+        match call {
             ResolvedCall::UserFunction { function, .. }
             | ResolvedCall::UserMethod { function, .. } => Some(*function),
             ResolvedCall::StandardLibrary { item, .. } => self.program.library_function(*item),
@@ -786,8 +824,32 @@ impl<'a> Evaluator<'a> {
             | ResolvedCall::OptionSome { .. }
             | ResolvedCall::IteratorItem { .. }
             | ResolvedCall::ResultSuccess { .. } => None,
-        }?;
-        self.summaries.get(function.index())
+        }
+    }
+
+    fn function_is_generator(&self, function: FunctionId) -> bool {
+        self.semantics
+            .function_result(function)
+            .is_some_and(|result| {
+                matches!(
+                    self.semantics.types().kind(result),
+                    TypeKind::Iterator { .. }
+                )
+            })
+            && self
+                .semantics
+                .function_completion(function)
+                .is_some_and(|completion| {
+                    matches!(
+                        self.semantics.types().kind(completion),
+                        TypeKind::Builtin(CoreTypeId::None)
+                    )
+                })
+    }
+
+    fn call_is_generator(&self, call: &ResolvedCall) -> bool {
+        self.call_function(call)
+            .is_some_and(|function| self.function_is_generator(function))
     }
 
     fn instantiate_operation(
@@ -840,6 +902,7 @@ impl<'a> Evaluator<'a> {
                 parameters,
                 body,
                 captures,
+                generator,
             } => {
                 let env = captures.iter().cloned().collect::<HashMap<_, _>>();
                 let mut child = Evaluator::new(
@@ -856,7 +919,18 @@ impl<'a> Evaluator<'a> {
                 }
                 let returned = child.expression(*body);
                 let returned = SymbolicValue::union(child.returns.into_iter().chain([returned]));
-                (child.accumulator.finish(), returned)
+                let operation = child.accumulator.finish();
+                if *generator {
+                    (
+                        function_semantics(vec![Effect::Allocates], Availability::Everywhere),
+                        SymbolicValue::Iterator {
+                            operation,
+                            inputs: Vec::new(),
+                        },
+                    )
+                } else {
+                    (operation, returned)
+                }
             }
             SymbolicValue::NamedFunction(function) => {
                 let Some(summary) = self.summaries.get(function.index()) else {
@@ -865,9 +939,19 @@ impl<'a> Evaluator<'a> {
                         SymbolicValue::Unknown,
                     );
                 };
-                let operation = self.instantiate_operation(&summary.operation, arguments);
-                let returned = summary.returned.substitute(arguments, 0);
-                (operation, returned)
+                if self.function_is_generator(*function) {
+                    (
+                        function_semantics(vec![Effect::Allocates], Availability::Everywhere),
+                        SymbolicValue::Iterator {
+                            operation: summary.operation.clone(),
+                            inputs: arguments.to_vec(),
+                        },
+                    )
+                } else {
+                    let operation = self.instantiate_operation(&summary.operation, arguments);
+                    let returned = summary.returned.substitute(arguments, 0);
+                    (operation, returned)
+                }
             }
             SymbolicValue::Union(values) => {
                 let mut accumulator = Accumulator::default();
@@ -879,7 +963,9 @@ impl<'a> Evaluator<'a> {
                 }
                 (accumulator.finish(), SymbolicValue::union(returned))
             }
-            SymbolicValue::Struct { .. } | SymbolicValue::Unknown => (
+            SymbolicValue::Iterator { .. }
+            | SymbolicValue::Struct { .. }
+            | SymbolicValue::Unknown => (
                 FunctionOperationSemantics::default(),
                 SymbolicValue::Unknown,
             ),
@@ -896,34 +982,15 @@ impl<'a> Evaluator<'a> {
                 }],
                 ..FunctionOperationSemantics::default()
             },
-            SymbolicValue::Struct {
-                constructor: Some(StdlibTypeConstructorId::MapIterator),
-                fields,
-            } => {
-                let source = struct_field(fields, StdlibFieldId::MapIteratorSource);
-                let transform = struct_field(fields, StdlibFieldId::MapIteratorTransform);
-                let mut accumulator = Accumulator::default();
-                accumulator.operation(&self.operation_for_iteration(&source));
-                accumulator.operation(&self.operation_for_invoke(&transform, &[]).0);
-                accumulator.finish()
-            }
-            SymbolicValue::Struct {
-                constructor: Some(StdlibTypeConstructorId::FilterIterator),
-                fields,
-            } => {
-                let source = struct_field(fields, StdlibFieldId::FilterIteratorSource);
-                let predicate = struct_field(fields, StdlibFieldId::FilterIteratorPredicate);
-                let mut accumulator = Accumulator::default();
-                accumulator.operation(&self.operation_for_iteration(&source));
-                accumulator.operation(&self.operation_for_invoke(&predicate, &[]).0);
-                accumulator.finish()
-            }
             SymbolicValue::Union(values) => {
                 let mut accumulator = Accumulator::default();
                 for value in values {
                     accumulator.operation(&self.operation_for_iteration(value));
                 }
                 accumulator.finish()
+            }
+            SymbolicValue::Iterator { operation, inputs } => {
+                self.instantiate_operation(operation, inputs)
             }
             SymbolicValue::Closure { .. }
             | SymbolicValue::NamedFunction(_)
@@ -937,18 +1004,6 @@ impl<'a> Evaluator<'a> {
             calls.insert(expression, operation.clone());
         }
     }
-}
-
-fn struct_field(
-    fields: &[(ResolvedStructFieldId, SymbolicValue)],
-    expected: StdlibFieldId,
-) -> SymbolicValue {
-    fields
-        .iter()
-        .find_map(|(field, value)| {
-            (*field == ResolvedStructFieldId::Standard(expected)).then(|| value.clone())
-        })
-        .unwrap_or(SymbolicValue::Unknown)
 }
 
 fn merge_environments(

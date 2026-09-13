@@ -61,6 +61,7 @@ impl<'a> Validator<'a> {
                     Some(value.name.as_str())
                 }
                 Declaration::Enum(value) if value.private => Some(value.name.as_str()),
+                Declaration::TypeConstructor(value) if value.private => Some(value.name.as_str()),
                 _ => None,
             })
             .collect();
@@ -239,10 +240,21 @@ impl<'a> Validator<'a> {
                     }
                     self.validate_public_function_types(&value.name, &value.functions);
                 }
+                Declaration::TypeConstructor(value) => {
+                    if value.private {
+                        continue;
+                    }
+                    self.validate_public_function_types(&value.name, &value.functions);
+                    for field in value.fields.iter().filter(|field| !field.private) {
+                        self.validate_public_type_ref(
+                            &format!("{}.{}", value.name, field.name),
+                            &field.ty,
+                        );
+                    }
+                }
                 Declaration::Root(value)
                 | Declaration::Namespace(value)
                 | Declaration::Capability(value)
-                | Declaration::TypeConstructor(value)
                 | Declaration::CoreExtension(value) => {
                     self.validate_public_function_types(&value.name, &value.functions);
                     for field in value.fields.iter().filter(|field| !field.private) {
@@ -295,13 +307,22 @@ impl<'a> Validator<'a> {
                 }
             }
             Type::Async(value)
+            | Type::Iterator(value)
             | Type::Array(value)
             | Type::Option(value)
             | Type::Result(value)
             | Type::ExclusiveRange(value)
             | Type::InclusiveRange(value) => self.validate_public_type_ref(owner, value),
             Type::FixedArray { element, .. } => self.validate_public_type_ref(owner, element),
-            Type::Application { arguments, .. } => {
+            Type::Application {
+                constructor,
+                arguments,
+            } => {
+                if self.private_types.contains(constructor.as_str()) {
+                    self.error(format!(
+                        "public standard-library surface `{owner}` exposes private type constructor `{constructor}`"
+                    ));
+                }
                 for argument in arguments {
                     self.validate_public_type_ref(owner, argument);
                 }
@@ -357,6 +378,7 @@ impl<'a> Validator<'a> {
         self.validate_capabilities(&value.name, &value.attributes);
         let owner = CallableOwnerDeclaration {
             name: value.name.clone(),
+            private: !public,
             type_constructor_syntax: None,
             type_parameters: Vec::new(),
             documentation: value.documentation.clone(),
@@ -1225,7 +1247,9 @@ impl<'a> Validator<'a> {
 
     fn validate_type(&mut self, owner: &str, ty: &Type, parameters: &[TypeParameter]) {
         match ty {
-            Type::Async(value) => self.validate_type(owner, value, parameters),
+            Type::Async(value) | Type::Iterator(value) => {
+                self.validate_type(owner, value, parameters)
+            }
             Type::Name(name)
                 if PrimitiveType::parse(name).is_some()
                     || self.types.contains(name.as_str())

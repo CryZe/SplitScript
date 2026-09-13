@@ -6,7 +6,7 @@
 
 use crate::{
     stdlib::{
-        CapabilityBehavior, ItemKind, StandardBinaryOperator, StandardLibrary,
+        CapabilityBehavior, Implementation, ItemKind, StandardBinaryOperator, StandardLibrary,
         StandardUnaryOperator, StdlibCapabilityId, StdlibItem, StdlibTypeConstructorId, TypeRef,
     },
     types::TypeKind,
@@ -89,7 +89,8 @@ impl StandardLibrarySemanticExt for StandardLibrary {
     fn methods_for_type(&self, receiver: &TypeKind) -> Vec<&'static StdlibItem> {
         self.methods()
             .filter(|item| {
-                item.implementation != crate::stdlib::Implementation::CapabilityRequirement
+                item.implementation != Implementation::CapabilityRequirement
+                    || matches!(receiver, TypeKind::Iterator { .. })
             })
             .filter(|item| catalog_method_accepts(self, item, receiver))
             .collect()
@@ -163,6 +164,7 @@ fn catalog_method_accepts(
             }),
         TypeRef::Associated(_) => false,
         TypeRef::Async(_) => matches!(receiver, TypeKind::Async { .. }),
+        TypeRef::Iterator(_) => matches!(receiver, TypeKind::Iterator { .. }),
         TypeRef::Callable { .. } => matches!(receiver, TypeKind::Callable { .. }),
     }
 }
@@ -209,7 +211,14 @@ fn semantic_type_may_have_capability(
             behavior == CapabilityBehavior::StructuralMemoryLayout && length.is_some()
         }
         TypeKind::GenericParameter { .. } => false,
-        TypeKind::Async { .. } | TypeKind::Iterator { .. } | TypeKind::Callable { .. } => false,
+        TypeKind::Iterator { .. } => matches!(
+            capability,
+            StdlibCapabilityId::Iterator
+                | StdlibCapabilityId::Iterable
+                | StdlibCapabilityId::Debug
+                | StdlibCapabilityId::Display
+        ),
+        TypeKind::Async { .. } | TypeKind::Callable { .. } => false,
         TypeKind::Range { .. } => false,
         TypeKind::Set { .. } => false,
         TypeKind::Application { constructor, .. } => {

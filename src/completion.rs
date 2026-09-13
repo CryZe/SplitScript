@@ -1368,7 +1368,7 @@ fn add_root_standard_library(
     // owns a public static member, such as `Set.new` or `Map.new`. Do not leak
     // ordinary generic type names (including implementation-only iterator
     // adapters) into value completion merely because they are valid in types.
-    for constructor in library.type_constructors().iter().filter(|constructor| {
+    for constructor in library.public_type_constructors().filter(|constructor| {
         constructor.syntax == TypeConstructorSyntax::Named
             && library.items().any(|item| {
                 item.owner == crate::stdlib::StdlibOwner::TypeConstructor(constructor.id)

@@ -168,8 +168,7 @@ pub(super) fn add_type_completions(
         });
     }
     for constructor in library
-        .type_constructors()
-        .iter()
+        .public_type_constructors()
         .filter(|constructor| constructor.syntax == TypeConstructorSyntax::Named)
     {
         let parameters = constructor

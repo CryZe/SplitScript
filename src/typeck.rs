@@ -945,6 +945,7 @@ mod tests {
             r#"
             state "game" {}
             fn values() -> iterator u32 {
+                yield 0
                 await nextTick()
                 retry process.read<u32>(0x1000)
                 return 1

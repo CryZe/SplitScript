@@ -244,7 +244,7 @@ impl DocumentationReference {
                 signature: Some(format!("capability {}", capability.name)),
             }
         }));
-        entries.extend(self.library.type_constructors().iter().map(|constructor| {
+        entries.extend(self.library.public_type_constructors().map(|constructor| {
             let title = self.library.render_type_constructor(constructor.id);
             DocumentationIndexEntry {
                 uri: symbol_uri(
@@ -463,8 +463,8 @@ impl DocumentationReference {
 
     /// Resolves the concise spelling people can write without inventing names
     /// for a generic owner's type parameters. Display labels retain the full
-    /// `MapIterator<K, V>.next` form, while exact lookup also accepts the
-    /// catalog-owned `MapIterator.next` path. Construct aliases from semantic
+    /// `MapEntry<K, V>.key` form, while exact lookup also accepts the
+    /// catalog-owned `MapEntry.key` path. Construct aliases from semantic
     /// ownership rather than stripping angle brackets from rendered Markdown;
     /// this keeps operators and future type-form syntax unambiguous.
     fn exact_generic_symbol_aliases(&self, query: &str) -> Vec<String> {
@@ -472,8 +472,7 @@ impl DocumentationReference {
         let member_query = query.rsplit_once('.');
         let mut uris = self
             .library
-            .type_constructors()
-            .iter()
+            .public_type_constructors()
             .filter(|constructor| constructor.name.eq_ignore_ascii_case(query))
             .map(|constructor| {
                 symbol_uri(
@@ -684,8 +683,7 @@ impl DocumentationReference {
             })
             .or_else(|| {
                 self.library
-                    .type_constructors()
-                    .iter()
+                    .public_type_constructors()
                     .find(|value| {
                         symbol_uri(StdlibSymbolId::TypeConstructor(value.id), &self.library) == uri
                     })
@@ -1444,7 +1442,7 @@ impl DocumentationReference {
                             .types()
                             .map(|ty| symbol_uri(StdlibSymbolId::Type(ty.id), &self.library)),
                     )
-                    .chain(self.library.type_constructors().iter().map(|constructor| {
+                    .chain(self.library.public_type_constructors().map(|constructor| {
                         symbol_uri(
                             StdlibSymbolId::TypeConstructor(constructor.id),
                             &self.library,
@@ -2771,20 +2769,25 @@ mod tests {
 
         for (query, expected_uri) in [
             ("Set", "/stdlib/type-forms/Set/index.md"),
-            (
-                "SetIterator.next",
-                "/stdlib/type-forms/SetIterator/methods/next.md",
-            ),
-            (
-                "MapIterator.next",
-                "/stdlib/type-forms/MapIterator/methods/next.md",
-            ),
             ("MapEntry.key", "/stdlib/type-forms/MapEntry/fields/key.md"),
         ] {
             assert_eq!(
                 reference.topic(query).map(|page| page.uri),
                 Some(expected_uri.to_owned()),
                 "concise generic topic `{query}`",
+            );
+        }
+        for private in [
+            "ArrayIterator",
+            "SetIterator",
+            "ExclusiveRangeIterator",
+            "InclusiveRangeIterator",
+            "MapIterator",
+            "FilterIterator",
+        ] {
+            assert!(
+                reference.topic(private).is_none(),
+                "private iterator implementation `{private}` must not have a documentation topic"
             );
         }
     }

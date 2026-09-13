@@ -951,6 +951,22 @@ impl CapabilityAnalysis {
                     semantics,
                 )
             }
+            TypeRef::Iterator(item) => {
+                let TypeKind::Iterator {
+                    item: actual_item, ..
+                } = semantics.types().kind(actual)
+                else {
+                    return false;
+                };
+                self.type_ref_matches(
+                    *item,
+                    *actual_item,
+                    receiver,
+                    capability,
+                    parameters,
+                    semantics,
+                )
+            }
             TypeRef::Application {
                 constructor,
                 arguments,

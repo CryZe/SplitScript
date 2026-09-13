@@ -259,6 +259,7 @@ pub struct StdlibCapability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StdlibTypeConstructor {
     pub id: StdlibTypeConstructorId,
+    pub public: bool,
     pub syntax: TypeConstructorSyntax,
     pub name: &'static str,
     pub parameters: &'static [TypeParameter],

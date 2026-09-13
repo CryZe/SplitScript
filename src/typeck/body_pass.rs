@@ -235,6 +235,11 @@ fn match_capability_contract_type(
         Required::Async(required) => actual_async_value(checker, actual).is_some_and(|actual| {
             match_capability_contract_type(checker, *required, actual, parameters, associated)
         }),
+        Required::Iterator(required) => {
+            actual_iterator_item(checker, actual).is_some_and(|actual| {
+                match_capability_contract_type(checker, *required, actual, parameters, associated)
+            })
+        }
         Required::Callable {
             parameters: required_parameters,
             result,
@@ -1163,7 +1168,9 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
         DebugContext::from_declaration(function.debug_only),
         |checker| {
             let signature = checker.declarations.function_signatures[&function.id].clone();
-            let generator_item = actual_iterator_item(checker, signature.result);
+            let generator_item = crate::typeck::control_flow::contains_yield(&function.body)
+                .then(|| actual_iterator_item(checker, signature.result))
+                .flatten();
             let library_item = checker
                 .standard_library
                 .source_body_item_by_function_name(&function.name);
@@ -1335,7 +1342,16 @@ fn seed_library_body_signature(
         checker.unify(actual, declared, span);
     }
     let result = checker.catalog_type(item.signature.result, &variables);
-    checker.unify(inferred.completion, result, span);
+    // Async catalog signatures describe the value produced on completion,
+    // while synchronous signatures describe the callable's direct result.
+    // A generator is synchronous at the call boundary: its direct result is
+    // the iterator frame and its body completion is `None`.
+    let actual_result = if item.signature.result_is_async {
+        inferred.completion
+    } else {
+        inferred.result
+    };
+    checker.unify(actual_result, result, span);
 }
 
 fn generalize_component(checker: &mut Checker, functions: &[FunctionId]) {

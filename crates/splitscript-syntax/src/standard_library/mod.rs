@@ -62,6 +62,9 @@ pub struct StateProviderSelectorDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallableOwnerDeclaration {
     pub name: String,
+    /// Whether this type constructor is available only to privileged
+    /// standard-library source.
+    pub private: bool,
     /// The public source form of a type constructor. This is present only for
     /// `typeConstructor` declarations; `name` remains its stable catalog ID.
     pub type_constructor_syntax: Option<TypeConstructorSyntax>,
@@ -183,6 +186,7 @@ pub struct TypeParameter {
 pub enum Type {
     Name(String),
     Async(Box<Type>),
+    Iterator(Box<Type>),
     Application {
         constructor: String,
         arguments: Vec<Type>,
@@ -207,6 +211,7 @@ impl fmt::Display for Type {
         match self {
             Self::Name(name) => formatter.write_str(name),
             Self::Async(value) => write!(formatter, "async {value}"),
+            Self::Iterator(item) => write!(formatter, "iterator {item}"),
             Self::Application {
                 constructor,
                 arguments,

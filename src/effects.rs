@@ -332,6 +332,13 @@ impl OperationAnalysis {
                 if let Some(violation) = self.direct_value_violation(expression, program) {
                     self.direct_value_violations.push(violation);
                 }
+                // A closure body is a deferred callable boundary, just like a
+                // named function body. Its instantiated operation is checked
+                // at the invocation site instead of in the lexical context
+                // where the closure value is created.
+                if matches!(expression.kind, hir::TypedExpressionKind::Closure { .. }) {
+                    return;
+                }
                 hir::walk_typed_expression(self, expression, program);
             }
 
@@ -469,6 +476,9 @@ impl OperationAnalysis {
                     })
                 {
                     self.violations.push(violation);
+                }
+                if matches!(expression.kind, hir::TypedExpressionKind::Closure { .. }) {
+                    return;
                 }
                 hir::walk_typed_expression(self, expression, program);
             }

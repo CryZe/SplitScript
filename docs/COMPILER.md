@@ -161,7 +161,7 @@ repeated optional/result-postfix diagnostic already supplies a
 machine-applicable edit that removes the extra postfix, while unused local
 bindings provide a multi-edit underscore-suppression action. For unused
 declarations, state fields, and nominal members, the LSP reuses the
-identity-aware Rename query to update every reference and shared layout
+identity-aware Rename query to update every reference and shared source
 declaration, tries extra underscores on collisions, and type-checks the
 candidate before offering the action. Unused settings receive a targeted
 source-name edit that preserves their host-visible key. The LSP publishes the
@@ -692,8 +692,8 @@ standard-library source body. Compiler-start validation and architecture tests
 reject malformed, duplicated, misaligned, incomplete, or redeclared backend
 layout facts before an emitter can silently drift.
 
-[`src/layout_selection.rs`](../src/layout_selection.rs) derives the bounded,
-backend-independent decision plan for attachment-wide layout dimensions.
+[`src/shape_selection.rs`](../src/shape_selection.rs) derives the bounded,
+backend-independent decision plan for attachment-wide shape dimensions.
 Conditional managed fields contribute exact presence evidence. The same plan
 drives semantic validation and Wasm emission, so automatic selection cannot
 silently disagree with the conditions used for member refinement. Payload
@@ -1348,8 +1348,7 @@ that terminate domain-specific entries. A delimiter pass separately records
 line breaks made directly inside each parenthesized or bracketed expression.
 Closed comma-separated lists receive a trailing comma when formatted across
 multiple lines, while compact lists do not. State fields instead receive a
-trailing semicolon because commas already join offsets in their pointer paths;
-named state-layout declarations remain an ordinary comma-separated list.
+trailing semicolon because commas already join offsets in their pointer paths.
 These rules keep multiline process-read arguments one level inside their call without
 over-indenting a call merely because a nested argument is multiline. Braces
 in the settings DSL keep each label and `=>` on the same line, including

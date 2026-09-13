@@ -377,7 +377,7 @@ Use postfix `?` to propagate a failed hop to the surrounding state field,
 function, or `retry` boundary. Calling `reference.snapshot()` reads every
 active instance field before constructing `T`; if any field fails, the whole
 operation returns an error and no partial snapshot escapes. Conditional fields
-follow the selected attachment layout, and snapshot readers are generated only
+follow the active attachment shape, and snapshot readers are generated only
 when used:
 
 ```splitscript
@@ -434,7 +434,7 @@ Expression-backed state fields form persistent watchers. Initialization waits
 for every required field to succeed in one poll and seeds `old == current`.
 Later, each successful `T!` advances that field and each error retains its last
 accepted value; actions see the resulting `current` and prior `old` objects.
-Fields may refer to siblings from the same active layout independent of source
+Fields may refer to siblings from the same state snapshot independent of source
 order. The compiler evaluates the resulting dependency graph in topological
 order and rejects cycles. A sibling can also be the dynamic base of an
 [`at`](syntax@at) pointer path. When a dependency fails, its

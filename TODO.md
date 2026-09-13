@@ -105,7 +105,7 @@ to inference or code generation.
   snapshot readers only when reachable.
   - [x] Derive one backend-independent binding plan from checked schema and
     semantic identities. It preserves image and namespace ownership, class and
-    layout alternatives, static versus instance fields, declared versus read
+    binding alternatives, static versus instance fields, declared versus read
     value types, exact aliases, and conventional C# automatic-property backing
     candidates. Snapshot code generation consumes this projection instead of
     maintaining a parallel Unity class registry.
@@ -118,7 +118,7 @@ to inference or code generation.
     same binding plan. Each reader evaluates every active instance field into
     temporary fallible results before constructing the immutable GC value,
     propagates the first failure without exposing a partial object, preserves
-    stable slots for layout-conditional fields, and is emitted only when a
+    stable slots for conditional fields, and is emitted only when a
     checked call can reach it.
 - [x] Specify deterministic metadata-name resolution. A missing `from` uses the
   source member name, `from "name"` names one exact metadata member, and
@@ -277,17 +277,17 @@ to inference or code generation.
 ### P0.3 — prove the design by simplifying Lunistice
 
 - [x] Declare the Lunistice `GameManager` and `Timer` schemas, including shared
-  fields, base-game and DLC-demo layouts, alternative singleton names,
-  `LevelTimeParts`, and the bounded DLC scene string.
+  fields, base-game and DLC-demo conditional shapes, alternative singleton
+  names, `LevelTimeParts`, and the bounded DLC scene string.
 - [x] Port `examples/lunistice.split` from manual class/instance/offset globals
   and raw `process.read` calls to generated transactional `GameManager` and
   `Timer` snapshots. The DLC scene is now an ordinary schema-declared
   `String scene maxLength 16` field read as part of the shared snapshot. Preserve
   all existing autosplitter behavior and keep the user's current local example
   edits out of intermediate mechanical rewrites.
-- [x] Add synthetic runtime coverage for both base and DLC metadata layouts,
+- [x] Add synthetic runtime coverage for both base and DLC metadata shapes,
   singleton replacement, backing-field lookup, inherited fields, failed reads,
-  and ambiguous layouts. Compare the resulting script structure and behavior
+  and ambiguous shapes. Compare the resulting script structure and behavior
   with `C:\Projekte\lunistice-auto-splitter`.
 - [x] Treat the milestone as complete only when all generated Unity symbols are
   navigable and documented in the editor and reference viewer, and the port no
@@ -345,8 +345,9 @@ to inference or code generation.
 The first clean-folder exercise had only the compiler and legacy ASL inputs. It
 produced 52 compiler-valid ports or partial ports across 53 reviewed scripts and
 learned the language exclusively through `splitc docs`. Exact Windows
-executable names and named layouts were found, demonstrating that the earlier
-documentation work helped. Compilation still hid substantial semantic drift:
+executable names and build-specific memory shapes were found, demonstrating
+that the earlier documentation work helped. Compilation still hid substantial
+semantic drift:
 every Unity port combined `state Unity` with manual runtime and metadata
 discovery, and emulator ports manually rediscovered mappings and byte order
 despite matching typed providers.
@@ -373,10 +374,10 @@ map, and reinforce the existing timer, writable-file, dynamic-settings, module
 enumeration, managed-collection, and process-write host gaps. Rechecking the
 current compiler also confirms that a 166 KiB unmodified legacy ASL still takes
 more than 60 seconds without producing diagnostics. Conversely, `Module.md5`,
-named layouts, finite scans, growable arrays, sets and maps, `Instant`, and
-static settings families already cover several reported omissions; those
-findings are documentation or migration-search work, not reasons to add
-duplicate APIs.
+conditional state shapes, finite scans, growable arrays, sets and maps,
+`Instant`, and static settings families already cover several reported
+omissions; those findings are documentation or migration-search work, not
+reasons to add duplicate APIs.
 
 ### Turn every reported blocker into an actionable product outcome
 
@@ -391,14 +392,15 @@ duplicate APIs.
   runtime again in `onAttach`.
 - [x] Rebuild the current Unity documentation journey around schema-first
   ports: `state Unity`, `image`, namespace/class declarations, static and
-  instance roots, bounded managed strings, layout dimensions, and fallible
-  live paths. Exact searches for `UnityASL`, `mono.Make<T>`, `mono.MakeString`,
+  instance roots, bounded managed strings, attachment shape globals, and
+  fallible live paths. Exact searches for `UnityASL`, `mono.Make<T>`,
+  `mono.MakeString`,
   `Unity.mono`, and conceptual queries such as “managed field” reach this
   workflow rather than a low-level class API. Contextual migration diagnostics
   cover the old helper spellings without claiming a mechanically safe rewrite.
 - [x] Extend that journey with transactional snapshots. The managed-class
   reference documents `T.Ref`, fallible live hops, `T`, transactional
-  `.snapshot()`, layout refinement, and demand-driven reader generation; editor
+  `.snapshot()`, shape refinement, and demand-driven reader generation; editor
   hover and navigation lead back to the source class and fields.
 - [x] Add the approved higher-level bounded managed-string declaration and keep
   examples, diagnostics, tooling, runtime semantics, and migration docs on the
@@ -537,8 +539,8 @@ concepts rather than maintaining a parallel inventory.
   debug and release builds, neighboring `.wasm` output, the currently supported
   host-loading workflow and limitations, opening/searching docs, and reading
   the first diagnostic. Introduce attachment, one typed setting, one `at` state
-  field, `old` / `current`, and one timer decision before scans, Unity, layouts,
-  or async discovery.
+  field, `old` / `current`, and one timer decision before scans, Unity,
+  conditional shapes, or async discovery.
 - [x] Rewrite the packaged VS Code README as an extension-user/Marketplace
   artifact: outcome, first workflow, commands and outputs, bundled compiler,
   documentation, requirements, limitations, and troubleshooting. Move npm,
@@ -600,8 +602,9 @@ concepts rather than maintaining a parallel inventory.
   field form, failure/async syntax, and string units. The lifecycle matrix must
   state timing, available roots/globals, suspension policy, return type, and
   fallthrough for every action. The other guides should lead from a task to
-  `at` versus discovery, required versus optional fields, layouts versus
-  dimensions, `T?` / `T!` / `else` / `?` / `retry` / `await`, and UTF-8 byte,
+  `at` versus discovery, required versus optional fields, build-specific shapes
+  versus independent discriminators, `T?` / `T!` / `else` / `?` / `retry` /
+  `await`, and UTF-8 byte,
   Unicode scalar, UTF-16LE, and managed-string units.
 - [x] Publish a renderer-produced static HTML reference for web readers so
   compiler-owned intra-doc links, semantic code highlighting, hierarchy, and
@@ -613,7 +616,7 @@ concepts rather than maintaining a parallel inventory.
   one actionable availability rule instead of overlapping facts; structural
   type forms use concise source spellings in indexes, headings, breadcrumbs,
   and member names while retaining capability constraints in their signatures;
-  and `onAttach` links its core state, layout, suspension, and snapshot
+  and `onAttach` links its core state, shape selection, suspension, and snapshot
   concepts. Every static example continues through compiler-produced semantic
   rendering.
 
@@ -626,7 +629,7 @@ concepts rather than maintaining a parallel inventory.
   attachment and state polling. The first update establishes a baseline;
   later `NotRunning -> active` and `active -> NotRunning` transitions fire
   once, including while detached. Process providers, attachment globals,
-  `layout`, `current`, and `old` remain unavailable. The compiler emits the
+  `current`, and `old` remain unavailable. The compiler emits the
   monitor global, import, and transition code only when either action exists.
   Script-requested starts and resets are observed naturally on the following
   update rather than being invoked directly and then rediscovered.

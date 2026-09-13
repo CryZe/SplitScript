@@ -12,7 +12,7 @@ The authoritative source for this port is
 | Cancel initialization when the process closes | Generated process-lifetime attach continuation |
 | Unity IL2CPP V2020 registration discovery | `state Unity.il2cpp(2020)` prepares the generated schema binder |
 | `Assembly-CSharp`, `GameManager`, and `Timer` lookup | Top-level `image` and `class` declarations |
-| Original/DLC GameManager binding race | Attachment-wide layout conditions and explicit `from` names |
+| Original/DLC GameManager binding race | Attachment-wide enum conditions and explicit `from` names |
 | C# property backing fields | Transparent `<Name>k__BackingField` matching |
 | `Instance` / legacy `_instance` singleton race | `static Timer instance from ["Instance", "_instance"]` |
 | Derived IL2CPP class field bindings | Generated live references consumed by expression-backed state fields |
@@ -41,7 +41,8 @@ DLC configurations and verifies:
 
 - base-game/DLC schema and executable fallback selection;
 - inherited managed-field discovery across a game-defined base class;
-- focused rejection of a mixed metadata shape that matches no declared layout;
+- focused rejection of a mixed metadata shape that matches no declared
+  conditional shape;
 - deterministic missing and ambiguous class and field diagnostics;
 - singleton replacement without duplicating static-root reads;
 - automatic and runner-initiated starts;

@@ -2786,8 +2786,8 @@ fn state_field_name_span(field: &ast::StateField) -> ast::Span {
 }
 
 /// Closes state-value observation over the physical candidate dependency
-/// graph. Shared named-layout declarations map to one storage field, so reading
-/// the public field keeps the dependencies of every runtime-selected physical
+/// graph. Shared multi-provider fields map to one storage field, so reading the
+/// public field keeps the dependencies of every runtime-selected physical
 /// source observable without producing duplicate warnings.
 fn expand_observed_state_field_dependencies(
     observed: &mut HashSet<ast::ValueId>,

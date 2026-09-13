@@ -82,7 +82,7 @@ split {
 
 The guide should then explain the four things the reader sees: attachment,
 polled state, old/current snapshots, and a timer decision. Advanced module
-scans, Unity layouts, signatures, and async discovery should come later.
+scans, Unity schemas, signatures, and async discovery should come later.
 
 ### P0 — Rewrite the VS Code extension README for extension users
 
@@ -133,7 +133,8 @@ order would be:
 5. settings and timer decisions;
 6. `T?`, `T!`, `else`, `?`, `retry`, and `await`;
 7. structs, enums, arrays, sets, ranges, closures, and iterators;
-8. layouts, Unity schemas, emulators, and other advanced topics; and
+8. conditional state shapes, Unity schemas, emulators, and other advanced
+   topics; and
 9. exact syntax and API reference.
 
 At minimum, add a table of contents and divide the longest sections into
@@ -247,8 +248,8 @@ Add one user-facing lifecycle reference that gives every block the same four
 facts:
 
 - when and how often it runs;
-- which of `process`, provider context, `layout`, `old`, `current`, `settings`,
-  and attempt/attachment globals are available;
+- which of `process`, provider context, `old`, `current`, `settings`, and
+  attempt/attachment globals are available;
 - whether it may `await` or `retry`; and
 - its return type and fallthrough behavior.
 
@@ -263,8 +264,9 @@ testing shows that documentation and tooling are insufficient.
 The `state` declaration supports several different ideas through compact
 syntax: static `at` paths, sibling-dependent paths, expression-backed fields,
 optional fields that change failure behavior, trailing candidate filters,
-named layouts, attachment-wide layout dimensions, and Unity schemas. Each
-feature is defensible, but the combined surface is hard to select correctly.
+conditional fields driven by attachment globals or dynamic state, and Unity
+schemas. Each feature is defensible, but the combined surface is hard to select
+correctly.
 
 Add a “Which state form should I use?” guide:
 
@@ -275,9 +277,10 @@ Add a “Which state form should I use?” guide:
 - absence is meaningful -> explicit `T?` field;
 - failed reads should retain the last accepted value -> required field;
 - a transient value should be rejected -> trailing field `if`;
-- whole memory shape differs by build -> named state layouts;
-- independent build facts affect native and managed fields -> layout
-  dimensions; and
+- whole memory shape differs by build -> an enum global initialized in
+  `onAttach`, then conditional fields;
+- independent build facts affect native and managed fields -> independent enum
+  globals used by the same conditional-field model; and
 - managed Unity objects -> `state Unity` plus schemas.
 
 Each branch should link to one complete example. The current reference explains
@@ -404,7 +407,7 @@ reader has learned the corresponding source syntax.
 
 Key lifecycle pages are sometimes too terse. The `onAttach` page is one short
 paragraph and one two-line example despite being central to cancellation,
-layout selection, discovery, and pre-snapshot behavior. Add related links and
+shape selection, discovery, and pre-snapshot behavior. Add related links and
 one conceptual sentence to key pages without turning each into another full
 guide.
 
@@ -460,7 +463,7 @@ provider, and concepts. Add small compiler-checked examples for:
 - load removal and game time;
 - `T?` versus `T!`, `else`, `?`, `retry`, and `await`;
 - one attach-time module/signature discovery;
-- two named game layouts;
+- two conditional game shapes selected by an attachment global;
 - one Unity schema;
 - one emulator provider; and
 - a complete but still readable production autosplitter.

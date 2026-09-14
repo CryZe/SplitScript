@@ -16,7 +16,8 @@ separate native executable.
    memory field, `old` / `current` snapshots, and the first timer decision.
 4. On desktop, use **Auto Splitter Debugger: Debug Active File** to compile and
    run a `.split` source or directly launch a `.wasm` module inside VS Code. The
-   dedicated **Auto Splitter Debugger** sidebar shows
+   debugger hot reloads saved `.split` sources and rebuilt `.wasm` modules by
+   default. The dedicated **Auto Splitter Debugger** sidebar shows
    the simulated timer, runtime statistics, user settings, the raw settings map,
    timer variables, and controls; runtime output is sent to the
    **Auto Splitting Runtime** Output channel and Debug Console.
@@ -41,7 +42,7 @@ Use the host's normal local-Wasm workflow to load the generated file.
 | **SplitScript: Search Documentation** | Searches symbols, concepts, signatures, summaries, and migration terms. |
 | **SplitScript: Start Debug Watch** | Saves and builds the active script with the debug profile, then rebuilds it after later saves. |
 | **SplitScript: Stop Debug Watch** | Stops the watcher shown in the status bar. |
-| **Auto Splitter Debugger: Debug Active File** | Compiles an active `.split` source or directly runs an active `.wasm` module in an isolated Node WebAssembly worker. If neither is active, prompts for one. |
+| **Auto Splitter Debugger: Debug Active File** | Compiles an active `.split` source or directly runs an active `.wasm` module in an isolated Node WebAssembly worker, hot reloading either input by default. If neither is active, prompts for one. |
 | **Auto Splitter Debugger: Restart** | Recompiles or rereads and replaces the running WebAssembly instance. |
 | **Auto Splitter Debugger: Start/Reset Timer** | Controls the debugger's simulated timer. |
 | **Auto Splitter Debugger: Clear Settings Map** | Removes all values currently overridden in the runtime settings map. |

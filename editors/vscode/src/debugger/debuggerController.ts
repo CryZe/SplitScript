@@ -118,7 +118,6 @@ export class SplitScriptDebuggerController implements
             configuration.request = 'launch';
             configuration.name = `Debug ${path.basename(uri.fsPath)}`;
             configuration.program = uri.fsPath;
-            configuration.hotReload = isSplitScript(uri);
         }
         return configuration;
     }
@@ -229,7 +228,6 @@ export class SplitScriptDebuggerController implements
             request: 'launch',
             name: `Debug ${path.basename(uri.fsPath)}`,
             program: uri.fsPath,
-            hotReload: isSplitScript(uri),
         });
     }
 

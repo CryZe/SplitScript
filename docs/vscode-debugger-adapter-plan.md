@@ -138,7 +138,9 @@ Support two equally accessible inputs:
 2. An arbitrary `.wasm` file. Modules with an
    `update` export use the recurring auto-splitting loop; other modules invoke
    `_initialize` / `_start` once when present and otherwise finish running
-   their WebAssembly start section during instantiation.
+   their WebAssembly start section during instantiation. Changes to the module
+   on disk trigger the same fresh-instance hot reload as saving a `.split`
+   source.
 
 Suggested initial `launch.json` shape:
 

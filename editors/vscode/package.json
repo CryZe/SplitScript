@@ -283,7 +283,7 @@
               },
               "hotReload": {
                 "type": "boolean",
-                "description": "Reload when the program is saved. Defaults to enabled for .split sources and disabled for .wasm modules."
+                "description": "Reload when a .split program is saved or a .wasm program changes on disk. Defaults to enabled."
               }
             }
           }

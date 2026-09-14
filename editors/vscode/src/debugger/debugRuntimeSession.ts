@@ -1,3 +1,5 @@
+import * as path from 'node:path';
+
 import * as vscode from 'vscode';
 
 import {
@@ -35,6 +37,8 @@ export class DebugRuntimeSession implements vscode.Disposable {
     private hotReload = true;
     private reloadChain = Promise.resolve();
     private readonly saveSubscription: vscode.Disposable;
+    private programWatcher: vscode.FileSystemWatcher | undefined;
+    private fileReloadTimer: ReturnType<typeof setTimeout> | undefined;
     private stopped = false;
     private suppressSaveReload = false;
 
@@ -52,12 +56,7 @@ export class DebugRuntimeSession implements vscode.Disposable {
                 && this.programUri !== undefined
                 && document.uri.toString() === this.programUri.toString()
             ) {
-                void this.reload().catch(error => {
-                    this.callbacks.log(runtimeLog(
-                        'error',
-                        `Hot reload failed: ${asError(error).message}`,
-                    ));
-                });
+                this.runHotReload();
             }
         });
     }
@@ -71,12 +70,15 @@ export class DebugRuntimeSession implements vscode.Disposable {
             throw new Error('Auto Splitter debugging currently requires a local file.');
         }
         const sourceProgram = uri.path.toLowerCase().endsWith('.split');
-        this.hotReload = configuration.hotReload ?? sourceProgram;
+        this.hotReload = configuration.hotReload ?? true;
         this.compiler = sourceProgram ? await this.createCompiler() : undefined;
         const artifact = await this.buildArtifact(uri);
         this.programUri = uri;
         this.callbacks.memoryReset();
         await this.runtime.launch(artifact, uri.fsPath);
+        if (this.hotReload && !sourceProgram) {
+            this.watchProgramFile(uri);
+        }
     }
 
     public reload(): Promise<void> {
@@ -130,6 +132,12 @@ export class DebugRuntimeSession implements vscode.Disposable {
         }
         this.stopped = true;
         this.saveSubscription.dispose();
+        this.programWatcher?.dispose();
+        this.programWatcher = undefined;
+        if (this.fileReloadTimer !== undefined) {
+            clearTimeout(this.fileReloadTimer);
+            this.fileReloadTimer = undefined;
+        }
         this.compiler?.dispose();
         this.compiler = undefined;
         await this.runtime.terminate();
@@ -142,7 +150,13 @@ export class DebugRuntimeSession implements vscode.Disposable {
 
     private async buildArtifact(uri: vscode.Uri): Promise<Uint8Array> {
         if (uri.path.toLowerCase().endsWith('.wasm')) {
-            return vscode.workspace.fs.readFile(uri);
+            const file = await vscode.workspace.fs.readFile(uri);
+            const artifact = new Uint8Array(file.length);
+            artifact.set(file);
+            if (!WebAssembly.validate(artifact)) {
+                throw new Error(`The WebAssembly module at ${uri.fsPath} is not valid.`);
+            }
+            return artifact;
         }
         if (!uri.path.toLowerCase().endsWith('.split')) {
             throw new Error('The debug program must be a .split or .wasm file.');
@@ -190,6 +204,55 @@ export class DebugRuntimeSession implements vscode.Disposable {
             ));
         }
     }
+
+    private watchProgramFile(uri: vscode.Uri): void {
+        this.programWatcher?.dispose();
+        const watcher = vscode.workspace.createFileSystemWatcher(
+            new vscode.RelativePattern(path.dirname(uri.fsPath), '*'),
+            false,
+            false,
+            true,
+        );
+        const changed = (changedUri: vscode.Uri): void => {
+            if (sameFile(changedUri, uri)) {
+                this.scheduleFileReload();
+            }
+        };
+        watcher.onDidChange(changed);
+        // Compilers commonly replace their output atomically, which appears as
+        // deletion followed by creation rather than an in-place change.
+        watcher.onDidCreate(changed);
+        this.programWatcher = watcher;
+    }
+
+    private scheduleFileReload(): void {
+        if (this.fileReloadTimer !== undefined) {
+            clearTimeout(this.fileReloadTimer);
+        }
+        // File watchers may report while a compiler is still replacing the
+        // module and often emit several events for one build.
+        this.fileReloadTimer = setTimeout(() => {
+            this.fileReloadTimer = undefined;
+            this.runHotReload();
+        }, 100);
+    }
+
+    private runHotReload(): void {
+        void this.reload().catch(error => {
+            this.callbacks.log(runtimeLog(
+                'error',
+                `Hot reload failed: ${asError(error).message}`,
+            ));
+        });
+    }
+}
+
+function sameFile(left: vscode.Uri, right: vscode.Uri): boolean {
+    const leftPath = path.resolve(left.fsPath);
+    const rightPath = path.resolve(right.fsPath);
+    return process.platform === 'win32'
+        ? leftPath.toLowerCase() === rightPath.toLowerCase()
+        : leftPath === rightPath;
 }
 
 function programUri(program: string): vscode.Uri {

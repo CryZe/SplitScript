@@ -1119,6 +1119,15 @@ remaining work is product hardening and distribution.
   moves the stable `latest` tag and replaces `splitscript-latest.vsix` on one
   durable GitHub release; pull requests and other branches remain read-only.
 
+- [ ] Publish extension version 0.1.0 through the Visual Studio Marketplace's
+  pre-release channel. Packaging already applies the VSCE pre-release marker,
+  the manifest identity is `LiveSplit.splitscript`, and Marketplace-facing
+  documentation is ready. Smoke-test the complete CI-assembled VSIX rather than
+  a single-platform local package, then upload that immutable artifact through
+  the `LiveSplit` publisher. Keep later Marketplace uploads explicitly
+  versioned; the rolling GitHub `latest` release may continue replacing its
+  separately distributed asset.
+
 - [x] Add cooperative cancellation points to expensive compiler stages so a
   superseded editor build can stop work rather than merely have its completed
   response discarded. The shared compiler and service distinguish typed

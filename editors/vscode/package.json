@@ -47,7 +47,8 @@
   },
   "files": [
     "dist/**",
-    "media/**",
+    "media/icon.png",
+    "media/splitscript-debugger.svg",
     "styles/**",
     "syntaxes/**",
     "language-configuration.json",
@@ -544,7 +545,7 @@
   "scripts": {
     "vscode:prepublish": "node scripts/build.mjs --production",
     "compile": "node scripts/build.mjs",
-    "package:vsix": "vsce package",
+    "package:vsix": "vsce package --pre-release",
     "clean": "node scripts/clean.mjs",
     "compile:ts": "tsc -p tsconfig.node.json",
     "bundle:web": "node scripts/bundle-web.mjs",

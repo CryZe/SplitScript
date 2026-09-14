@@ -19,7 +19,9 @@ uniform scale preserves the parallel ring gaps.
 - `../editors/vscode/media/icon.png`: an opaque 128 × 128 PNG for the extension
   listing.
 - `../editors/vscode/media/icon-readme-light.png` and `icon-readme-dark.png`:
-  transparent 128 × 128 PNG variants for the extension README.
+  transparent 128 × 128 PNG variants retained for contexts that need raster
+  theme artwork. They are not embedded in the packaged extension README because
+  VS Code's details renderer can reduce the artwork to an incorrect tiny icon.
 - `../editors/vscode/media/splitscript-debugger.svg`: monochrome artwork at a
   nominal 24 × 24 size for the debugger Activity Bar container. A tighter
   `18 18 220 220` viewBox removes outer padding, enlarging the artwork by about
@@ -29,8 +31,8 @@ uniform scale preserves the parallel ring gaps.
 An SVG loaded through `<img>` does not inherit its parent document's `color`;
 `currentColor` defaults to black in that case. The monochrome asset has no fixed
 color or background. The color SVG retains its white braces and hands.
-Both README headings use a `<picture>` element to choose the appropriate
-transparent artwork for light and dark themes, following
+The repository README heading uses a `<picture>` element to choose the
+appropriate transparent artwork for light and dark themes, following
 [GitHub's supported theme-image mechanism](https://github.blog/changelog/2022-08-15-specify-theme-context-for-images-in-markdown-ga/).
 This approximates text-color matching for README images; exact CSS color
 inheritance is available through the inline `icon-currentcolor.svg`.
@@ -49,6 +51,6 @@ are checked in, so normal extension builds do not need it.
 
 VS Code requires a [raster extension icon of at least 128 × 128 pixels](https://code.visualstudio.com/api/references/extension-manifest).
 The Marketplace [does not accept SVG listing icons or custom SVG README images](https://code.visualstudio.com/api/working-with-extensions/publishing-extension).
-The extension README therefore uses transparent PNGs, while GitHub's repository
-README uses transparent SVGs. The listing PNG's dark background is a contrast
-choice, not a transparency requirement of PNG.
+The extension README therefore has a text-only heading, while GitHub's
+repository README uses transparent SVGs. The listing PNG's dark background is a
+contrast choice, not a transparency requirement of PNG.

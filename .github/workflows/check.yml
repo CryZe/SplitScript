@@ -188,7 +188,7 @@ jobs:
           SPLITSCRIPT_NATIVE_ARTIFACTS: ${{ runner.temp }}/splitscript-native
         run: |
           node scripts/build.mjs --production --output ../../target/vscode-package/dist
-          node scripts/probe-package.mjs ../../target/vscode-package/dist splitscript-latest.vsix
+          node scripts/probe-package.mjs ../../target/vscode-package/dist splitscript-latest.vsix --pre-release
 
       - name: Upload the assembled VSIX
         uses: actions/upload-artifact@v7
@@ -245,7 +245,7 @@ jobs:
           assets+=(SHA256SUMS)
 
           title="Latest SplitScript"
-          notes="Continuously updated from the latest verified commit on master. Includes the VS Code extension and native splitc/splitls archives. This early build may introduce breaking language changes."
+          notes="Continuously updated from the latest verified commit on master. Includes the VS Code extension as a Marketplace-compatible pre-release and native splitc/splitls archives. This early build may introduce breaking language changes."
 
           git tag --force latest "$GITHUB_SHA"
           git push --force origin refs/tags/latest

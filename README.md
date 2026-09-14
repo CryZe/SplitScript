@@ -8,8 +8,9 @@ Runtime ABI.
 
 The project is usable for early ports and real-game testing, but it is not yet a
 stable release. Source compatibility may change, the VS Code extension is
-distributed as a VSIX rather than through the Marketplace, and the generated
-module still needs a compatible autosplitting host with WebAssembly GC enabled.
+published through the Marketplace's opt-in pre-release channel, and the
+generated module still needs a compatible autosplitting host with WebAssembly
+GC enabled.
 
 ## The language at a glance
 
@@ -44,12 +45,12 @@ recovery.
 
 ### Visual Studio Code authors
 
-Install the [latest SplitScript VSIX][latest-vsix], open a saved `.split` file,
-and run **SplitScript: Open Documentation**. The bundled **Getting started**
-guide is a self-contained, compiler-checked path through attachment, settings,
-state snapshots, builds, diagnostics, and host loading. The package is rebuilt
-from every verified push to `master`, so it is an early moving build rather than
-a stable release.
+Install the [SplitScript Marketplace pre-release][marketplace], open a saved
+`.split` file, and run **SplitScript: Open Documentation**. The bundled
+**Getting started** guide is a self-contained, compiler-checked path through
+attachment, settings, state snapshots, builds, diagnostics, and host loading.
+The [latest SplitScript VSIX][latest-vsix] remains available as the rolling
+build from every verified push to `master`.
 
 Use **SplitScript: Start Debug Watch** while editing and **SplitScript: Build
 Release** for the final module. Both write a neighboring `.wasm` file. The
@@ -168,3 +169,4 @@ inclusion in SplitScript are dual licensed under the same terms.
 
 [latest-vsix]: https://github.com/LiveSplit/SplitScript/releases/download/latest/splitscript-latest.vsix
 [latest-release]: https://github.com/LiveSplit/SplitScript/releases/tag/latest
+[marketplace]: https://marketplace.visualstudio.com/items?itemName=LiveSplit.splitscript

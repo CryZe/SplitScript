@@ -9,11 +9,18 @@ import { stageExtension } from './stage-extension.mjs';
 
 const extension = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repository = resolve(extension, '..', '..');
-const suppliedProductionDist = process.argv[2];
+const commandArguments = process.argv.slice(2);
+const preRelease = commandArguments.includes('--pre-release');
+const positionalArguments = commandArguments.filter(argument => argument !== '--pre-release');
+assert(
+    positionalArguments.every(argument => !argument.startsWith('--')),
+    `unknown package probe option ${positionalArguments.find(argument => argument.startsWith('--'))}`,
+);
+assert(positionalArguments.length <= 2, 'expected at most a production dist and package output');
+const [suppliedProductionDist, suppliedPackageOutput] = positionalArguments;
 const productionDist = resolve(
     suppliedProductionDist ?? resolve(repository, 'target', 'vscode-package', 'dist'),
 );
-const suppliedPackageOutput = process.argv[3];
 const vsce = resolve(extension, 'node_modules', '@vscode', 'vsce', 'vsce');
 const supportedPlatforms = new Set(supportedNativePlatforms);
 const maxCompilerWasmBytes = 8 * 1024 * 1024;
@@ -71,8 +78,6 @@ try {
         'syntaxes/splitscript.tmLanguage.json',
         'styles/documentation.css',
         'media/icon.png',
-        'media/icon-readme-light.png',
-        'media/icon-readme-dark.png',
         'media/splitscript-debugger.svg',
         'dist/splitscript_vscode_wasm.wasm',
         'dist/extension.js',
@@ -184,6 +189,7 @@ try {
         vsce,
         'package',
         '--no-dependencies',
+        ...(preRelease ? ['--pre-release'] : []),
         '--out',
         output,
     ], {
@@ -206,7 +212,8 @@ try {
     console.log(
         `VSIX packaging probe passed with ${files.length} production files and `
         + `${requiredPlatforms.length} required native bridge artifact(s); `
-        + `${compilerWasm.byteLength} compiler bytes and ${packageSize} packaged bytes.`,
+        + `${compilerWasm.byteLength} compiler bytes and ${packageSize} packaged bytes`
+        + `${preRelease ? ' as a pre-release' : ''}.`,
     );
 } finally {
     await rm(temporary, { recursive: true, force: true });

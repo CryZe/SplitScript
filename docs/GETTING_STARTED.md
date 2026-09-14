@@ -6,10 +6,11 @@ complete game autosplitter.
 
 ## Choose the extension or CLI
 
-The Visual Studio Code extension is the shortest path. Install the supplied
-`splitscript-*.vsix` with **Extensions: Install from VSIX**, open a folder, and
-create a file such as `game.split`. The extension includes the compiler and
-language server; it does not need a separate `splitc` installation.
+The Visual Studio Code extension is the shortest path. Install the SplitScript
+pre-release from the Visual Studio Marketplace, open a folder, and create a file
+such as `game.split`. The extension includes the compiler and language server;
+it does not need a separate `splitc` installation. A rolling VSIX is also
+available from the latest GitHub release.
 
 When working from this repository instead, the native CLI exposes the same
 compiler:
@@ -18,8 +19,7 @@ compiler:
 cargo run --bin splitc -- game.split -o game.wasm --profile release
 ```
 
-The project does not yet publish a Marketplace extension or native binary
-release. A contributor can build a shareable VSIX with the repository's
+Contributors can build the same pre-release VSIX with the repository's
 **package SplitScript VSIX** task.
 
 ## Attach to the game

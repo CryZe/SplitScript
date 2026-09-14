@@ -33,6 +33,9 @@ npm run package:vsix
 
 The production build runs automatically and writes
 `splitscript-<version>.vsix` in this directory.
+Version 0.1.x is packaged with VSCE's pre-release marker for the Marketplace's
+opt-in update channel. The Marketplace does not accept the same version twice;
+increment `package.json` before publishing another build there.
 It uses the Rust `max-opt` profile for the embedded compiler: full LTO, one code
 generation unit, aborting panics, and symbol stripping. The artifact is copied
 from `target/wasm32-unknown-unknown/max-opt`. Normal extension development builds
@@ -42,8 +45,9 @@ debug/release builds the extension can produce.
 After the complete verification job succeeds for a push to `master`, CI runs
 native bridge builds on Windows x64, Linux x64/ARM64, and macOS Intel/Apple
 Silicon runners. A separate assembly job downloads those five `.node` files,
-runs the production extension build, verifies that every bridge is present in
-`splitscript-latest.vsix`, and uploads the VSIX as a workflow artifact. This
+runs the production extension build, verifies that every bridge is present,
+packages `splitscript-latest.vsix` with VSCE's pre-release marker, and uploads
+the VSIX as a workflow artifact. This
 assembly also runs for pull requests, so packaging failures are caught before a
 merge. On `master`, the publish job moves the `latest` tag to the verified
 commit and replaces the asset on the existing **Latest SplitScript VS Code

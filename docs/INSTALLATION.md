@@ -14,16 +14,15 @@ follows each verified `master` build, and source compatibility can change.
 
 ## Visual Studio Code extension
 
-1. Download `splitscript-latest.vsix` from the [latest SplitScript
-   release][latest-release].
-2. In VS Code, run **Extensions: Install from VSIX** and select the downloaded
-   file.
-3. Open a folder, save a file with the `.split` extension, and run
+1. Open the [SplitScript Marketplace page][marketplace] in VS Code and choose
+   **Install Pre-Release Version**.
+2. Open a folder, save a file with the `.split` extension, and run
    **SplitScript: Open Documentation**.
 
-Installing a newer `splitscript-latest.vsix` updates the existing extension.
-The package is not currently published through the Visual Studio Marketplace,
-so VS Code does not automatically update it from the Marketplace.
+VS Code keeps pre-release users on the pre-release update channel. For a rolling
+build from the latest verified `master` commit instead, download
+`splitscript-latest.vsix` from the [latest SplitScript release][latest-release]
+and run **Extensions: Install from VSIX**.
 
 The VSIX is batteries-included: do not install `splitc`, `splitls`, Rust, Node,
 or a WebAssembly toolchain merely to use the extension. Release packaging
@@ -146,6 +145,7 @@ as extension builds. They likewise do not install, register, or execute the
 result in a timer host.
 
 [latest-release]: https://github.com/LiveSplit/SplitScript/releases/tag/latest
+[marketplace]: https://marketplace.visualstudio.com/items?itemName=LiveSplit.splitscript
 [windows-x64]: https://github.com/LiveSplit/SplitScript/releases/download/latest/splitscript-windows-x64.zip
 [linux-x64]: https://github.com/LiveSplit/SplitScript/releases/download/latest/splitscript-linux-x64.tar.gz
 [linux-arm64]: https://github.com/LiveSplit/SplitScript/releases/download/latest/splitscript-linux-arm64.tar.gz

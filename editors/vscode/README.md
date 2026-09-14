@@ -1,4 +1,4 @@
-# <picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/LiveSplit/SplitScript/master/editors/vscode/media/icon-readme-dark.png"><img src="https://raw.githubusercontent.com/LiveSplit/SplitScript/master/editors/vscode/media/icon-readme-light.png" alt="" height="42" align="top"></picture> SplitScript for Visual Studio Code
+# SplitScript for Visual Studio Code
 
 Write statically typed autosplitters with diagnostics, completion, navigation,
 documentation, formatting, and one-click WebAssembly builds. The extension
@@ -7,9 +7,10 @@ separate native executable.
 
 ## Start a script
 
-1. Download the [latest SplitScript VSIX][latest-vsix] and install it with
-   **Extensions: Install from VSIX**. This early package follows every verified
-   push to `master` and may contain breaking language changes.
+1. Install the [SplitScript Marketplace pre-release][marketplace]. To test the
+   newest verified `master` build instead, download the [latest SplitScript
+   VSIX][latest-vsix] and install it with **Extensions: Install from VSIX**.
+   These early packages may contain breaking language changes.
 2. Open a folder and create a saved file ending in `.split`.
 3. Run **SplitScript: Open Documentation** and open **Getting started**. That
    compiler-checked guide introduces process attachment, a typed setting, one
@@ -118,8 +119,8 @@ virtual workspaces.
   Older host engines that disable WebAssembly GC cannot instantiate them.
 - The debugger uses a simulated timer and does not control a running LiveSplit
   instance.
-- This early package is distributed as a VSIX rather than through the Visual
-  Studio Marketplace.
+- Version 0.1.x is distributed through the Visual Studio Marketplace's opt-in
+  pre-release channel.
 
 ## Troubleshooting
 
@@ -137,3 +138,4 @@ active when starting the command. Untitled files prompt for a save location;
 the resulting saved document is the one compiled.
 
 [latest-vsix]: https://github.com/LiveSplit/SplitScript/releases/download/latest/splitscript-latest.vsix
+[marketplace]: https://marketplace.visualstudio.com/items?itemName=LiveSplit.splitscript

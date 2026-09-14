@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">SplitScript</title>
+  <desc id="desc">Code braces and stopwatch hands in the current text color, with a red, green, and blue ring.</desc>
+  <path d="M72 36H64Q44 36 44 56V96Q44 116 28 128Q44 140 44 160V200Q44 220 64 220H72M184 36H192Q212 36 212 56V96Q212 116 228 128Q212 140 212 160V200Q212 220 192 220H184" fill="none" stroke="#1F2328" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M128 74V60M112.25 60H143.75" fill="none" stroke="#1F2328" stroke-width="13.5" stroke-linecap="round"/>
+  <g transform="translate(128 137) scale(1.125) translate(-128 -140)">
+    <path d="M82.196273 107.781703A56 56 0 0 1 173.803727 107.781703L159.869318 115.826738A40 40 0 0 0 96.130682 115.826738Z" fill="#D73F4A"/>
+    <path d="M178.803727 116.441957A56 56 0 0 1 133 195.776339L133 179.68627A40 40 0 0 0 164.869318 124.486992Z" fill="#3FCD46"/>
+    <path d="M123 195.776339A56 56 0 0 1 77.196273 116.441957L91.130682 124.486992A40 40 0 0 0 123 179.68627Z" fill="#3F5CD7"/>
+    <path d="M128 112V140L110 154" fill="none" stroke="#1F2328" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

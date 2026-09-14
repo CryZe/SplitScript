@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-const extensionId = 'livesplit.splitscript';
+const extensionId = 'LiveSplit.splitscript';
 
 export async function run(): Promise<void> {
     const extension = vscode.extensions.getExtension(extensionId);

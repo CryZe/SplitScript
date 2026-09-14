@@ -145,9 +145,9 @@ Native CLI builds produce the same WebAssembly GC and Auto Splitting Runtime ABI
 as extension builds. They likewise do not install, register, or execute the
 result in a timer host.
 
-[latest-release]: https://github.com/CryZe/SplitScript/releases/tag/latest
-[windows-x64]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-windows-x64.zip
-[linux-x64]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-linux-x64.tar.gz
-[linux-arm64]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-linux-arm64.tar.gz
-[macos-x64]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-macos-x64.tar.gz
-[macos-arm64]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-macos-arm64.tar.gz
+[latest-release]: https://github.com/LiveSplit/SplitScript/releases/tag/latest
+[windows-x64]: https://github.com/LiveSplit/SplitScript/releases/download/latest/splitscript-windows-x64.zip
+[linux-x64]: https://github.com/LiveSplit/SplitScript/releases/download/latest/splitscript-linux-x64.tar.gz
+[linux-arm64]: https://github.com/LiveSplit/SplitScript/releases/download/latest/splitscript-linux-arm64.tar.gz
+[macos-x64]: https://github.com/LiveSplit/SplitScript/releases/download/latest/splitscript-macos-x64.tar.gz
+[macos-arm64]: https://github.com/LiveSplit/SplitScript/releases/download/latest/splitscript-macos-arm64.tar.gz

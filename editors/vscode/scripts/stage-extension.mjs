@@ -4,6 +4,9 @@ import { dirname, resolve } from 'node:path';
 const staticPackagePaths = Object.freeze([
     'package.json',
     'README.md',
+    'CHANGELOG.md',
+    'SUPPORT.md',
+    'LICENSE',
     'language-configuration.json',
     'syntaxes',
     'styles',

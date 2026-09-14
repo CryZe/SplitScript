@@ -1,4 +1,4 @@
-# SplitScript for Visual Studio Code
+# <picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/LiveSplit/SplitScript/master/editors/vscode/media/icon-readme-dark.png"><img src="https://raw.githubusercontent.com/LiveSplit/SplitScript/master/editors/vscode/media/icon-readme-light.png" alt="" height="42" align="top"></picture> SplitScript for Visual Studio Code
 
 Write statically typed autosplitters with diagnostics, completion, navigation,
 documentation, formatting, and one-click WebAssembly builds. The extension
@@ -136,4 +136,4 @@ If a build targets the wrong file, make sure the intended `.split` editor is
 active when starting the command. Untitled files prompt for a save location;
 the resulting saved document is the one compiled.
 
-[latest-vsix]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-latest.vsix
+[latest-vsix]: https://github.com/LiveSplit/SplitScript/releases/download/latest/splitscript-latest.vsix

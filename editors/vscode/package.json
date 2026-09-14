@@ -1,14 +1,24 @@
 {
   "name": "splitscript",
   "displayName": "SplitScript",
-  "description": "Language support for statically typed autosplitters.",
+  "icon": "media/icon.png",
+  "description": "Write, analyze, build, and debug statically typed autosplitters with SplitScript.",
   "version": "0.1.0",
-  "publisher": "livesplit",
+  "publisher": "LiveSplit",
   "license": "MIT OR Apache-2.0",
+  "homepage": "https://github.com/LiveSplit/SplitScript#readme",
+  "bugs": {
+    "url": "https://github.com/LiveSplit/SplitScript/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/CryZe/SplitScript.git"
+    "url": "https://github.com/LiveSplit/SplitScript.git"
   },
+  "galleryBanner": {
+    "color": "#171717",
+    "theme": "dark"
+  },
+  "pricing": "Free",
   "engines": {
     "vscode": "^1.125.0"
   },
@@ -41,7 +51,10 @@
     "styles/**",
     "syntaxes/**",
     "language-configuration.json",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "SUPPORT.md",
+    "LICENSE"
   ],
   "contributes": {
     "markdown.previewStyles": [

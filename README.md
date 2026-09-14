@@ -1,4 +1,4 @@
-# SplitScript
+# <picture><source media="(prefers-color-scheme: dark)" srcset="assets/icon.svg"><img src="assets/icon-light.svg" alt="" height="42" align="top"></picture> SplitScript
 
 SplitScript is a statically typed language for writing autosplitters. It gives
 process memory, settings, timer decisions, errors, asynchronous discovery, and
@@ -75,7 +75,7 @@ before rewriting the file. A failed build leaves the previous successful
 output untouched. `splitc docs` renders the same compiler-owned reference used
 by the extension; add a symbol or search term to open a focused page. The same
 hierarchy is published as a [searchable HTML
-reference](https://cryze.github.io/SplitScript/) with semantic SplitScript
+reference](https://livesplit.org/SplitScript/) with semantic SplitScript
 highlighting and symbol navigation.
 
 ### Authors porting ASL
@@ -158,5 +158,13 @@ The repository also contains ports and deterministic runtime fixtures used as
 implementation evidence. They are not the user guide, are not compatibility
 promises, and should not be treated as templates for new scripts.
 
-[latest-vsix]: https://github.com/CryZe/SplitScript/releases/download/latest/splitscript-latest.vsix
-[latest-release]: https://github.com/CryZe/SplitScript/releases/tag/latest
+## License
+
+SplitScript is licensed under either the [Apache License, Version 2.0](LICENSE-APACHE)
+or the [MIT License](LICENSE-MIT), at your option.
+
+Unless explicitly stated otherwise, contributions intentionally submitted for
+inclusion in SplitScript are dual licensed under the same terms.
+
+[latest-vsix]: https://github.com/LiveSplit/SplitScript/releases/download/latest/splitscript-latest.vsix
+[latest-release]: https://github.com/LiveSplit/SplitScript/releases/tag/latest

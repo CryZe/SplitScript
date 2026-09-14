@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="18 18 220 220" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
   <title id="title">SplitScript</title>
   <desc id="desc">Code braces surrounding a stopwatch, drawn in the current text color.</desc>
   <path d="M72 36H64Q44 36 44 56V96Q44 116 28 128Q44 140 44 160V200Q44 220 64 220H72M184 36H192Q212 36 212 56V96Q212 116 228 128Q212 140 212 160V200Q212 220 192 220H184" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>

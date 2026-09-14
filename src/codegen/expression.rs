@@ -17,7 +17,8 @@ use crate::{
         IntrinsicId, MANAGED_POINTER_SIZE_FIELD, PROVIDER_BINDINGS_TYPE, RuntimeRepresentation,
         StandardLibrary, StdlibFieldId, StdlibOwner, StdlibStateProviderId,
         StdlibTypeConstructorId, StdlibTypeId, managed_field_offset_name,
-        managed_instance_header_name, managed_static_table_name, provider_context_field_name,
+        managed_instance_header_name, managed_static_field_address_name,
+        provider_context_field_name,
     },
     types::{EnumTypeId, ResolvedArrayType, TypeId},
     wasm_ir::{self, SnapshotProjection, SnapshotRoot, TemporaryId},
@@ -1910,8 +1911,8 @@ pub(super) fn compile_resolved_path(
             debug_assert_eq!(field_type, Type::Standard(context_declaration.ty));
             field_type
         }
-        ResolvedValue::ManagedStatic { class, field } => {
-            emit_managed_static_read(function, class, field, context)
+        ResolvedValue::ManagedStatic { field, .. } => {
+            emit_managed_static_read(function, field, context)
         }
         ResolvedValue::CurrentSnapshot | ResolvedValue::OldSnapshot => {
             function
@@ -2889,7 +2890,6 @@ fn managed_field_binding<'context>(
 /// across sibling fields in the same candidate snapshot.
 fn emit_managed_static_read(
     function: &mut Function,
-    class: crate::ast::ManagedClassId,
     field: crate::ast::ManagedFieldId,
     context: &ExprContext<'_>,
 ) -> Type {
@@ -2901,7 +2901,7 @@ fn emit_managed_static_read(
         function.instruction(&Instruction::Call(*function_index));
         Type::Result(storage.result)
     } else {
-        emit_uncached_managed_static_read(function, class, field, context)
+        emit_uncached_managed_static_read(function, field, context)
     }
 }
 
@@ -2941,7 +2941,7 @@ fn emit_cached_managed_static_read(
         .instruction(&Instruction::GlobalGet(storage.global))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::Else);
-    emit_uncached_managed_static_read(function, storage.class, storage.field, context);
+    emit_uncached_managed_static_read(function, storage.field, context);
     function
         // Outside a snapshot transaction this slot is deliberately
         // overwritten but never selected. Doing so keeps one canonical
@@ -2956,17 +2956,16 @@ fn emit_cached_managed_static_read(
 
 fn emit_uncached_managed_static_read(
     function: &mut Function,
-    class: crate::ast::ManagedClassId,
     field: crate::ast::ManagedFieldId,
     context: &ExprContext<'_>,
 ) -> Type {
     function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
     let binding = managed_field_binding(field, context);
-    emit_managed_binding_field(function, &managed_static_table_name(class.index()), context);
-    emit_managed_binding_field(function, &managed_field_offset_name(field.index()), context);
-    function
-        .instruction(&Instruction::I64ExtendI32U)
-        .instruction(&Instruction::I64Add);
+    emit_managed_binding_field(
+        function,
+        &managed_static_field_address_name(field.index()),
+        context,
+    );
     emit_managed_read_at_address(function, binding, context)
 }
 

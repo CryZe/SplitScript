@@ -1685,6 +1685,36 @@ private struct UnityMetadataClass {
         }
     }
 
+    // Resolves the complete address of a required static field. The backend
+    // uses the runtime class that actually declares an inherited field rather
+    // than assuming that its storage belongs to the schema class.
+    private fn staticFieldAny(names: [String]) -> async address {
+        return match self.backend {
+            UnityRuntimeBackend.Il2cpp => {
+                let class = self.il2cpp else await process.closed()
+                await class.staticFieldAny(names)
+            },
+            UnityRuntimeBackend.Mono => {
+                let class = self.mono else await process.closed()
+                await class.staticFieldAny(names)
+            },
+        }
+    }
+
+    // Preserves completed absence for conditional schema fields.
+    private fn probeStaticFieldAny(names: [String]) -> async address? {
+        return match self.backend {
+            UnityRuntimeBackend.Il2cpp => {
+                let class = self.il2cpp else await process.closed()
+                await class.probeStaticFieldAny(names)
+            },
+            UnityRuntimeBackend.Mono => {
+                let class = self.mono else await process.closed()
+                await class.probeStaticFieldAny(names)
+            },
+        }
+    }
+
     // Finds the selected class's static storage through either backend.
     private fn staticTable() -> async address {
         return match self.backend {
@@ -7492,6 +7522,31 @@ private struct UnityClass {
     @intrinsic(UnityClassProbeFieldAny)
     private fn rawProbeFieldAny(names: [String]) -> async UnityField?;
 
+    // Resolves static storage against the field's declaring runtime class.
+    private fn staticFieldAny(names: [String]) -> async address {
+        let field = await self.fieldAny(names)
+        let owner = UnityClass {
+            address: field.owner,
+            module: self.module,
+        }
+        return (await owner.staticTable()).add(field.offset as u64)
+    }
+
+    // Preserves completed absence for conditional schema fields.
+    private fn probeStaticFieldAny(names: [String]) -> async address? {
+        let field = await self.probeFieldAny(names)
+        return match field {
+            Some(field) => {
+                let owner = UnityClass {
+                    address: field.owner,
+                    module: self.module,
+                }
+                Some((await owner.staticTable()).add(field.offset as u64))
+            },
+            None => None,
+        }
+    }
+
     /// Finds a class's static-field table.
     ///
     /// Suspends until the static storage pointer is non-null.
@@ -7582,6 +7637,24 @@ private struct UnityField {
     /// let levelFieldIndex = field.index
     /// ```
     index: u32,
+
+    /// Returns the runtime metadata class that declares this field.
+    ///
+    /// Static storage belongs to this class, which may differ from the class
+    /// where schema lookup began.
+    ///
+    /// # Example
+    ///
+    /// Retain the declaring class during private schema binding
+    ///
+    /// ```splitscript
+    /// let runtime = await Unity.il2cpp(2020)
+    /// let image = await runtime.image("Assembly-CSharp")
+    /// let player = await image.class("Player")
+    /// let field = await player.fieldAny(["health"])
+    /// let declaringClass = field.owner
+    /// ```
+    owner: address,
 }
 
 /// Identifies the supported Unity Mono metadata layouts.
@@ -7971,6 +8044,7 @@ private struct MonoModule {
         let current = classAddress
         let selectedOffset: u32? = None
         let selectedIndex: u32 = 0
+        let selectedOwner: address = 0
         let ambiguous = false
         while current != 0 {
             let count = retry process.read<i32>(
@@ -8003,13 +8077,14 @@ private struct MonoModule {
                                 field.add(self.layout.fieldValue),
                             )
                             match selectedOffset {
-                                Some(previous) if previous != offset => {
+                                Some(previous) if previous != offset || selectedOwner != current => {
                                     ambiguous = true
                                 },
                                 Some(_) => {},
                                 None => {
                                     selectedOffset = Some(offset)
                                     selectedIndex = candidateIndex
+                                    selectedOwner = current
                                 },
                             }
                         },
@@ -8028,6 +8103,7 @@ private struct MonoModule {
             Some(offset) => Some(UnityField {
                 offset,
                 index: selectedIndex,
+                owner: selectedOwner,
             }),
             None => None,
         }
@@ -8049,6 +8125,7 @@ private struct MonoModule {
         return UnityField {
             offset: 0,
             index: 0,
+            owner: 0,
         }
     }
 
@@ -8254,6 +8331,25 @@ private struct MonoClass {
         return await self.module.probeFieldAnyInClass(self.address, names)
     }
 
+    // Resolves static storage against the field's declaring runtime class.
+    private fn staticFieldAny(names: [String]) -> async address {
+        let field = await self.fieldAny(names)
+        let table = await self.module.staticTableForClass(field.owner)
+        return table.add(field.offset as u64)
+    }
+
+    // Preserves completed absence for conditional schema fields.
+    private fn probeStaticFieldAny(names: [String]) -> async address? {
+        let field = await self.probeFieldAny(names)
+        return match field {
+            Some(field) => {
+                let table = await self.module.staticTableForClass(field.owner)
+                Some(table.add(field.offset as u64))
+            },
+            None => None,
+        }
+    }
+
     /// Finds the class's static-field storage table.
     ///
     /// The lookup waits until Mono has materialized the class vtable and its
@@ -8294,9 +8390,7 @@ private struct MonoClass {
         /// Managed static-field name or C# auto-property name.
         name: String,
     ) -> async address {
-        let table = await self.staticTable()
-        let offset = await self.field(name)
-        return table.add(offset as u64)
+        return await self.staticFieldAny([name])
     }
 
     /// Builds a reusable path to one static field.

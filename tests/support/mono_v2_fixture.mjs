@@ -1,6 +1,6 @@
 const encoder = new TextEncoder();
 
-export function createMonoV2Fixture({ className, fields }) {
+export function createMonoV2Fixture({ className, fields, parent }) {
     const moduleBase = 0x1000n;
     const assemblyList = 0x8000n;
     const link = 0x8100n;
@@ -112,9 +112,47 @@ export function createMonoV2Fixture({ className, fields }) {
     writeU64(runtimeInfo + 8n, vtables);
     writeU64(vtables + 0x48n, staticTable);
 
+    let parentStaticTable;
+    let parentFieldOffsets;
+    if (parent !== undefined) {
+        const parentClass = 0x9800n;
+        const parentFieldTable = 0x9900n;
+        const parentClassName = 0x9a00n;
+        const parentNamespace = 0x9a80n;
+        const parentRuntimeInfo = 0x9b00n;
+        const parentVtables = 0x9c00n;
+        parentStaticTable = 0x9d00n;
+        parentFieldOffsets = new Map();
+
+        writeU64(classAddress + 0x30n, parentClass);
+        writeU64(parentClass + 0x30n, 0n);
+        writeU64(parentClass + 0x48n, parentClassName);
+        writeU64(parentClass + 0x50n, parentNamespace);
+        writeU32(parentClass + 0x5cn, 1);
+        writeU64(parentClass + 0x98n, parentFieldTable);
+        writeU64(parentClass + 0xd0n, parentRuntimeInfo);
+        writeI32(parentClass + 0x100n, parent.fields.length);
+        writeU64(parentClass + 0x108n, 0n);
+        writeUtf8(parentClassName, parent.className);
+        writeUtf8(parentNamespace, parent.namespace ?? "");
+
+        parent.fields.forEach(({ name, offset }, index) => {
+            const field = parentFieldTable + BigInt(index) * 0x20n;
+            const nameAddress = 0xb000n + BigInt(index) * 0x100n;
+            writeU64(field + 0x8n, nameAddress);
+            writeU32(field + 0x18n, offset);
+            writeUtf8(nameAddress, name);
+            parentFieldOffsets.set(name, BigInt(offset));
+        });
+        writeU64(parentRuntimeInfo + 8n, parentVtables);
+        writeU64(parentVtables + 0x48n, parentStaticTable);
+    }
+
     return {
         staticTable,
         fieldOffsets,
+        parentStaticTable,
+        parentFieldOffsets,
         writeBytes,
         writeI32,
         writeU32,

@@ -655,6 +655,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/managed_inherited_static_runtime.split",
+        output: "managed_inherited_static_runtime.wasm",
+        profile: "release",
+        harness: "tests/managed_inherited_static_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/postfix_calls.split",
         output: "postfix_calls.wasm",
         profile: "release",

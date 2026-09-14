@@ -298,17 +298,18 @@ fn managed_preparation_source(
                 managed_instance_header_name(class.class.id.index())
             ));
         }
-        if class_fields(class.class).any(|field| field.is_static) {
-            source.push_str(&format!(
-                "    {}: address,\n",
-                managed_static_table_name(class.class.id.index())
-            ));
-        }
         for field in class_fields(class.class) {
-            source.push_str(&format!(
-                "    {}: u32,\n",
-                managed_field_offset_name(field.id.index())
-            ));
+            if field.is_static {
+                source.push_str(&format!(
+                    "    {}: address,\n",
+                    managed_static_field_address_name(field.id.index())
+                ));
+            } else {
+                source.push_str(&format!(
+                    "    {}: u32,\n",
+                    managed_field_offset_name(field.id.index())
+                ));
+            }
         }
         for field in class
             .class
@@ -442,12 +443,6 @@ fn managed_backend_binding_source(
                 managed_instance_header_name(class.class.id.index())
             ));
         }
-        if class_fields(class.class).any(|field| field.is_static) {
-            source.push_str(&format!(
-                "            let {} = await {class_local}.staticTable()\n",
-                managed_static_table_name(class.class.id.index())
-            ));
-        }
         for field in &class.class.fields {
             push_required_managed_field_binding(&mut source, &class_local, field);
         }
@@ -465,12 +460,12 @@ fn managed_backend_binding_source(
             let name = managed_instance_header_name(class.class.id.index());
             source.push_str(&format!("                {name},\n"));
         }
-        if class_fields(class.class).any(|field| field.is_static) {
-            let name = managed_static_table_name(class.class.id.index());
-            source.push_str(&format!("                {name},\n"));
-        }
         for field in class_fields(class.class) {
-            let name = managed_field_offset_name(field.id.index());
+            let name = if field.is_static {
+                managed_static_field_address_name(field.id.index())
+            } else {
+                managed_field_offset_name(field.id.index())
+            };
             source.push_str(&format!("                {name},\n"));
         }
         for field in class
@@ -513,10 +508,17 @@ fn push_required_managed_field_binding(
     field: &crate::ast::ManagedFieldDecl,
 ) {
     let candidates = managed_field_candidates(field);
-    let offset = managed_field_offset_name(field.id.index());
-    source.push_str(&format!(
-        "            let {offset} = (await {class_local}.fieldAny([{candidates}])).offset\n"
-    ));
+    if field.is_static {
+        let address = managed_static_field_address_name(field.id.index());
+        source.push_str(&format!(
+            "            let {address} = await {class_local}.staticFieldAny([{candidates}])\n"
+        ));
+    } else {
+        let offset = managed_field_offset_name(field.id.index());
+        source.push_str(&format!(
+            "            let {offset} = (await {class_local}.fieldAny([{candidates}])).offset\n"
+        ));
+    }
 }
 
 fn push_optional_managed_field_binding(
@@ -525,14 +527,24 @@ fn push_optional_managed_field_binding(
     field: &crate::ast::ManagedFieldDecl,
 ) {
     let candidates = managed_field_candidates(field);
-    let offset = managed_field_offset_name(field.id.index());
     let probe = format!("__field_{}_conditional_probe", field.id.index());
-    source.push_str(&format!(
-        "            let {probe} = await {class_local}.probeFieldAny([{candidates}])\n"
-    ));
-    source.push_str(&format!(
-        "            let {offset}: u32 = match {probe} {{ Some(field) => field.offset, None => 0 }}\n"
-    ));
+    if field.is_static {
+        let address = managed_static_field_address_name(field.id.index());
+        source.push_str(&format!(
+            "            let {probe} = await {class_local}.probeStaticFieldAny([{candidates}])\n"
+        ));
+        source.push_str(&format!(
+            "            let {address}: address = match {probe} {{ Some(address) => address, None => 0 }}\n"
+        ));
+    } else {
+        let offset = managed_field_offset_name(field.id.index());
+        source.push_str(&format!(
+            "            let {probe} = await {class_local}.probeFieldAny([{candidates}])\n"
+        ));
+        source.push_str(&format!(
+            "            let {offset}: u32 = match {probe} {{ Some(field) => field.offset, None => 0 }}\n"
+        ));
+    }
     let present = managed_field_presence_name(field.id.index());
     source.push_str(&format!(
         "            let {present} = match {probe} {{ Some(_) => true, None => false }}\n"
@@ -586,8 +598,8 @@ pub(crate) fn managed_field_presence_name(field: usize) -> String {
     format!("__field_{field}_present")
 }
 
-pub(crate) fn managed_static_table_name(class: usize) -> String {
-    format!("__class_{class}_static_table")
+pub(crate) fn managed_static_field_address_name(field: usize) -> String {
+    format!("__field_{field}_static_address")
 }
 
 pub(crate) fn managed_instance_header_name(class: usize) -> String {

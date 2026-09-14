@@ -42,7 +42,7 @@ pub(crate) use declarations::with_core_types;
 pub(crate) use library_bodies::{
     MANAGED_POINTER_SIZE_FIELD, PROVIDER_BINDINGS_TYPE, PROVIDER_PREPARATION_FUNCTION,
     RESERVED_FUNCTION_PREFIX, augment_program_with_library_bodies, managed_field_offset_name,
-    managed_field_presence_name, managed_instance_header_name, managed_static_table_name,
+    managed_field_presence_name, managed_instance_header_name, managed_static_field_address_name,
     provider_context_field_name,
 };
 

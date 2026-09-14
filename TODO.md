@@ -926,7 +926,7 @@ concepts rather than maintaining a parallel inventory.
   ordinary cooperative discovery starts again. A replacement mapping runs
   `onAttach` and seeds a fresh `old` / `current` baseline. Native and Unity
   providers opt out; the contract is general without adding public syntax.
-- [ ] Finish the schema-first Unity value surface rather than adding another
+- [x] Finish the schema-first Unity value surface rather than adding another
   public Mono path API. Bounded managed strings, scalar values, singleton and
   static roots, and nested references should all be expressible in `image` /
   `class` declarations and consumable by ordinary state snapshots. Use the
@@ -935,6 +935,13 @@ concepts rather than maintaining a parallel inventory.
   object-header arithmetic, and backend-specific target-family traversal
   private implementation tools. Bring any schema shape that still cannot
   represent a real port back as a design question before adding public syntax.
+  The final Assemble with Care gap required no new syntax: field binding now
+  retains the declaring runtime class found along the inheritance chain and
+  resolves each static field through that class's storage. A concrete schema
+  can therefore consume a singleton declared by a closed generic base with an
+  ordinary `static Concrete instance from "_instance";` declaration. A focused
+  Mono fixture keeps distinct base and derived static tables and rejects the
+  previously plausible wrong-table value.
 - [ ] Verify and extend PS2 guest-memory coverage against ASR before changing
   the provider boundary. Resident Evil Code: Veronica X reads its disc product
   code at `0x00015B90`, below SplitScript's documented

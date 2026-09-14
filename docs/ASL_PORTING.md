@@ -1532,11 +1532,25 @@ managed shapes use the same attachment-wide enum globals and
 The compiler rejects a native [`state`] declaration that tries to consume managed
 schema references, so managed reads cannot silently bypass the Unity provider.
 
-Cross-class inheritance layouts in which a static slot is declared on one
-managed class but stored in another class's static table are not yet expressible
-through the public schema. Record that as a schema requirement rather than
-reintroducing raw metadata traversal or guessed offsets. Older V1, 32-bit, ELF,
-and Mach-O Mono targets likewise need explicit backend support.
+Field lookup follows the target's runtime inheritance chain. Declare an
+inherited singleton on the concrete schema class exactly as it is consumed:
+
+```splitscript
+image "Assembly-CSharp" {
+    class LevelFlowService {
+        static LevelFlowService instance from "_instance";
+        i32 state from "_state";
+    }
+}
+# state Unity ["game.exe"] {}
+```
+
+If `_instance` is declared by a closed generic base such as
+`Service<LevelFlowService>`, the generated binder retains that declaring
+runtime class and uses its static storage automatically. Do not declare the
+generic metadata definition, expose its static table, or reproduce the raw
+field path. Older V1, 32-bit, ELF, and Mach-O Mono targets still need explicit
+backend support.
 
 When a port needs the mapping metadata itself, take a typed snapshot rather
 than reproducing the host's numeric count/index ABI:

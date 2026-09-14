@@ -669,9 +669,10 @@ fn emit_unity_class_failure(function: &mut Function, gc: &GcLayout) {
         .instruction(&Instruction::Return);
 }
 
-/// Returns a lookup status followed by `field_offset + 1`. A completed miss is
-/// distinct from a transient process-memory failure, while the encoded offset
-/// keeps a real field at offset zero representable.
+/// Returns a lookup status, `field_offset + 1`, and the runtime class that
+/// declares the field. A completed miss is distinct from a transient
+/// process-memory failure, while the encoded offset keeps a real field at
+/// offset zero representable.
 pub(super) fn compile_unity_get_field_offset(
     abi: &Abi,
     c_string_eq: u32,
@@ -679,7 +680,7 @@ pub(super) fn compile_unity_get_field_offset(
     gc: &GcLayout,
     abi_read: AbiReadScratch,
 ) -> Function {
-    let mut function = Function::new([(10, ValType::I64), (1, ValType::I32)]);
+    let mut function = Function::new([(11, ValType::I64), (1, ValType::I32)]);
     let process = 0;
     let class_value = 1;
     let expected_name = 2;
@@ -693,7 +694,8 @@ pub(super) fn compile_unity_get_field_offset(
     let encoded = 10;
     let field_count_offset = 11;
     let selected_encoded = 12;
-    let comparison = 13;
+    let selected_owner = 13;
+    let comparison = 14;
     function
         .instruction(&Instruction::LocalGet(class_value))
         .instruction(&Instruction::StructGet {
@@ -794,6 +796,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I32Const(LOOKUP_RETRY))
         .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::I32Const(abi_read.start()))
@@ -824,6 +827,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I32Const(LOOKUP_RETRY))
         .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::I32Const(abi_read.start()))
@@ -832,6 +836,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I32Const(LOOKUP_RETRY))
+        .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
@@ -914,6 +919,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I32Const(LOOKUP_RETRY))
         .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::I32Const(abi_read.start()))
@@ -927,12 +933,19 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(encoded))
         .instruction(&Instruction::LocalSet(selected_encoded))
+        .instruction(&Instruction::LocalGet(current))
+        .instruction(&Instruction::LocalSet(selected_owner))
         .instruction(&Instruction::Else)
         .instruction(&Instruction::LocalGet(selected_encoded))
         .instruction(&Instruction::LocalGet(encoded))
         .instruction(&Instruction::I64Ne)
+        .instruction(&Instruction::LocalGet(selected_owner))
+        .instruction(&Instruction::LocalGet(current))
+        .instruction(&Instruction::I64Ne)
+        .instruction(&Instruction::I32Or)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I32Const(LOOKUP_AMBIGUOUS))
+        .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
@@ -960,6 +973,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I32Const(LOOKUP_RETRY))
         .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::I32Const(abi_read.start()))
@@ -978,6 +992,7 @@ pub(super) fn compile_unity_get_field_offset(
         .instruction(&Instruction::I32Const(LOOKUP_FOUND))
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(selected_encoded))
+        .instruction(&Instruction::LocalGet(selected_owner))
         .instruction(&Instruction::End);
     function
 }
@@ -990,7 +1005,7 @@ pub(super) fn compile_unity_get_field_any(
 ) -> Function {
     let mut function = Function::new([
         (3, ValType::I32),
-        (2, ValType::I64),
+        (4, ValType::I64),
         (
             1,
             ValType::Ref(RefType {
@@ -1006,8 +1021,10 @@ pub(super) fn compile_unity_get_field_any(
     let status = 4;
     let selected_index = 5;
     let encoded = 6;
-    let selected_encoded = 7;
-    let names_backing = 8;
+    let owner = 7;
+    let selected_encoded = 8;
+    let selected_owner = 9;
+    let names_backing = 10;
     function
         .instruction(&Instruction::LocalGet(names))
         .instruction(&Instruction::StructGet {
@@ -1038,6 +1055,7 @@ pub(super) fn compile_unity_get_field_any(
     );
     function
         .instruction(&Instruction::Call(unity_get_field_offset))
+        .instruction(&Instruction::LocalSet(owner))
         .instruction(&Instruction::LocalSet(encoded))
         .instruction(&Instruction::LocalSet(status))
         .instruction(&Instruction::LocalGet(status))
@@ -1057,6 +1075,7 @@ pub(super) fn compile_unity_get_field_any(
         .instruction(&Instruction::I32Const(LOOKUP_FOUND))
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::StructNew(
             gc.standard_index(StdlibTypeId::UnityField),
         ))
@@ -1073,6 +1092,8 @@ pub(super) fn compile_unity_get_field_any(
         .instruction(&Instruction::LocalSet(selected_encoded))
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::LocalSet(selected_index))
+        .instruction(&Instruction::LocalGet(owner))
+        .instruction(&Instruction::LocalSet(selected_owner))
         .instruction(&Instruction::Else)
         // Two aliases resolving to the same metadata field are one runtime
         // match, not an ambiguity (for example a property name and its
@@ -1080,10 +1101,15 @@ pub(super) fn compile_unity_get_field_any(
         .instruction(&Instruction::LocalGet(encoded))
         .instruction(&Instruction::LocalGet(selected_encoded))
         .instruction(&Instruction::I64Ne)
+        .instruction(&Instruction::LocalGet(owner))
+        .instruction(&Instruction::LocalGet(selected_owner))
+        .instruction(&Instruction::I64Ne)
+        .instruction(&Instruction::I32Or)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I32Const(LOOKUP_FOUND))
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::StructNew(
             gc.standard_index(StdlibTypeId::UnityField),
         ))
@@ -1113,6 +1139,7 @@ pub(super) fn compile_unity_get_field_any(
         .instruction(&Instruction::I64Sub)
         .instruction(&Instruction::I32WrapI64)
         .instruction(&Instruction::LocalGet(selected_index))
+        .instruction(&Instruction::LocalGet(selected_owner))
         .instruction(&Instruction::StructNew(
             gc.standard_index(StdlibTypeId::UnityField),
         ))
@@ -1311,10 +1338,10 @@ pub(super) fn compile_unity_get_static_instance(
         .instruction(&Instruction::I64ExtendI32U)
         .instruction(&Instruction::LocalSet(static_table))
         .instruction(&Instruction::LocalGet(process))
-        .instruction(&Instruction::LocalGet(class_value))
+        .instruction(&Instruction::LocalGet(field))
         .instruction(&Instruction::StructGet {
-            struct_type_index: gc.standard_index(StdlibTypeId::UnityClass),
-            field_index: gc.standard_field_index(StdlibFieldId::UnityClassAddress),
+            struct_type_index: gc.standard_index(StdlibTypeId::UnityField),
+            field_index: gc.standard_field_index(StdlibFieldId::UnityFieldOwner),
         });
     emit_versioned_offset(
         &mut function,

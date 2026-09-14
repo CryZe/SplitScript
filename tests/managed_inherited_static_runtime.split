@@ -1,0 +1,14 @@
+image "Assembly-CSharp" {
+    class LevelFlowService {
+        static LevelFlowService instance from "_instance";
+        i32 state from "_state";
+    }
+}
+
+state Unity.mono(MonoVersion.V2) ["game.exe"] {
+    state: i32 = LevelFlowService.instance?.state?;
+}
+
+whileAttached {
+    print(current.state)
+}

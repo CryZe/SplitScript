@@ -136,9 +136,13 @@ for (let index = 0; index < gameFieldNames.length; index += 1) {
     field(0x4000, index, absolute(relative), gameFieldOffsets[index]);
 }
 if (inheritedField) {
-    pointer(0xd080, 0x5400);
+    // Keep the base class's field table outside the derived class's deliberately
+    // oversized 119-slot table. Overlapping them fabricates a second derived
+    // declaration of `_points`, which is observably distinct now that field
+    // identity includes the declaring runtime class for static storage.
+    pointer(0xd080, 0x15000);
     string(0xa600, "_points");
-    field(0x4400, 0, absolute(0xa600), 0x34);
+    field(0x14000, 0, absolute(0xa600), 0x34);
 }
 if (ambiguousField) {
     string(0xa1f0, "_points");

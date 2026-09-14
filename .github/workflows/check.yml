@@ -14,6 +14,9 @@ concurrency:
   group: check-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  WASM_TOOLS_VERSION: 1.201.0
+
 jobs:
   repository:
     name: Compiler, tooling, Wasm, and runtime
@@ -44,7 +47,6 @@ jobs:
       - name: Install WebAssembly validation tools
         shell: pwsh
         env:
-          WASM_TOOLS_VERSION: 1.201.0
           WASM_TOOLS_SHA256: 9b80cf19d25603da8a8a0814c0d2bbfdc5b5fbd70d399c013237ed64661756a7
         run: |
           $archive = Join-Path $env:RUNNER_TEMP "wasm-tools.zip"
@@ -77,7 +79,7 @@ jobs:
   vscode-native:
     name: Native artifacts (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -110,6 +112,11 @@ jobs:
         with:
           node-version: 24
 
+      - name: Install WebAssembly validation tools
+        uses: bytecodealliance/actions/wasm-tools/setup@v1
+        with:
+          version: ${{ env.WASM_TOOLS_VERSION }}
+
       - name: Test the native process bridge
         run: cargo test --package splitscript-process-native
 
@@ -119,10 +126,10 @@ jobs:
       - name: Probe process discovery and memory access
         run: node editors/vscode/scripts/probe-native.mjs
 
-      - name: Build the native CLI and language server
+      - name: Run native compiler and runtime conformance
         env:
           SPLITSCRIPT_GIT_REVISION: ${{ github.sha }}
-        run: cargo build --profile max-opt --bin splitc --bin splitls
+        run: cargo xtask conformance
 
       - name: Smoke-test and package the native tools
         run: node scripts/package-native.mjs ${{ matrix.platform }}

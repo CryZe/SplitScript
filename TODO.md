@@ -1157,8 +1157,12 @@ remaining work is product hardening and distribution.
   `latest` release as the VSIX. Each native runner builds and starts both tools,
   packages the installation guide, and contributes to one release checksum
   manifest.
-- [ ] Run the complete compiler and runtime conformance corpus on every native
-  release platform rather than only building and smoke-testing its tools.
+- [x] Run the complete compiler and runtime conformance corpus on every native
+  release platform rather than only building and smoke-testing its tools. The
+  shared `cargo xtask conformance` boundary runs all compiler tests, builds the
+  exact revision-stamped max-opt CLI/LSP binaries, compiles and validates every
+  fixture, and executes every runtime harness on Windows x64, Linux x64/ARM64,
+  and macOS x64/ARM64 before those same binaries are packaged.
 - [x] Document batteries-included extension installation separately from native
   CLI/LSP installation, including supported hosts, package size, memory use,
   debug-watch output, and failure recovery.

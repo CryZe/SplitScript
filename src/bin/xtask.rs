@@ -736,6 +736,13 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        [command] if command == "conformance" => match conformance() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("conformance verification failed: {error}");
+                ExitCode::FAILURE
+            }
+        },
         [command] if command == "docs" => {
             match documentation_site::generate(Some(Path::new("target/generated-docs"))) {
                 Ok(()) => ExitCode::SUCCESS,
@@ -764,7 +771,7 @@ fn main() -> ExitCode {
             }
         }
         _ => {
-            eprintln!("usage: cargo xtask <check | docs [OUTPUT | --check]>");
+            eprintln!("usage: cargo xtask <check | conformance | docs [OUTPUT | --check]>");
             ExitCode::FAILURE
         }
     }
@@ -779,8 +786,22 @@ fn check() -> Result<(), String> {
         &["clippy", "--all-targets", "--", "-D", "warnings"],
     )?;
     documentation_site::generate(None)?;
+    compiler_runtime_conformance(&root)?;
+    verify_extension(&root)?;
+    println!("repository verification passed");
+    Ok(())
+}
+
+fn conformance() -> Result<(), String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    compiler_runtime_conformance(&root)?;
+    println!("compiler and runtime conformance passed");
+    Ok(())
+}
+
+fn compiler_runtime_conformance(root: &Path) -> Result<(), String> {
     run(
-        &root,
+        root,
         "cargo",
         &[
             "test",
@@ -794,7 +815,7 @@ fn check() -> Result<(), String> {
     // Windows cannot replace its locked executable. These targets are the
     // complete repository test surface owned by the product.
     run(
-        &root,
+        root,
         "cargo",
         &[
             "test",
@@ -809,7 +830,7 @@ fn check() -> Result<(), String> {
         ],
     )?;
     run(
-        &root,
+        root,
         "cargo",
         &[
             "build",
@@ -821,8 +842,61 @@ fn check() -> Result<(), String> {
             "splitls",
         ],
     )?;
+    let outputs = root.join("target/verify");
+    fs::create_dir_all(&outputs)
+        .map_err(|error| format!("could not create {}: {error}", outputs.display()))?;
+    let compiler = root.join(if cfg!(windows) {
+        "target/max-opt/splitc.exe"
+    } else {
+        "target/max-opt/splitc"
+    });
+    let artifacts = verification_artifacts(RUNTIME_FIXTURES, COMPILE_FIXTURES)?;
+    println!(
+        "compiling {} unique verification artifacts for {} runtime scenarios",
+        artifacts.len(),
+        RUNTIME_FIXTURES.len()
+    );
+    for fixture in &artifacts {
+        compile_once(
+            root,
+            &compiler,
+            fixture.source,
+            &outputs.join(fixture.output),
+            fixture.profile,
+        )?;
+    }
+    let debug = outputs.join("debug_profile.debug.wasm");
+    let release = outputs.join("debug_profile.release.wasm");
+
+    for module in artifacts.iter().map(|fixture| outputs.join(fixture.output)) {
+        run(
+            root,
+            "wasm-tools",
+            &["validate", "--features", "all", path_text(&module)?],
+        )?;
+    }
+
+    for fixture in RUNTIME_FIXTURES {
+        let module = outputs.join(fixture.output);
+        let mut arguments = vec![fixture.harness, path_text(&module)?];
+        arguments.extend_from_slice(fixture.extra_arguments);
+        run(root, "node", &arguments)?;
+    }
     run(
-        &root,
+        root,
+        "node",
+        &[
+            "tests/debug_profile_runtime.mjs",
+            path_text(&debug)?,
+            path_text(&release)?,
+        ],
+    )?;
+    Ok(())
+}
+
+fn verify_extension(root: &Path) -> Result<(), String> {
+    run(
+        root,
         "cargo",
         &[
             "build",
@@ -853,12 +927,12 @@ fn check() -> Result<(), String> {
         root.join("target/wasm32-unknown-unknown/max-opt/splitscript_vscode_wasm.wasm");
     let packaged_compiler = verification_extension.join("splitscript_vscode_wasm.wasm");
     run(
-        &root,
+        root,
         "wasm-tools",
         &["validate", path_text(&embedded_compiler)?],
     )?;
     run(
-        &root,
+        root,
         "node",
         &[
             "tests/embedded_compiler_runtime.mjs",
@@ -867,7 +941,7 @@ fn check() -> Result<(), String> {
     )?;
     let embedded_worker = verification_extension.join("embeddedCompilerNodeWorker.js");
     run(
-        &root,
+        root,
         "node",
         &[
             "tests/embedded_compiler_worker_runtime.mjs",
@@ -877,7 +951,7 @@ fn check() -> Result<(), String> {
         ],
     )?;
     run(
-        &root,
+        root,
         "node",
         &[
             "tests/web_worker_bundles_runtime.mjs",
@@ -898,7 +972,7 @@ fn check() -> Result<(), String> {
     let embedded_language_server_worker =
         verification_extension.join("embeddedLanguageServerNodeWorker.js");
     run(
-        &root,
+        root,
         "node",
         &[
             "tests/embedded_language_server_worker_runtime.mjs",
@@ -929,57 +1003,6 @@ fn check() -> Result<(), String> {
             path_text(&production_extension)?,
         ],
     )?;
-
-    let outputs = root.join("target/verify");
-    fs::create_dir_all(&outputs)
-        .map_err(|error| format!("could not create {}: {error}", outputs.display()))?;
-    let compiler = root.join(if cfg!(windows) {
-        "target/max-opt/splitc.exe"
-    } else {
-        "target/max-opt/splitc"
-    });
-    let artifacts = verification_artifacts(RUNTIME_FIXTURES, COMPILE_FIXTURES)?;
-    println!(
-        "compiling {} unique verification artifacts for {} runtime scenarios",
-        artifacts.len(),
-        RUNTIME_FIXTURES.len()
-    );
-    for fixture in &artifacts {
-        compile_once(
-            &root,
-            &compiler,
-            fixture.source,
-            &outputs.join(fixture.output),
-            fixture.profile,
-        )?;
-    }
-    let debug = outputs.join("debug_profile.debug.wasm");
-    let release = outputs.join("debug_profile.release.wasm");
-
-    for module in artifacts.iter().map(|fixture| outputs.join(fixture.output)) {
-        run(
-            &root,
-            "wasm-tools",
-            &["validate", "--features", "all", path_text(&module)?],
-        )?;
-    }
-
-    for fixture in RUNTIME_FIXTURES {
-        let module = outputs.join(fixture.output);
-        let mut arguments = vec![fixture.harness, path_text(&module)?];
-        arguments.extend_from_slice(fixture.extra_arguments);
-        run(&root, "node", &arguments)?;
-    }
-    run(
-        &root,
-        "node",
-        &[
-            "tests/debug_profile_runtime.mjs",
-            path_text(&debug)?,
-            path_text(&release)?,
-        ],
-    )?;
-    println!("repository verification passed");
     Ok(())
 }
 

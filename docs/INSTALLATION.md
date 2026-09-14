@@ -112,11 +112,12 @@ editor with their absolute paths. The `max-opt` profile is the distribution
 profile; it favors compiler execution speed and executable size at the cost of
 a slower initial build.
 
-The complete repository verification matrix runs on Windows. The five native
-release runners additionally build and smoke-test their own binaries. Running
-the complete compiler and runtime conformance corpus independently on every
-native platform remains future hardening work. This is separate from the
-five-platform debugger bridges inside the VSIX.
+The complete repository verification matrix runs on Windows. Before packaging,
+each of the five native release runners also runs `cargo xtask conformance`: all
+compiler tests plus every compiled and validated runtime fixture execute on
+Windows x64, Linux x64/ARM64, and macOS x64/ARM64. The packaged CLI and language
+server are the same revision-stamped max-opt binaries exercised by that job.
+This is separate from the five-platform debugger bridges inside the VSIX.
 
 Compile, watch, format, or browse documentation with:
 
